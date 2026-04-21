@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "filelock>=3.0",
-    "orjson>=3.10.0",
+    "orjson>=3.11.8",
     "pandas>=2.3.3",
     "polars>=1.38.1",
     "seaborn>=0.13.2",
