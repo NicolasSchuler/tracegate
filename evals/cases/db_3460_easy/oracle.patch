@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,5 +15,5 @@
+             if i % 2 == 0:
+                 sum = sum + int(result[i])
+             else:
+-                sum = sum + int(result[i])
++                sum = sum - int(result[i])
+         return sum

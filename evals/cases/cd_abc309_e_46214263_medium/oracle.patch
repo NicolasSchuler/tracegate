@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+     ins[x - 1] = max(ins[x - 1], y)
+ q = [(0, ins[0])]
+ visit = [0] * N
+-cnt = 1 if ins[0] else 0
++cnt = 1 if ins[0] >= 0 else 0
+ while len(q):
+     s, i = q.pop()
+     for v in tree[s]:

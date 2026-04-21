@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,10 +16,10 @@
+     even = 0
+     for i in lst1:
+         if i%2 == 1:
+-            even -= 1
++            odd += 1
+     for i in lst2:
+         if i%2 == 0:
+-            odd += 1
++            even += 1
+     if even >= odd:
+         return "YES"
+     return "NO"

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ for i in range(N - 1):
+     if H[i] < H[i + 1]:
+         ans = H[i + 1]
+-    if H[0] >= H[1]:
++    elif H[0] >= H[1]:
+         ans = H[0]
+     else:
+         break

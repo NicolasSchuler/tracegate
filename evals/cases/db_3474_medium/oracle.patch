@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,6 +16,6 @@
+         for op in operations:
+             n1, n2 = op
+             nums[index_map[n1]] = n2
+-            new_obj = UndefinedObject()
++            index_map[n2] = index_map[n1]
+ 
+         return nums

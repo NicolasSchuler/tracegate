@@ -1,0 +1,19 @@
+{
+  "description": "Tuple return order is unpacked incorrectly in caller.",
+  "category": "cross_file_contract",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "TypeError",
+  "tags": [
+    "multifile",
+    "contract"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

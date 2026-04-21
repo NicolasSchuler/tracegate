@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,6 @@
+ 
+ 
+ def first_row_mean(batch: np.ndarray) -> float:
++    if batch.shape[0] == 0:
++        return 0.0
+     return float(batch[0].mean())

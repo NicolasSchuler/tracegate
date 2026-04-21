@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,6 +2,8 @@
+ A = list(map(int, input().split()))
+ li = list(sorted(A[2:]))
+ ans = 10**18
++
+ for i in range(2, n - m + 1):
+-    ans = min(ans, max(0, A[0] - A[i]) + max(0, A[i + m - 1] - A[1]))
++    ans = min(ans, max(0, A[0] - li[i - 2]) + max(0, li[i + m - 3] - A[1]))
++
+ print(ans)

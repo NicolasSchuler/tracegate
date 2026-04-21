@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+     n = int(input())
+     a = list(map(int, input().split()))
+     x, y = a[n - 2], a[n - 1]
+-    if x + 1 < y or (y - x) % 2 == 0:
++    if x + 1 < y or (y - n) % 2 == 0:
+         print("Alice")
+     else:
+         print("Bob")

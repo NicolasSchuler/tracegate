@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+     Y += y
+ 
+ if X > Y:
+-    print("Takahasi")
++    print("Takahashi")
+ elif X == Y:
+     print("Draw")
+ else:

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+             else:
+                 print("No")
+         elif A == 0 and D == 0:
+-            if N == 0:
++            if N <= 1:
+                 print("Yes")
+             else:
+                 print("No")

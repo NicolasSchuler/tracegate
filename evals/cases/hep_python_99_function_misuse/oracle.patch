@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,9 +27,9 @@
+     num = float(value)
+     if value[-2:] == '.5':
+         if num > 0:
++            res = ceil(num)
++        else:
+             res = floor(num)
+-        else:
+-            res = ceil(num)
+     elif len(value) > 0:
+         res = int(round(num))
+     else:

@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ 
+ def read_numeric_key(raw: str) -> int:
+     payload = json.loads(raw)
+-    return payload[1]
++    return payload["1"]

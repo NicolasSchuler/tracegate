@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,6 +7,6 @@
+         for j in range(x, len(s2)):
+             if s[i] == s2[j]:
+                 l.append(j + 1)
+-                x = j
++                x = j + 1
+                 break
+ print(*l)

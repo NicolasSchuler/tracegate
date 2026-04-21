@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,4 +15,4 @@
+                 max(max_memo, num, num * max_memo, num * min_memo),
+                 min(min_memo, num, num * min_memo, num * max_memo),
+             )
+-        return max_strength
++        return max_memo

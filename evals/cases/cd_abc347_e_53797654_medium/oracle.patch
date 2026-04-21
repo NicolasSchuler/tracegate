@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -54,4 +54,4 @@
+ for i, x in enumerate(pre):
+     if x != -1:
+         ans[i] += cumsum[-1] - cumsum[pre[i] - 1]
+-print(f"{ans[1:]}")
++print(*ans[1:])

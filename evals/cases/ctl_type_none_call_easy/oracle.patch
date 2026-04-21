@@ -1,0 +1,7 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,4 @@
+ def invoke(callback=None) -> str:
++    if callback is None:
++        return "default"
+     return callback()

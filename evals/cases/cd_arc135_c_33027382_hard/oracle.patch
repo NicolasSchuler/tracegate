@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -36,7 +36,5 @@
+     if value[i] > best:
+         best = value[i]
+         best_idx = i
+-print(bits)
+-print(value)
+ ans = sum(a ^ A[best_idx] for a in A)
+ print(max(ans, initial))

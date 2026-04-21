@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     sum_n = []
+     for i in range(N):
+         sum_n.append(int(nutrition[i][nut_num]))
+-    if int(goal[nut_num]) < sum(sum_n):
++    if int(goal[nut_num]) <= sum(sum_n):
+         check.append(1)
+     else:
+         check.append(0)

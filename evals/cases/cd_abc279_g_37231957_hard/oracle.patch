@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,5 +13,5 @@
+     tmp = s + t * (c - 1) + c * (c - 1)
+     dp.append((dp[-1] + tmp) % MOD)
+ 
+-ans = dp[-1] + c
++ans = (dp[-1] + c) % MOD
+ print(ans)

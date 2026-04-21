@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,7 +23,7 @@
+         pt = queB.popleft()
+         nowT += pt[1]
+ 
+-    if nowT >= p:
++    if nowT > p:
+         nowT -= p
+         nowP += 1
+     else:

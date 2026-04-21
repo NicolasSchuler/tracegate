@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -74,6 +74,5 @@
+                     se.add(uf.find(vers[i + ii][j + jj]))
+         ans += greencnt - len(se) + 1
+ mod = 998244353
+-print(ans)
+-print(bunbo)
++
+ print(ans * pow(bunbo, -1, mod) % mod)

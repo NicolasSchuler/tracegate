@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     for idx, elem in enumerate(numbers):
+         for idx2, elem2 in enumerate(numbers):
+             if idx != idx2:
+-                distance = elem - elem2
++                distance = abs(elem - elem2)
+                 if distance < threshold:
+                     return True
+ 

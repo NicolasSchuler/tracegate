@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+         res[i // 7] = SUM
+         SUM = 0
+ 
+-print(res)
++print(*res)

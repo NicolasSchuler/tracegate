@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ x = n
+ if n >= 42:
+     x += 1
+-print(f"AGC0{x}")
++print(f"AGC{x:03}")

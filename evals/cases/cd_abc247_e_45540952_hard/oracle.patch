@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+ for i in range(N):
+     if A[i] == X:
+         index_X = i
+-    elif A[i] == Y:
++    if A[i] == Y:
+         index_Y = i
+     elif A[i] > X or A[i] < Y:
+         index_ng = i

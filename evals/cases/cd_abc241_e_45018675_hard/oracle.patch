@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,7 +23,7 @@
+ 
+ ans = start_candy + (k - start_loop) // loop_len * loop_candy
+ rem = (k - start_loop) % loop_len
+-now = start_loop
++now = candy[start_loop] % n
+ for _ in range(rem):
+     ans += A[now]
+     now = ans % n

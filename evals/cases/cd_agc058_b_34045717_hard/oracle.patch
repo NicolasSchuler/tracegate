@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,8 +18,7 @@
+         else:
+             break
+     R[i] = j
+-print(L)
+-print(R)
++
+ DP = [0] * (N + 1)
+ DP[0] = 1
+ for i in range(N):

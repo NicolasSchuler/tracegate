@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,5 @@
+ ans = sum(i * i for i in a)
+ pairs = n - m
+ for i in range(pairs):
+-    ans += 2 * a[i] * a[i + pairs]
++    ans += 2 * a[i] * a[pairs + pairs - 1 - i]
+ print(ans)

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+     return ok
+ 
+ 
+-print(binary_search(0, mx))
++print(binary_search(0, mx + 1))

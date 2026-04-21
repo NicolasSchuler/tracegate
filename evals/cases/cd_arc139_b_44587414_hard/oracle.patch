@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         pts = [(y, 0) for y in range(0, min(N // A, B + 1) + 1)]
+         pts += [(y, (N - A * y) // B) for y in range(0, min(N // A, B + 1) + 1)]
+ 
+-        pts = [(y, 0) for y in range(max(0, N // A - B - 1), N // A + 1)]
++        pts += [(y, 0) for y in range(max(0, N // A - B - 1), N // A + 1)]
+         pts += [(y, (N - A * y) // B) for y in range(max(0, N // A - B - 1), N // A + 1)]
+ 
+     res = math.inf

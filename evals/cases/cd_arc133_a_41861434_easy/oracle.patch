@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -33,4 +33,4 @@
+ for i in range(n):
+     if a[i] != mx:
+         ans.append(a[i])
+-print(*a)
++print(*ans)

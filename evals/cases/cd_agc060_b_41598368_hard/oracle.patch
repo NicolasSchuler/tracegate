@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,4 +14,4 @@
+             i += 1
+         else:
+             i += 1
+-    print(ans)
++    print("Yes" if ans <= k else "No")

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     >>> add(5, 7)
+     12
+     """
+-    return x + y + y + x
++    return x + y

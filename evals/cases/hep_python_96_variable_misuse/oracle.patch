@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+     for i in range(2, n):
+         is_prime = True
+         for j in range(2, i):
+-            if j % i == 0:
++            if i % j == 0:
+                 is_prime = False
+                 break
+         if is_prime:

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+ if lower >= capital:
+     print(s.lower())
+ else:
+-    print(s.capitalize())
++    print(s.upper())

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+     for s_i in store:  # storeに格納された売り場のindex=s_iについて
+         for j, s_j in enumerate(S[s_i]):
+             if s_j == "o":  # s_i番目の売り場のj番目の要素s_jがoだったら
+-                data[j] == 1
++                data[j] = 1
+ 
+     if data == [1] * M:
+         ans = min(ans, len(store))

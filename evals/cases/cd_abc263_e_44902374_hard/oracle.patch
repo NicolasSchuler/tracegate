@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ # e[n]=0
+ for i in reversed(range(1, n)):
+     A = a[i]
+-    e[i] = rui[i + 1] - rui[i + A + 1] + (A + 1) * pow(A, mod - 2, mod)
++    e[i] = (rui[i + 1] - rui[i + A + 1] + (A + 1)) * pow(A, mod - 2, mod)
+     e[i] %= mod
+     rui[i] = e[i] + rui[i + 1]
+     rui[i] %= mod

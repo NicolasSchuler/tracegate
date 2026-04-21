@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -51,7 +51,7 @@
+     ret = [[0] * 4 for i in range(4)]
+     for i in range(4):
+         for j in range(4):
+-            ret[i][j] = M1[i][j] | M2[i][j] | M3[i][j]
++            ret[i][j] = int(M1[i][j] + M2[i][j] + M3[i][j] == 1)
+     return ret
+ 
+ 

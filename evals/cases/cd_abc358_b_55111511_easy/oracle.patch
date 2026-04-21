@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ time = 0
+ for i in T:
+     if i >= time:
+-        time = i + a - time
++        time = i + a
+         print(time)
+     else:
+         time += a

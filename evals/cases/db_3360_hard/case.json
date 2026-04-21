@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3360: multiple error/triple (hard)",
+  "category": "logic_error",
+  "difficulty": "hard",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "TypeError",
+  "tags": [
+    "debugbench",
+    "multiple_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 8,
+  "source_id": "debugbench_3360"
+}

@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,5 +4,5 @@
+     a.append(i)
+     if i == 0:
+         break
+-a.sort()
++a.reverse()
+ print(*a, sep="\n")

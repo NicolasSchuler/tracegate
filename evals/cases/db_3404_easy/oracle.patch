@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,6 +15,6 @@
+         d[0] = 0
+         d[1] = d[2] = 1
+         for i in range(3, n + 1):
+-            d.append(sum(d[1:]))
++            d.append(sum(d))
+             d.pop(0)
+         return d[2]

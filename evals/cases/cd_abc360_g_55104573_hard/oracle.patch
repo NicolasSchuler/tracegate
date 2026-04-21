@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -40,7 +40,7 @@
+             x = bisect.bisect_left(LIS_rev, -A[i])
+             LIS_rev[x] = -A[i]
+ 
+-        while x > 0 and size[LIS_size - x - 2]:
++        while LIS_size - x > 1 and size[LIS_size - x - 2]:
+             j = size[LIS_size - x - 2].pop()
+             if i <= j + 1:
+                 continue

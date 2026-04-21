@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ ans = P
+ for i in range(N):
+-    ret = P - Q + D[i]
++    ret = Q + D[i]
+     ans = min(ans, ret)
+ 
+ print(ans)

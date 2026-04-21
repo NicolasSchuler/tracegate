@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+ # print(S)
+ inf = 10**18
+ dp = [inf] * len(S)
+-ans = 1
++ans = 0
+ for i, y in enumerate(S):
+     if i == 0:
+         dp[0] = y

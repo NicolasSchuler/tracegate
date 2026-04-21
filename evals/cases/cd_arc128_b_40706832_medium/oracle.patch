@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,6 +25,6 @@
+         y = (i + 1) % n
+         c = min(a[x], a[y])
+         v = (max(a[y], a[x]) - c) // 3
+-        if (max(a[y], a[x]) - c) % 3 == 0 and a[i] + c >= v:
++        if (max(a[y], a[x]) - c) % 3 == 0:
+             ans = min(ans, c + v * 3)
+     print(-1 if ans == inf else ans)

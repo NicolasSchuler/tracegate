@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,5 +20,5 @@
+         else:
+             depth -= 1
+         if depth < 0:
+-            return True
++            return False
+     return depth == 0

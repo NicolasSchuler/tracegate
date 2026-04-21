@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,6 +3,8 @@
+         self._index = 0
+ 
+     def pick(self, items: list[str]) -> str:
+-        value = items[self._index]
++        if not items:
++            raise IndexError("items must not be empty")
++        value = items[self._index % len(items)]
+         self._index += 1
+         return value

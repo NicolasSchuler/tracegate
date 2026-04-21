@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,8 +11,9 @@
+     while idx >= 0 and t[idx] != i:
+         idx -= 1
+ 
+-    idx -= 1
+     if idx < 0:
+         print(n - j)
+         exit()
++    idx -= 1
++
+ print(0)

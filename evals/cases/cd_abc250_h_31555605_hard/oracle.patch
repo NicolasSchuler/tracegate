@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -102,6 +102,3 @@
+         ans[i] = "No"
+ 
+ print(*ans, sep="\n")
+-
+-print(dist)
+-print(new_edges)

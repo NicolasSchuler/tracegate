@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+             if a > i:
+                 a = i
+             if b < i:
+-                B = i
++                b = i
+             if c > j:
+                 c = j
+             if d < j:

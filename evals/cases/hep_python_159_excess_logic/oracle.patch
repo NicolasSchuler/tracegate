@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -29,6 +29,6 @@
+     Have fun :)
+     """
+     if(need <= remaining):
+-        return [ number + need , number + remaining-need ]
++        return [ number + need , remaining-need ]
+     else:
+-        return [ number + need + remaining , 0]
++        return [ number + remaining , 0]

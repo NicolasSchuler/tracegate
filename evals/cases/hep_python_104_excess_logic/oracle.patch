@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,8 +12,7 @@
+     []
+     """
+     odd_digit_elements = []
+-    for j, i in enumerate(x):
++    for i in x:
+         if all (int(c) % 2 == 1 for c in str(i)):
+             odd_digit_elements.append(i)
+-            odd_digit_elements.append(j)
+     return sorted(odd_digit_elements)

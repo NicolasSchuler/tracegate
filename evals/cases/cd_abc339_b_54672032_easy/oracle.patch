@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+     elif y == -1:
+         y = H - 1
+ for clm in grid:
+-    print(*clm)
++    print("".join(clm))

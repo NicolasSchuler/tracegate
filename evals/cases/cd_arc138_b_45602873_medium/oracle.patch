@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ a = list(map(int, input().split()))
+ l = 0
+ while l < n:
+-    if a[l] ^ (l & 1):
++    if a[l] == (l & 1):
+         l += 1
+     else:
+         break

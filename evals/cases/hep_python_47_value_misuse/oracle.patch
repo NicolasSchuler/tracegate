@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     if len(l) % 2 == 1:
+         return l[len(l) // 2]
+     else:
+-        return (l[len(l) - 1 // 2] + l[len(l) // 2]) / 2.0
++        return (l[len(l) // 2 - 1] + l[len(l) // 2]) / 2.0

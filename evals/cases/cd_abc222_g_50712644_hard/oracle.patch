@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -53,6 +53,8 @@
+     if K % 4 == 0 or K % 5 == 0:
+         print(-1)
+         continue
++    if K % 2 == 0:
++        K //= 2
+     pk = prime(K)
+     pk[3] += 2
+     l = 9 * K

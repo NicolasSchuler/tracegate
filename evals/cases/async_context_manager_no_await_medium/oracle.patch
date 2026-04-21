@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+
+     async def __aenter__(self) -> "DatabaseSession":
+-        self.conn = connect_db()
++        self.conn = await connect_db()
+         return self
+

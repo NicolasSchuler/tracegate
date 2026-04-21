@@ -1,0 +1,29 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,6 +13,9 @@
+         graph = [[] for _ in range(n)]
+         indegrees = [0] * n
+ 
++        # Time: O(n^2)
++        # Space: O(n^2 + n + n) -> O(n^2)
++
+         # 1st step: build adjacency list grpah and update the initial indegrees of every node!
+         for edge in edges:
+             src, dest = edge[0], edge[1]
+@@ -27,6 +30,8 @@
+                 queue.append(i)
+ 
+         # Kahn's algorithm initiation!
++        # while loop will run for each and every node in graph!
++        # in worst case, adjacency list for one particular node may contain all other vertices!
+         while queue:
+             cur = queue.pop()
+ 
+@@ -42,5 +47,5 @@
+ 
+         # at the end, we should have set of ancestors for each and every node!
+         # in worst case, set s for ith node could have all other vertices be ancestor to node i !
+-        ans = [(sorted(list(s))) for s in myList]
++        ans = [(sorted(list(s))) for s in ans]
+         return ans

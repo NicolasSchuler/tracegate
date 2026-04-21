@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,6 +22,4 @@
+             ans.append(end - i + 1)
+             i = end + 1
+ 
+-        self.undeclaredMethod()
+-
+         return ans

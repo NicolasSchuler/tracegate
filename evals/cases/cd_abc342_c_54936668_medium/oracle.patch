@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ phrase = input().lower()
+ operation = int(input())
+ 
+-alphabet = "abcdefghijklmnopqrstuvwsyz"
++alphabet = "abcdefghijklmnopqrstuvwxyz"
+ 
+ for i in range(operation):
+     original, become = input().split()

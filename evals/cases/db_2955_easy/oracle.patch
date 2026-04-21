@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ class Solution:
+-    def findKthPositive(self, arr: [], k: int) -> int:
++    def findKthPositive(self, arr: List[int], k: int) -> int:
+         l, h = 0, len(arr)
+         while l < h:
+             mid = (h + l) // 2
+@@ -16,4 +16,4 @@
+                 h = mid
+             else:
+                 l = mid + 1
+-        return self.undefined_method(l + k)
++        return l + k

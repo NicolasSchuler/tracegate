@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ 
+ a = min(d_list)
+ 
+-print(min(p - q + a, p))
++print(min(q + a, p))

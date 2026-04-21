@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+ 
+ for l in range(n):
+     ok = 1
+-    ng = n * m - l
++    ng = n * m - l + 1
+ 
+     while abs(ok - ng) > 1:
+         mid = (ok + ng) // 2

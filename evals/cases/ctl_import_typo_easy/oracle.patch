@@ -1,0 +1,10 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+-import mathh
++import math
+ 
+ 
+ def square_root(value: float) -> float:
+-    return mathh.sqrt(value)
++    return math.sqrt(value)

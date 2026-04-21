@@ -1,0 +1,18 @@
+{
+  "description": "Mutable default list is shared across calls.",
+  "category": "mutability_aliasing",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "mutable-default"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

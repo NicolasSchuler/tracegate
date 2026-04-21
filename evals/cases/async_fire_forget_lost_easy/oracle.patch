@@ -1,0 +1,10 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,5 +11,5 @@
+ async def schedule_jobs(values: list[int]) -> list[int]:
+     results.clear()
+-    for v in values:
+-        asyncio.create_task(background_work(v))
++    tasks = [asyncio.create_task(background_work(v)) for v in values]
++    await asyncio.gather(*tasks)
+     return list(results)

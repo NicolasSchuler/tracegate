@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ n, a, b = map(int, input().split())
+ ans = 0
+ if a <= b:
+-    ans = n - a + 1
++    ans = max(0, n - a + 1)
+ else:
+     ans += b * max(0, n // a - 1)
+     if n // a > 0:

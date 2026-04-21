@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,7 +35,7 @@
+                 y_diff = max(y, w) - min(y, w)
+                 dist = min(
+                     dist,
+-                    d1 + d2 + x_diff + y_diff + (max(x_diff, y_diff) - min(x_diff, y_diff)) / 2,
++                    d1 + d2 + x_diff + y_diff + (max(x_diff, y_diff) - min(x_diff, y_diff)) // 2,
+                 )
+     else:
+         for x, y, d1 in large_start:

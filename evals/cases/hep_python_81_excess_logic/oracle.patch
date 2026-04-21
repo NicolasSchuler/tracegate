@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -53,5 +53,5 @@
+         elif gpa > 0.0:
+             letter_grade.append("D-")
+         else:
+-            letter_grade.append("E+")
++            letter_grade.append("E")
+     return letter_grade

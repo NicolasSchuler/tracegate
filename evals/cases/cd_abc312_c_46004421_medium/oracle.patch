@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ bmax = B[-1]
+ 
+ # ok = 10**9
+-ok = max(amax, bmax)
++ok = max(amax, bmax + 1)
+ ng = 0
+ while abs(ok - ng) > 1:
+     mid = (ok + ng) // 2

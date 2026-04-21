@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,6 +2,6 @@
+ 
+ 
+ def add_event(user: str, event: str) -> list[str]:
+-    shared = get_buffer("shared")
+-    shared.append(event)
+-    return shared
++    user_buffer = get_buffer(user)
++    user_buffer.append(event)
++    return user_buffer

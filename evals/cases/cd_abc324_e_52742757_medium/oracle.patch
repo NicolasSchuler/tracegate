@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,6 +26,6 @@
+ c = 0
+ for j in range(k + 1):
+     x = bisect.bisect(left, j) - bisect.bisect_left(left, j)
+-    y = N - bisect.bisect_left(right, k - 1)
++    y = N - bisect.bisect_left(right, k - j)
+     c += x * y
+ print(c)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+ def Matpow_Linear(A, M, N):
+     Mat = [inf] * N * N
+     for i in range(N):
+-        Mat[i * N + i] = 1
++        Mat[i * N + i] = -1
+     while M:
+         if M & 1:
+             Mat = Matprod(Mat, A, N)

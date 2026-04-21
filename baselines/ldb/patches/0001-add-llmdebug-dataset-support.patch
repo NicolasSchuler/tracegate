@@ -1,0 +1,699 @@
+diff --git a/programming/generators/model.py b/programming/generators/model.py
+index f58fe83..8e8736f 100644
+--- a/programming/generators/model.py
++++ b/programming/generators/model.py
+@@ -1,6 +1,7 @@
+-from typing import List, Union, Optional, Literal
++from typing import Any, List, Union, Optional, Literal
+ import dataclasses
+ import os
++import time
+ from vllm import LLM, SamplingParams
+ from tenacity import (
+     retry,
+@@ -9,9 +10,15 @@ from tenacity import (
+ )
+ from openai import OpenAI
+ from transformers import GPT2Tokenizer, AutoTokenizer
++from baselines.openai_compat import (
++    OpenAICompatResponseError,
++    apply_compat_request_profile,
++    compat_config_from_extra,
++    normalize_chat_completion_response,
++    require_final_content,
++)
+ 
+ MessageRole = Literal["system", "user", "assistant"]
+-
+ @dataclasses.dataclass()
+ class Message():
+     role: MessageRole
+@@ -26,6 +33,44 @@ def messages_to_str(messages: List[Message]) -> str:
+     return "\n".join([message_to_str(message) for message in messages])
+ 
+ 
++def _usage_int(source: dict[str, object], *keys: str) -> int | None:
++    fallback_zero: int | None = None
++    for key in keys:
++        value = source.get(key)
++        if isinstance(value, int):
++            if value > 0:
++                return value
++            fallback_zero = 0
++    return fallback_zero
++
++
++def _compat_config_from_env():
++    return compat_config_from_extra(
++        {
++            "baseline_openai_compat_profile": os.getenv(
++                "LLMDEBUG_BASELINE_OPENAI_COMPAT_PROFILE",
++                "auto",
++            ),
++            "baseline_openai_allow_reasoning_fallback": os.getenv(
++                "LLMDEBUG_BASELINE_OPENAI_ALLOW_REASONING_FALLBACK",
++                "",
++            ).strip().lower()
++            in {"1", "true", "yes", "on"},
++        }
++    )
++
++
++def _compat_base_url() -> str:
++    return str(os.getenv("OPENAI_BASE_URL", "") or "").strip()
++
++
++def _request_model_name(default_model: str) -> str:
++    return (
++        str(os.getenv("LLMDEBUG_BASELINE_OPENAI_REQUESTED_MODEL", "") or "").strip()
++        or default_model
++    )
++
++
+ @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+ def gpt_completion(
+     model: str,
+@@ -45,10 +90,10 @@ def gpt_completion(
+         presence_penalty=0.0,
+         stop=stop_strs,
+         n=num_comps,
++        extra_body={"usage": {"include": True}},
+     )
+     if num_comps == 1:
+         return response.choices[0].text  # type: ignore
+-
+     return [choice.text for choice in response.choices]  # type: ignore
+ 
+ 
+@@ -84,19 +129,112 @@ class ModelBase():
+     def __init__(self, name: str):
+         self.name = name
+         self.is_chat = False
++        self.metrics = {
++            "llm_call_count": 0,
++            "llm_duration_sec": 0.0,
++            "tokens_prompt": 0,
++            "tokens_completion": 0,
++            "tokens_total": 0,
++            "usage_reported_call_count": 0,
++            "usage_missing_call_count": 0,
++            "usage_available": True,
++            "compat_error": False,
++        }
+ 
+     def __repr__(self) -> str:
+         return f'{self.name}'
+-
+     def generate_chat(self, messages: List[Message], max_tokens: int = 1024, temperature: float = 0.2, num_comps: int = 1) -> Union[List[str], str]:
+         raise NotImplementedError
+ 
+     def generate(self, prompt: str, max_tokens: int = 1024, stop_strs: Optional[List[str]] = None, temperature: float = 0.0, num_comps=1) -> Union[List[str], str]:
+         raise NotImplementedError
+ 
++    def _record_metrics(self, *, duration_sec: float, usage: object = None) -> None:
++        self.metrics["llm_call_count"] += 1
++        self.metrics["llm_duration_sec"] += max(0.0, float(duration_sec))
++        prompt_tokens = getattr(usage, "prompt_tokens", None)
++        input_tokens = getattr(usage, "input_tokens", None)
++        total_input_tokens = getattr(usage, "total_input_tokens", None)
++        completion_tokens = getattr(usage, "completion_tokens", None)
++        output_tokens = getattr(usage, "output_tokens", None)
++        total_output_tokens = getattr(usage, "total_output_tokens", None)
++        total_tokens = getattr(usage, "total_tokens", None)
++        if not isinstance(usage, dict):
++            usage = {
++                "prompt_tokens": prompt_tokens,
++                "input_tokens": input_tokens,
++                "total_input_tokens": total_input_tokens,
++                "completion_tokens": completion_tokens,
++                "output_tokens": output_tokens,
++                "total_output_tokens": total_output_tokens,
++                "total_tokens": total_tokens,
++            }
++        if not isinstance(usage, dict):
++            self.metrics["usage_available"] = False
++            self.metrics["usage_missing_call_count"] += 1
++            return
++        prompt_tokens = _usage_int(
++            usage,
++            "prompt_tokens",
++            "input_tokens",
++            "total_input_tokens",
++        )
++        completion_tokens = _usage_int(
++            usage,
++            "completion_tokens",
++            "output_tokens",
++            "total_output_tokens",
++        )
++        total_tokens = _usage_int(usage, "total_tokens")
++        if (
++            isinstance(prompt_tokens, int)
++            and isinstance(completion_tokens, int)
++            and not isinstance(total_tokens, int)
++        ):
++            total_tokens = prompt_tokens + completion_tokens
++        if (
++            isinstance(prompt_tokens, int)
++            and isinstance(completion_tokens, int)
++            and isinstance(total_tokens, int)
++        ):
++            self.metrics["tokens_prompt"] += prompt_tokens
++            self.metrics["tokens_completion"] += completion_tokens
++            self.metrics["tokens_total"] += total_tokens
++            self.metrics["usage_reported_call_count"] += 1
++            return
++        self.metrics["usage_available"] = False
++        self.metrics["usage_missing_call_count"] += 1
++
++    def _clear_compat_error(self) -> None:
++        self.metrics["compat_error"] = False
++        for key in (
++            "compat_message",
++            "compat_profile_requested",
++            "compat_profile_applied",
++            "direct_output_requested",
++            "allow_reasoning_fallback",
++            "content_present",
++            "reasoning_present",
++            "empty_content_with_reasoning",
++            "used_reasoning_fallback",
++            "reasoning_chars",
++            "reasoning_content_chars",
++            "final_text_chars",
++            "finish_reason",
++        ):
++            self.metrics.pop(key, None)
++
++    def _record_compat_error(self, exc: OpenAICompatResponseError) -> None:
++        self.metrics["compat_error"] = True
++        self.metrics["compat_message"] = str(exc)
++        for key, value in dict(exc.meta).items():
++            self.metrics[key] = value
++
+ 
+ class GPTChat(ModelBase):
+     def __init__(self, model_name: str, key: str = ""):
++        super().__init__(model_name)
++        self.request_model = _request_model_name(model_name)
+         self.name = model_name
+         self.is_chat = True
+         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+@@ -113,40 +251,78 @@ class GPTChat(ModelBase):
+         temperature: float = 0.0,
+         num_comps=1,
+     ) -> Union[List[str], str]:
++        started_at = time.perf_counter()
++        self._clear_compat_error()
++        compat_config = _compat_config_from_env()
++        compat_base_url = _compat_base_url()
++
++        def _create_response(message_rows):
++            request_kwargs, request_meta = apply_compat_request_profile(
++                {
++                    "model": self.request_model,
++                    "messages": [dataclasses.asdict(message) for message in message_rows],
++                    "max_tokens": max_tokens,
++                    "temperature": temperature,
++                    "top_p": 1,
++                    "frequency_penalty": 0.0,
++                    "presence_penalty": 0.0,
++                    "n": num_comps,
++                    "stop": stop,
++                },
++                compat_config=compat_config,
++                base_url=compat_base_url,
++            )
++            response = self.client.chat.completions.create(**request_kwargs)
++            return response, request_meta
++
+         try:
+             new_messages = change_messages(self.tokenizer, messages, 3097)
+             messages = new_messages
+-            response = self.client.chat.completions.create(
+-                model=self.name,
+-                messages=[dataclasses.asdict(message) for message in messages],
+-                temperature=temperature,
+-                top_p=1,
+-                frequency_penalty=0.0,
+-                presence_penalty=0.0,
+-                n=num_comps,
+-                stop=stop
+-            )
++            response, request_meta = _create_response(messages)
+         except Exception as e:
+             print("GPT Error:", str(e))
+             if "context_length_exceeded" in str(e):
+                 messages = change_messages(self.tokenizer, messages, 2097)
+                 print("AFTER CHANGE MESSAGE LEN:", len(messages))
+                 print(messages)
+-                response = self.client.chat.completions.create(
+-                    model=model,
+-                    messages=[dataclasses.asdict(message) for message in messages],
+-                    max_tokens=max_tokens,
+-                    temperature=temperature,
+-                    top_p=1,
+-                    frequency_penalty=0.0,
+-                    presence_penalty=0.0,
+-                    n=num_comps,
+-                )
++                response, request_meta = _create_response(messages)
+             else:
+                 assert False, "GPT API error: " + str(e)
+-        if num_comps == 1:
+-            return response.choices[0].message.content  # type: ignore
+-        return [choice.message.content for choice in response.choices]  # type: ignore
++        self._record_metrics(
++            duration_sec=time.perf_counter() - started_at,
++            usage=getattr(response, "usage", None),
++        )
++        try:
++            if num_comps == 1:
++                normalized = normalize_chat_completion_response(
++                    response,
++                    compat_config=compat_config,
++                    base_url=compat_base_url,
++                    request_meta=request_meta,
++                )
++                return require_final_content(normalized, base_url=compat_base_url)
++
++            outputs: list[str] = []
++            for choice in response.choices:  # type: ignore[attr-defined]
++                normalized = normalize_chat_completion_response(
++                    {
++                        "choices": [
++                            {
++                                "message": getattr(choice, "message", None),
++                                "finish_reason": getattr(choice, "finish_reason", ""),
++                            }
++                        ]
++                    },
++                    compat_config=compat_config,
++                    base_url=compat_base_url,
++                    request_meta=request_meta,
++                )
++                outputs.append(require_final_content(normalized, base_url=compat_base_url))
++            return outputs
++        except OpenAICompatResponseError as exc:
++            self._record_compat_error(exc)
++            print("GPT compat error:", str(exc))
++            return "" if num_comps == 1 else ["" for _ in range(max(0, int(num_comps)))]
+ 
+     def generate_chat(self, messages: List[Message], stop: List[str] = None, max_tokens: int = 1024, temperature: float = 0.0, num_comps: int = 1) -> Union[List[str], str]:
+         res = self.gpt_chat(messages, stop, max_tokens, temperature, num_comps)
+@@ -185,21 +361,23 @@ class VLLMModelBase(ModelBase):
+         num_comps=1,
+     ) -> Union[List[str], str]:
+         max_length = self.max_length
++        started_at = time.perf_counter()
+         while True:
+             prompt = change_messages(self.tokenizer, prompt, max_length)  # StarCoder max length
+             try:
+                 responses = self.vllm_client.completions.create(
+-                    model=self.model,
+-                    prompt=prompt,
+-                    echo=False,
+-                    max_tokens=max_tokens,
++                model=self.model,
++                prompt=prompt,
++                echo=False,
++                max_tokens=max_tokens,
+                     temperature=0,
+                     top_p=1,
+-                    stop=stop,
+-                    frequency_penalty=0.0,
+-                    presence_penalty=0.0,
+-                    n=num_comps,
+-                )
++                stop=stop,
++                frequency_penalty=0.0,
++                presence_penalty=0.0,
++                n=num_comps,
++                extra_body={"usage": {"include": True}},
++            )
+             except Exception as e:
+                 print("VLLM Error:", str(e))
+                 if "maximum context length" in str(e):
+@@ -208,10 +386,13 @@ class VLLMModelBase(ModelBase):
+                     assert False, "VLLM API error: " + str(e)
+             else:
+                 break
++        self._record_metrics(
++            duration_sec=time.perf_counter() - started_at,
++            usage=getattr(responses, "usage", None),
++        )
+         if num_comps == 1:
+             return responses.choices[0].text  # type: ignore
+         return [response.choices[0].text for response in responses]  # type: ignore
+-
+     def generate_completion(self, messages: str, stop: List[str] = [""], max_tokens: int = 1024, temperature: float = 0.0, num_comps: int = 1) -> Union[List[str], str]:
+         ret = self.vllm_chat(messages, stop, max_tokens, temperature, num_comps)
+         return ret
+diff --git a/programming/generators/py_generate.py b/programming/generators/py_generate.py
+index b51dbdd..a0e62d4 100644
+--- a/programming/generators/py_generate.py
++++ b/programming/generators/py_generate.py
+@@ -151,7 +151,7 @@ class PyGenerator:
+                     ]
+                     print_messages(messages, "213:\n")
+                 feedback = f"The Python translation does not do the same thing as the C++ code. Help me debug this. \nThese are the results of one failed unit test that tests whether the Python translation’s outputs match the C++ program’s outputs:\n{failed_test}."
+-            elif dataset_type in ["HumanEval", "MBPP"]:
++            elif dataset_type in ["HumanEval", "MBPP", "llmdebug"]:
+                 if len(messages) == 0:
+                     messages = [
+                         Message(
+@@ -346,7 +346,7 @@ class PyGenerator:
+                 ]
+                 messages += msg
+                 print_messages(msg)
+-            elif dataset_type in ["HumanEval", "MBPP"]:
++            elif dataset_type in ["HumanEval", "MBPP", "llmdebug"]:
+                 msg = [
+                     Message(
+                             role = "user",
+diff --git a/programming/ldb.py b/programming/ldb.py
+index 44765a3..de2991d 100644
+--- a/programming/ldb.py
++++ b/programming/ldb.py
+@@ -3,13 +3,121 @@ from generators import PyGenerator, model_factory
+ from typing import List
+ from multiprocessing import Pool
+ from filelock import FileLock
++import json
++import os
+ import random
++import tempfile
++import time
+ from transformers import GPT2Tokenizer
+ from utils import *
+ import sys
+ tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+ 
++
++def _write_metrics_sidecar(
++    log_dir,
++    *,
++    task_id,
++    model_metrics,
++    eval_duration_sec,
++    started_at,
++    attempts_completed,
++    is_passing=None,
++    status="running",
++):
++    os.makedirs(log_dir, exist_ok=True)
++    sidecar_path = os.path.join(log_dir, "llmdebug_metrics.json")
++    llm_call_count = int(model_metrics.get("llm_call_count", 0))
++    llm_duration_sec = max(0.0, float(model_metrics.get("llm_duration_sec", 0.0)))
++    eval_duration_sec = max(0.0, float(eval_duration_sec))
++    internal_total_duration_sec = max(0.0, time.perf_counter() - started_at)
++    orchestration_duration_sec = max(
++        0.0,
++        internal_total_duration_sec - llm_duration_sec - eval_duration_sec,
++    )
++    usage_reported_call_count = int(model_metrics.get("usage_reported_call_count", 0))
++    usage_missing_call_count = int(model_metrics.get("usage_missing_call_count", 0))
++    prompt_tokens = int(model_metrics.get("tokens_prompt", 0))
++    completion_tokens = int(model_metrics.get("tokens_completion", 0))
++    total_tokens = int(model_metrics.get("tokens_total", 0))
++    usage_available = bool(model_metrics.get("usage_available", False)) and usage_missing_call_count == 0
++
++    payload = {
++        "schema_version": 1,
++        "baseline": "ldb",
++        "status": status,
++        "task_id": task_id,
++        "llm_call_count": llm_call_count,
++        "llm_duration_sec": llm_duration_sec,
++        "eval_duration_sec": eval_duration_sec,
++        "internal_total_duration_sec": internal_total_duration_sec,
++        "orchestration_duration_sec": orchestration_duration_sec,
++        "usage_available": usage_available,
++        "usage_reported_call_count": usage_reported_call_count,
++        "usage_missing_call_count": usage_missing_call_count,
++        "reported_tokens_prompt": prompt_tokens,
++        "reported_tokens_completion": completion_tokens,
++        "reported_tokens_total": total_tokens,
++        "attempts_completed": int(attempts_completed),
++    }
++    if llm_call_count > 0:
++        payload["usage_source"] = (
++            "provider_reported"
++            if usage_available
++            else ("partial_provider_reported" if usage_reported_call_count > 0 else "not_reported")
++        )
++    if usage_available:
++        payload["tokens_prompt"] = prompt_tokens
++        payload["tokens_completion"] = completion_tokens
++        payload["tokens_total"] = total_tokens
++    if bool(model_metrics.get("compat_error")):
++        payload["compat_error"] = True
++    compat_message = str(model_metrics.get("compat_message") or "").strip()
++    if compat_message:
++        payload["compat_message"] = compat_message
++        payload["stopped_reason"] = payload.get("stopped_reason") or "openai_compat_reasoning_only"
++    for key in (
++        "compat_profile_requested",
++        "compat_profile_applied",
++        "direct_output_requested",
++        "allow_reasoning_fallback",
++        "content_present",
++        "reasoning_present",
++        "empty_content_with_reasoning",
++        "used_reasoning_fallback",
++        "reasoning_chars",
++        "reasoning_content_chars",
++        "final_text_chars",
++        "finish_reason",
++    ):
++        if key in model_metrics:
++            payload[key] = model_metrics[key]
++    if is_passing is not None:
++        payload["is_passing"] = bool(is_passing)
++
++    temp_name = None
++    try:
++        with tempfile.NamedTemporaryFile(
++            "w",
++            encoding="utf-8",
++            delete=False,
++            dir=log_dir,
++            prefix=".llmdebug_metrics_",
++            suffix=".json",
++        ) as handle:
++            json.dump(payload, handle)
++            temp_name = handle.name
++        os.replace(temp_name, sidecar_path)
++    finally:
++        if temp_name and os.path.exists(temp_name):
++            try:
++                os.remove(temp_name)
++            except OSError:
++                pass
++
+ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="", level = "block"):
++    started_at = time.perf_counter()
++    log_dir = os.path.dirname(log_path)
+     exe = PyExecutor()
+     gen = PyGenerator()
+     model = model_factory(model_name, port)
+@@ -20,6 +128,8 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+     cur_func_impl = ""
+     dataset_type = item["task_id"].split("/")[0]
+     token_nums = 0
++    eval_duration_sec = 0.0
++    compat_stopped_reason = ""
+     while cur_pass < pass_at_k and not is_solved:
+         cur_iter = 0
+         tests_i = item['given_tests']
+@@ -29,11 +139,33 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+         cur_func_impl = prepare_function_from_seed(dataset_type, item["prompt"], item["seed"], item["entry_point"])
+         implementations.append(cur_func_impl)
+         # call the executor to return failed_test
++        eval_started_at = time.perf_counter()
+         is_passing, failed_tests, _ = exe.execute(cur_func_impl, tests_i)
++        eval_duration_sec += max(0.0, time.perf_counter() - eval_started_at)
++        _write_metrics_sidecar(
++            log_dir,
++            task_id=item["task_id"],
++            model_metrics=getattr(model, "metrics", {}),
++            eval_duration_sec=eval_duration_sec,
++            started_at=started_at,
++            attempts_completed=cur_iter,
++            is_passing=is_passing,
++        )
+         test_feedback.append(failed_tests)
+         # if solved, exit early
+         if is_passing:
++            eval_started_at = time.perf_counter()
+             is_solved = exe.evaluate(item["entry_point"], cur_func_impl, item["test"], timeout=10)
++            eval_duration_sec += max(0.0, time.perf_counter() - eval_started_at)
++            _write_metrics_sidecar(
++                log_dir,
++                task_id=item["task_id"],
++                model_metrics=getattr(model, "metrics", {}),
++                eval_duration_sec=eval_duration_sec,
++                started_at=started_at,
++                attempts_completed=cur_iter,
++                is_passing=is_solved,
++            )
+             break
+         # use debug to iteratively improve
+         last_func_impl = ""
+@@ -46,7 +178,7 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+             # The output is 
+             # 1. the wrong blocks [wrong block]
+             # 2. the explanation [explanation]
+-            if dataset_type in ["HumanEval", "MBPP"]:
++            if dataset_type in ["HumanEval", "MBPP", "llmdebug"]:
+                 # Add comments
+                 if not find_comment(cur_func_impl, item["entry_point"]):
+                     debug_cur_func_impl = insert_comment(cur_func_impl, extrace_comment(item["prompt"]), item["entry_point"])
+@@ -58,6 +190,21 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+             selected_test = failed_tests[random.randint(0,len(failed_tests)-1)] if len(failed_tests) >= 1 else None
+             generate_function = None
+             messages = gen.ldb_debug(item["prompt"], debug_cur_func_impl, selected_test, item["entry_point"], model, messages, dataset_type, level)
++            _write_metrics_sidecar(
++                log_dir,
++                task_id=item["task_id"],
++                model_metrics=getattr(model, "metrics", {}),
++                eval_duration_sec=eval_duration_sec,
++                started_at=started_at,
++                attempts_completed=cur_iter,
++                is_passing=is_passing,
++            )
++            if bool(getattr(model, "metrics", {}).get("compat_error")):
++                compat_stopped_reason = str(
++                    getattr(model, "metrics", {}).get("compat_message")
++                    or "OpenAI-compatible response contained reasoning but no final content."
++                )
++                break
+             cur_func_impl, cur_messages = gen.ldb_generate(
+                 func_sig=item["prompt"],
+                 model=model,
+@@ -65,6 +212,21 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+                 messages=messages,
+                 failed_tests=selected_test,
+                 dataset_type=dataset_type)
++            _write_metrics_sidecar(
++                log_dir,
++                task_id=item["task_id"],
++                model_metrics=getattr(model, "metrics", {}),
++                eval_duration_sec=eval_duration_sec,
++                started_at=started_at,
++                attempts_completed=cur_iter,
++                is_passing=is_passing,
++            )
++            if bool(getattr(model, "metrics", {}).get("compat_error")):
++                compat_stopped_reason = str(
++                    getattr(model, "metrics", {}).get("compat_message")
++                    or "OpenAI-compatible response contained reasoning but no final content."
++                )
++                break
+             
+             messages = cur_messages
+             if isinstance(messages, str):
+@@ -75,8 +237,19 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+             last_func_impl = cur_func_impl
+             implementations.append(cur_func_impl)
+             # check if all internal unit tests pass
++            eval_started_at = time.perf_counter()
+             is_passing, failed_tests, _ = exe.execute(
+                 cur_func_impl, tests_i)
++            eval_duration_sec += max(0.0, time.perf_counter() - eval_started_at)
++            _write_metrics_sidecar(
++                log_dir,
++                task_id=item["task_id"],
++                model_metrics=getattr(model, "metrics", {}),
++                eval_duration_sec=eval_duration_sec,
++                started_at=started_at,
++                attempts_completed=cur_iter + 1,
++                is_passing=is_passing,
++            )
+             test_feedback.append(failed_tests)
+             # if passed, check if it passes the real tests, exit early
+             if is_passing or cur_iter == max_iters - 1:
+@@ -84,8 +257,19 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+                     print(f'{item["task_id"]} pass generated tests, check real tests')
+                 else:
+                     print(f'{item["task_id"]} fail generated tests, check real tests')
++                eval_started_at = time.perf_counter()
+                 is_solved = exe.evaluate(
+                     item["entry_point"], cur_func_impl, item["test"], timeout=10)
++                eval_duration_sec += max(0.0, time.perf_counter() - eval_started_at)
++                _write_metrics_sidecar(
++                    log_dir,
++                    task_id=item["task_id"],
++                    model_metrics=getattr(model, "metrics", {}),
++                    eval_duration_sec=eval_duration_sec,
++                    started_at=started_at,
++                    attempts_completed=cur_iter + 1,
++                    is_passing=is_solved,
++                )
+                 if is_solved:
+                     item["solution"] = cur_func_impl
+                 cur_iter += 1
+@@ -93,6 +277,8 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+                 break
+             cur_iter += 1
+             sys.stdout.flush()
++        if compat_stopped_reason:
++            break
+         cur_pass += 1
+     item["is_passing"] = is_passing
+     item["is_solved"] = is_solved
+@@ -102,10 +288,33 @@ def debug(i, item, log_path, model_name, num_items, pass_at_k, max_iters, port="
+     item["generated_test"] = tests_i
+     item["debug_iter"] = cur_iter
+     item["token_nums"] = token_nums
++    model_metrics = getattr(model, "metrics", {})
++    item["llm_call_count"] = int(model_metrics.get("llm_call_count", 0))
++    item["llm_duration_sec"] = float(model_metrics.get("llm_duration_sec", 0.0))
++    item["eval_duration_sec"] = float(eval_duration_sec)
++    item["processing_time_seconds"] = max(0.0, time.perf_counter() - started_at)
++    item["usage_available"] = bool(model_metrics.get("usage_available", False))
++    item["tokens_prompt"] = int(model_metrics.get("tokens_prompt", 0))
++    item["tokens_completion"] = int(model_metrics.get("tokens_completion", 0))
++    item["tokens_total"] = int(model_metrics.get("tokens_total", 0))
++    item["usage_reported_call_count"] = int(model_metrics.get("usage_reported_call_count", 0))
++    item["usage_missing_call_count"] = int(model_metrics.get("usage_missing_call_count", 0))
++    if compat_stopped_reason:
++        item["error"] = "openai_compat_reasoning_only"
++        item["compat_message"] = compat_stopped_reason
++    _write_metrics_sidecar(
++        log_dir,
++        task_id=item["task_id"],
++        model_metrics=model_metrics,
++        eval_duration_sec=eval_duration_sec,
++        started_at=started_at,
++        attempts_completed=cur_iter,
++        is_passing=is_passing,
++        status="completed",
++    )
+     with FileLock(log_path + ".lock"):
+         write_jsonl(log_path, [item], append=True)
+     print(f'completed {i+1}/{num_items}')
+-
+ def run_ldb(
+     dataset: List[dict],
+     model_name: str,
+@@ -129,4 +338,4 @@ def run_ldb(
+         with Pool(n_proc) as pool:
+             pool.starmap(debug, args)
+     print("Accuracy:", count_solved(log_path))
+-    
+\ No newline at end of file
++    
+diff --git a/programming/utils.py b/programming/utils.py
+index 3c0b36d..445a1ae 100644
+--- a/programming/utils.py
++++ b/programming/utils.py
+@@ -10,7 +10,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
+ IMPORT_HEADER = "from typing import *\nimport math\nfrom heapq import *\nimport itertools\nimport re\nimport typing\nimport heapq\n_str=str\nimport re\n"
+ 
+ def prepare_function_from_seed(dataset_type, prompt, seed, entry_point):
+-    if dataset_type in ["HumanEval", "MBPP"]:
++    if dataset_type in ["HumanEval", "MBPP", "llmdebug"]:
+         if (prompt in seed) or (('def ' + entry_point + '(') in seed):
+             # It has the function header, no need to add
+             cur_func_impl = seed

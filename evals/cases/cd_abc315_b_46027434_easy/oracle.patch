@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,7 @@
+ M = int(input())
+ D = list(map(int, input().split()))
+-half = (sum(D) + 1) / 2
++half = int((sum(D) + 1) / 2)
++
+ 
+ for i in range(M):
+     if half - D[i] <= 0:

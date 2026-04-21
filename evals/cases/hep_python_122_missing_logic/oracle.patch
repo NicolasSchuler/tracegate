@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,4 +13,4 @@
+         1. 1 <= len(arr) <= 100
+         2. 1 <= k <= len(arr)
+     """
+-    return sum(elem for elem in arr if len(str(elem)) <= 2)
++    return sum(elem for elem in arr[:k] if len(str(elem)) <= 2)

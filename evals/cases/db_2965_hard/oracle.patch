@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,6 +34,5 @@
+             truc = isForbidden(word[i:j])
+             if truc:
+                 j = i + truc - 1
+-                undefinedFunction(word)
+             res = max(res, j - i)
+-        return res
++        return res

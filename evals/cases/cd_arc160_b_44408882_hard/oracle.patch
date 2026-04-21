@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+ mod = 998244353
+ for _ in range(t):
+     n = int(readline())
+-    m = int(n**0.5 + 0.001)
++    m = int(n**0.5)
+     ans = pow(m, 3, mod)
+     j = m
+     for i in range(m, 0, -1):

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+     if dango > max_dango:
+         max_dango = dango
+ 
+-    if stick == True:
++    if stick == True and max_dango != 0:
+         print(max_dango)
+     else:
+         print(-1)

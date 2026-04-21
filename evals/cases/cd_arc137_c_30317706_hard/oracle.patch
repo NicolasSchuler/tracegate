@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ if As[-1] - As[-2] > 1:
+     print("Alice")
+ else:
+-    if As[-1] - (n - 1) % 2 == 1:
++    if (As[-1] - (n - 1)) % 2 == 1:
+         print("Alice")
+     else:
+         print("Bob")

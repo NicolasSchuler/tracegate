@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     l = len(b)
+     pat = b + b
+     for i in range(len(a) - l + 1):
+-        for j in range(len(b) - l + 1):
++        for j in range(l + 1):
+             if a[i:i+l] == pat[j:j+l]:
+                 return True
+     return False

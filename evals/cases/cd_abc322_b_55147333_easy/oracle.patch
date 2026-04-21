@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,10 +1,11 @@
+ length1, length2 = map(int, input().split())
+ word1 = str(input())
+ word2 = str(input())
+-if word2[length1:length2] == word1:
++if word2[(length2 - length1) : length2] == word1:
+     a = True
+ else:
+     a = False
++
+ if word2[0:length1] == word1:
+     b = True
+ else:

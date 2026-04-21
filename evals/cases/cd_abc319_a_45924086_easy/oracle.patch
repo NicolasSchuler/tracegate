@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,3 +12,7 @@
+         "semiexp": 3481,
+     }
+     print(map[input()])
++
++
++if __name__ == "__main__":
++    main()

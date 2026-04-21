@@ -1,0 +1,25 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,11 +5,16 @@
+ import bisect
+ import itertools
+ import functools
++
++
+ class Solution:
+     def pivotArray(self, nums: List[int], pivot: int) -> List[int]:
+-        lst,val,tmp=[],[],[]
++        lst, val, tmp = [], [], []
+         for i in nums:
+-            if i<pivot:val.append(i)
+-            elif i==pivot:lst.append(nums[i])
+-            else:tmp.append(nums[i])
+-        nums[]return lst+val+tmp
++            if i == pivot:
++                val.append(i)
++            elif i < pivot:
++                lst.append(i)
++            else:
++                tmp.append(i)
++        return lst + val + tmp

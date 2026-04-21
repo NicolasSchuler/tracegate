@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         com = ""
+         while num > 0:
+             if num % 2 == 1:
+-                com += not_defined_variable
++                com += "0"
+             else:
+                 com += "1"
+             num = num // 2

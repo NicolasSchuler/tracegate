@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ N = int(input())
+ 
+-if 2**N > N:
++if 2**N > N**2:
+     print("Yes")
+ else:
+     print("No")

@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+ import functools
+ class Solution:
+     def plusOne(self, digits: List[int]) -> List[int]:
+-    s= ''.join(map(str,digits))
+-    i=int(s)+1
+-    li=list(map(int,str(i)))  
+-    return li
++        s= ''.join(map(str,digits))
++        i=int(s)+1
++        li=list(map(int,str(i)))  
++        return li

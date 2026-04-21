@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,5 @@
+ 
+ 
+ def read_value() -> str:
+-    return Path("data/value.txt").read_text(encoding="utf-8").strip()
++    base = Path(__file__).resolve().parent
++    return (base / "data" / "value.txt").read_text(encoding="utf-8").strip()

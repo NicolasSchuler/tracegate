@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -72,7 +72,7 @@
+ if fillPuzzle(0, 0):
+     print("Yes")
+     for line in grid:
+-        print(line)
++        print("".join(line))
+ else:
+     print("No")
+ # print(sum(rows[0].values()))

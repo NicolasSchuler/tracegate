@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     >>> truncate_number(3.5)
+     0.5
+     """
+-    return number % 1.0 + 1.0
++    return number % 1.0

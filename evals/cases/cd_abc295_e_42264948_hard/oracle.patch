@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -58,6 +58,6 @@
+         # Z個の零要素中N-K+1-C個以上をi以上に置換える
+         for m in range(N - K + 1 - C, Z + 1):
+             #            print(f'i={i}, comb({Z},{m})*pow({M-i+1},{m})*pow({M},{Z-m})')
+-            NC = (NC + comb(Z, m) * pow(M - i + 1, m, MOD) * pow(M, Z - m, MOD)) % MOD
++            NC = (NC + comb(Z, m) * pow(M - i + 1, m, MOD) * pow(i - 1, Z - m, MOD)) % MOD
+ 
+ print((NC * NAI) % MOD)

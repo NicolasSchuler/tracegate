@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+             return False
+         if t1[i] < t2[i]:
+             return True
+-    if len(t1) > len(t2):
++    if len(t1) >= len(t2):
+         return False
+     else:
+         return True

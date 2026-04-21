@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+     is_equal_to_sum_even(6) == False
+     is_equal_to_sum_even(8) == True
+     """
+-    return n%2 == 0 and n >= 8 and n <= 8
++    return n%2 == 0 and n >= 8

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+-n = 10**12
++n = int(input())
+ 
+ 
+ def primes(n):

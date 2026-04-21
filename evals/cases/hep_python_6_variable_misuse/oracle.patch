@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+                 depth += 1
+                 max_depth = max(depth, max_depth)
+             else:
+-                max_depth -= 1
++                depth -= 1
+ 
+         return max_depth
+ 

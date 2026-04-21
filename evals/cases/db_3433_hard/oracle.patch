@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,5 +22,5 @@
+                 else:
+                     v[c] = [i, t]
+                     t += 1
+-                    c = edges[c] - 1
++                    c = edges[c]
+         return ans

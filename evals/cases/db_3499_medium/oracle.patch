@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+                 continue
+             visited.add(cur)
+             result += 1
+-            for node in adj_list[nodes]:
++            for node in adj_list[cur]:
+                 que.append(node)
+ 
+         return result

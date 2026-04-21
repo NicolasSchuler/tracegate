@@ -1,0 +1,12 @@
+{
+  "description": "Bytes payload concatenated with str header without decoding raises TypeError.",
+  "category": "type_coercion",
+  "difficulty": "hard",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "TypeError",
+  "tags": ["type_coercion"],
+  "python_args": ["-m", "pytest", "-q"],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

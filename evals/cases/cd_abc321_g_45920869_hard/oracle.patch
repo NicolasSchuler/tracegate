@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,4 +15,4 @@
+         x -= X[i ^ j] * F[C[j]]
+         j = j - 1 & k
+     X[i] = x * (c == d) % P
+-print(sum(x * F[c] for x, c in zip(X, C[::-1])) * pow(F[-1], P - 2, P) % P)
++print(sum(x * F[c] for x, c in zip(X, C[::-1])) * pow(F[-1], P - 2, P) % P - 1)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,8 +6,6 @@
+     while N2 > 0:
+         ternary.append(N2 % 3)
+         N2 //= 3
+-    print(ternary)
+-    print(sum(ternary))
+     if N % 2 != K % 2:
+         print("No")
+     else:

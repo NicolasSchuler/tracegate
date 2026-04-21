@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+         if row[i] == 1:
+             e_s = i
+             break
+-    if f_s and e_s and any(row[i] == 0 for i in range(f_s, e_s)):
++    if f_s != None and e_s != None and any(row[i] == 0 for i in range(f_s, e_s)):
+         print("Yes")
+     else:
+         print("No")

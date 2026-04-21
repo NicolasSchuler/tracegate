@@ -1,0 +1,18 @@
+{
+  "description": "Loop counter never wraps and eventually goes out of bounds.",
+  "category": "hidden_state",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "IndexError",
+  "tags": [
+    "stateful"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

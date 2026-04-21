@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ P = list(map(int, input().split()))
+ q = P[:k]
+ heapq.heapify(q)
+-print(q)
++# print(q)
+ a = heapq.heappop(q)
+ prev = a
+ print(a)

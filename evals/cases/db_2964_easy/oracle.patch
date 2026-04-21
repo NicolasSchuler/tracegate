@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,4 +15,4 @@
+         for i in range(50):
+             if s[i] != g[i]:
+                 count += 1
+-        self.some_undefined_method(count)
++        return count

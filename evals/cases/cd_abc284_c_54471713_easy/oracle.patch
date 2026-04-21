@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+             if x in seen:
+                 continue
+             seen.add(x)
+-            for j in G[i]:
++            for j in G[x]:
+                 if j not in seen:
+                     stack.append(j)
+ print(cnt)

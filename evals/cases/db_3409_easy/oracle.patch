@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,4 +19,4 @@
+                 stack.append(stack[-1] + stack[-2])
+             else:
+                 stack.append(int(i))
+-        return sum(stack[0])
++        return sum(stack)

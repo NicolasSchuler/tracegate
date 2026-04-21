@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+ class Solution:
+     def longestWPI(self, A):
+         curr, ans, D = 0, 0, {}
+-        for e, i in enumerate(self.transform(A)):
++        for e, i in enumerate(map(lambda x: (-1, 1)[x > 8], A)):
+             curr += i
+             D[curr] = D.get(curr, e)
+             ans = e + 1 if curr > 0 else max(ans, e - D.get(curr - 1, e))

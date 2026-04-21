@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+     XY.append((x, y))
+     P.append(p)
+ 
+-ok = 10**9
++ok = 10**18
+ ng = 0
+ while abs(ok - ng) > 1:
+     m = (ok + ng) // 2

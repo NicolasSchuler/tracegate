@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,8 +1,6 @@
+ S = input()
+ T = input()
+ k = ord(T[0]) - ord(S[0]) if ord(T[0]) - ord(S[0]) >= 0 else ord(T[0]) - ord(S[0]) + 26
+-print(ord(S[0]))
+-print(ord(T[0]))
+ for i in range(len(S) - 1):
+     l = (
+         ord(T[i + 1]) - ord(S[i + 1])

@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,11 +24,13 @@
+         heapq.heappush(U, (Vs[now[0]][1], Vs[now[0]]))
+     elif Vs[now[0]][1] > now[1] + A:
+         Vs[now[0]][1] = now[1] + A
++        heapq.heappush(U, (Vs[now[0]][1], Vs[now[0]]))
+     if Vs[X - 1][1] == inf:
+         Vs[X - 1][1] = now[1] + B
+         heapq.heappush(U, (Vs[X - 1][1], Vs[X - 1]))
+     elif Vs[X - 1][1] > now[1] + B:
+         Vs[X - 1][1] = now[1] + B
++        heapq.heappush(U, (Vs[X - 1][1], Vs[X - 1]))
+     now = heapq.heappop(U)[1]
+ 
+ print(Vs[N - 1][1])

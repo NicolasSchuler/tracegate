@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3704: multiple error/quadruple (easy)",
+  "category": "logic_error",
+  "difficulty": "easy",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "SyntaxError",
+  "tags": [
+    "debugbench",
+    "multiple_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 15,
+  "source_id": "debugbench_3704"
+}

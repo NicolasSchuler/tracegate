@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,6 +20,8 @@
+ 
+ l = itertools.permutations(list(range(n)))
+ 
++Takahashi.sort()
++
+ for i in l:
+     # print(i)
+     test = [[0] * 2 for _ in range(m)]
+@@ -30,6 +32,7 @@
+         test[j].sort()
+ 
+     test.sort()
++    # print(Takahashi, test)
+ 
+     if Takahashi == test:
+         print("Yes")

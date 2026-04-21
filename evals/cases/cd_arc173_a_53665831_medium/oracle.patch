@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -38,7 +38,7 @@
+                 for j in range(0, len(m) - 1):
+                     if m[j] == m[j + 1]:
+                         if j + 2 < len(m) - 1:
+-                            m = str(int(m[: j + 2]) - 1) + "9" * (len(m) - 1 - j - 2)
++                            m = str(int(m[: j + 2]) - 1) + "9" * (len(m) - j - 2)
+                         else:
+                             m = str(int(m) - 1)
+                         break

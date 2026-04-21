@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,5 +5,5 @@
+ ans = ""
+ for i in range(q):
+     y, x = map(int, input().split())
+-    ans += "#" if r[y - 1] + c[y - 1] > n else "."
++    ans += "#" if r[y - 1] + c[x - 1] > n else "."
+ print(ans)

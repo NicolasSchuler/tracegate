@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,5 +12,5 @@
+ res = 0
+ for i in range(N):
+     j = bisect.bisect_right(left, A[i][1])
+-    res += j - 1 - 1
++    res += j - 1 - i
+ print(res)

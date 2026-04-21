@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3240: multiple error/triple (easy)",
+  "category": "logic_error",
+  "difficulty": "easy",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "NameError",
+  "tags": [
+    "debugbench",
+    "multiple_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 4,
+  "source_id": "debugbench_3240"
+}

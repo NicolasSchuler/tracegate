@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,5 +4,5 @@
+ if a[-1] - a[-2] >= 2:
+     print("Alice")
+ else:
+-    d = sum(t - s - 1 for s, t in zip(a, a[1:]))
++    d = sum(t - s - 1 for s, t in zip(a, a[1:])) + a[0]
+     print("Bob" if d % 2 == 0 else "Alice")

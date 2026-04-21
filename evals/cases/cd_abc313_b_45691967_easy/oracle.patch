@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,5 +5,5 @@
+     a, b = map(int, input().split())
+     lst[b] = False
+ 
+-print(-1 if sum(lst[1:]) != 1 else lst.count(1))
++print(-1 if sum(lst) != 1 else lst.index(1))
+ # print(lst)

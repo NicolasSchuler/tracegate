@@ -1,0 +1,59 @@
+[run_eval]
+# Exact study config: TraceCoder hybrid-canonical arm.
+run_id = "replace-me"
+baseline = "tracecoder"
+conditions = "layered_adaptive_gated"
+max_cases = 0
+k = 2
+jobs = 2
+retry_prompt_mode = "full"
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+baseline_process_timeout_sec = 600.0
+baseline_max_iterations = 2
+baseline_openai_compat_profile = "lmstudio_model_yaml"
+baseline_openai_allow_reasoning_fallback = true
+baseline_openai_enable_thinking = true
+baseline_hybrid_guidance_mode = "fair_v1"
+adaptive_controller_lambda_rlm = false
+baseline_tracecoder_controller_guidance_max_chars = 2000
+baseline_tracecoder_max_no_improvement_streak = 2
+
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "Qwen3.5-35B-A3B-UD-Q4_K_M"
+http2 = true
+timeout_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.adaptive]
+gate_policy = "balanced"
+max_helper_calls = 1
+budget_topup_max_calls = 1
+informativeness_pregate = true
+informativeness_pregate_threshold = 0.7
+online_policy_mode = "off"
+budget_policy_mode = "off"
+no_progress_token_cap = 15000
+
+[run_eval.context]
+compaction_mode = "auto_overflow"
+compaction_scope = "snapshot,pytest,files"
+compaction_max_calls = 1
+compaction_target_chars = 18000
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ 
+ for i in range(n):
+     if a[i] % k == 0:
+-        b.append(a[i] / k)
++        b.append(a[i] // k)
+ 
+ b.sort()
+ print(*b)

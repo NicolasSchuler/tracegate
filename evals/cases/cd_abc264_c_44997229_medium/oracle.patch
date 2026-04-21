@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+                 for shift_c in range(w1):
+                     if bit_c >> shift_c & 1 == 0:
+                         after_row.append(a[shift_r][shift_c])
+-                    after.append(after_row)
++                after.append(after_row)
+         if after == b:
+             print("Yes")
+             exit()

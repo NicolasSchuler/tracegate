@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+     l += 1
+     l %= 1000000
+     n -= 1
+-print(l)
++# print(l)
+ ans = ["" for i in range(9)]
+ l_s = list(str(l))
+ ans[0] = l_s[0]

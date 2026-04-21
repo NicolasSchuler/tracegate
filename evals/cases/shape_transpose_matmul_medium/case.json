@@ -1,0 +1,20 @@
+{
+  "description": "Matrix projection transposes input instead of doing direct matmul, producing wrong output shape.",
+  "category": "data_shape_runtime",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "ValueError",
+  "tags": [
+    "data_shape_runtime",
+    "numpy",
+    "matmul"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

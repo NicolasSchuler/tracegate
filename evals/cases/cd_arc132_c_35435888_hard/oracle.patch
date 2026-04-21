@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+                 dp[i + 1][(s >> 1) | (1 << (a[i + 1] - (i + 1) + d))] %= mod
+         else:
+             for k in range(-d, d + 1):
+-                if 1 <= i + 1 + k <= n and a[i + 1 + k] == -1 and ((s >> 1) & (1 << (k + d))) == 0:
++                if 1 <= i + 1 + k <= n and ((s >> 1) & (1 << (k + d))) == 0:
+                     dp[i + 1][(s >> 1) | (1 << (k + d))] += dp[i][s]
+                     dp[i + 1][(s >> 1) | (1 << (k + d))] %= mod
+ ans = 0

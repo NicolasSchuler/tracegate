@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,5 @@
+ 
+ for i in range(N):
+     if P[i] == X:
+-        print(i)
++        print(i + 1)
+         break

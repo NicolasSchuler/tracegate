@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,6 +16,6 @@
+         return True
+     largest = 1
+     for j in range(2, n + 1):
+-        if n % j == 0 and is_prime(n):
++        if n % j == 0 and is_prime(j):
+             largest = max(largest, j)
+     return largest

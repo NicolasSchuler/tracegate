@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     for i in range(2 * N - 1):
+         if i % 2 == 1:  # should be A[i]>A[i+1]
+             if A[i] < A[i + 1]:
+-                if A[i] > A[i + 2]:
++                if A[i] < A[i + 2]:
+                     A[i], A[i + 1] = A[i + 1], A[i]
+                     ans.append(i + 1)
+                 else:

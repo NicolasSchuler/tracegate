@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,6 +5,8 @@
+ for i in range(n):
+     if s[i] != 0:
+         ans += 1
++        ans += (ze + 1) // 2
++        ze = 0
+     else:
+         ze += 1
+ print(ans + (ze + 1) // 2)

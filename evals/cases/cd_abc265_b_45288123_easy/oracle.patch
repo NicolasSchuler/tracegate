@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+     T -= A[now - 1]
+     now += 1
+ 
+-    if T < 0:
++    if T <= 0:
+         print("No")
+         exit()
+ 

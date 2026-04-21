@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ A = [list(map(int, input().split())) for _ in range(h)]
+ dp = [[0] * w for _ in range(h)]
+ ans = 0
+-dp = [[[-1] * w for _ in range(h)] for _ in range(h * w + 10)]
++dp = [[[-1 << 60] * w for _ in range(h)] for _ in range(h * w + 10)]
+ dp[0][sy][sx] = 0
+ 
+ for t in range(min(h * w, k) + 1):

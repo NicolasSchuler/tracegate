@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+ for k in range(i, N):
+     if idx >= N:
+         break
+-    if A[k] != S[idx]:
++    if A[k] == S[idx]:
+         idx += 2
+     else:
+         idx += 1

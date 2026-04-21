@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+     dp.append(1 + dp[-1] * (100 - P) * inv + dp[-2] * P * inv)
+     dp[-1] %= mod
+ print(dp[-1])
+-print(dp)
++# print(dp)

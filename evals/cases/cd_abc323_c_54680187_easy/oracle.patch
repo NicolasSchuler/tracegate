@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,7 +24,7 @@
+         sumlist.append(sum + (i + 1))
+ 
+ maxsum = max(sumlist)
+-print(maxsum, sumlist, nolist)
++# print(maxsum,sumlist,nolist)
+ 
+ k = 0
+ for iindex, ee in enumerate(sumlist):

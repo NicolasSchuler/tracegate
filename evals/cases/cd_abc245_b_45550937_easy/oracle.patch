@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ N = int(input())
+ A = list(map(int, input().split()))
+ 
+-for i in range(N):
++for i in range(2001):
+     if i not in A:
+         print(i)
+         break

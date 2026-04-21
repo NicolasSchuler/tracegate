@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+         x1 = (a - 1) // Y + 1
+         if x1 < X:
+             y1 = (b - 1) // (X - x1) + 1
+-            if y1 >= Y:
++            if y1 < Y:
+                 if (X - x1) * (Y - y1) >= c:
+                     print("Yes")
+                     exit()

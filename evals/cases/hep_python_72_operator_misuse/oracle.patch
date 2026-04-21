@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+ 
+     i, j = 0, len(q)-1
+     while i<j:
+-        if q[i] == q[j]:
++        if q[i] != q[j]:
+             return False
+         i+=1
+         j-=1

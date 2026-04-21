@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+         print("No")
+ else:
+     k = Y - X
+-    if k >= 2:
++    if k <= 2:
+         print("Yes")
+     else:
+         print("No")

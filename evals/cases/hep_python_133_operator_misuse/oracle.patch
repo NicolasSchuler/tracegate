@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,5 +16,5 @@
+     import math
+     squared = 0
+     for i in lst:
+-        squared += math.ceil(i)*2
++        squared += math.ceil(i)**2
+     return squared

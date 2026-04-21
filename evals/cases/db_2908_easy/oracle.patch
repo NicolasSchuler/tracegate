@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ class Solution:
+-    def firstPalindrome(self, words: ArrayList[str]) -> str:
++    def firstPalindrome(self, words: List[str]) -> str:
+         for i in words:
+             if i == i[::-1]:
+                 return i

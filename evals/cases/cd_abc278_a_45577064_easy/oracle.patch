@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+ def main():
+     n, k = ints()
+     aa = ints()
+-    print(locals())
++    #    print(locals())
+ 
+     if n > k:
+         bb = aa[k:] + [0] * k

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ K = 0
+ A = ["0", "1", "2", "3", "4"]
+ 
+-if S == "ABC316" or "ABC000":
++if S == "ABC316" or S == "ABC000":
+     K = 0
+ else:
+     if S[3] == "3":

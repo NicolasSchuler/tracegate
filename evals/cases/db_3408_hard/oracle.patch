@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -39,7 +39,7 @@
+             else:
+                 diff = target - power
+                 power = target
+-                stations[min(i + r, n - 1)] -= diff
++                stations[min(i + r, n - 1)] += diff
+                 k -= diff
+                 newStations[min(i + r, n - 1)] += diff
+         for i in newStations:

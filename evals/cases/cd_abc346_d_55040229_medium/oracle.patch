@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+ min_m = 10**24
+ x = zo[-1]
+ y = oz[-1]
+-for n in range(N):
++for n in range(N - 1):
+     min_m = min(min_m, zo[n] - oz[n] + y, oz[n] - zo[n] + x)
+ print(min_m)
+ # print(zo,oz)

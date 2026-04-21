@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,4 +30,4 @@
+     else:
+         ans.append(0)
+ 
+-print(ans)
++print(*ans, sep="\n")

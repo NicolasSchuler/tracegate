@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+     N = (H // (2**a)) * (W // (2**a))
+     area += (2**a) ** 2 * n
+     # print(a,n,N,area)
+-    if area >= (2**a) ** 2 * N:
++    if area > (2**a) ** 2 * N:
+         flag = False
+ if flag:
+     print("Yes")

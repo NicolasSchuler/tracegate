@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ h = int(input())
+ 
+-cnt = 0
++cnt = 1
+ plant = 0
+ while plant < h:
+     plant = plant + 2**cnt

@@ -1,0 +1,39 @@
+a/buggy.py	2026-02-12 14:50:00
++++ b/buggy.py	2026-02-12 14:50:16
+@@ -1,26 +1,25 @@
+ import asyncio
+ 
+-_pending: dict[str, asyncio.Future[int]] = {}
++_cache: dict[str, int] = {}
+ 
+ 
+-async def start_compute(key: str) -> None:
+-    loop = asyncio.get_event_loop()
+-    fut = loop.create_future()
++async def compute_value(key: str) -> int:
++    await asyncio.sleep(0.01)
++    return len(key) * 10
+ 
+-    async def _do_work() -> None:
+-        await asyncio.sleep(0.01)
+-        fut.set_result(len(key) * 10)
+ 
+-    asyncio.create_task(_do_work())
+-    _pending[key] = fut
++async def warm_cache(key: str) -> None:
++    _cache[key] = await compute_value(key)
+ 
+ 
+ async def get_result(key: str) -> int:
+-    return await _pending[key]
++    if key in _cache:
++        return _cache[key]
++    return await compute_value(key)
+ 
+ 
+ def warm(key: str) -> None:
+-    asyncio.run(start_compute(key))
++    asyncio.run(warm_cache(key))
+ 
+ 
+ def compute(key: str) -> int:

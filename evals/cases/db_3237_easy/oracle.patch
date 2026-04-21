@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,6 @@
+ 
+ class Solution:
+     def averageValue(self, nums: List[int]) -> int:
+-        return int(sum(lst) / len(lst))
+-
+-
+-1
++        return (
++            int(sum(lst) / len(lst)) if len(lst := [num for num in nums if num % 6 == 0]) > 0 else 0
++        )

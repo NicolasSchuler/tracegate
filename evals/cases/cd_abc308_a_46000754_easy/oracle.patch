@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ 
+ N = len(S)
+ for i in range(N):
+-    if sorted(S) == S or not (100 <= S[i] <= 675) or S[i] % 25 != 0:
++    if sorted(S) != S or not (100 <= S[i] <= 675) or S[i] % 25 != 0:
+         print("No")
+         exit()
+ else:

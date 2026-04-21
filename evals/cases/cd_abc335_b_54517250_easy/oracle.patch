@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,5 @@
+ for x in range(N + 1):
+     for y in range(N + 1):
+         for z in range(N + 1):
+-            if x + y + z == N:
++            if x + y + z <= N:
+                 print(x, y, z)

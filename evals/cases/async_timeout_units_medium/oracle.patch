@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,5 +7,5 @@
+ 
+ 
+ def run_fetch(timeout_ms: int = 50) -> str:
+-    timeout_sec = timeout_ms / 10000
++    timeout_sec = timeout_ms / 1000
+     return asyncio.run(asyncio.wait_for(_fetch(), timeout=timeout_sec))

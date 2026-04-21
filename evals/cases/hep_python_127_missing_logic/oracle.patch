@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,6 +32,6 @@
+     l = max(interval1[0], interval2[0])
+     r = min(interval1[1], interval2[1])
+     length = r - l
+-    if length > 0:
++    if length > 0 and is_prime(length):
+         return "YES"
+     return "NO"

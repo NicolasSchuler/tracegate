@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+ 
+     This function outputs the number of such collisions.
+     """
+-    return n**3
++    return n**2

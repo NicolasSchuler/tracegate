@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,4 +26,4 @@
+ 
+ 
+ for t in range(H):
+-    print(*grid[t])
++    print(*grid[t], sep="")

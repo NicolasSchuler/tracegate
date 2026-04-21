@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,9 +17,9 @@
+     >>> is_prime(1)
+     False
+     """
+-    if n < 1:
++    if n < 2:
+         return False
+-    for k in range(1, n - 1):
++    for k in range(2, n - 1):
+         if n % k == 0:
+             return False
+     return True

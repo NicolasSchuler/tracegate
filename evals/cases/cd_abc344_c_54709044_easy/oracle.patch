@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+     while left <= right:
+         mid = (left + right) // 2
+         if sorted_comb_sum[mid] == x:
+-            print("YES")
++            print("Yes")
+             flag = True
+             break
+         if sorted_comb_sum[mid] < x:

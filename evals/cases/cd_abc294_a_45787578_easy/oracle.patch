@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ N = int(input())
+ Arr = list(map(int, input().split()))
+ 
+-print([n for n in Arr if n % 2 == 0])
++print(" ".join([str(n) for n in Arr if n % 2 == 0]))

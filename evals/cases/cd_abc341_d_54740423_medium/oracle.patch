@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ 
+ n, m, k = map(int, input().split())
+ q = (n * m) / math.gcd(n, m)
+-min = 1
++min = 0
+ max = int(2e18)
+ while (max - min) > 1:
+     x = (max + min) // 2

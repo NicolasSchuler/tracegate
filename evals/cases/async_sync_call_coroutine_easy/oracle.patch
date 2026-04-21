@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ async def get_total(player_ids: list[int]) -> int:
+     total = 0
+     for pid in player_ids:
+-        score = get_score(pid)
++        score = await get_score(pid)
+         total += score
+     return total
+

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,6 +7,6 @@
+     Tx -= 1
+ 
+ if abs(Tx - Sx) > abs(Ty - Sy):
+-    print(abs(Tx - Sx))
++    print(abs(Ty - Sy) + (abs(Tx - Sx) - abs(Ty - Sy)) // 2)
+ else:
+     print(abs(Ty - Sy))

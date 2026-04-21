@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,8 +10,11 @@
+     for k in range(n):
+         if i > k and s[i][k] == "o":
+             dic[i] += 1
++        elif i > k and s[i][k] == "x":
++            dic[k] += 1
+ 
+ dic = sorted(dic.items(), key=lambda x: x[1], reverse=True)
+ 
++
+ for i in dic:
+     print(i[0] + 1, end=" ")

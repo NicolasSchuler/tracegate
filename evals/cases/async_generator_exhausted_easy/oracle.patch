@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,8 +8,8 @@
+             yield i * 10
+
+     gen = _gen()
+-    first_pass = [item async for item in gen]
+-    second_pass = [item async for item in gen]
++    first_pass = [item async for item in _gen()]
++    second_pass = [item async for item in _gen()]
+     return first_pass + second_pass
+

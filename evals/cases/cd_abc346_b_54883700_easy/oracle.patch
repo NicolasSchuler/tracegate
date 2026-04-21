@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ n = len(wball)
+ 
+ for i in range(n - (W + B)):
+-    if wball[i : (W + B + 1)].count("w") == W and wball[i : (W + B + 1)].count("b") == B:
++    if wball[i : (i + W + B)].count("w") == W and wball[i : (i + W + B)].count("b") == B:
+         print("Yes")
+         exit()
+ print("No")

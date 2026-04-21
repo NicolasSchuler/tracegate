@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+         l=[]
+         for i in range(len(list2)):
+             d2[list2[i]]=i
+-          for i in range(len(list1)):
++        for i in range(len(list1)):
+             if list1[i] in d2:
+                 l.append([i+d2[list1[i]],list1[i]])
+         l1=[]
+@@ -22,4 +22,4 @@
+                 l1.append(l[i][1])
+             else:
+                 break
+-        return l1
++        return l1

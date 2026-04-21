@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+             while cr < d:
+                 # Greedy: finish the task as late as you can which benefits later tasks
+                 if on[e] != 1:
+-                    on[e] = 2
++                    on[e] = 1
+                     cr += 1
+                 e -= 1
+         return sum(on)

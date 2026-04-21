@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+ 
+         cnt = 0
+         for i in range(len(c)):
+-            if c[i] == "0":
++            if c[i] == "1":
+                 if not (a[i] == c[i] or b[i] == c[i]):
+                     cnt += 1
+             else:

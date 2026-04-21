@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     exit()
+ 
+ empty = 1 + max_n - n
+-if empty & 2 == 0:
++if empty % 2 == 0:
+     print("Bob")
+ else:
+     print("Alice")

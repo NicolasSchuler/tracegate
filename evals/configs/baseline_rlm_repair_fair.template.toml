@@ -1,0 +1,67 @@
+[run_eval]
+# External baseline: upstream RLM (secondary tuned-baseline track).
+# This keeps the same outer harness budget as the canonical baseline template,
+# but opts into the solve-first `repair_fair_v1` prompt contract and a
+# shallower native inner search budget for single-file repair.
+# Copy this file, set your own run_id, then pass:
+#   --config <your_file.toml>
+run_id = "replace-me"
+baseline = "rlm"
+conditions = "rlm"
+max_cases = 0
+k = 2
+jobs = 3
+retry_prompt_mode = "full"
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+baseline_process_timeout_sec = 600.0
+baseline_max_iterations = 2
+baseline_openai_compat_profile = "lmstudio_model_yaml"
+baseline_openai_allow_reasoning_fallback = true
+baseline_openai_enable_thinking = true
+# Adaptive+baseline hybrids: keep `tuned_v1` for current behavior or switch to
+# `fair_v1` for the shared canonical augmentation lane.
+baseline_hybrid_guidance_mode = "tuned_v1"
+
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "Qwen3.5-35B-A3B-UD-Q4_K_M"
+http2 = true
+timeout_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.adaptive]
+online_policy_mode = "off"
+budget_policy_mode = "off"
+max_helper_calls = 0
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true
+
+[run_eval.baseline_rlm]
+max_depth = 1
+max_iterations = 8
+timeout_sec = 600
+max_errors = 5
+max_tokens = 3072
+max_total_tokens = 200000
+compaction = false
+compaction_threshold_pct = 0.85
+verbose = false
+prompt_contract = "repair_fair_v1"
+controller_guidance_max_chars = 2500
+failure_feedback_max_chars = 3500
+failure_feedback_meta_max_chars = 2000

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+ 
+ ans = []
+ for x in range(L, R + 1):
+-    res = 1
++    res = 0
+     for j in range(60):
+         if (x >> j) & 1:
+             res ^= base[j]

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ N = int(readline())
+ S = readline().rstrip()
+ 
+-if S[0] == "A" and S[-1] == "B":
++if (S[0] == "A" and S[-1] == "B") or S == "BA":
+     print("No")
+ else:
+     print("Yes")

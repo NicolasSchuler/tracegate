@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+ for i in range(n):
+     for j in range(n):
+         if p[i] >= p[j]:
+-            if f[j].issuperset(f[i]):
++            if f[j].issuperset(f[i]) and (p[i] > p[j] or len(f[j]) > len(f[i])):
+                 print("Yes")
+                 exit(0)
+ 

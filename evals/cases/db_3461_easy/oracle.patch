@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,4 +21,4 @@
+                     break
+             if ch:
+                 res.append(i)
+-        return res[-1]
++        return res

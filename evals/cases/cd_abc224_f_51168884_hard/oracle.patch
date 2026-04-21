@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -44,5 +44,5 @@
+ 
+ 
+ if __name__ == "__main__":
+-    sys.stdin = io.StringIO(_INPUT)
++    # sys.stdin = io.StringIO(_INPUT)
+     main()

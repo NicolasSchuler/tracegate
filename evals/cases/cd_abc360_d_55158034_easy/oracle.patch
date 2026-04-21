@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,5 +12,5 @@
+ Z.sort()
+ for i in range(LS):
+     if S[i] == "1":
+-        ans += bisect_right(Z, X[i] * 2 * T) - bisect_right(Z, X[i])
++        ans += bisect_right(Z, X[i] + 2 * T) - bisect_right(Z, X[i])
+ print(ans)

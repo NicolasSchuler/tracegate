@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -38,7 +38,7 @@
+ else:
+     l, r = S[0], S[-1]
+     n = S[1:-1]
+-    print(n)
++    # print(n)
+     if l in ascii_uppercase and r in ascii_uppercase and n.isdecimal():
+         if 100000 <= int(n) <= 999999:
+             print("Yes")

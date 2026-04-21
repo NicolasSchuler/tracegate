@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ k = int(input())
+-print(f"{21 + k // 60}:{k % 60}")
++print(f"{21 + k // 60:02}:{k % 60:02}")

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,4 +17,4 @@
+             # i項目を決めない
+             dp[i][j][bit >> 1] += dp[i - 1][j][bit]
+ 
+-print(sum(sum(dp[N][j]) * P[N - j] * pow(-1, j % 2) for j in range(N + 1)))
++print(sum(sum(dp[N][j]) * P[N - j] * pow(-1, j % 2) for j in range(N + 1)) % MOD)

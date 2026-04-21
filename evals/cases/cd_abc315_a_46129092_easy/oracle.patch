@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,11 @@
+ def remove_str(input_str):
+-    result = input_str.replace("a", "").replace("e", "").replace("o", "")
++    result = (
++        input_str.replace("a", "")
++        .replace("e", "")
++        .replace("i", "")
++        .replace("o", "")
++        .replace("u", "")
++    )
+     return result
+ 
+ 

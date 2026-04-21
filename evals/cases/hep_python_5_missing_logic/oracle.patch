@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,4 +17,6 @@
+         result.append(n)
+         result.append(delimeter)
+ 
++    result.append(numbers[-1])
++
+     return result

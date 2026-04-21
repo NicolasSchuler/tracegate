@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,5 +9,5 @@
+     if s[i] == "C":
+         c = 1
+     if a * b * c == 1:
+-        print(i)
++        print(i + 1)
+         exit()

@@ -1,0 +1,22 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,13 +8,14 @@
+ 
+ 
+ class Solution:
+-    def selfDividingNumbers(self, left: int, right: int) -> Lista[int]:
++    def selfDividingNumbers(self, left: int, right: int) -> List[int]:
+         res = []
+-        for i in range(left, right):
++        for i in range(left, right + 1):
+             ch = True
+             for j in str(i):
+-                if i % int(j) != 0:
+-                    ch = False
++                if j != "0":
++                    if i % int(j) != 0:
++                        ch = False
+                 else:
+                     ch = False
+                     break

@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,11 +10,11 @@
+ used = set()
+ ans = []
+ for a in A:
++    idx[a].pop()
+     if a in used:
+         continue
+     while ans and ans[-1] > a and idx[ans[-1]]:
+         used.discard(ans.pop())
+     ans.append(a)
+     used.add(a)
+-    idx[a].pop()
+ print(*ans)

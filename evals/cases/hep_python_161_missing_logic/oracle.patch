@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+     new_str = list(s)
+     for i in s:
+         if i.isalpha():
+-            new_str[idx] = i
++            new_str[idx] = i.swapcase()
+             flg = 1
+         idx += 1
+     s = ""

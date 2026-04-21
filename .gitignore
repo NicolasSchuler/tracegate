@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.json
+.benchmarks/
+--no-backup-if-mismatch
+analysis/figures/
+
+# Mutation testing
+.mutmut-cache/
+
+# llmdebug output (for development)
+.llmdebug/
+
+# OS
+.DS_Store
+Thumbs.db
+.venv312
+
+# IDE / editor artifacts
+.claude/
+.playwright-mcp/
+
+# Large data files (ConDefects repo, Test.zip, etc.)
+data/
+analysis/data.zip
+analysis/data Kopie/
+
+# External baseline repos (cloned by baselines/setup_repos.sh)
+baselines/repos/
+baselines/envs/
+
+# Eval outputs and generated artifacts
+evals/artifacts/
+evals/results/
+evals/swebench_runs/
+evals/swebench_pro_runs/
+evals/swebench_pro_assets/
+slurm/
+docs/haicore_eval_runbook.md
+haicore-eval.yaml
+haicore-eval-baseline-hybrid.yaml
+scripts/run_haicore_llm_service.sh
+scripts/submit_haicore_failed_baseline_hybrids.sh
+tests/test_haicore_*.py
+tests/test_script_path_portability.py
+results/
+evals/cases/env_missing_suffix_easy/config/
+evals/cases/env_relative_cwd_shift_easy/data/
+reports/
+swebench-lite-gen-*.out
+swebench-llama-server-*.log
+swebench-generate-launch-*.log
+.last
+*.json
+!quality/coverage_baseline.json
+!quality/coverage_evals_baseline.json
+!quality/type_coverage_baseline.json
+!evals/cases/**/case.json
+.worktrees
+.playwright-mcp
+*.tex

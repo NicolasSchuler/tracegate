@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+     p, q = map(int, input().split())
+     sum += p * q
+ 
+-if s < sum:
++if s <= sum:
+     print(sum)
+ else:
+     print(sum + k)

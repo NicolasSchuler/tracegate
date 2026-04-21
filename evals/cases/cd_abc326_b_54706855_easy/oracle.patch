@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+         return False
+ 
+ 
+-for i in range(N, 919):
++for i in range(N, 920):
+     if like326_Number(i):
+         print(i)
+         exit()

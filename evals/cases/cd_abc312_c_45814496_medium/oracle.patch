@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -29,4 +29,4 @@
+         Ri = mid
+     else:
+         Le = mid
+-print(Le)
++print(Ri)

@@ -1,0 +1,21 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,11 +6,11 @@
+ import itertools
+ import functools
+ class Solution:
+-def getNoZeroIntegers(self, n: int) -> List[int]:
+-    for i in range(n-1, -1, -1):
+-        if '0' not in str(i) and '0' not in str(n - i):
+-            return [i, n-i ]
++    def getNoZeroIntegers(self, n: int) -> List[int]:
++        for i in range(n-1, -1, -1):
++            if '0' not in str(i) and '0' not in str(n - i):
++                return [i, n-i ]
+ 
+-    
++        #Oneliner
+ 
+-    return next([i, n-i] for i in range(n-1, -1, -1) if '0' not in str(i) and '0' not in str(n-i))
++        return next([i, n-i] for i in range(n-1, -1, -1) if '0' not in str(i) and '0' not in str(n-i))

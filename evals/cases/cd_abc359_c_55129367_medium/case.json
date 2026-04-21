@@ -1,0 +1,21 @@
+{
+  "description": "ConDefects abc359_c/55129367",
+  "category": "type_coercion",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "condefects",
+    "atcoder"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "condefects",
+  "contamination_risk": "low",
+  "expected_fix_lines": 2,
+  "source_id": "condefects_abc359_c_55129367"
+}

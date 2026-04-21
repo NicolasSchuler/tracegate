@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+     lis.append([a, b])
+ 
+ l = -1
+-r = maxday
++r = maxday + 1
+ 
+ while abs(r - l) > 1:
+     mid = (l + r) // 2

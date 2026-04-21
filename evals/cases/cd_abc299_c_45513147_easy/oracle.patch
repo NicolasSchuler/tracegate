@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+         right += 1
+     else:
+         now -= 1 if s[left] == "o" else 0
+-print(ans if ans != 0 else -1)
++print(ans if ans != 0 and "-" in s else -1)

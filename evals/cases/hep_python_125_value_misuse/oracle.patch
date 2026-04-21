@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,6 +12,6 @@
+     if " " in txt:
+         return txt.split()
+     elif "," in txt:
+-        return txt.replace(' ',',').split()
++        return txt.replace(',',' ').split()
+     else:
+         return len([i for i in txt if i.islower() and ord(i)%2 == 0])

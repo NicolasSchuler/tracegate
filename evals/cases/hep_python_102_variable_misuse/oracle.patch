@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,4 +14,4 @@
+         return y
+     if x == y:
+         return -1
+-    return x - 1
++    return y - 1

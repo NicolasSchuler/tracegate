@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,6 +9,10 @@
+ 
+ 
+ def judge(x, y, a, b, c):
++    if (a // x) + (1 if a % x != 0 else 0) + (b // x) + (1 if b % x != 0 else 0) + (c // x) + (
++        1 if c % x != 0 else 0
++    ) <= y:
++        return True
+     y -= (a // x) + (1 if a % x != 0 else 0)
+     if y <= 0:
+         return False

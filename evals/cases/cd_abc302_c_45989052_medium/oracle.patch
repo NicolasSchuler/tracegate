@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,5 +19,5 @@
+             ok = False
+     if ok:
+         print("Yes")
+-        break
++        exit()
+ print("No")

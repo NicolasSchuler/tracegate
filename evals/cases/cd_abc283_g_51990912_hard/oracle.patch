@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -62,7 +62,6 @@
+     for v in A:
+         for e in base:
+             v = min(v, v ^ e)
+-        print(base)
+         """
+         vの最上位bitを見る。
+         base 1
+@@ -74,7 +73,6 @@
+         for i in range(len(base)):
+             if (v ^ base[i]) < base[i]:
+                 base[i] ^= v
+-        print(v)
+         if v > 0:
+             base.append(v)
+     return base

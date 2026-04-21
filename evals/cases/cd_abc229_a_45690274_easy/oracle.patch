@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,6 +5,8 @@
+ 
+     if (s1[0] == "#" and s2[1] == "#") or (s1[1] == "#" and s2[0] == "#"):
+         print("No")
++    else:
++        print("Yes")
+     return
+ 
+ 

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -28,4 +28,4 @@
+         chk[dic[S[i][j]]] += 1
+         if chk[1] == 0:
+             ans = min(ans, chk[2])
+-print(ans)
++print(ans if ans < 10**10 else -1)

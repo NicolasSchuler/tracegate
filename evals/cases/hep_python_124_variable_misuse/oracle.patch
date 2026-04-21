@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,8 +21,8 @@
+     """
+     try:
+         date = date.strip()
+-        day, month, year = date.split('-')
+-        day, month, year = int(day), int(month), int(year)
++        month, day, year = date.split('-')
++        month, day, year = int(month), int(day), int(year)
+         if month < 1 or month > 12:
+             return False
+         if month in [1,3,5,7,8,10,12] and day < 1 or day > 31:

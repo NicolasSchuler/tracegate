@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -78,7 +78,7 @@
+     ans = res0 + res1
+     #     print(ans)
+     # print(ans)
+-    if ind >= 0:
++    if c > 0:
+         v0 = v0orig[:]
+         v1 = v1orig[:]
+         tmp0 = tmp1 = 0

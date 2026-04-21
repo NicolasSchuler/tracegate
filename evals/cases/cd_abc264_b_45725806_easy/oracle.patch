@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ r, c = map(int, input().split())
+ 
+-if min(r, c, 15 - r, 15 - c) % 2 == 1:
++if max(abs(r - 8), abs(c - 8)) % 2 == 1:
+     print("black")
+ else:
+     print("white")

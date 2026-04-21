@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,7 +35,7 @@
+             for v in adj[r]:
+                 if v == p:
+                     continue
+-                t = [0] + dfs(v, r)
++                t = [1] + dfs(v, r)
+                 d = comb(t, d)
+             return d
+ 

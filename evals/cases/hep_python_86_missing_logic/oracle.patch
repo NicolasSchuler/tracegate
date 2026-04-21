@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+     anti_shuffle('hello') returns 'ehllo'
+     anti_shuffle('Hello World!!!') returns 'Hello !!!Wdlor'
+     """
+-    return ''.join([''.join(sorted(list(i))) for i in s.split(' ')])
++    return ' '.join([''.join(sorted(list(i))) for i in s.split(' ')])

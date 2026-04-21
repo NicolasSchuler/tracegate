@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,4 +13,4 @@
+         for i in nums:
+             ls.append(int(i))
+         sorted_ = sorted(ls)
+-        return str(sorted_[k])
++        return str(sorted_[-1 * k])

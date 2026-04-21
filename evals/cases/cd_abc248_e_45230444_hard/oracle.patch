@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -31,7 +31,7 @@
+         z = dx * y0 - dy * x0
+         cnt = 0
+         for x, y in XY:
+-            if dx * y + dy * x == z:
++            if dx * y - dy * x == z:
+                 cnt += 1
+ 
+         if cnt >= K:

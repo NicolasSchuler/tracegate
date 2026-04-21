@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,8 +9,6 @@
+         isBig = True
+     if s[i] in small:
+         isSmall = True
+-    if isBig and isSmall:
+-        break
+     if s.count(s[i]) > 1:
+         isDifferent = False
+         break

@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ x, y = map(int, input().split())
+-print("Yes" if y - x == 2 or x - y == 3 else "No")
++print("Yes" if 0 < y - x <= 2 or 0 < x - y <= 3 else "No")

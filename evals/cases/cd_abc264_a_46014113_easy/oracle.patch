@@ -1,0 +1,8 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,3 +1,3 @@
+ st, en = map(int, input().split())
+ 
+-print("atcoder"[st + 1 : en])
++print("atcoder"[st - 1 : en])

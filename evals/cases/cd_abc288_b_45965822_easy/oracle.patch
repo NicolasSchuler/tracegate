@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ c = []
+ for i in range(a):
+     c.append(str(input()))
++c = c[0:b]
+ c.sort()
+-c = c[0:b]
+ for i in c:
+     print(i)

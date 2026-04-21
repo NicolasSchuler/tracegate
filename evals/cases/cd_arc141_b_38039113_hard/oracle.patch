@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ N, M = map(int, input().split())
+ Mod = 998244353
+-if math.floor(math.log2(M)) < N:
++if math.floor(math.log2(M)) + 1 < N:
+     print(0)
+     exit()
+ 

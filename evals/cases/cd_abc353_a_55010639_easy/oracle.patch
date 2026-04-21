@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ HeightList = input[1]
+ 
+ 
+-print(HeightList)
++# print(HeightList)
+ 
+ Height_FirstBuld = HeightList[0]
+ found = 0

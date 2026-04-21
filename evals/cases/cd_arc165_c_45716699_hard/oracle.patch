@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -78,4 +78,4 @@
+             ng = x
+     ans = min(ok, ans)
+ 
+-print(ans)
++    print(ans)

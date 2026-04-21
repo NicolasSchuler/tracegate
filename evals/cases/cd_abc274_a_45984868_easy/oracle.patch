@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ from decimal import Decimal, ROUND_UP
+ 
+ a, b = map(int, input().split())
+-print(Decimal(str(b / a)).quantize(Decimal(10) ** -3, rounding=ROUND_UP))
++print(Decimal(str(b / a)).quantize(Decimal(10) ** -3))

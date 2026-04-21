@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+             for i, j in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                 new_r, new_c = r + i, c + j
+                 if 0 <= new_r < 2 and 0 <= new_c < 3:
+-                    new_board = List[List[int]]
++                    new_board = [row[:] for row in board]
+                     new_board[r][c] = new_board[new_r][new_c]
+                     new_board[new_r][new_c] = 0
+                     neighbors.append(new_board)

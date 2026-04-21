@@ -1,0 +1,26 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,11 +12,11 @@
+         new = []
+         while p1 < len(nums1) and p2 < len(nums2):
+             if nums1[p1] < nums2[p2]:
+-            new.append(nums1[p1])
+-            p1 += 1
+-        else:
+-            new.append(nums2[p2])
+-            p2 += 1
++                new.append(nums1[p1])
++                p1 += 1
++            else:
++                new.append(nums2[p2])
++                p2 += 1
+         while p1 < len(nums1):
+             new.append(nums1[p1])
+             p1 += 1
+@@ -28,4 +28,4 @@
+             median = (new[index] + new[index-1]) / 2
+         else:
+             median = float(new[len(new)//2])
+-        return median
++        return median

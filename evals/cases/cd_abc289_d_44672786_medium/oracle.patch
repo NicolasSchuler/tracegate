@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+ dp[0] = True
+ 
+ for now in range(x + 1):
+-    if now and (not now in B):
++    if dp[now] and (not now in B):
+         for a in A:
+             if now + a < x + 1:
+                 dp[now + a] = True

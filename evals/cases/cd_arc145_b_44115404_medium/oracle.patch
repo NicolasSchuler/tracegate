@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ 
+ 
+ def f(x):
+-    return x // a * min(a, b) + min(n % a, b - 1)
++    return x // a * min(a, b) + min(x % a, b - 1)
+ 
+ 
+ print(max(f(n) - f(a - 1), 0))

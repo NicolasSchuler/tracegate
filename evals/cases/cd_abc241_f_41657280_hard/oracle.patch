@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+         if 0 <= l - 1:
+             go.append((x, xs[x][l - 1] + 1))
+         if l < len(xs[x]):
+-            go.append((y, xs[x][l] - 1))
++            go.append((x, xs[x][l] - 1))
+         l = bisect.bisect_left(ys[y], x)
+         if 0 <= l - 1:
+             go.append((ys[y][l - 1] + 1, y))

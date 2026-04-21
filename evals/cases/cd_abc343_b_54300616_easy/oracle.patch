@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,5 +9,5 @@
+     ans = []
+     for j in range(N):
+         if matrix[i][j] == 1:
+-            ans.append(j)
++            ans.append(j + 1)
+     print(*ans)

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+     if n == 0:
+         return 0
+     if n == 1:
++        return 0
++    if n == 2:
+         return 1
+-    if n == 2:
+-        return 2
+     return fibfib(n - 1) + fibfib(n - 2) + fibfib(n - 3)

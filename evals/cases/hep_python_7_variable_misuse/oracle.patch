@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+     >>> filter_by_substring(['abc', 'bacd', 'cde', 'array'], 'a')
+     ['abc', 'bacd', 'array']
+     """
+-    return [x for x in strings if x in substring]
++    return [x for x in strings if substring in x]

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,6 +14,5 @@
+         P[-(i + 1)], P[-(i - jj)] = P[-(i - jj)], P[-(i + 1)]  # 入れ替える
+     break
+ # 変更する残りの数を最大に並べ直す。
+-Q = P[:-i] + sorted(P[-(i + 1) :], reverse=True)
+-
++Q = P[:-i] + sorted(P[-i:], reverse=True)
+ print(*Q)

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+     if query == 1:
+         A.append(num)
+     elif query == 2:
+-        print(A[-1])
++        print(A[-num])

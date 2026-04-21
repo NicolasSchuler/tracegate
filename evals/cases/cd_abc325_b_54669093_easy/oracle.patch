@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     c = 0
+     for j in range(N):
+         t = (X[j] + i) % 24
+-        if 9 < t < 18:
++        if 9 <= t < 18:
+             c += W[j]
+     ans = max(ans, c)
+ 

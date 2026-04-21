@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -31,7 +31,7 @@
+             break
+         if checked[i - j]:
+             continue
+-        if match(s[i - i : i - j + m]):
++        if match(s[i - j : i - j + m]):
+             s[i - j : i - j + m] = ["#"] * m
+             que.append(i - j)
+     # right side

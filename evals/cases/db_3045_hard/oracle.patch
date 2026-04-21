@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,7 +32,7 @@
+ 
+         while queue:
+             board, moves = queue.popleft()
+-            if board == [[1, 2, 3], [5, 4, 0]]:
++            if board == [[1, 2, 3], [4, 5, 0]]:
+                 return moves
+             for neighbor in get_neighbors(board):
+                 if tuple(tuple(row) for row in neighbor) not in seen:

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,5 +9,7 @@
+     s = S.count(S[0])
+     if s == 1:
+         print(S[0])
++    elif S[0] == S[1]:
++        print(S[2])
+     else:
+         print(S[1])

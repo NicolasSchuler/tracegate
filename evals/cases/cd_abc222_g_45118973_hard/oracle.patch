@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -69,7 +69,7 @@
+             j = 1
+             while True:
+                 if doubling(i * j, K) == 0:
+-                    return i
++                    return i * j
+                 j += 1
+ 
+ 

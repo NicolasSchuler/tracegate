@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     return primes
+ 
+ 
+-setx = set(prime(100))
++setx = set(prime(200))
+ 
+ A, B, C, D = map(int, input().split())
+ for i in range(A, B + 1):

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+         dirPath = (dirPath + 1) % 4
+     x = x + dir[dirPath][0]
+     y = y + dir[dirPath][1]
+-    print(x, y)
++    # print(x,y)
+ 
+     grid[x][y] = i
+ 

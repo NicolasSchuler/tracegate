@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+     return False
+ 
+ 
+-left, right = 0, 10**10
++left, right = 0, 10**15
+ while right - left > 1:
+     mid = (right + left) // 2
+     if isok(mid):

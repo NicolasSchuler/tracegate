@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n = int(input())
+ 
+-for i in range(919):
++for i in range(920):
+     if i <= 99:
+         continue
+     elif i < n:

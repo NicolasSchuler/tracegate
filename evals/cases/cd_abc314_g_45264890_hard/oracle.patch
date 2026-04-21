@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -103,7 +103,7 @@
+     a, b = map(int, input().split())
+     b -= 1
+     s.set(b, a + s.a[b])
+-    while s.get() > h:
++    while s.get() >= h:
+         ans.append(i)
+         s.dec_k()
+ 

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+     return (g1[n] * g2[r] % mod) * g2[n - r] % mod
+ 
+ 
+-mod = 10**9 + 7
++mod = 998244353
+ N = 2 * 10**5
+ g1 = [1] * (N + 1)
+ g2 = [1] * (N + 1)

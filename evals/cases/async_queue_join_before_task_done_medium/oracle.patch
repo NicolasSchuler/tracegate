@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     while True:
+         item = await queue.get()
+         results.append(item * 2)
+-        # Bug: forgets to call queue.task_done()
++        queue.task_done()
+
+
+ async def pipeline() -> list[int]:

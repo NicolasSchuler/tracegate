@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ N = int(input())
+-for i in range(N, 919):
++for i in range(N, 920):
+     N_str = str(i)
+     if int(N_str[0]) * int(N_str[1]) == int(N_str[2]):
+         print(i)

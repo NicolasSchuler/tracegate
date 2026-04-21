@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+ tl.sort()
+ 
+ if sl != tl:
+-    print("No")
++    print(-1)
+     exit()
+ 
+ 

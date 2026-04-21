@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,7 +35,7 @@
+     trie.insert(S[i])
+ 
+ for i in range(N):
+-    l, r = 1, len(S[i]) + 1
++    l, r = 0, len(S[i]) + 1
+     while r - l > 1:
+         m = (l + r) // 2
+         if trie.search(S[i][:m]) > 1:

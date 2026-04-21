@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,9 +13,10 @@
+         x = sorted(set(arr))
+         dict1 = {}
+         for i in range(len(x)):
+-            dict1[x[i]] = i
++            dict1[x[i]] = i + 1
+         for j in arr:
+-            dict1[j] += 1
+             y = dict1[j]
+             list1.append(y)
+         return list1
++
++    # please do upvote it will help alot to gain my love in coding

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+             right = sum(nums[mid:r])
+             left = sum(nums[l:mid])
+ 
+-            left_ind = dnc(l, mid, lo, hi + left)
++            left_ind = dnc(l, mid, lo, hi + right)
+             return left_ind if left_ind != -1 else dnc(mid, r, lo + left, hi)
+ 
+         return dnc(0, len(nums), 0, 0)

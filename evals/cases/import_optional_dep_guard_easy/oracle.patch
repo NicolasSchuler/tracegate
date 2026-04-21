@@ -1,0 +1,15 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,10 @@
+-import ujson
++import json
++
++try:
++    import ujson as _json
++except ModuleNotFoundError:
++    _json = json
+ 
+ 
+ def parse_payload(raw: str) -> dict[str, int]:
+-    return ujson.loads(raw)
++    return _json.loads(raw)

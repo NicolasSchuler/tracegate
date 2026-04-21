@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+ if N % 2 == 1:
+     print("Win")
+ else:
+-    print("No")
++    print("Lose")

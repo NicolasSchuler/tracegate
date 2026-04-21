@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,5 +4,5 @@
+ 
+ def load_threshold() -> int:
+     base = Path(__file__).resolve().parent
+-    text = (base / "config" / "settings").read_text(encoding="utf-8")
++    text = (base / "config" / "settings.json").read_text(encoding="utf-8")
+     return int(json.loads(text)["threshold"])

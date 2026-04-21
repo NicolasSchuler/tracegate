@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+         T += 1
+     elif S[i] == "A":
+         A += 1
+-    print(f"A:{A},T:{T}")
++    # print(f'A:{A},T:{T}')
+     if A >= (N / 2 + 1):
+         print("A")
+         break

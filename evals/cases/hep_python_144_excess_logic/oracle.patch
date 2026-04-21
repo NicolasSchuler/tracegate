@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,8 +13,6 @@
+     """
+     a, b = x.split("/")
+     c, d = n.split("/")
+-    a = int(b) * int(c)
+-    d = int(c) * int(b)
+     numerator = int(a) * int(c)
+     denom = int(b) * int(d)
+     if (numerator/denom == int(numerator/denom)):

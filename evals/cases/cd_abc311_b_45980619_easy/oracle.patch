@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,8 +14,7 @@
+ for i in range(N):
+     s = input()
+     a.append(s)
+-for i in range(N):
+-    print(a[i])
++
+ ans = 0
+ for i in range(D):
+     for j in range(i, D):

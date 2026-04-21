@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ Aset = set(A)
+ ok = False
+ for a in A:
+-    if X - a in Aset:
++    if a + X in Aset:
+         ok = True
+         break
+ if ok:

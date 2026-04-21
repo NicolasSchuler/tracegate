@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+     '''
+     
+     if isinstance(x,int) and isinstance(y,int) and isinstance(z,int):
+-        if (x+y==z) or (y+z==x):
++        if (x+y==z) or (x+z==y) or (y+z==x):
+             return True
+         return False
+     return False

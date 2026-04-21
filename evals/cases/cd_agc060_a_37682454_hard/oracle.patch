@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,6 +26,8 @@
+ else:
+     i, j = f(S[0]), f(S[1])
+     DP[1][i][j] = 1 if i != j else 0
++for i in range(26):
++    DP2[1][i] = sum(DP[1][i]) % mod
+ 
+ 
+ for n in range(2, N):

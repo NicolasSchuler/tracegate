@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,6 @@
+ 
+ def dfs(y, x, a):
+     if y == N:
+-        print(a)
+         if all(
+             "".join(sorted([ai[j] for ai in a])).strip(".").strip(".") == "ABC"
+             and "".join([ai[j] for ai in a]).strip(".").strip(".")[0] == C[j]
+@@ -14,7 +13,6 @@
+             print("\n".join("".join(row) for row in a))
+             exit(0)
+     elif x == N:
+-        print(a)
+         if (
+             "".join(sorted(a[y])).strip(".").strip(".") == "ABC"
+             and "".join(a[y]).strip(".").strip(".")[0] == R[y]

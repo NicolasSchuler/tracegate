@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n, m = map(int, input().split())
+ L = list(map(int, input().split()))
+-left, right = max(L), sum(L)
++left, right = max(L), sum(L) + len(L)
+ while left < right:
+     mid = (left + right) // 2
+     cur = 0

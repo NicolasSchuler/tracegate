@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+         while j < i + N and box < M:
+             # print("scan i,j={}".format((i,j)))
+             dp[c_lst[j]] += 1
+-            if dp[c_lst[j]] % K == 1:
++            if (dp[c_lst[j]] - 1) % K + 1 == 1:
+                 box += 1
+                 res += min(K, cnt[c_lst[j]] - dp[c_lst[j]] + 1)
+                 # print("include at i,j={} for {}".format((i,j), min(K, cnt[c_lst[j]]-dp[c_lst[j]]+1)))

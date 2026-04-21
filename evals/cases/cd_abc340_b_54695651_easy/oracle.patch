@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,6 +3,6 @@
+ for _ in range(Q):
+     t, k = map(int, input().split())
+     if t == 1:
+-        A.append(t)
++        A.append(k)
+     else:
+         print(A[-k])

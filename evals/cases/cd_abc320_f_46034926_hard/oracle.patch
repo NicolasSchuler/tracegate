@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+             hhh = hh + d
+             if hhh == H:
+                 for k in range(hhh - F[n + 1], hhh + 1):
+-                    dp[n + 1][h - d][k] = min(dp[n + 1][hhh][k], dp[n][h][hh] + P[n + 1])
++                    dp[n + 1][h - d][k] = min(dp[n + 1][h - d][k], dp[n][h][hh] + P[n + 1])
+             elif hhh >= F[n + 1]:
+                 dp[n + 1][h - d][hhh - F[n + 1]] = min(
+                     dp[n + 1][h - d][hhh - F[n + 1]], dp[n][h][hh] + P[n + 1]

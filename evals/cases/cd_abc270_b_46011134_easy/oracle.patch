@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+         if x * z < 0:
+             print(abs(x) + 2 * abs(z))
+         else:
+-            if abs(z) < abs(x):
++            if abs(z) < abs(y):
+                 print(abs(x))
+             else:
+                 print(-1)

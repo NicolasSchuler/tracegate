@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+             else:
+                 l[i] = "B"
+     x = "".join(l)
+-    print(x, y)
++    # print(x, y)
+     cy, cx = 0, 0
+     for xx, yy in zip(x, y):
+         cx += 1 if xx == "B" else 0

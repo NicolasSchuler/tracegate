@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+ x = A[-1]
+ for i in range(N - 1):
+     if A[i] > A[i + 1]:
+-        x = i
++        x = A[i]
+         break
+ 
+ a = f(x)

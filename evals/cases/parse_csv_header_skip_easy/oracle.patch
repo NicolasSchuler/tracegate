@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,5 +5,5 @@
+ def parse_scores(raw_csv: str) -> list[int]:
+     reader = csv.reader(io.StringIO(raw_csv))
+     rows = list(reader)
+-    data_rows = rows[2:]  # skip header
++    data_rows = rows[1:]  # skip header
+     return [int(row[1]) for row in data_rows]

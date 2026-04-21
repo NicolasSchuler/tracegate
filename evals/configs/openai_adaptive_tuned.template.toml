@@ -1,0 +1,145 @@
+[run_eval]
+# Tuned adaptive policy template (Path A controller fixes).
+#
+# Key changes from default openai_adaptive.template.toml:
+# 1. Higher exploration than the conservative shared default:
+#    online alpha/epsilon 0.8/0.15 (vs 0.6/0.10),
+#    budget alpha/epsilon 0.6/0.08 (vs 0.4/0.05)
+# 2. Keeps a larger helper warmup buffer (50 decisions) while budget warmup stays 20
+# 3. Decay enabled: 0.95 for both policies
+# 4. Reward scaling intentionally inherits the baseline adaptive defaults.
+#
+# Copy this file, set your own run_id and model, then pass:
+#   --config <your_file.toml>
+run_id = "replace-me"
+patcher = "openai"
+conditions = "layered_adaptive_llm"
+max_cases = 0
+k = 2
+jobs = 3
+retry_prompt_mode = "full"
+prompt_retry_reflection = false
+prompt_adaptive_stage_b_cot = false
+prompt_repair_method_scaffold = false
+prompt_retry_plan_then_patch = false
+prompt_order_mode = "current"
+adaptive_reveal_mode = "full"
+snapshot_frame_pruning_mode = "off"
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "replace-me"
+compat_profile = "lmstudio_model_yaml"
+allow_reasoning_fallback = true
+enable_thinking = true
+http2 = true
+response_mode = "edits"
+auto_context_window = true
+response_mode_autoswitch = "retry_to_diff"
+temperature = 0.0
+timeout_sec = 600.0
+max_propose_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.adaptive]
+max_helper_calls = 1
+budget_topup_max_calls = 1
+informativeness_pregate = true
+informativeness_pregate_threshold = 0.7
+
+# --- Online helper-invocation policy (tuned) ---
+online_policy_mode = "on"
+online_policy_algo = "linucb"
+online_alpha = 0.8
+# More exploration than the conservative shared default.
+online_epsilon = 0.15
+online_l2 = 1.0
+# Learn from evidence sooner; 50 random decisions is enough for initialization.
+online_warmup_decisions = 50
+online_save_every = 5
+online_decay = 0.95
+online_feature_scaling_profile = "v1"
+online_action_score_biases = "search_only=-1.00,frame_only=-0.50"
+online_init_state_path = ""
+online_state_path = "evals/artifacts/policies/replace-me-policy.json"
+online_events_path = "evals/results/replace-me-policy-events.jsonl"
+
+# --- Budget-escalation policy (tuned) ---
+budget_policy_mode = "on"
+budget_policy_algo = "linucb"
+budget_policy_architecture = "tier_binary"
+budget_policy_tiers = "1.0,1.1,1.2,1.35,1.5"
+budget_policy_max_ups_per_case = 1
+budget_online_alpha = 0.6
+# More exploration than the conservative shared default.
+budget_online_epsilon = 0.08
+budget_online_l2 = 1.0
+budget_online_warmup_decisions = 20
+budget_online_save_every = 5
+budget_online_decay = 0.95
+budget_feature_scaling_profile = "v1"
+budget_init_state_path = ""
+budget_online_state_path = "evals/artifacts/policies/replace-me-budget-policy.json"
+budget_online_events_path = "evals/results/replace-me-budget-policy-events.jsonl"
+budget_bwk_run_token_budget = 50000
+budget_reward_rho_budget_exceeded = 0.5
+
+# Reward scaling intentionally matches the baseline adaptive template.
+reward_lambda_tokens = 0.02
+reward_mu_latency = 0.01
+reward_token_scale = 1000.0
+reward_latency_scale = 10.0
+reward_eta_progress = 0.15
+reward_kappa_stagnation = 0.10
+no_progress_token_cap = 15000
+
+# --- Thompson Sampling ablation (uncomment to switch from LinUCB) ---
+# Thompson Sampling provides natural exploration through posterior sampling.
+# Enable for ablation comparison against LinUCB. State persistence and event
+# logging are fully compatible; no other changes needed.
+# online_policy_algo = "thompson"
+# budget_policy_algo = "thompson"
+
+# --- Auxiliary reward signals (off by default) ---
+# Adds 4 extra reward terms from unused feedback signals:
+# pytest fail reduction, evidence novelty, compaction efficiency,
+# informativeness alignment. Total auxiliary weight <= 0.40.
+# Enabled by default. Use aux_reward = false to disable.
+# aux_reward = true
+# aux_pytest_reduction_weight = 0.15
+# aux_evidence_novelty_weight = 0.10
+# aux_compaction_efficiency_weight = 0.05
+# aux_informativeness_alignment_weight = 0.10
+
+# --- TEP: Textual Equilibrium Propagation (off by default) ---
+# Formalizes the retry loop as equilibrium propagation. When enabled,
+# the loop_breaker signal escalates with stagnation depth, and an
+# optional equilibrium check iterates plan-then-patch until convergence.
+# tep = false
+# tep_equilibrium = false
+# tep_equilibrium_max_iterations = 2
+# tep_equilibrium_similarity_threshold = 0.85
+
+[run_eval.context]
+compaction_mode = "auto_overflow"
+compaction_scope = "snapshot,pytest,files"
+compaction_max_calls = 1
+compaction_target_chars = 18000
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true

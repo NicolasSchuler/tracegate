@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ class Solution:
+-    def palindromePairs(self, words: Arreglo[str]) -> Arreglo[Arreglo[int]]:
++    def palindromePairs(self, words: List[str]) -> List[List[int]]:
+         backward, res = {}, []
+         for i, word in enumerate(words):
+             backward[word[::-1]] = i

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ S = input()
+ 
+ level = 0
+-LV = [set()] * len(S)
++LV = [set() for _ in range(len(S))]
+ ST = set()
+ 
+ for ss in S:

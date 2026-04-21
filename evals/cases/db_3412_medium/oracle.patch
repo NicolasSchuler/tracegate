@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -50,6 +50,6 @@
+                         break
+                 else:
+                     flst.append(x)
+-                    supplies.append(i)
++                    supplies.append(x)
+ 
+         return flst

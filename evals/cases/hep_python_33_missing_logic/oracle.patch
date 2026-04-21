@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,4 +10,5 @@
+     [2, 6, 3, 4, 8, 9, 5]
+     """
+     l = list(l)
++    l[::3] = sorted(l[::3])
+     return l

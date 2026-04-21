@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     if y < 10**6 and nums[y] == -1:
+         nums[y] = nums[x] + 1
+         q.append(y)
+-    if x > 9:
++    if x > 9 and x % 10 != 0:
+         X = str(x)
+         Z = X[-1] + X[:-1]
+         z = int(Z)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,8 +3,6 @@
+ eng = ["and", "not", "that", "the", "you"]
+ 
+ for i in range(n):
+-    print(i)
+-    print(x[i])
+     if x[i] in eng:
+         print("Yes")
+         break

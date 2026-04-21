@@ -1,0 +1,21 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ 
+ class Solution:
+     def fourSumCount(
+-        self, undefined_list, nums1: List[int], nums2: List[int], nums3: List[int], nums4: List[int]
++        self, nums1: List[int], nums2: List[int], nums3: List[int], nums4: List[int]
+     ) -> int:
+         dictionary = defaultdict(int)
+         for n1 in nums1:
+@@ -19,7 +19,7 @@
+ 
+         numberOfTuples = 0
+         for n3 in nums3:
+-            for n4 in undefined_list:
++            for n4 in nums4:
+                 numberOfTuples += dictionary[n3 + n4]
+ 
+         return numberOfTuples

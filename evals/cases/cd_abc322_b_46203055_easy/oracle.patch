@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     print(0)
+ else:
+     atama = T.find(S) == 0
+-    sippo = T.find(S) == len(T) - len(S)
++    sippo = T.rfind(S) == len(T) - len(S)
+     if atama and sippo:
+         print(0)
+     elif atama:

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+         b = set(b)
+         a = list(a)
+         b = list(b)
+-        print(a, b)
++        # print(a,b)
+         a = list(a)
+         b = list(b)
+         if len(a) == 1 and len(b) == 1 and a == b:

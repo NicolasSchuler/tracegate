@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,7 +32,7 @@
+ 
+         def dfs(r, p):  # num of subtree rooted at r with given depth
+             d = [1]
+-            for v in undefined_list:
++            for v in adj[r]:
+                 if v == p:
+                     continue
+                 t = [1] + dfs(v, r)

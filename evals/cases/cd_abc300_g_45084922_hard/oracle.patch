@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ # n = int(input())
+ n, q = map(int, input().split())
+ if q == 2:
+-    print(int(math.log(n, 2)))
++    print(int(math.log(n, 2)) + 1)
+     exit()
+ P = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97]
+ r = 0

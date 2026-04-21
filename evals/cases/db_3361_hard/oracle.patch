@@ -1,0 +1,24 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,7 +26,7 @@
+                 start = ptr + 1
+             rec.append(ct + 1)
+ 
+-            if rec[-1] >= n1:
++            if rec[-1] > n1:
+                 return (len(rec) - 2) // n2
+ 
+             if ptr not in track:
+@@ -38,9 +38,9 @@
+         cycle1, cycle2 = ct + 1 - cycleStart, len(rec) - 1 - track[ptr]
+         rest = n1 - cycleStart
+ 
+-        rem = cycleStart + self.calculateRemainder(rest, cycle1)
++        rem = cycleStart + rest % cycle1
+ 
+         while rec[ptr2] <= rem:
+             ptr2 += 1
+ 
+-        return (cycle2 * (rest // cycle1) + ptr2 - 2) // n2
++        return (cycle2 * (rest // cycle1) + ptr2 - 1) // n2

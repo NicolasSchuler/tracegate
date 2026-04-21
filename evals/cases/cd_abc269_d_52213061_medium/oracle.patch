@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -69,4 +69,4 @@
+         uf.unite(2002 * X + Y, 2002 * (X + 1) + Y)
+     if black[2002 * (X) + Y + 1]:
+         uf.unite(2002 * X + Y, 2002 * (X) + Y + 1)
+-print(uf.group_size() - (2002 * 2002 - sum(black)))
++print(uf.group_size() - (2003 * 2003 - sum(black)))

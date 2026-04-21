@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,3 +1,5 @@
+-def append_event(value: str, events: list[str] = []) -> list[str]:
++def append_event(value: str, events: list[str] | None = None) -> list[str]:
++    if events is None:
++        events = []
+     events.append(value)
+     return events

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ 
+ for i in range(0, 10**6 + 1):
+     B = i**3
+-    if B >= N:
++    if B > N:
+         break
+     elif str(B) == str(B)[::-1]:
+         A.append(B)

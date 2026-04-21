@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+             L[0] = 1
+         if i + 1 == 10:
+             L[6] = 1
+-if S[0] == 1:
++if S[0] == "1":
+     print("No")
+     sys.exit()
+ flag = 0

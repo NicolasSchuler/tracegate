@@ -1,0 +1,14 @@
+a/buggy.py	2026-02-12 14:54:13
++++ b/buggy.py	2026-02-12 14:58:30
+@@ -17,9 +17,8 @@
+         state["a_completed"] = True
+         return "a_done"
+     finally:
+-        if state.get("a_completed"):
+-            resource["active"] = False
+-            state["a_cleaned"] = True
++        resource["active"] = False
++        state["a_cleaned"] = True
+ 
+ 
+ async def worker_b() -> str:

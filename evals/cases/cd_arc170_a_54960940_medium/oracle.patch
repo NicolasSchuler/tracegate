@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+     if s[i] == "A" and t[i] == "B" and before_A is False:
+         print(-1)
+         exit()
+-    if s[i] == "A":
++    if t[i] == "A":
+         before_A = True
+     if s[i] == "B" and t[i] == "A":
+         last_B = True

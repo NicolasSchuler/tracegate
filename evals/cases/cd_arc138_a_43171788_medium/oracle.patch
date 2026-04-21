@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+ for i in range(K):
+     j = bisect_right(M, L[i])
+     m = min(m, V[j] + (K - i - 1) + 1)
+-print(m)
++print(m if m < INF else -1)

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -38,7 +38,8 @@
+     Z = 1
+     for i in range(sq):
+         Z = Z * X % M
+-        D[Z] = i + 1
++        if Z not in D:
++            D[Z] = i + 1
+ 
+     if Y in D:
+         return D[Y]

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n = int(input())
+ if n % 5 == 0:
+-    print(0)
++    print(n)
+ elif n % 5 >= 3:
+     print(n + 5 - n % 5)
+ else:

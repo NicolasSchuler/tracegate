@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@ def merge_sorted(left: List[int], right: List[int]) -> List[int]:
+     i, j = 0, 0
+     while i < len(left) and j < len(right):
+-        if left[i] >= right[j]:  # Bug: should be <= for stable ascending merge
++        if left[i] <= right[j]:
+             result.append(left[i])
+             i += 1
+         else:

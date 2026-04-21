@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+     """
+     import math
+     fact = []
+-    i = 0
++    i = 2
+     while i <= int(math.sqrt(n) + 1):
+         if n % i == 0:
+             fact.append(i)

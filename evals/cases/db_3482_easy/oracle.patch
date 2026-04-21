@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ class Solution:
+-    def getMinDistance(self, nums: undefinedList[int], target: int, start: int) -> int:
++    def getMinDistance(self, nums: List[int], target: int, start: int) -> int:
+         curVal = len(nums)
+         for i in range(start, len(nums)):
+             if nums[i] == target:

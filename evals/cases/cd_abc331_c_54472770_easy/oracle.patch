@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ a = list(map(int, input().split()))
+ from collections import Counter
+ 
+-c = list(Counter(a).items())
++c = sorted(Counter(a).items())
+ l = []
+ for num, cnt in c:
+     l.append(num * cnt)

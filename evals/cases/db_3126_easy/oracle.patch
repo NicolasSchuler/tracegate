@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ 
+ class Solution:
+     def answerQueries(self, nums: List[int], queries: List[int]) -> List[int]:
+-        nums, sums, res, n = sorted(nums), [0], [], len(queries) + 1
++        nums, sums, res, n = sorted(nums), [0], [], len(nums) + 1
+         for num in nums:
+             sums.append(sums[-1] + num)
+ 

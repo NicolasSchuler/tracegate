@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+     return cnt
+ 
+ 
+-print(f(n) - f(a - 1))
++print(max(0, f(n) - f(a - 1)))

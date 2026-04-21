@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,7 +26,7 @@
+                         Q[n + i][m + j] = "."
+         else:
+             if Q[i][j] == "1":
+-                Q[i][j] = "#"
++                Q[i][j] = b
+ 
+ for q in Q:
+     for i in q:

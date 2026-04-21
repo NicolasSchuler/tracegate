@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,9 +15,9 @@
+     def isPrime(n):
+         for i in range(2,int(n**0.5)+1):
+             if n%i==0:
+-                return True
++                return False
+ 
+-        return False
++        return True
+     maxx = 0
+     i = 0
+     while i < len(lst):

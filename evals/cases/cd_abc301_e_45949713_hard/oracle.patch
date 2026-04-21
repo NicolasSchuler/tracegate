@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -44,7 +44,7 @@
+ for i in range(H):
+     for j in range(W):
+         if a[i][j] == "S":
+-            s = [i, j]
++            start = [i, j]
+         if a[i][j] == "G":
+             g = [i, j]
+         if a[i][j] == "o":

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+     print(3858)
+ if s == "ksun48":
+     print(3679)
+-if s == "Beng":
++if s == "Benq":
+     print(3658)
+ if s == "Um_nik":
+     print(3648)

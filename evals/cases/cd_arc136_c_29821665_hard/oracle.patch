@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ input = lambda: sys.stdin.readline().rstrip()
+ N = int(input())
+ A = list(map(int, input().split()))
+-print(sum([abs(A[i - 1] - A[i]) for i in range(N)]) // 2)
++print(max(sum([abs(A[i - 1] - A[i]) for i in range(N)]) // 2, *A))

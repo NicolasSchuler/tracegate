@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ N, X, Y, Z = map(int, input().split())
+ 
+-if X <= Z and Z <= Y:
++if (X <= Z and Z <= Y) or (Y <= Z and Z <= X):
+     print("Yes")
+ else:
+     print("No")

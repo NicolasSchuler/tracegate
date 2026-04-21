@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+ 
+ class Solution:
+     def distributeCandies(self, candyType: List[int]) -> int:
+-        return max(len(candyType) // 2, len(set(candyType)))
++        return min(len(candyType) // 2, len(set(candyType)))

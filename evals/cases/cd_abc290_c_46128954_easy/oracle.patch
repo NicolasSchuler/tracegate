@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ a = sorted(list(set(a)))
+ p, ans = 0, 0
+ for i in range(min(len(a), k)):
+-    if p == i:
++    if p == a[i]:
+         ans += 1
+         p += 1
+     else:

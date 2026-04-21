@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+ for i in range(1, m + 1):
+     if now >= k:
+         break
+-    for j in range(k - now):
++    for j in range(min(k - now, cnt[0] + 1)):
+         ans += (
+             p[cnt[0]]
+             * pr[cnt[0] - j]

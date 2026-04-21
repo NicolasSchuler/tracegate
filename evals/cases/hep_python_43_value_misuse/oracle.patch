@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+     False
+     """
+     for i, l1 in enumerate(l):
+-        for j in range(i, len(l)):
++        for j in range(i + 1, len(l)):
+             if l1 + l[j] == 0:
+                 return True
+     return False

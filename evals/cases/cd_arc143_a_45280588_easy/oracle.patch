@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,6 +2,6 @@
+ max_A = max(A, B, C)
+ sum_B = A + B + C
+ if sum_B - max_A >= max_A:
+-    print(sum_B // 2)
++    print(max_A)
+ else:
+     print(-1)

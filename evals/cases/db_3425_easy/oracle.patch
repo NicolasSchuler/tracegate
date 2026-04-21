@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,5 +15,5 @@
+             if i % 2 == 0:
+                 count += int(n[i])
+             else:
+-                count += int(n[i])
++                count -= int(n[i])
+         return count

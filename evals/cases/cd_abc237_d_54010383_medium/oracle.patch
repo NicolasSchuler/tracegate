@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -33,7 +33,7 @@
+         recent_node.nex = new_node
+ 
+     recent_node = new_node
+-    print(recent_node.value)
++    # print(recent_node.value)
+ 
+ after_recent = list()
+ n = recent_node

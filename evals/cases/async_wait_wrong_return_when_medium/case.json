@@ -1,0 +1,20 @@
+{
+  "description": "asyncio.wait uses ALL_COMPLETED instead of FIRST_COMPLETED, blocking until slowest task times out.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "TimeoutError",
+  "tags": [
+    "asyncio",
+    "wait",
+    "timeout"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

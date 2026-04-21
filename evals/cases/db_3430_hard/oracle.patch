@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -33,7 +33,7 @@
+         a = sorted([[nums1[i], nums2[i]] for i in range(n)])
+         max_y = [v[1] for v in a]
+         for i in range(n - 2, -1, -1):
+-            max_y[i] = max(max_y[i], max_y[1 + 1])
++            max_y[i] = max(max_y[i], max_y[i + 1])
+         _sum = [v[0] + v[1] for v in a]
+         st_max_sum = buildSparseTable(_sum, n)
+         res = []

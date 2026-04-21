@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+ for i in range(N):
+     alp[alpha.index(S[i])] += 1
+ 
+-print("alp:", alp)
++# print('alp:', alp)
+ # import math
+ # def comb(n, r):
+ #     return math.factorial(n) // (math.factorial(n - r) * math.factorial(r)) % mod

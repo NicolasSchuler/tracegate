@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ 
+ class Solution:
+     def generate(self, numRows: int) -> List[List[int]]:
+-        if numRows == 0:
++        if numRows == 1:
+             return [[1]]
+         prev = self.generate(numRows - 1)
+         fin = prev[-1]

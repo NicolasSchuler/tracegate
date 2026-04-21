@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ k = 0
+ while True:
+     flag = False
+-    for i in range(k):
++    for i in range(k + 1):
+         r2 = r - i
+         l2 = l + k - i
+         if math.gcd(l2, r2) == 1:

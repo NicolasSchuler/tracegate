@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,5 +19,5 @@
+     get_row([], 1) == []
+     get_row([[], [1], [1, 2, 3]], 3) == [(2, 2)]
+     """
+-    coords = [(j, i) for i in range(len(lst)) for j in range(len(lst[i])) if lst[i][j] == x]
++    coords = [(i, j) for i in range(len(lst)) for j in range(len(lst[i])) if lst[i][j] == x]
+     return sorted(sorted(coords, key=lambda x: x[1], reverse=True), key=lambda x: x[0])

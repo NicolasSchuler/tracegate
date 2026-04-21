@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,4 +18,4 @@
+         return 6
+ 
+ 
+-print(round(N, -range(N)))
++print(N // 10 ** range(N) * 10 ** range(N))

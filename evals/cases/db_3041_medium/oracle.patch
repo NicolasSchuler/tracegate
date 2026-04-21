@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+             if i == len(s) and len(cur) == 4:
+                 res.append(".".join(cur))
+                 return
+-            if len(cur) > 4 or i > len(s):
++            if len(cur) > 4 or i >= len(s):
+                 return
+             if s[i] == "0":
+                 cur.append(s[i])

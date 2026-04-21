@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,8 +6,6 @@
+         total += i
+         if -start > total:
+             start = -total
+-        print("total: " + str(total))
+-        print("start: " + str(start))
+     return start + total
+ 
+ 

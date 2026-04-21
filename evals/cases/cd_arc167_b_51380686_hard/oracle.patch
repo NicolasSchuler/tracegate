@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -39,7 +39,8 @@
+ for key in res.keys():
+     pro *= B * res[key] + 1
+ 
+-ans = 10**30
++ans = 10**1000
+ for key in res.keys():
+     ans = min(ans, (B * res[key] * pro // 2) // res[key])
++
+ print(ans % 998244353)

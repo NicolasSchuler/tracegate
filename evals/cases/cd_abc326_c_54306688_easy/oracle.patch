@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,5 +5,5 @@
+ a.sort()
+ ans = 0
+ for i in range(n):
+-    ans = max(ans, bisect.bisect_left(a, a[i] + m) - 1)
++    ans = max(ans, bisect.bisect_left(a, a[i] + m) - i)
+ print(ans)

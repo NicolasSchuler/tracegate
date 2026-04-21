@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+         continue
+     a = asum[z]
+     w = bl(asum, R + a)
+-    if w >= N or asum[w] - a != R:
++    if w > N or asum[w] - a != R:
+         continue
+     print("Yes")
+     break

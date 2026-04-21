@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ S = input()
+-for i in range(6):
++for i in range(6 + 1):
+     SS = S * i
+     if len(SS) == 6:
+         print(SS)

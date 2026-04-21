@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+         while que:
+             v = que.popleft()
+             f = self.tree[v][-2]
+-            if self.tree[v][-1] == -1:
++            if self.tree[f][-1] != -1:
+                 self.tree[v][-1] = self.tree[f][-1]
+             for i in range(self.sigma):
+                 if self.tree[v][i] == -1:

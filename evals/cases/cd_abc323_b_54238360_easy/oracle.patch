@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,6 @@
+     A[i] = [C, i + 1]
+     C = 0
+ 
+-print(A)
+ 
+ Y = 0
+ 
+@@ -30,6 +29,5 @@
+ for k in range(N):
+     D[k] = A[k][1]
+ 
+-print(A)
+ 
+ print(*D)

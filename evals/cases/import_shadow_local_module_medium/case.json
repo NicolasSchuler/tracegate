@@ -1,0 +1,20 @@
+{
+  "description": "Local module shadows stdlib dependency in import path.",
+  "category": "path_import_env",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "AttributeError",
+  "tags": [
+    "import",
+    "shadowing",
+    "multifile"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

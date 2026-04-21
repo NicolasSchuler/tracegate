@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,3 +11,5 @@
+     print(n - n % 10000)
+ elif n <= 10**8 - 1:
+     print(n - n % 100000)
++elif n <= 10**9 - 1:
++    print(n - n % 1000000)

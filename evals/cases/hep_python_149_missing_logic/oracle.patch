@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,4 +19,4 @@
+     for i in lst:
+         if len(i)%2 == 0:
+             new_lst.append(i)
+-    return new_lst
++    return sorted(new_lst, key=len)

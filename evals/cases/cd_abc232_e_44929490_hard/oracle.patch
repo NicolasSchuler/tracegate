@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ H, W, K = map(int, input().split())
+-x1, y1, x2, y2 = map(int, input().split())
++y1, x1, y2, x2 = map(int, input().split())
+ 
+ dp = [[0] * 4 for i in range(K + 1)]
+ mod = 998244353

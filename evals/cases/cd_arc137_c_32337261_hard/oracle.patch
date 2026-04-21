@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+         print("Bob")
+     elif nums[-2] + 1 < nums[-1]:
+         print("Alice")
+-    elif nums[-1] % 2:
++    elif (nums[-1] - n + 1) % 2:
+         print("Alice")
+     else:
+         print("Bob")

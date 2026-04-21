@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -68,7 +68,7 @@
+ 
+ 
+ l = [0, 2**30]
+-while l[1] - l[0] > 2:
++while l[1] - l[0] >= 2:
+     lm = (l[0] + l[1]) // 2
+     if func(A, lm):
+         l[0] = lm

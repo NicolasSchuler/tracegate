@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+         print(0)
+         continue
+     if A == 0:
+-        if B == P:
++        if B == G:
+             print(1)
+             continue
+         else:

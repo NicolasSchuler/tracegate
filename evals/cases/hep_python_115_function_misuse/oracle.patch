@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,4 +34,4 @@
+         * grid[i][j] -> 0 | 1
+         * 1 <= capacity <= 10
+     """
+-    return sum([math.floor(sum(arr)/capacity) for arr in grid])
++    return sum([math.ceil(sum(arr)/capacity) for arr in grid])

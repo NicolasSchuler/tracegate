@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+
+
+ async def process() -> int:
+-    data = asyncio.run(fetch_data())
++    data = await fetch_data()
+     return data["value"] + 1
+
+

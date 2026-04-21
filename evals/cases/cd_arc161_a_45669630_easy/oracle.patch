@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     else:
+         B[2 * i - N] = A[i]
+ for i in range(N):
+-    if i % 2 != 0:
++    if i % 2 == 0:
+         continue
+     if B[i - 1] < B[i] and B[i] > B[i + 1]:
+         continue

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+     for i in range(n):
+         if s[i] == t[i]:
+             ans += "0"
+-        elif s[i] == 0:
++        elif s[i] == "0":
+             if hum_t < cnt // 2:
+                 ans += "0"
+                 hum_t += 1

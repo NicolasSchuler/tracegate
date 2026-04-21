@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ N = int(input())
+ P = list(map(int, input().split()))
+ 
+-for i in range(N):
++for i in range(1, N + 1):
+     if P[-i] > P[-i - 1]:
+         continue
+     else:

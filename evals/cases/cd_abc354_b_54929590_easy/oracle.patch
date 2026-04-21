@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,5 @@
+ for i in range(N):
+     S[i], C[i] = input().split()
+     C[i] = int(C[i])
+-    S.sort()
++S.sort()
+ print(S[sum(C) % N])

@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,9 +18,6 @@
+
+ async def run_pool() -> list[str]:
+     sem = asyncio.Semaphore(1)
+-    # Bug: extra release inflates internal counter from 1 to 2,
+-    # allowing two workers to hold the semaphore simultaneously.
+-    sem.release()
+     active: list[int] = []
+     violations: list[str] = []
+     tasks = [

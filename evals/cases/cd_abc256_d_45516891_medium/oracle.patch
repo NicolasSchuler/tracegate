@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+ for _ in range(N):
+     l, r = map(int, input().split())
+     L[l] += 1
+-    L[r] -= -1
++    L[r] -= 1
+ for i in range(num):
+     L[i + 1] += L[i]
+ 

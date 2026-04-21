@@ -1,0 +1,21 @@
+{
+  "description": "except (TimeoutError, CancelledError) conflates timeout with external cancellation, swallowing cancel signals.",
+  "category": "async_temporal",
+  "difficulty": "hard",
+  "snapshot_dependency": "required",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "asyncio",
+    "wait_for",
+    "cancellation",
+    "timeout"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

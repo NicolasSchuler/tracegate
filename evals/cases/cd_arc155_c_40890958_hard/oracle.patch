@@ -1,0 +1,21 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,8 @@
+         if i2 - i1 <= 2:
+             flag = 1
+             break
+-    if flag:
++
++    if flag and len(odd_pos) < len(data):
+         odd = []
+         even = []
+         for a in data:
+@@ -47,6 +48,7 @@
+ 
+ A = sort_data(A)
+ B = sort_data(B)
++
+ if A == B:
+     print("Yes")
+ else:

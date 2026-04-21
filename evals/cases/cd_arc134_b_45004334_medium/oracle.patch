@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+                 S[i] = chr(cmin + 97)
+                 i += 1
+             else:
+-                X[cmin] = []
++                X[cmin].pop(-1)
+         else:
+             if cmin < 25:
+                 cmin += 1

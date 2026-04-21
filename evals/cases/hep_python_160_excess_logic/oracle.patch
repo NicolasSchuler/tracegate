@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,5 +26,5 @@
+     """
+     expression = str(operand[0])
+     for oprt, oprn in zip(operator, operand[1:]):
+-        expression+=expression + oprt + str(oprn)
++        expression+= oprt + str(oprn)
+     return eval(expression)

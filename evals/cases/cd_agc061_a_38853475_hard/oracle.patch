@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,7 +23,7 @@
+     elif z[0] % (2**k) == 2 or z[0] % (2**k) == 2 ** (k - 1) + 2 or z[0] == 2 ** (k - 1) + 2:
+         z[1] -= 1
+     c = 2**k
+-    if K >= 2 ** (k - 1) + 1:
++    if K > 2 ** (k - 1) + 1:
+         p = 2 ** (k - 1) + 1
+     else:
+         p = 1

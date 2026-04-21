@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,7 +20,7 @@
+         r = max(r, pos[a] + 1)
+ 
+ dp = [[0] * (m + 2) for _ in range(m + 1)]
+-dp[0][-1] = 1
++dp[0][m] = 1
+ for a in range(n - 1, min_aaa, -1):
+     ndp1 = [[0] * (m + 2) for _ in range(m + 1)]  # l が増える方向の累積和
+     ndp2 = [[0] * (m + 2) for _ in range(m + 1)]  # r が減る方向の累積和

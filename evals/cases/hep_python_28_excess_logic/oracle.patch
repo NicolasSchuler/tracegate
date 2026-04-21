@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+     >>> concatenate(['a', 'b', 'c'])
+     'abc'
+     """
+-    return ' '.join(strings)
++    return ''.join(strings)

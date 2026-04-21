@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ N = int(input())
+-if N > 4:
++if N > 4 or N == 1:
+     print("Yes")
+ else:
+     print("No")

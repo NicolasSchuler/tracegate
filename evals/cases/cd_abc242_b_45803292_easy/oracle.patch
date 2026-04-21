@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+     # 入力を取得
+     S = input()
+ 
+-    print(sorted(S))
++    print(*sorted(S), sep="")
+ 
+ 
+ if __name__ == "__main__":

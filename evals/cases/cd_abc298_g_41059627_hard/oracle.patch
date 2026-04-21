@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -63,5 +63,5 @@
+                                 )
+                         if DP[a][b][c][d][e] < X:
+                             DP[a][b][c][d][e] = INF
+-    ans = min(ans, min(DP[a][b][c][d][T] for a in Rh for b in Rh for c in Rw for d in Rw) - X)
++    ans = min(ans, DP[0][H][0][W][T] - X)
+ print(ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+             # counting frequencies of word i in dictionary d
+             for j in i:
+                 if d.get(j):
+-                    d[j] += 2
++                    d[j] += 1
+                 else:
+                     d[j] = 1
+ 

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+     if shift > len(s):
+         return s[::-1]
+     else:
+-        return s[:len(s) - shift] + s[len(s) - shift:]
++        return s[len(s) - shift:] + s[:len(s) - shift]

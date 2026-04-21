@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+         if s[i] == "o":
+             for x in range(i + 1, j + 1):
+                 if s[x] == "f" and dfs(i + 1, x - 1) == 0:
+-                    res = min(res, dfs(min(x + K + 1, j + 1), j))
++                    res = min(res, max(0, dfs(x + 1, j) - K))
+         for x in range(i + 1, j + 1):
+             if s[x] == "o":
+                 res = min(res, x - i + dfs(x, j))

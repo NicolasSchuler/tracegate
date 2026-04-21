@@ -1,0 +1,13 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,9 +16,8 @@
+         asyncio.create_task(fast_worker()),
+         asyncio.create_task(slow_worker()),
+     }
+-    # Bug: ALL_COMPLETED waits for slow_worker too — times out
+     done, pending = await asyncio.wait_for(
+-        asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED),
++        asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED),
+         timeout=1.0,
+     )
+     for task in pending:

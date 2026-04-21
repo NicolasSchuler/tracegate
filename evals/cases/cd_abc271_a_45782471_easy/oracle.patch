@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ n = int(input())
+ 
+-ans = format(n, "x").zfill(2)  # zfillで2桁となるよう0埋め
++ans = f"{n:02X}"
+ print(ans)

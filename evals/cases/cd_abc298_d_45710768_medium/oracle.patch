@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,6 +26,6 @@
+         ans = (ans * 10 + d[1]) % MOD
+     elif d[0] == 2:
+         front = queue.popleft()
+-        ans = (ans - front * mod_pow(10, len(queue) - 1, MOD)) % MOD
++        ans = (ans - front * mod_pow(10, len(queue), MOD)) % MOD
+     elif d[0] == 3:
+         print(ans)

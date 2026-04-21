@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,5 +10,5 @@
+     else:
+         d = D // gcd
+         n = N // gcd
+-        answer = ((((K - 1) % n) * d % N) * gcd + (K - 1) // n) % n
++        answer = ((((K - 1) % n) * d % N) * gcd + (K - 1) // n) % N
+     print(answer)

@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ s = input()
+-print("er" if s[-2:] == "er" else "est")
++print("er" if s[-2:] == "er" else "ist")

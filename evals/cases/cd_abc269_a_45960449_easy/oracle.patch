@@ -1,0 +1,8 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,3 +1,3 @@
+ a, b, c, d = map(int, input().split())
+-print(((a + b) * (a - d)))
++print(((a + b) * (c - d)))
+ print("Takahashi")

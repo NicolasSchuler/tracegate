@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -82,6 +82,8 @@
+     v_s = mod_time(v_f, fraci[i])
+ 
+     ans[0] += (mod_time(v_f, Prob[i][0]) + mod_time(v_s, Prob[i][1])) % BigPrime
++    ans[0] %= BigPrime
+     ans[1] += (mod_time(v_s, Prob[i][0]) + mod_time(v_f, Prob[i][1])) % BigPrime
++    ans[1] %= BigPrime
+ 
+ print(*ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         if n < 27:
+             return chr(ord("A") + (n - 1) % 26)
+         ans = ""
+-        if n > 0:
++        while n > 0:
+             if n % 26 == 0:
+                 ans += chr(ord("A") + 25)
+                 n -= 1

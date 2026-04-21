@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+     elif c == 2:
+         T[x - 1] -= 2
+     else:
+-        if T[x - 1] == 0:
++        if T[x - 1] <= 0:
+             print("Yes")
+         else:
+             print("No")

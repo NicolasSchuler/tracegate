@@ -1,0 +1,16 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,8 +8,11 @@
+
+ async def save_with_timeout(data: str) -> str:
+     inner = asyncio.ensure_future(slow_save(data))
+-    shielded = asyncio.shield(inner)
+-    return await asyncio.wait_for(shielded, timeout=0.01)
++    try:
++        return await asyncio.wait_for(asyncio.shield(inner), timeout=0.01)
++    except asyncio.TimeoutError:
++        result = await inner
++        return result
+
+
+ def persist(data: str) -> str:

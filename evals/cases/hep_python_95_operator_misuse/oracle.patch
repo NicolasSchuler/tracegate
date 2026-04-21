@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+                     state = "lower"
+                 else:
+                     break
+-            elif (state == "upper" and not key.isupper()) and (state == "lower" and not key.islower()):
++            elif (state == "upper" and not key.isupper()) or (state == "lower" and not key.islower()):
+                     state = "mixed"
+                     break
+             else:

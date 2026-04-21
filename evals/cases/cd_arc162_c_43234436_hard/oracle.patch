@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -84,7 +84,7 @@
+         if count == 1 and num == 1:
+             return "Alice"
+ 
+-        return "Bob"
++    return "Bob"
+ 
+ 
+ def main():

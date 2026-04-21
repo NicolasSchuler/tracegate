@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -72,7 +72,7 @@
+ st = SegTree(n + 1)
+ st2 = SegTree(n + 1)
+ st.update(a[n - 1], -a[n - 1] + n)
+-st.update(a[n - 1], a[n - 1] + n)
++st2.update(a[n - 1], a[n - 1] + n)
+ for i in range(n - 2, -1, -1):
+     s = st.query(0, a[i]) + a[i] - i - 1
+     ss = st2.query(a[i] + 1, n + 1) - a[i] - i - 1

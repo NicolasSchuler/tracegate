@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ for i in range(M):
+     a, b, x, y = map(int, input().split())
+     G[a].append([b, x, y])
+-    G[b].append([a, x, y])
++    G[b].append([a, -x, -y])
+ 
+ visited = [False] * (N + 1)
+ visited[1] = True

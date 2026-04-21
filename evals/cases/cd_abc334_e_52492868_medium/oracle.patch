@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -53,5 +53,5 @@
+             s.add(uf.find(i * W + j - 1))
+         if j + 1 < W and S[i][j + 1] == "#":
+             s.add(uf.find(i * W + j + 1))
+-        num += 1 - len(s)
++        num += cnt + 1 - len(s)
+ print(num * pow(den, MOD - 2, MOD) % MOD)

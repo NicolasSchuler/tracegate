@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+     D.append((mi, ma))
+ D.reverse()
+ ans = []
+-v = INF
++v = D[0][0]
+ for (mi, ma), (l, r) in zip(D, LR):
+     v = max(l, min(v, ma))
+     ans.append(v)

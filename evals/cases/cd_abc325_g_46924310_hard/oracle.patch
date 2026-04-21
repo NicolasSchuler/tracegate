@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+             for k in range(l + 1, r + 1):
+                 if s[k] == "f" and q[l + 1][k - 1] == 0:
+                     if k + x < r:
+-                        q[l][r] = min(q[l][r], q[k + 1 + x][r])
++                        q[l][r] = min(q[l][r], max(q[k + 1][r] - x, 0))
+                     else:
+                         q[l][r] = 0
+ print(q[0][n - 1])

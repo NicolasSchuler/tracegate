@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,6 +8,6 @@
+     if aa == n:
+         m = abs(a[i] - (l - a[aa - 1]))
+     else:
+-        m = min(abs(a[i] - (l - a[n - 1])), abs(a[i] - (l - a[aa])))
++        m = min(abs(a[i] - (l - a[aa - 1])), abs(a[i] - (l - a[aa])))
+     mi = min(mi, m)
+ print(2 * (l + mi))

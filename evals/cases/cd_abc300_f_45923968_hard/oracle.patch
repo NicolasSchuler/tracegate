@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+ ans = 0
+ for i in range(N):
+     ok = -1
+-    ng = M * N
++    ng = M * N + 1
+     while abs(ok - ng) > 1:
+         c = (ok + ng) // 2
+         total = 0

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ start = string.find("|", 0)
+ end = string.find("|", start + 1) + 1
+ if not (start == (end - 2)):
+-    string = string.replace(string[start : end + 1], "")
++    string = string.replace(string[start:end], "")
+ else:
+     string = string.replace("|", "")
+ print(string)

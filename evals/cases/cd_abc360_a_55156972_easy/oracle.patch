@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ def resolve():
+     S = str(input())
+-    if (S[2] == "M") or (S[:1] == "RM"):
++    if S.index("R") < S.index("M"):
+         print("Yes")
+     else:
+         print("No")

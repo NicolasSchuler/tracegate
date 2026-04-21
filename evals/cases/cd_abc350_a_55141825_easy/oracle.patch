@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+     print("No")
+ elif num == 316:
+     print("No")
+-elif s[0:3] != "ABC":
++elif num < 1:
+     print("No")
+ else:
+     print("Yes")

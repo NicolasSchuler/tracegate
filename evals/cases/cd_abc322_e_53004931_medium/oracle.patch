@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+             newdp[tmp] = min(dp[key] + c, newdp[tmp])
+         dp = newdp
+ 
+-    if dp[tuple([P] * K)] == 1 << 30:
++    if dp[tuple([P] * K)] == inf:
+         print(-1)
+     else:
+         print(dp[tuple([P] * K)])

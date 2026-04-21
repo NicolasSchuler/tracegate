@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ import math
+ 
+ n = int(input())
+-if n > 5:
++if n > 4 or n == 1:
+     print("Yes")
+ else:
+     print("No")

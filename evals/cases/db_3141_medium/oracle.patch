@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+ class Solution:
+     def maximumGap(self, nums: List[int]) -> int:
+         nums = sorted(nums)
+-        min = float("inf")
++        min = float("-inf")
+         if len(nums) < 2:
+             return 0
+         for i in range(len(nums) - 1):

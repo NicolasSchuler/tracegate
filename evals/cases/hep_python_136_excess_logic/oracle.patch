@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,6 +13,4 @@
+     '''
+     smallest = list(filter(lambda x: x < 0, lst))
+     largest = list(filter(lambda x: x > 0, lst))
+-    largest = list(filter(lambda x: x > 0, smallest))
+-    smallest = list(filter(lambda x: x > 0, largest))
+     return (max(smallest) if smallest else None, min(largest) if largest else None)

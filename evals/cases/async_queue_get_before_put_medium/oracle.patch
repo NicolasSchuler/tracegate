@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+ async def consumer(queue: asyncio.Queue[int]) -> list[int]:
+     results: list[int] = []
+     for _ in range(3):
+-        item = await asyncio.wait_for(queue.get(), timeout=0.01)
++        item = await asyncio.wait_for(queue.get(), timeout=1.0)
+         results.append(item)
+     return results
+

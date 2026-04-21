@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+     g = a[-1] - a[0]
+     for i in a:
+         g = gcd(2 * (i - a[0]), g)
+-    res = min(a[0] % g, -a[-1] % g)
++    res = a[0] % g
+     print(res + a[-1] - a[0])
+ 
+ 

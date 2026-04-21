@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ S = input()
+ words = [S]
+-for i in range(len(S) - 1):
++for i in range(len(S)):
+     words.append(S[i:] + S[:i])
+ words = sorted(words)
+ print(words[0])

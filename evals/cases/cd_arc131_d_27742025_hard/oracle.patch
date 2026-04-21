@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+         xd[(x % d - 1) % d] -= scores[i] - scores[i - 1]
+ for i in range(1, d):
+     xd[i] += xd[i - 1]
+-print(ans + max(xd))
++print(ans + max(0, max(xd)))

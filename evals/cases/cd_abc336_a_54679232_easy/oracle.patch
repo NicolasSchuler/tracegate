@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ N = int(input())
+-Xo = "o" * (N - 3)
++Xo = "o" * N
+ ans = "L" + Xo + "n" + "g"
+ print(ans)

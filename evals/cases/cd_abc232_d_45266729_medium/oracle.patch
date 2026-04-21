@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,8 @@
+ dp[0][0] = 1
+ for i in range(H):
+     for j in range(W):
++        if i == 0 and j == 0:
++            continue
+         if S[i][j] == ".":
+             dp[i][j] = max(dp[i][j], dp[i - 1][j] + 1, dp[i][j - 1] + 1)
+ result = 0

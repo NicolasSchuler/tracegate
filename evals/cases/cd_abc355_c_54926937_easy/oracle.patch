@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+         diagonal[1].append(a)
+     if (
+         (len(horizontal[row]) == N)
+-        or (len(vertical[col - 1]) == N)
++        or (len(vertical[col]) == N)
+         or (len(diagonal[0])) == N
+         or (len(diagonal[1])) == N
+     ):

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+         self.y = 0
+ 
+     def rotate(self) -> None:
+-        self.dx, self.dy = self.y, -self.dx
++        self.dx, self.dy = self.dy, -self.dx
+ 
+     def move(self) -> None:
+         self.x += self.dx

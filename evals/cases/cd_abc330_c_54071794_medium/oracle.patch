@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ D = int(input())
+ 
+ square = []
+-for i in range(10**6 + 2):
++for i in range(10**7):
+     if i**2 > D:
+         break
+     square.append(i**2)

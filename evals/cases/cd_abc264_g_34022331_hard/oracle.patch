@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -77,4 +77,4 @@
+     dist.append(r)
+ 
+ D, tf = SPFA(dist, 0)
+-print(-min(D[1:offset]) if tf else "infinity")
++print(-min(D[1:offset]) if tf else "Infinity")

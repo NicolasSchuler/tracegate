@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+     a //= g
+     b //= g
+     diff = a - b
+-    if diff == 1:
++    if diff <= 1:
+         ans += b
+         break
+     else:

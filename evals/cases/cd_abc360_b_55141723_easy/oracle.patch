@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+             if c < len(s):
+                 column += s[c]
+         #        print(c, column)
+-        if len(column) >= c and column == T:
++        if column == T:
+             print("Yes")
+             exit()
+ 

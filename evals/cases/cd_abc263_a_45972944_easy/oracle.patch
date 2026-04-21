@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,6 +13,6 @@
+ if 2 < len(count.values()):
+     print("No")
+ elif a[0] == 3 or a[1] == 3:
+-    print("YES")
++    print("Yes")
+ else:
+     print("No")

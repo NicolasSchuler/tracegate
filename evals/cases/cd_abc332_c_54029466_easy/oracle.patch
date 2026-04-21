@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ ans = 0
+ cnt = 0
+-muji = 0
++muji = m
+ 
+ for c in s:
+     match c:

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,7 +35,7 @@
+     return count
+ 
+ 
+-ans = 10**10
++ans = 1 << 70
+ for edges in combinations(edge, N - 1):  # 辺の数はN-1本でいい
+     R = [-1] * N
+     cost = 0

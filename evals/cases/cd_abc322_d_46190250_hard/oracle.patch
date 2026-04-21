@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -68,7 +68,7 @@
+             if p3 is None:
+                 continue
+             if can_merge(p1, p2, p3):
+-                # print('Yes')
++                print("Yes")
+                 # print(*p1, sep='\n')
+                 # print()
+                 # print(*p2, sep='\n')

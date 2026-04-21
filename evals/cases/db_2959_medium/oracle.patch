@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,6 +20,6 @@
+         numberOfTuples = 0
+         for n3 in nums3:
+             for n4 in nums4:
+-                numberOfTuples += self.nonExistingMethod(dictionary[n3 + n4])
++                numberOfTuples += dictionary[n3 + n4]
+ 
+         return numberOfTuples

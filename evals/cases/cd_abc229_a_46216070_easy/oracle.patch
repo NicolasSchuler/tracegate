@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ s1 = input()
+ s2 = input()
+ 
+-if [s1, s2] == ["#.", ".#"] or [".#", "#."]:
++if [s1, s2] == ["#.", ".#"] or [s1, s2] == [".#", "#."]:
+     print("No")
+     exit()
+ else:

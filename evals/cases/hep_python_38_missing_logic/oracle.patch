@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,4 +15,4 @@
+     """
+     takes as input string encoded with encode_cyclic function. Returns decoded string.
+     """
+-    return encode_cyclic(s)
++    return encode_cyclic(encode_cyclic(s))

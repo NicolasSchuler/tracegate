@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ S = input()
+-if S == "RSM" or "RMS" or "SRM":
++if S == "RSM" or S == "RMS" or S == "SRM":
+     print("Yes")
+ else:
+     print("No")

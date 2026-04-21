@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -29,7 +29,7 @@
+                     j += 1
+                 else:
+                     profit = profit + (stockSell - stockBuy)
+-                    i = counter
++                    i = counter + 1
+                     j = i + 1
+ 
+             stockSell = prices[j]

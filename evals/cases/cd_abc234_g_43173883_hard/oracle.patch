@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -45,4 +45,4 @@
+ 
+     dp[i] %= MOD
+ 
+-print(dp[-1])
++print(dp[0])

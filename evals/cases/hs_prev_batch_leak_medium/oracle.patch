@@ -1,0 +1,10 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,5 @@
+ 
+     def normalize(self, batch: list[int]) -> list[float]:
+         current_scale = max(batch)
+-        scale = self._prev_scale if self._prev_scale is not None else current_scale
+         self._prev_scale = current_scale
+-        return [value / scale for value in batch]
++        return [value / current_scale for value in batch]

@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ n = int(input())
+ a = list(map(int, input().split()))
+ 
+-a_n = abs(sum(a))
++a_n = 0 - sum(a)
+ print(a_n)

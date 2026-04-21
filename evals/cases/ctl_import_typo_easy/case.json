@@ -1,0 +1,19 @@
+{
+  "description": "Import typo control case.",
+  "category": "traceback_controls",
+  "difficulty": "easy",
+  "snapshot_dependency": "none",
+  "expected_exception": "ModuleNotFoundError",
+  "tags": [
+    "control",
+    "import"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

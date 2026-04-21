@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     elif i == ")":
+         #  print(a)
+         for j in a[-1]:
+-            print(t)
++            #   print(t)
+             t.remove(j)
+         a.pop(-1)
+     elif i == "(":

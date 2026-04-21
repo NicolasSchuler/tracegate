@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+         tmp += (i - 3) * A[i - 1]
+     if tmp >= 0:
+         print(0)
+-        break
++        continue
+     x = (-tmp + 1) // 2
+     ans = -tmp * P[3]
+     if 2 * P[3] - P[4] >= 0:

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,6 +14,9 @@
+     if S == "AA" or S == "BB":
+         return True
+ 
++    if S == "AB" or S == "BA":
++        return False
++
+     # 先頭文字が「A」、末尾文字が「B」のとき回文不可能
+     if S[0] == "A" and S[-1] == "B":
+         return False

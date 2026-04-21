@@ -1,0 +1,27 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+     if sh <= a:
+         sh = a - sh
+     else:
+-        sh = w - (sh - a)
++        sh = h - (sh - a)
+     if rw <= b:
+         rw = b - rw
+     else:
+@@ -34,6 +34,7 @@
+ 
+ x = sh - rh
+ y = sw - rw
++
+ 
+ for i in range(h):
+     ansh[rh] = i
+@@ -52,6 +53,5 @@
+     for j in range(w):
+         ans[i][j] = c[ansh[i]][answ[j]]
+ 
+-
+ for i in ans:
+     print("".join(i))

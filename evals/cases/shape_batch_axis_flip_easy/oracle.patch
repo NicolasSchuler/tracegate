@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ 
+ 
+ def merge_batches(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+-    return np.concatenate([left, right], axis=1)
++    return np.concatenate([left, right], axis=0)

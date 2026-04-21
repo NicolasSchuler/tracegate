@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,5 +16,5 @@
+         max_sum = max(s, max_sum)
+     if max_sum == 0:
+         max_sum = max(-i for i in nums)
+-    min_sum = min(-i for i in nums)
++    min_sum = -max_sum
+     return min_sum

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+ S = input()
+ last = 1
+ ans = 0
+-for key, val in groupby(S):
++for key, val in groupby(S[::-1]):
+     val = list(val)
+     key = int(key)
+     if (key > 1 and len(val) > 1) or (last > 1 and key > 1):

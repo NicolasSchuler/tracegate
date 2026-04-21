@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,7 +24,7 @@
+         for cha in s:
+             ct2 += 1
+             if cha != "a":
+-                ans += chr(ord(cha) - 2)
++                ans += chr(ord(cha) - 1)
+                 change = True  # record operation at least once.
+                 continue
+             else:
+@@ -33,4 +33,6 @@
+                     contiguous = False
+             if not contiguous:  # then break , add the remaining string to the end of the ans.
+                 break
+-        return ans + s[ct2:] if change else UndefinedFunc(ans[:-1] + "z")
++        return (
++            ans + s[ct2:] if change else ans[:-1] + "z"
++        )  # check if it consists entirely of the letter "a."  'aaaa' > 'aaaz'

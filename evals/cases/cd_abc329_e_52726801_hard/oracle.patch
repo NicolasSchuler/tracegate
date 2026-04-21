@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -31,7 +31,7 @@
+     # print(S)
+ 
+     l = max(0, idx - M)
+-    r = min(N - M, idx + M)
++    r = min(N - M + 1, idx + M)
+ 
+     for k in range(l, r):
+         if chk(S[k : k + M], T):

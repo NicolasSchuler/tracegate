@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -31,11 +31,10 @@
+             return False
+ 
+         res = 0
+-        j = len(word) + 1
++        j = len(word)
+         for i in range(len(word) - 1, -1, -1):
+             truc = isForbidden(word[i:j])
+             if truc:
+-                j = i - truc - 1
+-                undefinedFunction(word)
++                j = i + truc - 1
+             res = max(res, j - i)
+         return res

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,6 +21,6 @@
+         exit()
+     S_dict[S[wb]] -= 1
+     S_dict[S[wb + white + black]] += 1
+-    print(S_dict)
++    # print(S_dict)
+ 
+ print("No")

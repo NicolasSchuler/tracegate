@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     """
+     while b:
+         a, b = b, a % b
+-    return b
++    return a

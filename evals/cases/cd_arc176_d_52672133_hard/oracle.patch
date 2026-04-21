@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     a, b, c = dp
+     X = (N - 2) * (N - 3) // 2 + 1
+     dp = [
+-        (a * (X + 4 * N - 11) + b * (N - 3)) % D,
++        (a * (X + 2 * N - 8) + b * (N - 3)) % D,
+         (a * 4 + b * (X + N - 2) + c * (2 * N - 4)) % D,
+         (b + c * X) % D,
+     ]

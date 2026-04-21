@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,8 +13,6 @@
+ for i in reversed(range(1, N - 1)):
+     rotate_list.append(A[i][0])
+ 
+-for i in range(N):
+-    rotate_list.append(A[0][i])
+ 
+ cnt = -1
+ for i in range(N):
+@@ -34,6 +32,7 @@
+     A[i][0] = rotate_list[cnt]
+     cnt += 1
+ 
++
+ for i in range(N):
+     for j in range(N):
+         print(A[i][j], end="")

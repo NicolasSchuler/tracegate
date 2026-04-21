@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,5 +6,5 @@
+         if self._enabled is None:
+             self._enabled = bool(config.get("flag", False))
+         if "override" in config:
+-            enabled = bool(config["override"])
++            self._enabled = bool(config["override"])
+         return self._enabled

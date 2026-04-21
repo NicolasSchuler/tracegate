@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,5 +20,5 @@
+             break
+     ans.append(tmp)
+ 
+-for i in range(len(ans) // 2):
++for i in range(0, len(ans), 2):
+     print(ans[i], ans[i + 1])

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,7 +20,7 @@
+         ni = np[i]
+         if ni[1] == c:
+             if ni[0] < w:
+-                np[i][0] = v
++                np[i][0] = w
+         elif ni[3] == c:
+             if ni[0] >= ni[2] >= w:
+                 continue

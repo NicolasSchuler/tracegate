@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,4 +25,4 @@
+ 
+ 
+ for i in Z:
+-    print(*i)
++    print("".join(i))

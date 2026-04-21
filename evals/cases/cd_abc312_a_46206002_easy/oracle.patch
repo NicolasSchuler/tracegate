@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ S = input()
+ list = ["ACE", "BDF", "CEG", "DFA", "EGB", "FAC", "GBD"]
+ 
+-print("YES" if S in list else "NO")
++print("Yes" if S in list else "No")

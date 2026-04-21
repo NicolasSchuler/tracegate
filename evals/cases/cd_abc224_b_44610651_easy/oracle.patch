@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,4 +21,4 @@
+ if does_satisfy:
+     print("Yes")
+ else:
+-    print("False")
++    print("No")

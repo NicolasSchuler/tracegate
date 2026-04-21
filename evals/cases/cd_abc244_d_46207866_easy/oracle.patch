@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     cnt += 1
+ if S3 != T3:
+     cnt += 1
+-print("Yes" if cnt % 2 == 0 else "No")
++print("Yes" if cnt == 0 or cnt == 3 else "No")

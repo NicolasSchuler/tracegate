@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+         await asyncio.sleep(10)
+         log.append("completed")
+         return "success"
+-    except BaseException:
++    except Exception:
+         # Bug: catches CancelledError — should use ``except Exception:``
+         log.append("suppressed")
+         return "error_handled"

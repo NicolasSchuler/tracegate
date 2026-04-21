@@ -1,0 +1,25 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,14 +5,16 @@
+ import bisect
+ import itertools
+ import functools
++
++
+ class Solution:
+-    def makeSmallestPalindrome(self, s: str) -> str
++    def makeSmallestPalindrome(self, s: str) -> str:
+         before = 0
+-        after = len(s)-1
++        after = len(s) - 1
+         l = [i for i in s]
+-        while before <= len(s)/2
++        while before <= len(s) / 2:
+             l[before] = min(l[before], l[after])
+             l[after] = l[before]
+-            before+=1
+-            after+=1
++            before += 1
++            after -= 1
+         return "".join(l)

@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #2936: reference error/illegal keywords (hard)",
+  "category": "reference_error",
+  "difficulty": "hard",
+  "snapshot_dependency": "none",
+  "expected_exception": "NameError",
+  "tags": [
+    "debugbench",
+    "reference_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 5,
+  "source_id": "debugbench_2936"
+}

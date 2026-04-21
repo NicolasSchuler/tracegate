@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+         x = 0
+     else:
+         x += 1
+-if m == n - 2:
++if m == n - 2 or m == 0:
+     print(-1)
+ else:
+     print(m)

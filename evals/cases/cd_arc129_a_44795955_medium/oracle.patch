@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,5 +13,6 @@
+     s = num
+     e = s * 2 - 1
+     cnt = min(r, e) - max(l, s) + 1
+-    ans += cnt
++
++    ans += max(cnt, 0)
+ print(ans)

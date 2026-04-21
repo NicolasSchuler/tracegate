@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -39,7 +39,7 @@
+                 if mex == k:
+                     mex = j
+ 
+-        if (x == 1 and y == 1) or (mex == k and x == 0):
++        if (x == 1 and y == 1) or (mex == k and (x == 0 or x == 1)):
+             print("Alice")
+             break
+     else:

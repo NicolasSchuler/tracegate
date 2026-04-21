@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+ elif scoreX < scoreY:
+     print("Aoki")
+ else:
+-    print("draw")
++    print("Draw")

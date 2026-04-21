@@ -1,0 +1,6 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ def format_receipt_line(item: str, price: float) -> str:
+-    return item + ": $" + price
++    return item + ": $" + str(price)

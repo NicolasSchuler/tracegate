@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,7 +24,7 @@
+         for cha in s:
+             ct2 += 1
+             if cha != "a":
+-                ans += chr(ord(cha) - 2)
++                ans += chr(ord(cha) - 1)
+                 change = True  # record operation at least once.
+                 continue
+             else:

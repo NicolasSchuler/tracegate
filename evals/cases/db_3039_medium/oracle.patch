@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,4 +16,4 @@
+                 j += 1
+             if j == k:
+                 break
+-        return num if j == k + 1 else -1
++        return num if j == k else -1

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -33,7 +33,7 @@
+                 dp[i][min(x, j)][m] %= mod
+ 
+ ans = 0
+-for j in range(n + 1):
++for j in range(n + 2):
+     ans += dp[-1][j][k]
+     ans %= mod
+ 

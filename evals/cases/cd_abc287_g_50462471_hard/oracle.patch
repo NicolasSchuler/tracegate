@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -94,7 +94,7 @@
+         bit0.add(co[a], a * y - a * b)
+         bit1.add(co[a], y - b)
+         data[x - 1][1] = y
+-    if qu[0] == 100:
++    if qu[0] == 3:
+         x = qu[1]
+         if bit1.all_prod() < x:
+             print(-1)

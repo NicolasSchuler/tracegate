@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,4 +4,4 @@
+ 
+ A, B, C, D, E, F = str(100_000 + (N - 1))
+ ANS = "".join((A, A, B, C, D, D, E, F, E))
+-print(str(100_000 + (N - 1)))
++print(ANS)

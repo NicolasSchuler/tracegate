@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ 
+ n = int(input())
+ 
+-print(float(s[: n + 2]))
++print(s[: n + 2])

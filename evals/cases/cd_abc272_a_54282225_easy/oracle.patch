@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+-# list型で取得
++N = int(input())
+ l = list(map(int, input().split()))
+ 
+ m = 0

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ s = input()
+ t = input()
+ 
+-if s == t:
++if s == t[:n] and s == t[-n:]:
+     print(0)
+ elif s == t[:n]:
+     print(1)

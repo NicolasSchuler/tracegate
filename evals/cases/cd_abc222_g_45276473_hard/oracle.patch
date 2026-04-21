@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,6 +24,9 @@
+     if not (k % 2 and k % 5):
+         return -1
+ 
++    if not (k % 3):
++        k *= 9
++
+     sq = int(sqrt(k))
+     s = 1
+     tbl = {}

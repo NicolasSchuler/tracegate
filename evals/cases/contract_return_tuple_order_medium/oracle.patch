@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,5 +2,5 @@
+ 
+ 
+ def read_count() -> int:
+-    payload, _status = fetch_status_payload()
++    _status, payload = fetch_status_payload()
+     return payload["count"]

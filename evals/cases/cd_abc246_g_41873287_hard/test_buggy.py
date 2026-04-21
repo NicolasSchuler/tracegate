@@ -1,0 +1,47 @@
+import subprocess
+import sys
+
+
+def test_condefects_0():
+    proc = subprocess.run(
+        [sys.executable, "buggy.py"],
+        input='7\n2 4 6 5 6 10\n1 2\n1 3\n2 4\n2 5\n5 6\n5 7\n',
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = '5\n'
+    actual = proc.stdout.strip()
+    assert actual == expected.strip(), (
+        f"Expected {expected.strip()!r}, got {actual!r}"
+    )
+
+
+def test_condefects_1():
+    proc = subprocess.run(
+        [sys.executable, "buggy.py"],
+        input='30\n29 27 79 27 30 4 93 89 44 88 70 75 96 3 78 39 97 12 53 62 32 38 84 49 93 53 26 13 25\n13 15\n14 22\n17 24\n12 3\n4 3\n5 8\n26 15\n3 2\n2 9\n4 25\n4 13\n2 10\n28 15\n6 4\n2 5\n19 9\n2 7\n2 14\n23 30\n17 2\n7 16\n21 13\n13 23\n13 20\n1 2\n6 18\n27 6\n21 29\n11 8\n',
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = '70\n'
+    actual = proc.stdout.strip()
+    assert actual == expected.strip(), (
+        f"Expected {expected.strip()!r}, got {actual!r}"
+    )
+
+
+def test_condefects_2():
+    proc = subprocess.run(
+        [sys.executable, "buggy.py"],
+        input='2\n1\n1 2\n',
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = '0\n'
+    actual = proc.stdout.strip()
+    assert actual == expected.strip(), (
+        f"Expected {expected.strip()!r}, got {actual!r}"
+    )

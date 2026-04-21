@@ -1,0 +1,20 @@
+{
+  "description": "Semaphore.release() without matching acquire() inflates the counter, allowing excess concurrency.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "asyncio",
+    "semaphore",
+    "concurrency"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

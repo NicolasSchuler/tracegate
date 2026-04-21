@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+             s[i] = "B"
+         else:
+             s[i] = "A"
+-print(s)
++
+ L = []
+ cur = s[0]
+ cnt = 0
+@@ -19,7 +19,6 @@
+         L.append(cnt)
+         cnt = 1
+ L.append(cnt)
+-print(L)
+ 
+ ans = 1
+ for l in L:

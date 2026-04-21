@@ -1,0 +1,63 @@
+ARG CUDA_IMAGE=nvidia/cuda:13.1.1
+ARG GGML_CUDA_FA_ALL_QUANTS=ON
+
+FROM ${CUDA_IMAGE}-devel-ubuntu24.04 AS builder
+ARG GGML_CUDA_FA_ALL_QUANTS
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    cmake \
+    git \
+    build-essential \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+RUN git clone --depth 1 --single-branch https://github.com/ggml-org/llama.cpp /src/llama.cpp
+WORKDIR /src/llama.cpp
+
+# The linker needs libcuda.so.1 (not just libcuda.so) to resolve transitive deps.
+# Use the stable /usr/local/cuda symlink so CUDA_IMAGE can vary without breaking.
+RUN ln -s /usr/local/cuda/targets/x86_64-linux/lib/stubs/libcuda.so \
+         /usr/local/lib/libcuda.so.1 \
+    && ldconfig
+
+# Blackwell-targeted build: compile all FlashAttention KV-cache quant pairs.
+# This matches the current upstream workaround discussed in ggml-org/llama.cpp#19662.
+RUN cmake -B build \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="120a-real" \
+    -DGGML_CUDA_FA_ALL_QUANTS=${GGML_CUDA_FA_ALL_QUANTS} \
+    -DGGML_CUDA_GRAPHS=ON \
+    -DGGML_CUDA_COMPRESSION_MODE=size \
+    -DLLAMA_CURL=ON \
+    -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --target llama-server -j"$(nproc)"
+
+# Remove the fake symlink so it doesn't interfere at runtime
+RUN strip --strip-unneeded build/bin/llama-server \
+    && rm /usr/local/lib/libcuda.so.1 \
+    && ldconfig
+
+FROM ${CUDA_IMAGE}-runtime-ubuntu24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libcurl4 \
+    libgomp1 \
+    libstdc++6 \
+    libgcc-s1 \
+    libatomic1 \
+     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+     && rm -rf /usr/share/doc/* /usr/share/info/* /usr/share/man/* /usr/share/locale/*
+
+ENV LLAMA_PRESET=qwen35-coding-repro \
+    LLAMA_NO_MMAP=1 \
+    LLAMA_UBATCH_SIZE=2048
+
+COPY --from=builder /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY llama-entrypoint.sh /usr/local/bin/llama-entrypoint.sh
+RUN chmod 755 /usr/local/bin/llama-entrypoint.sh
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/llama-entrypoint.sh"]

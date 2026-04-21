@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+     c, d = map(int, input().split())
+ 
+     if c == 1:
+-        A.append(c)
++        A.append(d)
+ 
+     else:
+         print(A[-d])

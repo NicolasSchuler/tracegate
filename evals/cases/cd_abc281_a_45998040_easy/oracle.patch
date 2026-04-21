@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,5 @@
+ n = int(input())
+ for i in range(n):
+-    print(n - 1)
++    print(n - i)
++
+ print(0)

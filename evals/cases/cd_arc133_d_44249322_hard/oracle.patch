@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -38,7 +38,7 @@
+         for j in range(4):
+             if s[i] ^ s[j] == V & 3:
+                 ans += calc((L + 3 - i) // 4, (R - j) // 4, (i & 1) ^ 1, (j & 1) ^ 1, i < j, V >> 2)
+-    return ans
++    return ans % mod
+ 
+ 
+ def naive(L, R, V):

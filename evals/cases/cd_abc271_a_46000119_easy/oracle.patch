@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,4 +5,4 @@
+ if a < 16:
+     b = "0" + b
+ 
+-print(b)
++print(b.upper())

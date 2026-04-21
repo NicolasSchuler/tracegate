@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,8 +2,8 @@
+ 
+ while N % 2 == 0:
+     N //= 2
+-print(N)
++
+ while N % 3 == 0:
+     N //= 3
+-print(N)
++
+ print("Yes" if N == 1 else "No")

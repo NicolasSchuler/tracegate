@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         if i != t[id]:
+             return id + 1
+ 
+-    return id + 1
++    return id + 2
+ 
+ 
+ if __name__ == "__main__":

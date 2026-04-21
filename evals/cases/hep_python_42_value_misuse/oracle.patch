@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     >>> incr_list([5, 3, 5, 2, 3, 3, 9, 0, 123])
+     [6, 4, 6, 3, 4, 4, 10, 1, 124]
+     """
+-    return [(e + 2) for e in l]
++    return [(e + 1) for e in l]

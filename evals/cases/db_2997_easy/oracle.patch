@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+         for num in nums:
+             count[num] += 1
+         for num in nums:
+-            res.append(self.calculate_numbers(count[:num]))
++            res.append(sum(count[:num]))
+         return res

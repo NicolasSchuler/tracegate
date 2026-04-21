@@ -1,0 +1,24 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -36,16 +36,16 @@
+             if grid[i][j] == 1:
+                 temp = []
+                 if i != 0:
+-                    temp.append(grid[i][j])
++                    temp.append(grid[i - 1][j])
+ 
+                 if j != 0:
+-                    temp.append(grid[i][j])
++                    temp.append(grid[i][j - 1])
+ 
+                 if i != n - 1:
+-                    temp.append(grid[i][j])
++                    temp.append(grid[i + 1][j])
+ 
+                 if j != n - 1:
+-                    temp.append(grid[i][j])
++                    temp.append(grid[i][j + 1])
+ 
+                 val = min(temp)
+ 

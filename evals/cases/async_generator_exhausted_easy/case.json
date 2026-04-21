@@ -1,0 +1,19 @@
+{
+  "description": "Async generator reused after exhaustion; second iteration yields nothing.",
+  "category": "async_temporal",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "asyncio",
+    "async_generator"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

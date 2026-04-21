@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ S = input()
+ 
+ while "A" in S:
+-    S = S.replace("A", "B")
++    S = S.replace("A", "BB")
+ while "BB" in S:
+     S = S.replace("BB", "A")
+ print(S)

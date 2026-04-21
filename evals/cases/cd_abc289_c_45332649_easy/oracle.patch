@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,7 +20,7 @@
+             if mask & 1 << i:
+                 for val in tmp[i]:
+                     cur |= 1 << val
+-        if bin(cur).count("1") == m:
++        if bin(cur).count("1") == n:
+             ans += 1
+     return ans
+ 

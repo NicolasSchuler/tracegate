@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,5 +11,6 @@
+     ret = set()
+     for e1 in l1:
+         for e2 in l2:
+-            ret.add(e1)
++            if e1 == e2:
++                ret.add(e1)
+     return sorted(list(ret))

@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -247,8 +247,6 @@
+ n = I()
+ a = LI_()
+ 
+-n = 8
+-a = RLI(n, 0, 3)
+ 
+ b = sorted(a)
+ d = defaultdict(int)
+@@ -278,6 +276,7 @@
+                 if (i, j) == (l, k):
+                     continue
+                 q += ((i, j, k, l),)
++
+ for _ in range(n):
+     f = False
+     for i, j, k, l in p:

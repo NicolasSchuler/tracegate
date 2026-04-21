@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -63,8 +63,8 @@
+ 
+         diff = []
+         while node.parent is not None:
++            diff.append(node.wordCount)  # !重复的单词统计为多次而不是1次
+             node = node.parent
+-            diff.append(node.wordCount)  # !重复的单词统计为多次而不是1次
+ 
+         res, cur = [], 0
+         for i in range(len(diff) - 1, -1, -1):

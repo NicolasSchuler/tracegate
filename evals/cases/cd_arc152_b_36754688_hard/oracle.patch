@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,5 +5,5 @@
+ for c in a:
+     x = l - c
+     i = bisect(a, x)
+-    t = min(t, min(x - a[i - 1], a[min(i, n - 1)] - x))
++    t = min(t, min(abs(x - a[min(max(j, 0), n - 1)]) for j in [i, i - 1]))
+ print(2 * (t + l))

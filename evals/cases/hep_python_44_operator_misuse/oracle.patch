@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+     ret = ""
+     while x > 0:
+         ret = str(x % base) + ret
+-        x -= base
++        x //= base
+     return ret

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -45,7 +45,7 @@
+     # 対角線が作る直線に対して残りの２点が反対側にあれば凸
+     if (
+         above_below(pts[0], pts[1], pts[3]) * above_below(pts[2], pts[1], pts[3]) < 0
+-        and above_below(pts[1], pts[0], pts[2]) * above_below(pts[3], pts[1], pts[2]) < 0
++        and above_below(pts[1], pts[0], pts[2]) * above_below(pts[3], pts[0], pts[2]) < 0
+     ):
+         print("Yes")
+     else:

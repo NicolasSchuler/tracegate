@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -187,6 +187,8 @@
+         gogo = teind
+     else:
+         gogo = ttind + l - ttval
++        if gogo + r - l < teind:
++            continue
+ 
+     while te != None:
+         teval = te >> 30

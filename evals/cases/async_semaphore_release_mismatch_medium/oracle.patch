@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,9 +8,6 @@
+         if "bad" in url:
+             raise ConnectionError(f"failed: {url}")
+         return f"data:{url}"
+-    except ConnectionError:
+-        sem.release()
+-        raise
+     finally:
+         sem.release()

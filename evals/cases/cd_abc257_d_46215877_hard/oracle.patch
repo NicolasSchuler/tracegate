@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,7 +26,7 @@
+     return all(used)
+ 
+ 
+-l = 1
++l = 0
+ r = 4 * 10**9
+ while r - l > 1:
+     frag = True

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+ N = int(input())
+ ans = 10**20
+ for a in range(10**6):
+-    lb = a
++    lb = a - 1
+     ub = 10**6
+     while ub - lb > 1:
+         mid = (ub + lb) // 2

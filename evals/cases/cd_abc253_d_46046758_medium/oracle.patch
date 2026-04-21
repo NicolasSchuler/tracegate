@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+     - (rui * const * 2 + za // a * a + a) * (za // a) // 2
+     - (rui * const * 2 + za // b * b + b) * (za // b) // 2
+ )
+-ans += rui * const * (const + 1) // 2 * (const - const // a - const // b + 1)
++ans += (rui - 1) * const * rui // 2 * (const - const // a - const // b + 1)
+ ans += rui * (
+     const * (const + 1) // 2 - const * (1 + const // a) // 2 - const * (1 + const // b) // 2 + const
+ )

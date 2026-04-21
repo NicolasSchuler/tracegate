@@ -1,0 +1,39 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,8 +5,10 @@
+ import bisect
+ import itertools
+ import functools
++
++
+ class Solution:
+-    def longestValidSubstring(self, word: str, forbidden: List[str]) -> int
++    def longestValidSubstring(self, word: str, forbidden: List[str]) -> int:
+         trie = {}
+         for f in forbidden:
+             t = trie
+@@ -15,7 +17,7 @@
+                     t[c] = {}
+                 t = t[c]
+             t["end"] = True
+-        
++
+         def isForbidden(s):
+             t = trie
+             counter = 0
+@@ -27,13 +29,12 @@
+                 if "end" in t:
+                     return counter
+             return False
+-        
++
+         res = 0
+         j = len(word)
+         for i in range(len(word) - 1, -1, -1):
+             truc = isForbidden(word[i:j])
+             if truc:
+                 j = i + truc - 1
+-                undefinedFunction(word)
+             res = max(res, j - i)
+         return res

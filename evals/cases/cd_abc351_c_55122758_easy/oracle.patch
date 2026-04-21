@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+         bai = ans.pop() + 1
+         ans.pop()
+         ans.append(bai)
+-    print(ans)
++    # print(ans)
+ print(len(ans))

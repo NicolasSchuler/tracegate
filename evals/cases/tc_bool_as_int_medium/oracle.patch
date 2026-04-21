@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,5 +7,5 @@
+     """Return percentage of passing scores as a formatted string like '75.0%'."""
+     total = len(scores)
+     passed = count_passing(scores, threshold)
+-    ratio = passed // total * 100
++    ratio = passed / total * 100
+     return f"{ratio}%"

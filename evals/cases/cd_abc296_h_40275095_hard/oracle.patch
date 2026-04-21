@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -118,7 +118,7 @@
+     dp0 = [inf] * l
+     mi = min(dp)
+     for i in range(l):
+-        if dp[i] > mi + 4:
++        if dp[i] > mi + 5:
+             continue
+         ui = u[i]
+         v = []

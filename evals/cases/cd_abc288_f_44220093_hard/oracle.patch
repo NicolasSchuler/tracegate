@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ for c in input()[::-1]:
+     a += b * (ord(c) - ord("0"))
+     b = (b * 10 + a) % m
+-print(a)
++print(a % m)

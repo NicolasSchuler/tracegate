@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ l = list(map(int, input().split()))
+ l.sort()
+-if l[0] > l[1] + l[2]:
++if l[2] > l[1] + l[0]:
+     print("-1")
+ else:
+     print(l[2])

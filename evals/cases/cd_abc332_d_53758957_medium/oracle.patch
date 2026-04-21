@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -63,7 +63,7 @@
+                 for j in q:
+                     t.append(At[i][j])
+                 tbl.append(t)
+-            if sorted(tbl) == sorted(Bt):
++            if tbl == Bt:
+                 ans = min(ans, f(p) + f(q))
+ 
+ if ans == float("inf"):

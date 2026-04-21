@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+ dir = []
+ 
+ for i in range(M + 1):
+-    x, y = i, int((M - i) ** 0.5)
++    x, y = i, int(abs(M - i**2) ** 0.5)
+     if x**2 + y**2 == M:
+         dir.append([x, y])
+         dir.append([-x, y])

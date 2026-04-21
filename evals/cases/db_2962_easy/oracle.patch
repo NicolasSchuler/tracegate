@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,8 +17,8 @@
+             elif i % 3 != 0 and i % 5 != 0:
+                 l.append(str(i))
+             elif i % 3 == 0:
+-                l.append(self.fizz())
++                l.append("Fizz")
+             elif i % 5 == 0:
+-                l.append(self.buzz())
++                l.append("Buzz")
+ 
+         return l

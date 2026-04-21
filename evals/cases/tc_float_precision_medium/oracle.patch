@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,5 +8,5 @@
+
+ def check_tax_balance(prices: list[float], expected: float) -> bool:
+     """Return True if computed tax matches expected value exactly."""
+     computed = accumulate_tax(prices)
+-    return computed == expected
++    return abs(computed - expected) < 1e-9

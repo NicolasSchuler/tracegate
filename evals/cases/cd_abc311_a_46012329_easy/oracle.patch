@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ N = int(input())
+ S = input()
+ 
+-print(max([S.rfind("A"), S.rfind("B"), S.rfind("C")]) + 1)
++print(max([S.find("A"), S.find("B"), S.find("C")]) + 1)

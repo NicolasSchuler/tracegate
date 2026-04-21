@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ 
+ 
+ def favorite_game(N, M, A):
+-    lower_start, upper_start = min(A[0], A[1]), max(A[0], A[1])
++    lower_start, upper_start = A[0], A[1]
+     B = sorted(A[2:])
+ 
+     min_move = float("inf")

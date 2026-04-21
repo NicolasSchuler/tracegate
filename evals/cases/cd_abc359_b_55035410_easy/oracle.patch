@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ arr = list(map(int, input().rstrip().split()))
+ 
+ res = 0
+-for i in range(n - 2):
++for i in range(2 * n - 2):
+     if arr[i + 2] == arr[i]:
+         res += 1
+ 

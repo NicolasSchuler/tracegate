@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,6 +9,8 @@
+             count += 1
+         if (i != k) and (A[k][i] == "W") and (A[i][k] == "L"):
+             count += 1
++        if (i != k) and (A[i][k] == "D") and (A[k][i] == "D"):
++            count += 1
+ if count == N**2:
+     print("correct")
+ else:

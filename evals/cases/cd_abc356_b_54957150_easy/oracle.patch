@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+         for j in range(N):
+             total += X[j][i]
+         if total < A[i]:
+-            ans = False
++            ans = "No"
+             print(ans)
+             return
+ 

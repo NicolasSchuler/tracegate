@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,4 +10,4 @@
+ class Solution:
+     def sortArray(self, nums: List[int]) -> List[int]:
+         nums.sort()
+-        return nums + 1
++        return nums

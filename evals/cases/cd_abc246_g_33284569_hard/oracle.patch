@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+         return dfs(0, -1) >= 1
+ 
+     n = int(input())
+-    values = [-1] + list(map(int, input().split()))
++    values = [0] + list(map(int, input().split()))
+     adjMap = defaultdict(set)
+     for _ in range(n - 1):
+         u, v = map(int, input().split())

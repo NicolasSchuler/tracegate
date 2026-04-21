@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ s = input()
+ t = input()
+ 
+-if len(s) > len(t) or (len(s) == len(t) and s != t):
++if len(t) > len(s) or (len(s) == len(t) and s != t):
+     print("No")
+     exit()
+ else:

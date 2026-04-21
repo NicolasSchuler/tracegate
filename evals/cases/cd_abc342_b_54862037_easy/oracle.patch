@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ flg = [[False] * N for i in range(N)]
+ for i in range(1, N):
+     for j in range(i):
+-        flg[j][i] = True
++        flg[P[j] - 1][P[i] - 1] = True
+ Q = int(input())
+ for i in range(Q):
+     A, B = map(int, input().split())

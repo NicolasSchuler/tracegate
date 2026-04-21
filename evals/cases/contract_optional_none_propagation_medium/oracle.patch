@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,6 @@
+ 
+ def upper_user_name(active: bool) -> str:
+     user = maybe_user(active)
++    if user is None:
++        return ""
+     return user["name"].upper()

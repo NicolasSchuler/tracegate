@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,5 +24,4 @@
+ 
+             res = max(res, e * top_k_sum)
+ 
+-        console.log(res % MOD)
+         return res % MOD

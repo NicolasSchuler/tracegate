@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,4 +23,4 @@
+     return A_num >= B_num
+ 
+ 
+-print(bisect(10**9, -1, solve))
++print(bisect(10**9 + 1, -1, solve))

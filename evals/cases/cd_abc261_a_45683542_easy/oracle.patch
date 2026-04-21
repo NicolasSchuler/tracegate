@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ a = list(map(int, input().split()))
+-print(max(0, max(a[0], a[1]) - min(a[2], a[3])))
++print(max(0, min(a[1], a[3]) - max(a[0], a[2])))

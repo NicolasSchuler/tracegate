@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -87,7 +87,7 @@
+             break
+     if not flg:
+         continue
+-    ng = 0
++    ng = -1
+     ok = n * m
+     while ok - ng > 1:
+         mid = (ok + ng) // 2

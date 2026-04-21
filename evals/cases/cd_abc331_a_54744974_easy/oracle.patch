@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+ else:
+     d = d + 1
+ 
+-print(f"y m d")
++print(y, m, d)

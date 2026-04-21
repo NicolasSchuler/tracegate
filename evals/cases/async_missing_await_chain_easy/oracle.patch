@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,5 +7,5 @@
+ 
+ 
+ def compute(seed: int) -> int:
+-    value = fetch_value(seed)
++    value = asyncio.run(fetch_value(seed))
+     return value + 1

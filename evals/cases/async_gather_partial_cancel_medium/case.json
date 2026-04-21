@@ -1,0 +1,20 @@
+{
+  "description": "One task in gather() cancelled; return_exceptions=False causes entire gather to fail.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "CancelledError",
+  "tags": [
+    "asyncio",
+    "gather",
+    "cancellation"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

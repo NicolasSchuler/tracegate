@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -64,7 +64,7 @@
+         # v[1] -= ep[i]
+     # 3a+5b
+     # 5a+8b
+-    # print(ep[-1])
++    print(ep[-1])
+ 
+     # ep = [0] * len(a)
+     # ep[0] = -1

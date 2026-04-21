@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -28,5 +28,5 @@
+     if end - start > 2:
+         new_text += "-"
+     elif end - start > 0:
+-        new_text += "__"
++        new_text += "_"
+     return new_text

@@ -1,0 +1,19 @@
+{
+  "description": "Optional dependency import is unguarded.",
+  "category": "path_import_env",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "ModuleNotFoundError",
+  "tags": [
+    "import",
+    "optional-dep"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,7 @@
+ if b == a + 1:
+     if a % 3 != 0:
+         print("Yes")
++    else:
++        print("No")
+ else:
+     print("No")

@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -92,9 +92,9 @@
+         for index, stone in enumerate(stones) :
+             # while the stone at starting index is lte this stone minus stone length (cost of a move) 
+             while stones[starting_index] <= stone - stone_length : 
+-            
+-            starting_index += 1
++                # increment 
++                starting_index += 1
+             # max legal moves is then set to maxima of self and indexed difference with 1 for 0 based indexing  
+             max_legal_moves = min(max(max_legal_moves, index - starting_index + 1), most_moves) 
+         # return length - max legal moves when in sorted order (your minimal move state) and most moves in sorted order 
+-        return [stone_length - max_legal_moves, most_moves]
++        return [stone_length - max_legal_moves, most_moves]

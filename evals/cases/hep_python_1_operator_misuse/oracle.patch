@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+             current_depth -= 1
+             current_string.append(c)
+ 
+-            if current_depth < 0:
++            if current_depth == 0:
+                 result.append(''.join(current_string))
+                 current_string.clear()
+ 

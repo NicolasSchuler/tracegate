@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,5 +11,5 @@
+     cnt = d
+ 
+     cnt += (L[2] - L[0]) * 2
+-    cnt += L[2] - L[0]
++    cnt += L[0] - (L[2] - L[0])
+     print(cnt)

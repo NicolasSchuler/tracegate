@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ 
+ def timeout_seconds() -> float:
+     timeout = get_timeout_ms()
+-    return timeout["ms"] / 1000
++    return timeout / 1000

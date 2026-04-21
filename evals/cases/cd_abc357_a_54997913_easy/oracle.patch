@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+ for i in range(N):
+     total -= H[i]
+     if total < 0:
+-        print(i + 1)
++        print(i)
+         break
+ else:
+     print(N)

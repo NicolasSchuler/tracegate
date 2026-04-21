@@ -1,0 +1,21 @@
+{
+  "description": "ConDefects arc129_a/44795955",
+  "category": "logic_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "condefects",
+    "atcoder"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "condefects",
+  "contamination_risk": "low",
+  "expected_fix_lines": 3,
+  "source_id": "condefects_arc129_a_44795955"
+}

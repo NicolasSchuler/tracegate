@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,8 +10,6 @@
+     if ope == 1:
+         dic[user1].add(user2)
+     elif ope == 2:
+-        if user1 in dic[user2]:
+-            dic[user2].remove(user1)
+         if user2 in dic[user1]:
+             dic[user1].remove(user2)
+     else:

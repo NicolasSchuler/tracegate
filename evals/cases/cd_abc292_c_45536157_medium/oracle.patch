@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,7 +32,7 @@
+         cntCD = 1
+     else:
+         cntCD = reduce(lambda x, y: x * (y + 1), Counter(prime_factorize(CD)).values(), 1)
+-    cnt += (cntAB * cntCD * 2) if AB != CD else (cntAB + cntCD)
++    cnt += (cntAB * cntCD * 2) if AB != CD else (cntAB * cntCD)
+ 
+ 
+ print(cnt)

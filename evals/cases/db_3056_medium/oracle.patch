@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,10 +12,13 @@
+         result = float("inf")
+         left, right = 0, sum(grid[0])
+ 
+-        for a, b in zip(grid[1], grid[0]):
++        for a, b in zip(grid[0], grid[1]):
+             right -= a
+ 
+             result = min(result, max(left, right))
+             left += b
+ 
+         return result
++
++
++# time & space - O(n),O(1)

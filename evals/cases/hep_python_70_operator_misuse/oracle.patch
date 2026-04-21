@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     strange_sort_list([5, 5, 5, 5]) == [5, 5, 5, 5]
+     strange_sort_list([]) == []
+     '''
+-    res, switch = [], False
++    res, switch = [], True
+     while lst:
+         res.append(min(lst) if switch else max(lst))
+         lst.remove(res[-1])

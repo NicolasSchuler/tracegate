@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,5 +6,4 @@
+ for i in range(N):
+     go = max(in_retu, T[i]) + A
+     print(go)
+-
+-in_retu = go
++    in_retu = go

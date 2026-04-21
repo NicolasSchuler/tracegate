@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,8 @@
+ 
+ async def _run() -> int:
+     task = asyncio.create_task(_worker())
+-    return task.result() + 1
++    value = await task
++    return value + 1
+ 
+ 
+ def racey_read() -> int:

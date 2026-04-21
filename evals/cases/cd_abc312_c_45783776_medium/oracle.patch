@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+ 
+ 
+ Le = 0
+-Ri = 1_000_000_000
++Ri = 1_000_000_001
+ 
+ while abs(Le - Ri) > 1:
+     mid = (Le + Ri) // 2

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     kyori = 0
+     kazu = 1
+     i = 0
+-    ans = 0
++    ans = 1
+     for b in B:
+         kyori += b
+         kazu += 1

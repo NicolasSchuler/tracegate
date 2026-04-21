@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ M = int(input())
+ D = list(map(int, input().split()))
+ 
+-middleD = (sum(D) + 1) / 2
++middleD = int((sum(D) + 1) / 2)
+ sumD = 0
+ for i in range(M):
+     sumD += D[i]

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ b = []
+ for i in range(n):
+     if a[i] % k == 0:
+-        c = a[i] / k
++        c = a[i] // k
+         b.append(c)
+ sorted_b = sorted(b)
+ print(" ".join(map(str, sorted_b)))

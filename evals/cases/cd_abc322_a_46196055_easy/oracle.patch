@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,3 +1,4 @@
++n = input()
+ s = input()
+ 
+ ret = -1
+@@ -5,3 +6,4 @@
+     if s[i : i + 3] == "ABC":
+         ret = i + 1
+         break
++print(ret)

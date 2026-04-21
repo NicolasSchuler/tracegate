@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+             return encoded_text
+ 
+         N = len(encoded_text)
+-        cols = non_existing_variable // rows
++        cols = N // rows
+         i, j, k = 0, 0, 0
+         original_text = []
+ 

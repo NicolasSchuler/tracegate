@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ s = input()
+-if s <= "ABC349" and s != "ABC316":
++if "ABC001" <= s <= "ABC349" and s != "ABC316":
+     print("Yes")
+ else:
+     print("No")

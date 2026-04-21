@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+ 
+ moves = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+ INF = 10**18
+-f = [[[INF] * w for _ in range(h)] for _ in range(min(k, h * w) + 2)]
++f = [[[-INF] * w for _ in range(h)] for _ in range(min(k, h * w) + 2)]
+ f[0][sx][sy] = 0
+ res = 0
+ for i in range(min(k, h * w) + 1):

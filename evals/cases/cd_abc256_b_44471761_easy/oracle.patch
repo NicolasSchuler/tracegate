@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,5 +6,5 @@
+         a[j] += a[i]
+ ans = 0
+ for i in range(n):
+-    ans += a[i] >= 5
++    ans += a[i] >= 4
+ print(ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+             ans = nums[u]
+             for v in tree[u]:
+                 if v != p:
+-                    ans += self.fn(v, u)
++                    ans += fn(v, u)
+             return 0 if ans == cand else ans
+ 
+         total = sum(nums)

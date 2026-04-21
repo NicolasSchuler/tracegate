@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+                     if nums1[i] < nums2[j]:
+                         out.append(nums2[j])
+                         break
+-                    if j == len(nums2):
++                    if j == len(nums2) - 1:
+                         out.append(-1)
+                         break
+                     j += 1

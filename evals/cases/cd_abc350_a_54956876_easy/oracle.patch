@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ s = input()
+-if len(s) == 6 and int(s[3:]) < 350 and int(s[3:]) != 316:
++if int(s[3:]) > 0 and int(s[3:]) < 350 and int(s[3:]) != 316:
+     print("Yes")
+ else:
+     print("No")

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,3 +35,8 @@
+ 
+ 
+ DFS(0, 0)
++
++if inc and dec or not inc and not dec:
++    print("Yes")
++else:
++    print("No")

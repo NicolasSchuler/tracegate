@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -33,5 +33,5 @@
+             for dh, dw in moves:
+                 nh, nw = hh + dh, ww + dw
+                 if 0 <= nh < h and 0 <= nw < w:
+-                    f[i + 1][nh][nw] = max(f[i + 1][nh][nw], f[i][hh][ww] + A[hh][ww])
++                    f[i + 1][nh][nw] = max(f[i + 1][nh][nw], f[i][hh][ww] + A[nh][nw])
+ print(res)

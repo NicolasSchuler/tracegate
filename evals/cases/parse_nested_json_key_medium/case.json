@@ -1,0 +1,19 @@
+{
+  "description": "Wrong key path when extracting a value from nested JSON structure.",
+  "category": "parse_value",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "KeyError",
+  "tags": [
+    "json",
+    "nested-keys"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

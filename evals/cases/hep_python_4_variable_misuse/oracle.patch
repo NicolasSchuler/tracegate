@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     1.0
+     """
+     mean = sum(numbers) / len(numbers)
+-    return sum(abs(x - mean) for x in numbers) / mean
++    return sum(abs(x - mean) for x in numbers) / len(numbers)

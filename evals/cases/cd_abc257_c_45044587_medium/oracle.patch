@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+ 
+     # 隣の人と体重が同じならそれは境界とはいえない
+     # ansの更新を行わない(cntの計算だけしておいてスキップ)
+-    if i + 1 >= n or w != people[i + 1]:
++    if i + 1 >= n or w != people[i + 1][0]:
+         ans = max(ans, cnt)
+ 
+ print(ans)

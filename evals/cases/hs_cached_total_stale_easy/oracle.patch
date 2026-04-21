@@ -1,0 +1,10 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,5 +10,6 @@
+     def total_without_last(self) -> int:
+         if not self.values:
+             return 0
+-        self.values.pop()
++        removed = self.values.pop()
++        self._cached_total -= removed
+         return self._cached_total

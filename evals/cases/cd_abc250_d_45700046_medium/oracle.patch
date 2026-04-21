@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -40,7 +40,7 @@
+ 
+ N = int(input())
+ 
+-Alist = Eratosthenes(10**3)
++Alist = Eratosthenes(10**6)
+ lenAlist = len(Alist)
+ k = lenAlist - 1
+ ans = 0

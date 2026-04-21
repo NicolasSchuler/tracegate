@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,6 +9,6 @@
+ ans = sorted(ans)
+ ans.append(360)
+ Ma = 0
+-for i in range(n):
++for i in range(n + 1):
+     Ma = max(Ma, ans[i + 1] - ans[i])
+ print(Ma)

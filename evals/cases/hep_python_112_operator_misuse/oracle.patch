@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     For s = "abcdedcba", c = "ab", the result should be ('cdedc',True)
+     """
+     s = ''.join([char for char in s if char not in c])
+-    return (s,s[::-1] != s)
++    return (s,s[::-1] == s)

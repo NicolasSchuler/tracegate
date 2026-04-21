@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     """
+     min_number = min(numbers)
+     max_number = max(numbers)
+-    return [(x - min_number) / (max_number + min_number) for x in numbers]
++    return [(x - min_number) / (max_number - min_number) for x in numbers]

@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ N, M, P = map(int, input().split())
+-print((N - M) // P + 1 if N > M else 0)
++print((N - M) // P + 1 if N >= M else 0)

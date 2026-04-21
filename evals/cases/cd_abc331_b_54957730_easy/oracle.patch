@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ n, s, m, l = map(int, input().split())
+-sum = 10000
++sum = 10**10
+ 
+ for j in range(20):
+     for k in range(15):

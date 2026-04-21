@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+                 dx = 1
+             g = gcd(dx, dy)
+             dx, dy = dx // g, dy // g
+-            b = M * yi - M * dy * xi // dx if dx != 0 else 0
++            b = M * yi - M * dy * xi // dx if dx != 0 else xi
+             if (dx, dy, b) in S:
+                 continue
+             S.add((dx, dy, b))

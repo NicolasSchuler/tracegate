@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     # 何番目か
+     j = K % x
+ 
+-    print(((D + i) * j) % N)
++    print(((j * D + i) % N))

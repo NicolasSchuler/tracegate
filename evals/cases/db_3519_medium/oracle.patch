@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,4 +32,4 @@
+ 
+         for i in adjacencyList[0]:
+             total = dfs(i, visited)
+-        return res[0], variable_that_does_not_exist
++        return res[0]

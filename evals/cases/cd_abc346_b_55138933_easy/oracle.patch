@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+         if A not in can_l:
+             can_l.append(A)
+ 
+-print(can_l)
++# print(can_l)
+ test_l = [W, B]
+ 
+ if test_l in can_l:

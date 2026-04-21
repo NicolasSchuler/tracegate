@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,4 +21,4 @@
+     Q = int(input())
+     queries = [list(map(int, input().split())) for _ in range(Q)]
+     ans = solve(n, R, C, Q, queries)
+-    print(*ans)
++    print("".join(ans))

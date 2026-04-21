@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -36,7 +36,7 @@
+ for _ in range(T):
+     k = int(input())
+     lo = 0
+-    hi = 10**12
++    hi = 10**15
+     # f(lo) < k
+     while lo < hi - 1:
+         m = (lo + hi) // 2

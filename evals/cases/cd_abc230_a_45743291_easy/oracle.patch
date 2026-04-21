@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ N = int(input())
+ 
+-if N >= 43:
++if N >= 42:
+     print(f"AGC{N + 1:03}")
+ else:
+     print(f"AGC{N:03}")

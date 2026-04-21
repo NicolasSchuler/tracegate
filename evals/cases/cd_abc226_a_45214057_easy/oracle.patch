@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ X = input()
+-print(int(float(X) + 1))
++print(int(float(X) + 0.5))

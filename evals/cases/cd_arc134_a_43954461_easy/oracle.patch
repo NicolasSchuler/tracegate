@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+ 
+ N, L, W = MI()
+ A = list(MI())
+-A.append(L + 1)
++A.append(L)
+ now = 0
+ ans = 0
+ for a in A:

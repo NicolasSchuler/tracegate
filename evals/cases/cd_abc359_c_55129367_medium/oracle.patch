@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+ Tx = abs(Tx)
+ Ty = abs(Ty)
+ 
+-print(Ty + max(0, Tx - Ty) / 2)
++print(Ty + max(0, Tx - Ty) // 2)

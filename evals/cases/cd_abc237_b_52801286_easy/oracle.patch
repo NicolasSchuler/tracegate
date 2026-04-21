@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,6 +3,6 @@
+ for i in range(h):
+     tmp = list(map(int, input().split(" ")))
+     for j in range(w):
+-        b[j][h - 1 - i] = tmp[j]
++        b[j][i] = tmp[j]
+ for b_ in b:
+     print(*b_)

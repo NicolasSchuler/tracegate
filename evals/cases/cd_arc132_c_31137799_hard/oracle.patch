@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -240,7 +240,7 @@
+ 
+ D = 1 << (2 * d + 1)
+ dp = [[0] * D for i in range(n + 1)]
+-dp[0][0] = 1
++dp[0][D - (1 << -~d)] = 1
+ for i in range(n):
+     c = a[i]
+     for b in range(D):

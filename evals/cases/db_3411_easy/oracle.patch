@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+             if len(l) <= 2:
+                 li[i] = l.lower()
+             else:
+-                li[i] = l[0].lower() + l[1:].lower()
++                li[i] = l[0].upper() + l[1:].lower()
+         return " ".join(li)

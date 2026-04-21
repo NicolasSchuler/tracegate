@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -36,5 +36,5 @@
+             stockBuy = prices[i]
+             counter += 1
+         if (stockSell - stockBuy) > 0:
+-            profit = profit + (stockSell - random_object)
++            profit = profit + (stockSell - stockBuy)
+         return profit

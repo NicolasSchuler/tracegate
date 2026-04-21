@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n = int(input())
+ x = input()
+-mod = 998255353
++mod = 998244353
+ 
+ dp = 0
+ s = 1

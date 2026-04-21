@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+ dis = [[-1] * W for _ in range(H)]
+ dis[0][0] = 1
+ 
+-ans = 0
++ans = 1
+ while que:
+     y, x = que.popleft()
+     for dy, dx in zip(dys, dxs):

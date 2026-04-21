@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ MOD = 998244353
+ ret = 0
+ for i in range(60):
+-    if M and 2**i:
++    if M & 2**i:
+         tmp = N // ((2**i) * 2)
+         ret = ret + tmp * (2**i)
+         tmp = N % ((2**i) * 2)

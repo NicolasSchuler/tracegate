@@ -1,0 +1,20 @@
+{
+  "description": "Binary search initializes hi to len(arr) instead of len(arr)-1 causing IndexError.",
+  "category": "logic_error",
+  "difficulty": "easy",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "IndexError",
+  "tags": [
+    "logic_error",
+    "binary_search",
+    "off_by_one"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

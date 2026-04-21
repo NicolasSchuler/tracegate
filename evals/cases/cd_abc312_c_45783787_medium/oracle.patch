@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,7 +24,7 @@
+ 
+ 
+ left = 0
+-right = 1000000000
++right = 1000000001
+ 
+ while (right - left) > 1:
+     mid = (right + left) // 2

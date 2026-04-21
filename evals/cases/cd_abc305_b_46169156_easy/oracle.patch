@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+     short = li[5]
+ 
+ if q == "A":
+-    short = 0
++    long = 0
+ elif q == "B":
+     long = li[0]
+ elif q == "C":

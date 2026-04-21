@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,10 +22,6 @@
+     if s == ")":
+         left_to_right[d.pop()] = i
+ right_to_left = {v: k for k, v in left_to_right.items()}
+-
+-print(left_to_right)
+-print(right_to_left)
+-
+ 
+ i = 0
+ swap = 0

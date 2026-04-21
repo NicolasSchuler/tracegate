@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,7 +20,7 @@
+         if k <= n - b:
+             return ans(n - b, k, bit - 1)
+         elif k >= b + 1:
+-            return ans(n - b, k, bit - 1) + b
++            return ans(n - b, k - b, bit - 1) + b
+         else:
+             return k
+ 

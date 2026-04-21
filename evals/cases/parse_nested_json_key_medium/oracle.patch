@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+
+ def extract_city(raw: str) -> str:
+     data = json.loads(raw)
+-    return data["address"]["city"]
++    return data["user"]["address"]["city"]

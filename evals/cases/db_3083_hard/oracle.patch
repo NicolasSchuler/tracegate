@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+             C = [0] * n
+             val = K
+             for j in range(i, -1, -1):
+-                val += (C[A[j]] >= 1) + (C[A[j]] == 0)
++                val += (C[A[j]] >= 1) + (C[A[j]] == 1)
+                 C[A[j]] += 1
+                 dp[i + 1] = min(dp[i + 1], dp[j] + val)
+         return dp[-1]

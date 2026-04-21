@@ -1,0 +1,268 @@
+[project]
+name = "llmdebug"
+version = "3.1.0"
+description = "TraceGate: structured debug snapshots for LLM-assisted debugging"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Anonymous Authors" }]
+keywords = ["debugging", "llm", "crash-reporting", "pytest"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+    "Typing :: Typed",
+    "Framework :: Pytest",
+]
+dependencies = [
+    "filelock>=3.0",
+    "orjson>=3.10.0",
+    "pandas>=2.3.3",
+    "polars>=1.38.1",
+    "seaborn>=0.13.2",
+    "xxhash>=3.6.0",
+]
+
+[project.optional-dependencies]
+cli = ["click>=8.0", "rich>=13.0"]
+mcp = ["mcp>=1.0"]
+toon = ["toons>=0.1"]
+jupyter = ["ipython>=8.0"]
+evals = [
+    "datasets>=2.0",      # HuggingFace datasets for importers
+    "httpx[http2]>=0.27.0",
+    "pydantic>=2.0",      # Eval-only schema validation contracts
+    "polars>=1.12.0",     # Eval/report analytics
+    "scikit-learn>=1.4.0",# Eval/report metrics
+    "scipy>=1.13",        # Eval/report stats
+    "docker>=6.0.0",      # Docker SDK for SWE-bench Pro container-based scoring
+    "swebench==4.1.0",    # Pin official evaluator CLI for reproducible publication scoring
+    "testcontainers>=4.13.2",
+    "tiktoken>=0.9.0",    # Optional exact token telemetry for eval/report diagnostics
+]
+dev = [
+    "bandit>=1.8.0",
+    "click>=8.0",
+    "deptry>=0.22.0",
+    "diff-cover>=9.2",
+    "httpx[http2]>=0.27.0",
+    "import-linter>=2.0",
+    "ipykernel>=6.29",
+    "ipython>=8.0",
+    "matplotlib>=3.8",
+    "mcp>=1.0",
+    "mutmut>=3.2",
+    "nbclient>=0.10",
+    "nbconvert>=7.0",
+    "nbformat>=5.10",
+    "numpy>=1.20",
+    "polars>=1.12.0",
+    "pip-audit>=2.9.0",
+    "pyright>=1.1.390",
+    "pytest>=9.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-benchmark>=4.0",
+    "pytest-cov>=6.0",
+    "radon>=6.0",
+    "rich>=13.0",
+    "ruff>=0.12.0",
+    "scikit-learn>=1.4.0",
+    "scipy>=1.13",
+    "tiktoken>=0.9.0",
+    "toons>=0.1",
+    "vulture>=2.14",
+    "xenon>=0.9.3",
+]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.8.0",
+    "click>=8.0",
+    "deptry>=0.22.0",
+    "diff-cover>=9.2",
+    "httpx[http2]>=0.27.0",
+    "import-linter>=2.0",
+    "ipykernel>=6.29",
+    "ipython>=8.0",
+    "matplotlib>=3.8",
+    "mcp>=1.0",
+    "mutmut>=3.2",
+    "nbclient>=0.10",
+    "nbconvert>=7.0",
+    "nbformat>=5.10",
+    "numpy>=1.20",
+    "polars>=1.12.0",
+    "pip-audit>=2.9.0",
+    "pyright>=1.1.390",
+    "pytest>=9.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-benchmark>=4.0",
+    "pytest-cov>=6.0",
+    "radon>=6.0",
+    "rich>=13.0",
+    "ruff>=0.12.0",
+    "scikit-learn>=1.4.0",
+    "scipy>=1.13",
+    "tiktoken>=0.9.0",
+    "toons>=0.1",
+    "vulture>=2.14",
+    "xenon>=0.9.3",
+]
+
+[project.urls]
+Homepage = "https://example.com/tracegate"
+Repository = "https://example.com/tracegate/repository"
+Documentation = "https://example.com/tracegate/docs"
+Issues = "https://example.com/tracegate/issues"
+Changelog = "https://example.com/tracegate/changelog"
+
+[project.scripts]
+llmdebug = "llmdebug.cli:main"
+llmdebug-mcp = "llmdebug.mcp_server:main"
+
+[project.entry-points.pytest11]
+llmdebug = "llmdebug.pytest_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    ".DS_Store",
+    ".benchmarks/",
+    ".coverage",
+    ".coverage.*",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".uv-cache/",
+    ".github/",
+    ".llmdebug/",
+    ".venv",
+    ".venv*/",
+    ".worktrees/",
+    "--no-backup-if-mismatch",
+    "**/.DS_Store",
+    "**/__pycache__/",
+    "*.py[cod]",
+    "analysis/figures/",
+    "analysis/*.tex",
+    "baselines/envs/",
+    "baselines/repos/",
+    "build/",
+    "coverage*.json",
+    "coverage.xml",
+    "dist/",
+    "evals/artifacts/",
+    "evals/results/",
+    "evals/swebench_runs/",
+    "evals/swebench_pro_assets/",
+    "evals/swebench_pro_runs/",
+    "*-eval*.yaml",
+    "htmlcov/",
+    "reports/",
+    "scripts/run_*_llm_service.sh",
+    "scripts/submit_*_failed_baseline_hybrids.sh",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llmdebug"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["evals/cases", "evals/artifacts", "baselines/repos"]
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PERF", "FURB"]
+ignore = [
+    "E501",    # line length — formatter handles it
+    "SIM105",  # contextlib.suppress — less readable than try/except pass
+    "PERF203", # try-except in loop — common pattern for error recovery in I/O loops
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # assert is fine in tests
+    "F401",    # unused imports (test fixtures, re-exports)
+    "RUF012",  # ClassVar annotations in test helper classes
+]
+"evals/**/*.py" = [
+    "S101",  # assert in eval scripts
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["llmdebug"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 50
+
+[tool.pyright]
+include = ["src/llmdebug"]
+exclude = ["tests", ".venv", ".venv*", "evals"]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportUnusedImport = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks integration tests",
+    "baseline_runtime: marks provisioned baseline runtime integration tests",
+]
+
+[tool.coverage.run]
+source = ["src/llmdebug"]
+branch = true
+omit = ["*/tests/*", "*/__pycache__/*", "*/snapshot_types.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 95
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "if TYPE_CHECKING",
+    "raise NotImplementedError",
+    "@overload",
+    "\\.\\.\\.",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "evals"]
+skips = [
+    "B101",  # assert — used extensively, not a security concern
+    "B311",  # random for non-crypto — we don't use random for security
+    "B404",  # import subprocess — needed for git/process operations
+    "B603",  # subprocess without shell=True — intentional and safe
+]
+
+[tool.deptry]
+exclude = [".venv", "tests", "evals"]
+pep621_dev_dependency_groups = ["dev"]
+
+[tool.deptry.per_rule_ignores]
+DEP001 = ["torch", "jax", "pandas", "toons", "IPython"]
+DEP002 = [
+    "docker",
+    "filelock",
+    "datasets",
+    "httpx",
+    "pydantic",
+    "swebench",
+    "testcontainers",
+    "tiktoken",
+    "polars",
+    "scikit-learn",
+    "scipy",
+]
+DEP004 = ["pytest", "numpy"]

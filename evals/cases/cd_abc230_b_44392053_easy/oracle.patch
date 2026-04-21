@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ S = input()
+-T = "oox" * 10**5
++T = "oxx" * 10**5
+ 
+ if T.find(S) != -1:
+     print("Yes")

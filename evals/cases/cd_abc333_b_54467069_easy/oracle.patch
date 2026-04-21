@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -265,7 +265,7 @@
+     else:
+         print("No")
+ elif s1 == "D" and s2 == "E":
+-    if t1 == "D" and t2 == "E" and t1 == "E" and t2 == "D":
++    if t1 == "D" and t2 == "E" or t1 == "E" and t2 == "D":
+         print("Yes")
+     else:
+         print("No")

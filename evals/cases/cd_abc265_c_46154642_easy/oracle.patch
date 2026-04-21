@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,7 +30,7 @@
+         else:
+             visited[i][j] = True
+             j -= 1
+-    if g[i][j] == "W":
++    if g[i][j] == "R":
+         if j == w - 1:
+             print(i + 1, j + 1)
+             exit()

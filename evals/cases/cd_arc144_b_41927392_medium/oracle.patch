@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+     b_cnt = 0
+     for num in al:
+         diff = abs(num - m)
+-        if num < diff:
++        if num < m:
+             cnt = diff // a
+             if diff % a != 0:
+                 cnt += 1

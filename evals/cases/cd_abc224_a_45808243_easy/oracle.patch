@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ if A[len(A) - 1] == "r":
+     print("er")
+ else:
+-    print("st")
++    print("ist")

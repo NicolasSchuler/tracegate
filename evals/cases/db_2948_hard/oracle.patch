@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,5 +15,5 @@
+             for j in range(i):
+                 diff = nums[j] - nums[i]
+                 dp[i][diff] += dp[j][diff] + 1
+-                total += self.undifned_method(dp[j][diff])
++                total += dp[j][diff]
+         return total

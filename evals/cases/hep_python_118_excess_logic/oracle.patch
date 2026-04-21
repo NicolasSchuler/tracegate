@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,11 +15,11 @@
+     get_closest_vowel("ab") ==> ""
+     """
+     if len(word) < 3:
+-        return " "
++        return ""
+ 
+     vowels = {"a", "e", "i", "o", "u", "A", "E", 'O', 'U', 'I'}
+     for i in range(len(word)-2, 0, -1):
+         if word[i] in vowels:
+             if (word[i+1] not in vowels) and (word[i-1] not in vowels):
+                 return word[i]
+-    return " "
++    return ""

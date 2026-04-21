@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+             if num not in count_map:
+                 count_map[num] = 1
+             else:
+-                count_map[num] -= 1
++                count_map[num] += 1
+         for num, count in count_map.items():
+             if num + 1 in count_map:
+                 result = max(count + count_map[num + 1], result)

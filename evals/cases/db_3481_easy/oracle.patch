@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,6 +19,8 @@
+                 oddlist.append(i)
+         even = [-x for x in evenlist]
+         odd = [-x for x in oddlist]
++        heapq.heapify(even)
++        heapq.heapify(odd)
+         result = []
+         for ele in nums:
+             if ele in evenlist:
+@@ -27,7 +29,3 @@
+                 result += [-heapq.heappop(odd)]
+         result = [str(x) for x in result]
+         return int("".join(result))
+-
+-
+-s = Solution()
+-print(s.largestInteger(1234))

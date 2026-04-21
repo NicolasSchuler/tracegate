@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ import math
+ 
+ x, y = map(int, input().split())
+-print(math.ceil((y - x) / 10))
++print(math.ceil(max((y - x), 0) / 10))

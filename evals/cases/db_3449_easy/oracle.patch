@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,6 +10,6 @@
+ class Solution:
+     def firstPalindrome(self, words: List[str]) -> str:
+         for i in words:
+-            if i == i.sort():
++            if i == i[::-1]:
+                 return i
+         return ""

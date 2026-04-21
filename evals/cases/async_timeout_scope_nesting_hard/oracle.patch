@@ -1,0 +1,20 @@
+a/buggy.py	2026-02-12 14:37:22
++++ b/buggy.py	2026-02-12 14:48:11
+@@ -11,15 +11,9 @@
+ 
+ 
+ async def fetch_batch(ids: list[int]) -> list[dict[str, int]]:
+-    async def _sequential() -> list[dict[str, int]]:
+-        results: list[dict[str, int]] = []
+-        for item_id in ids:
+-            result = await fetch_with_retry(item_id)
+-            results.append(result)
+-        return results
++    tasks = [fetch_with_retry(i) for i in ids]
++    return list(await asyncio.wait_for(asyncio.gather(*tasks), timeout=0.5))
+ 
+-    return await asyncio.wait_for(_sequential(), timeout=0.05)
+ 
+-
+ def get_batch(ids: list[int]) -> list[dict[str, int]]:
+     return asyncio.run(fetch_batch(ids))

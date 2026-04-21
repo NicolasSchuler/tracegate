@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -58,4 +58,4 @@
+     return ok
+ 
+ 
+-print(bisect(0, max(S) + 1))
++print(bisect(-1, max(S) + 1))

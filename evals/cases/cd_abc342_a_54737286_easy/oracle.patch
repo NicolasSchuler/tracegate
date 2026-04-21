@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,7 +5,7 @@
+     elif S[2] == S[1]:
+         common_char = S[1]
+     else:
+-        return S[1]
++        return 2
+ 
+     # 異なる1文字の位置を特定
+     for i, char in enumerate(S):

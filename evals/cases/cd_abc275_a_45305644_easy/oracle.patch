@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+     if H[i - 1] > M:
+         M = H[i - 1]
+         ans = i
+-print(i)
++print(ans)

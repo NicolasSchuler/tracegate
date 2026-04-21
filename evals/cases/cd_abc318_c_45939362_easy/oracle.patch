@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,6 @@
+ i = 0
+ ans = 0
+ while d * i < n:
+-    ans += min(p, sum(f[d * i : d * (i + 1) + 1]))
++    ans += min(p, sum(f[d * i : d * (i + 1)]))
+     i += 1
+ print(ans)

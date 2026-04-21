@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+             return True
+         if P[i - 3] % 2 != (i - 2) % 2:
+             return True
+-        ans.append(("B", i - 1))
++        ans.append(("B", i - 2))
+         P[i - 3], P[i - 1] = P[i - 1], P[i - 3]
+         calc1(i - 2)
+         return True

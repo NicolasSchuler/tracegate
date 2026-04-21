@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,9 +2,7 @@
+ 
+ if b - a != 1:
+     print("No")
+-
+-
+-cnt = 0
++    exit()
+ 
+ 
+ def judge(s):

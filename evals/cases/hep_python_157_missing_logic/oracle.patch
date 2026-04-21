@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     right_angle_triangle(3, 4, 5) == True
+     right_angle_triangle(1, 2, 3) == False
+     '''
+-    return c*c == a*a + b*b
++    return a*a == b*b + c*c or b*b == a*a + c*c or c*c == a*a + b*b

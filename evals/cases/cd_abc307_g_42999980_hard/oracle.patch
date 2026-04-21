@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+         x0 = x - (a + d)
+         ndp[j] = min(ndp[j], dp[j] + abs(x0))
+         if j < y:
+-            ndp[j + 1] = min(ndp[j], dp[j] + abs(x0 + 1))
++            ndp[j + 1] = min(ndp[j + 1], dp[j] + abs(x0 + 1))
+ 
+     tmp_sum += aaa[i]
+     dp = ndp

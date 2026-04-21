@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,8 +27,8 @@
+         continue
+ 
+     if S[right] != alp[now]:
++        C[S[right]] -= 1
+         right -= 1
+-        C[S[right]] -= 1
+     else:
+         S[left], S[right] = S[right], S[left]
+         C[alp[now]] -= 1

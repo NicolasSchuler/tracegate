@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ a.sort(reverse=True)
+ 
+ single_sz = n - (n - m) * 2
+-print(single_sz)
++# print(single_sz)
+ 
+ ans = 0
+ for i in range(single_sz):

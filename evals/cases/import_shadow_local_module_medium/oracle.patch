@@ -1,0 +1,10 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+-import statistics
++import numpy as np
+ 
+ 
+ def median_value(values: list[int]) -> float:
+-    return float(statistics.median(values))
++    return float(np.median(values))

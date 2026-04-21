@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,4 +17,4 @@
+ B = A1 + A4 + A3 + A2 + A5
+ 
+ # 出力(「*」をつけるとかっこなしで出力できる)
+-print(B)
++print(*B)

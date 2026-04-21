@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,4 +14,4 @@
+     '''
+  
+     check = txt.split(' ')[-1]
+-    return True if len(check) == 1 and (97 <= ord(check.upper()) <= 122) else False
++    return True if len(check) == 1 and (97 <= ord(check.lower()) <= 122) else False

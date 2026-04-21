@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ 
+ N, X = map(int, input().split())
+ 
+-print(ascii_uppercase[X // N - 1])
++print(ascii_uppercase[(X - 1) // N])

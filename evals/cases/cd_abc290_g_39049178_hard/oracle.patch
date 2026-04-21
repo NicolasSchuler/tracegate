@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+         else:
+             tmp2 = 0
+         amari = tmp[i] - X
+-        for j in range(id - 1, -1, -1):
++        for j in range(i - 1, -1, -1):
+             if amari == 0:
+                 break
+             tmp2 += min(K, amari // tmp[j])

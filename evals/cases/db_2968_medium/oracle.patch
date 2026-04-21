@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ class Solution:
+-    def powerfulIntegers(self, x: int, y: int, bound: int):
++    def powerfulIntegers(self, x: int, y: int, bound: int) -> List[int]:
+         if bound == 0:
+             return []
+ 
+@@ -21,4 +21,4 @@
+                 yield vi
+                 vi *= v
+ 
+-        return list({xi + yi for xi in self.get(x) for yi in self.get(y) if xi + yi <= bound})
++        return list({xi + yi for xi in get(x) for yi in get(y) if xi + yi <= bound})

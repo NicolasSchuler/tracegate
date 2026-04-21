@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ 
+ 
+ def check(k):
+-    x = bisect_left(a, k)
++    x = bisect_left(a, k + 0.5)
+     y = m - bisect_left(b, k)
+     return x >= y
+ 

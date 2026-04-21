@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+-# LUOGU_RID: 117445639
++input()
+ print(input().replace("A", "BB").replace("BB", "A"))

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,5 +6,7 @@
+     print(f"22:{K - 60}")
+ elif K > 59:
+     print(f"22:0{K - 60}")
++elif K < 10:
++    print(f"21:0{K}")
+ else:
+     print(f"21:{K}")

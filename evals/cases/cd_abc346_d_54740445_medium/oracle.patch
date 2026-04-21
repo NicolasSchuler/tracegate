@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+ 
+                 ndp[s[i] ^ k][same | y] = min(ndp[s[i] ^ k][same | y], dp[x][y] + cost)
+     dp = ndp
+-print(min(map(min, dp)))
++print(min(dp[0][1], dp[1][1]))

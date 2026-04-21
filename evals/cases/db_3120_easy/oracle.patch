@@ -1,0 +1,20 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,6 @@
+ 
+ # Import RegEx
+ import re
+-from collections import Counter
+ 
+ 
+ class Solution:
+@@ -17,7 +16,7 @@
+         paragraph = re.subn("[.,!?;']", " ", paragraph.lower())[0].split(" ")
+ 
+         # Remove any '' or words in banned from paragraph list
+-        paragraph = list(filter(lambda x: x in banned + [""], paragraph))
++        paragraph = list(filter(lambda x: x not in banned + [""], paragraph))
+ 
+         # Return most common word in filtered list
+         return Counter(paragraph).most_common(1)[0][0]

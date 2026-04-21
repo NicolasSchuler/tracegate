@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+             ans += 1
+             flag = True
+         else:
+-            if lst[i] > 1 and (lst[i + 1] > 1 or i + 1 == len(lst) - 1):
++            if lst[i] > 1:
+                 ans += 1
+                 flag = True
+             else:

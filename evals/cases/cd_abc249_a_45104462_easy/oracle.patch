@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -92,7 +92,7 @@
+ if a_mod >= d:
+     judge -= d * e
+ else:
+-    judge -= a_mod * f
++    judge -= a_mod * e
+ 
+ if judge > 0:
+     print("Takahashi")

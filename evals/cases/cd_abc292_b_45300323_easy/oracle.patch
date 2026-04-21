@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+     elif s[0] == 2:
+         cnts[player] += 2
+     elif s[0] == 3:
+-        if cnts[player] == 2:
++        if cnts[player] >= 2:
+             print("Yes")
+         else:
+             print("No")

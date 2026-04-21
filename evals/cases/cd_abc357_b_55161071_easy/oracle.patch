@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+         num += 1
+ 
+ 
+-if num % 2 == 1:
++if num > len(string) - num:
+     print(word.upper())
+ else:
+     print(word.lower())

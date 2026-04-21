@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,4 +17,8 @@
+ 
+ N, A, B = LL()
+ D = sorted(set(d % (A + B) for d in LL()))
+-print("Yes" if any((D[(i + 1) % len(D)] - D[i]) % (A + B) > B for i in range(len(D))) else "No")
++print(
++    "Yes"
++    if any((D[(i + 1) % len(D)] - D[i]) % (A + B) > B for i in range(len(D))) or len(D) == 1
++    else "No"
++)

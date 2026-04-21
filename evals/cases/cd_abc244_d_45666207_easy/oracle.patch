@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     if S[i] == T[i]:
+         cnt += 1
+ 
+-if cnt % 2 == 1:
++if cnt == 3 or cnt == 0:
+     print("Yes")
+ else:
+     print("No")

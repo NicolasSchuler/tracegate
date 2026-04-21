@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ def strict_ceil(number):
+     if number == ceil(number):
+-        return number + 1
++        return int(number + 1)
+     return ceil(number)
+ 
+ 

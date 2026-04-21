@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ 
+ j = 0
+ ans = 0
+-for i in range(n - 1):
++for i in range(n):
+     x = A[i] + m
+     while j < n and A[j] < x:
+         ans = max(ans, j - i + 1)

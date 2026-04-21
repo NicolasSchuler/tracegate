@@ -1,0 +1,59 @@
+[run_eval]
+# Base-repair ablation: retry reflection prompt enabled, everything else unchanged.
+# Copy this file, set your own run_id, then pass:
+#   --config <your_file.toml>
+run_id = "replace-me"
+patcher = "openai"
+conditions = "base_repair"
+max_cases = 0
+k = 2
+jobs = 3
+retry_prompt_mode = "full"
+prompt_retry_reflection = true
+prompt_adaptive_stage_b_cot = false
+prompt_repair_method_scaffold = false
+prompt_retry_plan_then_patch = false
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "Qwen3.5-35B-A3B-UD-Q4_K_M"
+compat_profile = "lmstudio_model_yaml"
+allow_reasoning_fallback = true
+enable_thinking = true
+http2 = true
+response_mode = "edits"
+auto_context_window = true
+response_mode_autoswitch = "retry_to_diff"
+temperature = 0.0
+timeout_sec = 600.0
+max_propose_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.context]
+compaction_mode = "auto_overflow"
+compaction_scope = "pytest,files"
+compaction_max_calls = 1
+compaction_target_chars = 18000
+
+[run_eval.adaptive]
+online_policy_mode = "off"
+budget_policy_mode = "off"
+max_helper_calls = 0
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true

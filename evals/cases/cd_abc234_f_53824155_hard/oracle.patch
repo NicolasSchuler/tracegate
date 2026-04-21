@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -35,7 +35,7 @@
+             else:
+                 if j % 2 == 0 and K > j // 2:
+                     K -= (K - j // 2) * 2
+-                elif j & 2 == 1 and K > j // 2:
++                elif j % 2 == 1 and K > j // 2:
+                     K -= (K - j // 2 - 1) * 2 + 1
+                 dp[i][j] += comb[J - 1][K - 1] * dp[i - 1][j - k]
+                 dp[i][j] %= MOD

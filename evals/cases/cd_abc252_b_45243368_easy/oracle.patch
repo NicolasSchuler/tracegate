@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+     M = A[0][0]
+     for i in range(N):
+         if A[i][0] == M:
+-            if A[i][1] in B:
++            if A[i][1] + 1 in B:
+                 print("Yes")
+                 return
+     print("No")

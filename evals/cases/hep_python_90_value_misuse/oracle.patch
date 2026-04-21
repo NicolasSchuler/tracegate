@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     next_smallest([1, 1]) == None
+     """
+     lst = sorted(set(lst))
+-    return None if len(lst) < 3 else lst[1]
++    return None if len(lst) < 2 else lst[1]

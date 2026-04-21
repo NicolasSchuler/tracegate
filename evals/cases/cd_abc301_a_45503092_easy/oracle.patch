@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ N = int(input())
+-S = input().split()
++S = input()
+ 
+ T_W = S.count("T")
+ A_W = S.count("A")

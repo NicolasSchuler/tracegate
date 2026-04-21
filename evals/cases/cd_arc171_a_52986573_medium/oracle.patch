@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     b = N - A
+     c = min((N + 1) // 2, b)
+ 
+-    print("yes" if N - A >= 0 and c * (N - A) >= B else "no")
++    print("Yes" if N - A >= 0 and c * (N - A) >= B else "No")

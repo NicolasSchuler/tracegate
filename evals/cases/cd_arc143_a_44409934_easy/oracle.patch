@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ al = [a, b, c]
+ al.sort()
+ diff = al[2] - al[1]
+-if a < diff:
++if al[0] < diff:
+     print(-1)
+ else:
+     ans = 0

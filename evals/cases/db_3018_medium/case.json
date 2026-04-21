@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3018: syntax error/illegal comment (medium)",
+  "category": "syntax_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "none",
+  "expected_exception": "SyntaxError",
+  "tags": [
+    "debugbench",
+    "syntax_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 14,
+  "source_id": "debugbench_3018"
+}

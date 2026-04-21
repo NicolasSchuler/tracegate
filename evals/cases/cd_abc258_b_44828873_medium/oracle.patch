@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+             tmp = []
+             for i in range(n):
+                 tmp.append(A[(r + dr * i) % n][(c + dc * i) % n])
+-        ans.append("".join(tmp))
++            ans.append("".join(tmp))
+ 
+ ans.sort()
+ print(ans[-1])

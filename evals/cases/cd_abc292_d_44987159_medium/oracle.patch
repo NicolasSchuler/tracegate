@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+         cnt[u] += 1
+         cnt[v] += 1
+ 
+-    groups = lib.get_groups(vertexes)
++    groups = lib.get_groups(range(1, N + 1))
+     matches = True
+ 
+     for group in groups:

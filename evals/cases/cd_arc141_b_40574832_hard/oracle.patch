@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,4 +14,4 @@
+         for k in range(j + 1, len(binm)):
+             dp[i + 1][k] += dp[i][j] * num[k]
+             dp[i + 1][k] %= 998244353
+-print(sum(dp[-1]) % 988244353)
++print(sum(dp[-1]) % 998244353)

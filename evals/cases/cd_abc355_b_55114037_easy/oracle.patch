@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,6 +5,6 @@
+ ans = "No"
+ C = sorted(A + B)
+ for i in range(len(C) - 1):
+-    if (C[i] in A and C[i + 1] in A) or (C[i] in B and C[i + 1] in B):
++    if C[i] in A and C[i + 1] in A:
+         ans = "Yes"
+ print(ans)

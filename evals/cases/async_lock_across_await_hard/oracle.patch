@@ -1,0 +1,16 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,9 +6,10 @@
+
+ async def increment() -> None:
+     global _counter
+-    val = _counter
+-    await asyncio.sleep(0)  # yields without holding lock — lost update
+-    _counter = val + 1
++    async with _lock:
++        val = _counter
++        await asyncio.sleep(0)
++        _counter = val + 1
+
+
+ async def run_increments() -> int:

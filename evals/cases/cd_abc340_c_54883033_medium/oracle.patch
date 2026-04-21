@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ def calc(m):
+     if m < 2:
+         return 0
+-    return m + calc(int(m / 2)) + calc(int((m + 1) / 2))
++    return m + calc(m // 2) + calc((m + 1) // 2)
+ 
+ 
+ print(calc(n))

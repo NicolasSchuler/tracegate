@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,8 +4,6 @@
+ for i in str_list:
+     for j in range(8):
+         if i[j] == "*":
+-            print(counter)
+-            print(j)
+             print(j_list[j] + str(8 - counter))
+             break
+     counter += 1

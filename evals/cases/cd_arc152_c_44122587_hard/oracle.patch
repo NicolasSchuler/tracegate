@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -37,5 +37,5 @@
+ g = 0
+ for i in range(N - 1):
+     g = GCD(g, A[i + 1] - A[i])
+-ans = A[0] % g + A[-1] - A[0]
++ans = min(A[0] % (2 * g), A[-1] % (2 * g)) + A[-1] - A[0]
+ print(ans)

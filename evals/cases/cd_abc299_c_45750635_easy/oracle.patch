@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -48,7 +48,7 @@
+     else:
+         cur += 1
+ 
+-if "-" in s:
++if "-" in s and cur != 0:
+     ans = max(cur, ans)
+ 
+ print(ans)

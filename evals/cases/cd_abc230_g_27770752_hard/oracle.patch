@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -99,7 +99,7 @@
+ 
+ def cnt_pair(a):
+     if a * 2 > n:
+-        return 1
++        return pp[a] > 1
+     cnt = Counter()
+     for i in range(a, n + 1, a):
+         # print(a, pp[i], fac(pp[i]))

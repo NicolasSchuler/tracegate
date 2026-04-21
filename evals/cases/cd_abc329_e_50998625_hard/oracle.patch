@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ n, m = map(int, input().split())
+ s = input()
+ t = input()
+-dp = [[[False] for _ in range(m + 1)] for _ in range(n + 1)]
++dp = [[False for i in range(m + 1)] for j in range(n + 1)]
+ dp[0][0] = True
+ for i in range(n):
+     if i + m <= n:

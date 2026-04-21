@@ -1,0 +1,12 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,8 +3,7 @@
+ 
+ async def _run() -> int:
+     task = asyncio.create_task(asyncio.sleep(0.01, result=3))
+-    task.cancel()
+-    return task.result()
++    return await task
+ 
+ 
+ def read_cancelled() -> int:

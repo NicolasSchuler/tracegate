@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     return list(map(dtype, input().split()))
+ 
+ 
+-(r,) = read(float)
++(r,) = read(str)
+ (x,) = read()
+ # ceil
+ 

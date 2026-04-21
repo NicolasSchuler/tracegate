@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@ def flatten_for_dense(images: np.ndarray) -> np.ndarray:
+     """
+     n, c, h, w = images.shape
+     # Bug: reshapes to (N*C, H*W) instead of (N, C*H*W)
+-    return images.reshape(n * c, h * w)
++    return images.reshape(n, c * h * w)

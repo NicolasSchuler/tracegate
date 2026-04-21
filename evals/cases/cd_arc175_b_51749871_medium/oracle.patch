@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+         else:
+             a_sum -= 1
+         a_min = min(a_sum, a_min)
+-    swap_count = abs(a_min // 2)
++    swap_count = abs(a_min) // 2
+     if abs(a_min) % 2 == 1:
+         swap_count += 1
+ 

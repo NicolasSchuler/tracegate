@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -38,7 +38,7 @@
+                 dp_[i + 1] += dp[i] * (m - i)
+                 dp_[i + 1] %= mod
+                 # print(m-i)
+-            dp_[m + 1] += dp[m + 1] * m
++            dp_[m + 1] += dp[m + 1] * (m + 1)
+             dp_[m + 1] %= mod
+         dp = dp_
+         # print(dp)

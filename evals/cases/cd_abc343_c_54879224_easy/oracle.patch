@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ 
+ n = int(input())
+ ans = 0
+-for i in range(n):
++for i in range(n + 10):
+     if i**3 <= n and isok(i**3):
+         ans = i**3
+     elif i**3 > n:

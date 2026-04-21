@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -56,7 +56,7 @@
+                 # exclude i
+                 dp[i][min(r, j)][k] = (dp[i][min(r, j)][k] + dp[i - 1][j][k]) % MOD
+ 
+-    return sum(dp[N][j][K] for j in range(N)) % MOD
++    return sum(dp[N][j][K] for j in range(N + 1)) % MOD
+ 
+ 
+ def main():

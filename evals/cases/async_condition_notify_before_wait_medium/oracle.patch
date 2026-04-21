@@ -1,0 +1,18 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,9 +19,12 @@
+     cond = asyncio.Condition()
+     shared: dict[str, int] = {}
+     # Bug: producer runs to completion (notify) before consumer enters wait(),
+-    # so the notification is lost and consumer blocks forever.
+-    await producer(cond, shared)
+-    return await asyncio.wait_for(consumer(cond, shared), timeout=0.5)
++    # so the notification is lost and consumer blocks forever.  Fix: start
++    # consumer as a task first so it enters wait() before producer notifies.
++    task = asyncio.create_task(consumer(cond, shared))
++    await asyncio.sleep(0)  # let consumer acquire lock and enter wait()
++    await producer(cond, shared)
++    return await asyncio.wait_for(task, timeout=0.5)
+
+
+ def run() -> int:

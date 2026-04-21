@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,5 +23,5 @@
+                 if word1[i - 1] == word2[j - 1]:
+                     dp[i][j] = dp[i - 1][j - 1]
+                 else:
+-                    dp[i][j] = self.min(dp[i][j - 1], dp[i - 1][j]) + 1
++                    dp[i][j] = min(dp[i][j - 1], dp[i - 1][j]) + 1
+         return dp[-1][-1]

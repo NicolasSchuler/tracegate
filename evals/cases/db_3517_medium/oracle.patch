@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ 
+ class Solution:
+     def minOperationsMaxProfit(
+-        self, customers: UndefinedList[int], boardingCost: int, runningCost: int
++        self, customers: List[int], boardingCost: int, runningCost: int
+     ) -> int:
+         maxProfit = -1
+         ans = i = curRounds = curCustomers = rem = 0

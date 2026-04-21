@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,6 +30,8 @@
+             n -= mask
+         if ch == "1":
+             min_val -= mask
++            ans += mask
++            n -= mask
+         mask >>= 1
+     return ans
+ 

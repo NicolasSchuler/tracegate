@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -37,6 +37,8 @@
+                     w.add(l.pop())
+                 # パンチをカウント
+                 cnt += 1
++                # 右端をリセット
++                r = inf
+         # 壊されていない壁リストに追加
+         l.append(wn)
+ # 残った壁を壊す

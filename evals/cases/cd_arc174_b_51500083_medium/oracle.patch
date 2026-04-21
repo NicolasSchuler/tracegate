@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -62,4 +62,4 @@
+             l, r = mid + 1, r
+ 
+     best_cost = min(best_cost, best * brr[4] + brr[3])
+-    print(best_cost, "BEST")
++    print(best_cost)  # , "BEST")

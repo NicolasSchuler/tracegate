@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,6 +6,6 @@
+ for n in range(1, 4):
+     for ss in itertools.combinations(A, n):
+         m = sum(ss)
+-        if m < W:
++        if m <= W:
+             ans.add(m)
+ print(len(ans))

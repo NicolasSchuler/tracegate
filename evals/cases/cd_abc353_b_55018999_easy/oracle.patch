@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,10 +4,8 @@
+ for x in range(N):
+     if A[x] + i <= K:
+         i = i + A[x]
+-        print(i, "now1")
+     elif A[x] + i > K:
+         num += 1
+         i = 0
+         i = i + A[x]
+-        print(i, "now2")
+ print(num + 1)

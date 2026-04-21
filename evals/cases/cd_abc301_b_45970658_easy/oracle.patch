@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+ i_bef = 0
+ # print(a)
+ for i in a:
+-    print(i)
++    # print(i)
+     if i_bef == 0:
+         b.append(i)
+         i_bef = i

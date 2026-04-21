@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,6 +13,6 @@
+         cnt2 = Counter(t)
+         sm = 0
+         cnt = cnt1 - cnt2 + (cnt2 - cnt1)
+-        for i in undf_obj.values():
++        for i in cnt.values():
+             sm += i
+         return sm

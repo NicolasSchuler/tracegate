@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,4 +16,4 @@
+     for i in s.split(' '):
+         if i.isdigit():
+             lis.append(int(i))
+-    return n - sum(lis) - 1
++    return n - sum(lis)

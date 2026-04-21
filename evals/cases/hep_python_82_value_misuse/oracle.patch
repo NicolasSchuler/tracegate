@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     l = len(string)
+     if l == 0 or l == 1:
+         return False
+-    for i in range(3, l):
++    for i in range(2, l):
+         if l % i == 0:
+             return False
+     return True

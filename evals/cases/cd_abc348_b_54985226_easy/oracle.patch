@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,4 +10,4 @@
+         if dist < math.sqrt((x - x_i) ** 2 + (y - y_i) ** 2):
+             dist = math.sqrt((x - x_i) ** 2 + (y - y_i) ** 2)
+             ans = i
+-        print(ans)
++    print(ans)

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,9 +4,7 @@
+ idx = 0
+ for i in range(len(s)):
+     for j in range(idx, len(t)):
+-        print(i, j)
+         if s[i] == t[j]:
+-            print("A")
+             ans.append(j + 1)
+             idx = j + 1
+             break

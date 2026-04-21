@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -56,7 +56,7 @@
+     vl = state.sumrange(0, a - 1)
+     vr = state.sumrange(a + 1, N)
+     if ctl + vl > K:
+-        x = state.lower_bound(K - ctl)
++        x = state.lower_bound(K - ctl + 1)
+         ind = inda[x]
+         for j in range(i, ind + 1):
+             ans[j] = A[ind - j + i]

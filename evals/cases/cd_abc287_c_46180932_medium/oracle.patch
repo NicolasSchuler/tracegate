@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -45,7 +45,7 @@
+ for i in unionFind.parents:
+     if i < 0:
+         count_parent += 1
+-if count_parent == 1 and result_flag and (N == 1 or set(counter) == set([1, 2])):
++if count_parent == 1 and result_flag and (N == 2 or set(counter) == set([1, 2])):
+     print("Yes")
+ else:
+     print("No")

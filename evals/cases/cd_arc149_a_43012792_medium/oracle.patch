@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+         if not c:
+             l[0] = 9
+             l[1] = length
+-            break
++            continue
+         for i in range(2, 10):
+             if not (c * i) % M:
+                 l[0] = i

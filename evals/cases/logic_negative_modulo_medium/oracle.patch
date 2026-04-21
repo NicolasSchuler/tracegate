@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@ def wrap_index(index: int, length: int) -> int:
+     """
+     # Bug: uses int() truncation toward zero instead of Python's floor modulo.
+     # For negative numbers, int(-1/5) = 0, so this returns -1 + 0*5 = -1.
+-    return index - int(index / length) * length
++    return index % length
+
+
+ def circular_get(buf: List[int], index: int) -> int:

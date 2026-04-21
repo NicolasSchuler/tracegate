@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,5 +12,5 @@
+     >>> prod_signs([]) == None
+     """
+     if not arr: return None
+-    prod = 0 if 0 in arr else (-1) ** 2 * len(list(filter(lambda x: x < 0, arr)))
++    prod = 0 if 0 in arr else (-1) ** len(list(filter(lambda x: x < 0, arr)))
+     return prod * sum([abs(i) for i in arr])

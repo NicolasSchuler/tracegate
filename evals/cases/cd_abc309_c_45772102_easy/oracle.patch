@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,3 +15,5 @@
+             print(AB[i - 1][0] + 1)
+             exit(0)
+     medicines -= AB[i][1]
++# i == N - 1までprintされなかった
++print(AB[i][0] + 1)

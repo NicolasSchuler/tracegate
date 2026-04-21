@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+     N = int(input())
+     for n in range(N):
+         s = input()
+-        if (not (s[0] in pattern1)) or (not (s[1] in pattern2)) or (not (s in pat_set)):
++        if (not (s[0] in pattern1)) or (not (s[1] in pattern2)) or (s in pat_set):
+             print("No")
+             return
+ 

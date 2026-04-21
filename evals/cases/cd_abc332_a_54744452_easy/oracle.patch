@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+ 
+ pq = [x * y for x, y in zip(p, q)]
+ amount = int(sum(pq))
+-print(amount if amount > s else amount + k)
++print(amount if amount >= s else amount + k)

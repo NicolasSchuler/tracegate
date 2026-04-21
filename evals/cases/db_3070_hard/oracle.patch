@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -51,7 +51,7 @@
+         for j in z:
+             if z[j]:
+                 for i in range(n):
+-                    if vis[i] == 0 and nums1[i] == j and nums2[i] == j and x:
++                    if vis[i] == 0 and nums1[i] != j and nums2[i] != j and x:
+                         if flag:
+                             ans += i
+                             x -= 1

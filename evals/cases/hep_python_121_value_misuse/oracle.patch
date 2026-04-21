@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+     solution([3, 3, 3, 3, 3]) ==> 9
+     solution([30, 13, 24, 321]) ==>0
+     """
+-    return sum([x for idx, x in enumerate(lst) if idx%2==1 and x%2==1])
++    return sum([x for idx, x in enumerate(lst) if idx%2==0 and x%2==1])

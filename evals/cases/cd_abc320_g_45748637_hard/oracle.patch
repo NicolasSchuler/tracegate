@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -183,7 +183,7 @@
+     # ここで時間について二分探索しながら
+     # 辺の追加を行ってマッチングが成立する
+     # 最小の時間を求めるのか
+-    res = min(res, meguru_bisearch(-1, len(n2t[j]), j))
++    res = min(res, meguru_bisearch(-1, max(n2t[j]), j))
+ 
+ if res == INF:
+     print(-1)

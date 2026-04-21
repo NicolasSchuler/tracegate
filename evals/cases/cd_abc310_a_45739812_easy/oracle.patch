@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ res = P
+ 
+ for d in D:
+-    if (p := P - Q + d) < res:
++    if (p := Q + d) < res:
+         res = p
+ 
+ print(res)

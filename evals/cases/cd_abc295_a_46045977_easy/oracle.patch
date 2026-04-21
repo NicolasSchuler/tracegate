@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ L = list(map(str, input().split()))
+ ans = "No"
+ for i in range(len(L)):
+-    if L[i] == "and" or L[i] == "not" and L[i] == "that" and L[i] == "the" and L[i] == "you":
++    if L[i] == "and" or L[i] == "not" or L[i] == "that" or L[i] == "the" or L[i] == "you":
+         ans = "Yes"
+         break
+ print(ans)

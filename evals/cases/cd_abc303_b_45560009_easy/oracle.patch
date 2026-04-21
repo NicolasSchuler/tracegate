@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+         hunaka[x - 1][y - 1] = 0
+         hunaka[y - 1][x - 1] = 0
+ ans = sum(sum(row) for row in hunaka) - n
+-print(ans / 2)
++print(ans // 2)

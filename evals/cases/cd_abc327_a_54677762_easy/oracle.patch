@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ f = False
+ for i in range(N - 1):
+-    if S[i] == "a" and S[i + 1] == "b":
++    if (S[i] == "a" and S[i + 1] == "b") or (S[i] == "b" and S[i + 1] == "a"):
+         f = True
+ 
+ if f:

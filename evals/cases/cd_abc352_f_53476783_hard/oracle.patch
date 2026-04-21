@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -42,7 +42,6 @@
+     cnt = bit.bit_count()
+     bitset[cnt].append(bit)
+ 
+-
+ ans = [-1] * n
+ for i in range(len(g)):
+     now = 0
+@@ -75,6 +74,6 @@
+         # print(ok)
+         # print(st[i])
+         for s in st[i]:
+-            ans[s] = s + ok[0] + 1
++            ans[s] = cost[s] + ok[0] + 1
+ 
+ print(*ans)

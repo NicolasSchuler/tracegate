@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,11 +9,12 @@
+ 
+ class Solution:
+     def stoneGameVI(self, a: List[int], b: List[int]) -> int:
+-        combines = [(a[i] + c[i], a[i], b[i]) for i in range(len(a))]
+-        combines.sort(reverse=True)
++        # hurt other enemy rather than self collecting to max
++        combines = [(a[i] + b[i], a[i], b[i]) for i in range(len(a))]
++        combines.sort(reverse=True)  # why we can sort? -> because we can pick any stone we want
+         bobPoints = sum(b)
+         alicePoints = 0
+-        for i in range(1, len(a), 2):
++        for i in range(0, len(a), 2):
+             alicePoints += combines[i][1]
+             bobPoints -= combines[i][2]
+         if alicePoints > bobPoints:

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -86,8 +86,6 @@
+     fct.append((fct[-1] * i) % mod)
+ # print(fct)
+ for i in range(n):
+-    ans *= N
+-    ans %= mod
+     p[i] *= inv
+     p[i] %= mod
+ # print(ans)

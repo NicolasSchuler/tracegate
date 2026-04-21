@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+
+
+ async def inner() -> int:
+-    async with lock:
++    if True:  # lock already held by caller
+         await asyncio.sleep(0)
+         return 42
+

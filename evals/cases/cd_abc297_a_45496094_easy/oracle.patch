@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ t = list(map(int, input().split()))
+ for i in range(n - 1):
+     if t[i + 1] - t[i] <= d:
+-        print(t[i])
++        print(t[i + 1])
+         break
+ else:
+     print(-1)

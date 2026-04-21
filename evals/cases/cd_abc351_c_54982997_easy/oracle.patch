@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,5 +13,7 @@
+         while tfe and tfe[-1] == temp:
+             temp += 1
+             tfe.pop()
++        tfe.append(temp)
+     else:
+         tfe.append(temp)
++print(len(tfe))

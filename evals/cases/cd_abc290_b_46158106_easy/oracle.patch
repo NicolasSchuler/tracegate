@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ for i in range(n):
+     if s[i] == "o":
+         cnt += 1
+-        if cnt >= k:
++        if cnt > k:
+             ans_list.append("x")
+         else:
+             ans_list.append("o")

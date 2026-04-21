@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ # B - Balls of Three Colors
+ 
+-MAX = 10**8
++MAX = 10**8 + 1
+ 
+ 
+ def solve(r, g, b):

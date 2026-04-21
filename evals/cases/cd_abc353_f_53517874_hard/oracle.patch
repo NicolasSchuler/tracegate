@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -66,5 +66,5 @@
+         if x > y:
+             x, y = y, x
+         ans = min(ans, y * 2 + d + e)
+-        ans = min(ans, x * 2 + (y - x) * (k + 1) + d + e)
++        ans = min(ans, x * 2 + (y - x) // 2 * (k + 1) + d + e)
+ print(ans)

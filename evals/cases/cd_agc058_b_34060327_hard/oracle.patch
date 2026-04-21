@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -80,4 +80,4 @@
+         ndp[j + 1] %= MOD
+     dp = ndp
+ 
+-print(dp[n], dp)
++print(dp[n])

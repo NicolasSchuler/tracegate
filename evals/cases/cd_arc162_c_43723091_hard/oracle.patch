@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -104,7 +104,7 @@
+         if ecount_list[i] == 0 and len(num_list[i]) == k and k not in num_list[i]:
+             print("Alice")
+             break
+-        elif ecount_list[i] == 1 and len(num_list[i]) == k - 1 and k not in num_list[i]:
++        elif ecount_list[i] == 1 and k - 1 <= len(num_list[i]) <= k and k not in num_list[i]:
+             print("Alice")
+             break
+     else:

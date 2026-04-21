@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     v[x - 1] = y
+ for i in range(n - 1):
+     t += v[i]
+-    if t > i:
++    if t > a[i]:
+         t -= a[i]
+     else:
+         print("No")

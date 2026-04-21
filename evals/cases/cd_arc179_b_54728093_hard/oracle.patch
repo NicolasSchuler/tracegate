@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ pr = [[-1 for i in range(m)] for j in range(s)]
+ for i in range(s):
+     for j in range(m):
+-        if i & (1 << j) == 0 or (s & (1 << j) != 0 and x[j] == j + 1):
++        if i & (1 << j) == 0 or (i & (1 << j) != 0 and x[j] == j + 1):
+             c = (i | xi[j]) - xi[j]
+             c = c | (1 << j)
+             pr[i][j] = c

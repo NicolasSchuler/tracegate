@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+             grid[i].sort()
+         n = len(grid[0])
+         res = 0
+-        for j in range(0, n + 1):
++        for j in range(0, n):
+             ans = 0
+             for i in range(0, len(grid)):
+                 ans = max(ans, grid[i].pop())

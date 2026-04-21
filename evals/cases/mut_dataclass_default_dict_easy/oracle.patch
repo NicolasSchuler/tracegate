@@ -1,0 +1,14 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,9 +1,9 @@
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ 
+ 
+ @dataclass
+ class Metrics:
+-    counters: dict[str, int] = {}
++    counters: dict[str, int] = field(default_factory=dict)
+ 
+ 
+ def bump(metrics: Metrics, name: str) -> int:

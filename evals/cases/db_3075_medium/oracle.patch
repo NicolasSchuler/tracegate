@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,9 +11,9 @@
+     def pivotArray(self, nums: List[int], pivot: int) -> List[int]:
+         lst, val, tmp = [], [], []
+         for i in nums:
+-            if i < pivot:
++            if i == pivot:
+                 val.append(i)
+-            elif i == pivot:
++            elif i < pivot:
+                 lst.append(i)
+             else:
+                 tmp.append(i)

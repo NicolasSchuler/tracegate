@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,3 +7,5 @@
+     print(a + 1)
+ elif a % 4 == 3:
+     print(a + 3)
++elif a % 4 == 0:
++    print(a + 2)

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,8 +25,7 @@
+     b = [(val, i + 1) for i, val in enumerate(b)]
+     a.sort(reverse=True)
+     b.sort(reverse=True)
+-    print(a)
+-    print(b)
++
+     s = set()
+     for _ in range(L):
+         c, d = map(int, input().split())

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,4 +16,4 @@
+     >>> remove_vowels('zbcd')
+     'zbcd'
+     """
+-    return "".join([s for s in text if s.lower() not in ["a", "e", "i", "o", "u", "w", "y"]])
++    return "".join([s for s in text if s.lower() not in ["a", "e", "i", "o", "u"]])

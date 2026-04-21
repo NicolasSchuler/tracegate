@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ C = [0] * 24
+ for i in range(N):
+     W, X = map(int, input().split())
+-    C[X] = W
++    C[X] += W
+ B = 0
+ 
+ for j in range(24):

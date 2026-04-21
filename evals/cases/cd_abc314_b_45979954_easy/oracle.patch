@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,4 +22,4 @@
+ 
+ print(len(R))
+ for r in R:
+-    print(r, end="")
++    print(r, end=" ")

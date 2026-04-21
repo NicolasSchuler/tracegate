@@ -1,0 +1,26 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,6 +9,12 @@
+ 
+ class Solution:
+     def fib(self, n: int) -> int:
++        def fib(n):
++            if Fib[n] != -1:
++                return Fib[n]
++            Fib[n] = fib(n - 1) + fib(n - 2)
++            return Fib[n]
++
+         if n == 0:
+             return 0
+         if n == 1:
+@@ -17,9 +23,3 @@
+         Fib[0] = 0
+         Fib[1] = 1
+         return fib(n)
+-
+-    def fib(n):
+-        if Fib[n] != -1:
+-            return Fib[n]
+-        Fib[n] = fib(n - 1) + fib(n - 2)
+-        return Fib[n]

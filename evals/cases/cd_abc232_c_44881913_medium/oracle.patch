@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,11 +7,13 @@
+ for _ in range(m):
+     u, v = map(int, input().split())
+     g1[u - 1][v - 1] = 1
++    g1[v - 1][u - 1] = 1
+ 
+ g2 = [[0 for _ in range(n)] for _ in range(n)]
+ for _ in range(m):
+     u, v = map(int, input().split())
+     g2[u - 1][v - 1] = 1
++    g2[v - 1][u - 1] = 1
+ 
+ isok = False
+ for p in itertools.permutations(range(n), n):

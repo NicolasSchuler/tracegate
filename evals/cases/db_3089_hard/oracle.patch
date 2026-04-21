@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+                 for ind in range(0, val + 1):
+                     p += dfs(i + 1, ind) % (10**9 + 7)
+             else:
+-                for ind in range(val + 1, i + 1):
++                for ind in range(val + 1, i + 2):
+                     p += dfs(i + 1, ind) % (10**9 + 7)
+             mem[i, val] = p
+             return p

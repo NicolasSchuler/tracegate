@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+             nex = 1
+             while not b:
+                 nex += 1
+-                if j + nex >= N:
++                if j + nex > N:
+                     break
+                 if S[0:j] < S[j : j + nex]:
+                     print("Yes")

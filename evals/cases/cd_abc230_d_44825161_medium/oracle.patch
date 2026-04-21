@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+     else:
+         if punch_length < l:
+             ans += 1
+-            punch_length == r + D - 1
++            punch_length = r + D - 1
+ 
+ 
+ print(ans)

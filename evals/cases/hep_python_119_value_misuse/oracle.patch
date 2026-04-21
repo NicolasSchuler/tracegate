@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,4 +27,4 @@
+ 
+     S1 = lst[0] + lst[1]
+     S2 = lst[1] + lst[0]
+-    return 'yes' if check(S1) or check(S2) else 'no'
++    return 'Yes' if check(S1) or check(S2) else 'No'

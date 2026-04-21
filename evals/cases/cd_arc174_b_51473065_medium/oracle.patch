@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+         if P[3] < P[4] / 2:
+             ans = P[3] * abs(K)
+         else:
+-            ans = P[4] * abs(K) // 2
++            ans = P[4] * (abs(K) // 2)
+             if K % 2 != 0:
+                 ans += min(P[3], P[4])
+ 

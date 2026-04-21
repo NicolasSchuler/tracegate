@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,6 +6,6 @@
+ while i < N:
+     sum += H[i]
+     if sum > M:
+-        print(i)
+         break
+     i += 1
++print(i)

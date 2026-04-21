@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,6 +3,6 @@
+ S = input()
+ 
+ if S in seikai:
+-    print("Yse")
++    print("Yes")
+ else:
+     print("No")

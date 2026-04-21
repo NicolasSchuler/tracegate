@@ -1,0 +1,19 @@
+{
+  "description": "Async function called without await inside an async wrapper, coroutine used as result.",
+  "category": "async_temporal",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "TypeError",
+  "tags": [
+    "asyncio",
+    "coroutine"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

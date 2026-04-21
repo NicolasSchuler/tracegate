@@ -1,0 +1,6 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ def read_port(config: dict[str, int]) -> int:
+-    return config["prt"]
++    return config["port"]

@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -58,5 +58,5 @@
+         dfs(nex, hp - 1)
+ 
+ 
+-dfs(0, 0)
++dfs(0, -1)
+ print(count)

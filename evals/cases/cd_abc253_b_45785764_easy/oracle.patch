@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,5 +7,5 @@
+     for col in range(w):
+         if s[row][col] == "o":
+             o.append([row, col])
+-hirai = abs(o[0][0] - o[1][0]) + abs(o[1][0] - o[1][1])
++hirai = abs(o[0][0] - o[1][0]) + abs(o[0][1] - o[1][1])
+ print(hirai)

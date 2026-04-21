@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+ if (
+     all(len(r) == 9 for r in row)
+     and all(len(c) == 9 for c in col)
+-    and all(len(b) == 9 for b in block)
++    and all(all(len(b) == 9 for b in br) for br in block)
+ ):
+     print("Yes")
+ else:

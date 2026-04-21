@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -34,7 +34,7 @@
+     now = g
+     D = dict()
+     M = int(mod**0.5) + 1
+-    for j in range(M):
++    for j in range(M + 1):
+         D[now] = j
+         now = f(now, A, B, mod)
+ 

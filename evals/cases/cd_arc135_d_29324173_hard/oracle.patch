@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -51,7 +51,7 @@
+ ans_sum = 0
+ for i in range(h):
+     for j in range(w):
+-        ans[i][j] *= (-1) ** (h + w)
++        ans[i][j] *= (-1) ** (i + j)
+         ans_sum += abs(ans[i][j])
+ 
+ print(ans_sum)

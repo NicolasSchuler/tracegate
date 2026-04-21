@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,6 +14,6 @@
+             gc = int(math.gcd(gc, i))
+         nums.sort()
+         for i in range(len(nums)):
+-            if nums[i] % gc == 0:
++            if gc % nums[i] == 0:
+                 return i
+         return -1

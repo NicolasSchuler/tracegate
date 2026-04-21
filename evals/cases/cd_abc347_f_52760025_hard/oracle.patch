@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -97,7 +97,7 @@
+             mx = mxColumns[y3 - M]
+             if mx > a2:
+                 a2 = mx
+-            a3 = mxULss[N][y3]
++            a3 = mxURss[N][y3]
+             area = a1 + a2 + a3
+             #        print('# (x1, x3):', (x1, x3), '/ (a1, a2, a3):', (a1, a2, a3), '/ area:', area)
+             if area > ans:

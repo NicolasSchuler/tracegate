@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,6 @@
+ N, D = map(int, input().split())
+ A = [int(i) for i in input().split()]
++
+ 
+ mod = 998244353
+ S = 1 << (2 * D + 2)
+@@ -21,7 +22,7 @@
+             if s & 1 == 0:
+                 continue
+             t = s >> 1
+-            for diff in range(0, 2 * D + 2):
++            for diff in range(0, 2 * D + 1):
+                 if t >> diff & 1:
+                     continue
+                 dp[i + 1][t | (1 << diff)] += dp[i][s]

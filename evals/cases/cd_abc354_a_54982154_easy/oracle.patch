@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ P = 0
+ i = 0
+ 
+-while N > P:
++while N >= P:
+     P += 2**i
+     i += 1
+ print(i)

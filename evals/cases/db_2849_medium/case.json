@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #2849: syntax error/illegal indentation (medium)",
+  "category": "syntax_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "none",
+  "expected_exception": "IndentationError",
+  "tags": [
+    "debugbench",
+    "syntax_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 4,
+  "source_id": "debugbench_2849"
+}

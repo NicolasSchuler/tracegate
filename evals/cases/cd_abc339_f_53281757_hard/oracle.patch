@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ N = int(input())
+ A = [int(input()) for i in range(N)]
+ 
+-MOD = [998244353, 1000000007, 1000000009]
++MOD = [998244353, 1000000007, 1000000009, 1000000021]
+ M = len(MOD)
+ 
+ C = [[A[i] % MOD[c] for i in range(N)] for c in range(M)]

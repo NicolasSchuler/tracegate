@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+ 
+ lis = []
+ if l % 2 == 1:
+-    lis.append([l])
++    lis.append([l, l + 1])
+     l = l + 1
+ 
+ while l != r:

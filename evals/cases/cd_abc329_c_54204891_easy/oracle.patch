@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+         ch = s[i]
+         length = 1
+         result.add((ch, length))
+-result = len(result)
++print(len(result))

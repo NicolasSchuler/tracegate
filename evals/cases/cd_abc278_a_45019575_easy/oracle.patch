@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,4 +5,4 @@
+ for i in range(k):
+     li.pop(0)
+     li.append(0)
+-print(li)
++print(*li)

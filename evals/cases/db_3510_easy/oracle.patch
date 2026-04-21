@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,13 +8,13 @@
+ 
+ 
+ class Solution:
+-    def findTheArrayConcVal(self, nums) -> int:
++    def findTheArrayConcVal(self, nums: List[int]) -> int:
+         i = 0
+         c = 0
+         j = len(nums) - 1
+         while i <= j:
+             if i == j:
+-                c = c + num[i]
++                c = c + nums[i]
+                 break
+             s = str(nums[i]) + str(nums[j])
+             c = c + int(s)

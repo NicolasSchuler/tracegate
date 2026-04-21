@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ s = 0
+ for i in c:
+     if i not in ds:
+-        print(p[0])
++        s += p[0]
+     else:
+         s += ds[i]
+ print(s)

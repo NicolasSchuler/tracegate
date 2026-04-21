@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+     for i in range(N * 2):
+         if X[i + 1] == -1:
+             X[i + 1] = 1
+-            K -= 2
++            K += 2
+             if K == 0:
+                 break
+ 

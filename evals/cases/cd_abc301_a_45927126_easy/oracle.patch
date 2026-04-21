@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     if i == "T":
+         cnt += 1
+ 
+-if cnt > N - cnt:
++if cnt > N - cnt or (cnt == N - cnt and S[-1] == "A"):
+     print("T")
+ else:
+     print("A")

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+ 
+ 
+ MOD = 998244353
+-H, W, K = map(int, input().split())
++W, H, K = map(int, input().split())
+ dp = [[0, 0, 0, 0]]
+ x1, y1, x2, y2 = map(int, input().split())
+ if x1 != x2:

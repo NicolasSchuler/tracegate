@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+ while 0 <= right and S[right] == "a":
+     right -= 1
+ 
+-if left >= N - 1 - right:
++if left > N - 1 - right:
+     print("No")
+     exit()
+ 

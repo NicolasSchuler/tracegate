@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,4 +22,4 @@
+ # 割り切れること
+ assert sum(C) == 0
+ 
+-print(" ".join(map(str, answer[-M:])))
++print(" ".join(map(str, answer[-(M + 1) :])))

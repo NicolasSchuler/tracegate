@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+         flag_c = 1
+ 
+     if flag_a + flag_b + flag_c == 3:
+-        print(i)
++        print(i + 1)
+         break

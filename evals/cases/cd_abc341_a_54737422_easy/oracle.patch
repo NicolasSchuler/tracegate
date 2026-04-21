@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ n = int(input())
+ a = ""
+ 
+-for i in range(2 * n):
++for i in range(2 * n + 1):
+     a += "1" if i % 2 == 0 else "0"
+ 
+ print(a)

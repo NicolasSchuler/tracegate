@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -108,6 +108,9 @@
+             if (bit >> 3) & 1:
+                 y -= 1
+ 
++            if x <= 0 or y <= 0:
++                continue
++
+             if popcount(bit) % 2 == 1:
+                 add -= f.comb(x * y, K)
+             else:

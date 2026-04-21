@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+         if A[i][j] == 0:
+             s += "."
+         else:
+-            s += chr(ord("A") + A[i][j] + 1)
++            s += chr(ord("A") + A[i][j] - 1)
+     strings.append(s)
+ 
+ for s in strings:

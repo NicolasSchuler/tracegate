@@ -1,0 +1,3881 @@
+diff --git a/config.py b/config.py
+index 9a27643..581bd78 100644
+--- a/config.py
++++ b/config.py
+@@ -1,10 +1,10 @@
+ import argparse
+ 
+ # --- Dataset Path Configuration ---
+-DATASET_PATHS = {
+-    "humaneval": {
+-        "data_path": "./datasets/human_eval/data/test.jsonl", # Please replace with the actual local path
+-        "eval_module": "datasets.human_eval.execution" # Python import path for the evaluation module
++DATASET_PATHS = {
++    "humaneval": {
++        "data_path": "./datasets/human_eval/data/test.jsonl", # Please replace with the actual local path
++        "eval_module": "datasets.human_eval.execution" # Python import path for the evaluation module
+     },
+     "humanevalplus": {
+         "data_path": "./datasets/human_eval_plus/data/test-00000-of-00001-5973903632b82d40.parquet", # Please replace with the actual local path
+@@ -14,12 +14,16 @@ DATASET_PATHS = {
+         "data_path": "./datasets/BigCodeBench/data/v0.1.4-00000-of-00001.parquet",   # Please replace with the actual local path
+         "eval_module": "datasets.BigCodeBench.evaluation" # Python import path for the evaluation module
+     },
+-    "classeval": { # Added eval_module for ClassEval
+-        "data_path": "./datasets/ClassEval/data/test-00000-of-00001-5c45fa6e45572491.parquet",      # Please replace with the actual local path
+-        "eval_module": "datasets.ClassEval.evaluation" # Python import path for the evaluation module
+-    }
+-    # Add other datasets here, ensure they have 'data_path' and 'eval_module'
+-}
++    "classeval": { # Added eval_module for ClassEval
++        "data_path": "./datasets/ClassEval/data/test-00000-of-00001-5c45fa6e45572491.parquet",      # Please replace with the actual local path
++        "eval_module": "datasets.ClassEval.evaluation" # Python import path for the evaluation module
++    },
++    "llmdebug": {
++        "data_path": "./datasets/llmdebug/data/test.jsonl",
++        "eval_module": "datasets.llmdebug.evaluation"
++    }
++    # Add other datasets here, ensure they have 'data_path' and 'eval_module'
++}
+ 
+ # Note: Please ensure the above paths point to the actual location of your dataset files on your local machine.
+ 
+@@ -31,13 +35,15 @@ def setup_arg_parser():
+     parser = argparse.ArgumentParser(description="A framework for running code generation and repair experiments")
+     parser.add_argument('-m', '--model', type=str, default='gemini-1.5-flash-preview-0514', help='The name of the model to use')
+     # Update choices to match the keys in DATASET_PATHS
+-    parser.add_argument('-d', '--dataset', type=str, required=True, choices=list(DATASET_PATHS.keys()), help='The dataset to use')
+-    parser.add_argument('--no-instrumentation', action='store_true', help='Disable the code instrumentation step')
++    parser.add_argument('-d', '--dataset', type=str, required=True, choices=list(DATASET_PATHS.keys()), help='The dataset to use')
++    parser.add_argument('--dataset-path', type=str, default=None, help='Override the dataset path from DATASET_PATHS')
++    parser.add_argument('--no-instrumentation', action='store_true', help='Disable the code instrumentation step')
+     parser.add_argument('--no-two-step-repair', action='store_true', help='Disable the two-step repair process and use a single-step repair instead')
+     parser.add_argument('--start-index', type=int, default=0, help='The index of the problem in the dataset to start processing from')
+     parser.add_argument('--max-problems', type=int, default=-1, help='The maximum number of problems to process (-1 means process all)')
+-    parser.add_argument('--max-debug-attempts', type=int, default=5, help='The maximum number of debugging attempts per problem')
+-    parser.add_argument('--max-no-improvement-streak', type=int, default=2, help='The threshold for stopping debugging after consecutive attempts with no improvement')
+-    parser.add_argument('--timeout', type=int, default=10, help='The timeout for code execution in seconds')
+-    parser.add_argument('-o', '--output-file', type=str, default=None, help='Specify the path and name for the output CSV file')
+-    return parser
++    parser.add_argument('--max-debug-attempts', type=int, default=5, help='The maximum number of debugging attempts per problem')
++    parser.add_argument('--max-no-improvement-streak', type=int, default=2, help='The threshold for stopping debugging after consecutive attempts with no improvement')
++    parser.add_argument('--timeout', type=int, default=10, help='The timeout for code execution in seconds')
++    parser.add_argument('-o', '--output-file', type=str, default=None, help='Specify the path and name for the output CSV file')
++    parser.add_argument('--llmdebug-metrics-path', type=str, default=None, help='Optional JSON sidecar path for timeout-safe llmdebug telemetry')
++    return parser
+diff --git a/datasets/llmdebug/__init__.py b/datasets/llmdebug/__init__.py
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/datasets/llmdebug/__init__.py
+@@ -0,0 +1 @@
++
+diff --git a/datasets/llmdebug/evaluation.py b/datasets/llmdebug/evaluation.py
+new file mode 100644
+index 0000000..f737ba5
+--- /dev/null
++++ b/datasets/llmdebug/evaluation.py
+@@ -0,0 +1,42 @@
++from reporting import build_llmdebug_failure_feedback
++from src.traceRunner import run_llmdebug_pytest_case
++
++
++def check_correctness(problem_data: dict, generated_code: str, timeout_seconds: int = 10) -> dict:
++    result = run_llmdebug_pytest_case(problem_data, generated_code, timeout_seconds=timeout_seconds)
++    passed_count = int(result.get("passed_count", 0) or 0)
++    failed_count = int(result.get("failed_count", 0) or 0)
++    total_count = int(result.get("total_count", 0) or 0)
++    stdout_text = str(result.get("stdout") or "").strip()
++    stderr_text = str(result.get("stderr") or "").strip()
++    error_text = str(result.get("error") or "").strip()
++
++    exitcode = int(result.get("exitcode", 1) or 0)
++    result_text = build_llmdebug_failure_feedback(
++        passed_count=passed_count,
++        failed_count=failed_count,
++        total_count=total_count,
++        exitcode=exitcode,
++        timed_out=bool(result.get("timed_out", False)),
++        stdout_text=stdout_text,
++        stderr_text=stderr_text,
++        error_text=error_text,
++    )
++    if not result_text:
++        result_text = "All tests passed." if exitcode == 0 else "Pytest failed without output."
++
++    return {
++        "passed": exitcode == 0,
++        "passed_count": passed_count,
++        "failed_count": failed_count,
++        "total_count": total_count,
++        "result": result_text,
++        "status": "success" if exitcode == 0 else ("timeout" if result.get("timed_out") else "failure"),
++        "prints_output": result_text,
++        "_debug_process_exit_code": exitcode,
++        "_debug_timeout": bool(result.get("timed_out", False)),
++        "_debug_stdout_tail": stdout_text[-2000:],
++        "_debug_stderr_tail": stderr_text[-2000:],
++        "_debug_error_tail": error_text[-1000:],
++        "_debug_failed_nodeids": list(result.get("failed_nodeids") or []),
++    }
+diff --git a/problem_processor.py b/problem_processor.py
+index 64e3d94..95cda9d 100644
+--- a/problem_processor.py
++++ b/problem_processor.py
+@@ -1,15 +1,23 @@
+-import re
+-import time
+-from itertools import islice
+-import importlib 
+-from typing import Callable 
+-
+-# Import functions from sibling modules
+-from config import DATASET_PATHS 
+-from reporting import format_check_correctness_result
+-from src.generation import generator 
+-from src.traceRunner import execute_code_and_capture_prints_last  # <<< New import
+-from src.postprocessing import remove_main_block  # <<< New import for _parse_llm_response
++import re
++import time
++from itertools import islice
++import importlib 
++from typing import Any, Callable
++
++# Import functions from sibling modules
++from config import DATASET_PATHS 
++from reporting import format_check_correctness_result, save_metrics_sidecar
++from src.generation import generator 
++from src.progress import (
++    current_progress_snapshot,
++    emit_progress,
++    progress_span,
++    reset_progress_state,
++    set_progress_refresh_callback,
++)
++from src.exact_test_context import build_exact_test_context
++from src.traceRunner import execute_code_and_capture_prints_last, execute_llmdebug_case_and_capture_output
++from src.postprocessing import remove_main_block  # <<< New import for _parse_llm_response
+ 
+ 
+ # --- Helper Functions ---
+@@ -129,13 +137,30 @@ def _get_failed_history_str(history: list) -> str:
+     return "\n".join(formatted_failed_list)
+ 
+ 
+-def _build_analysis_planning_prompt(problem_data, code_with_prints, captured_prints_output, history) -> str:
+-    """Builds the prompt for the first step (analysis and planning) in the two-step method."""
+-    failed_attempts_feedback_str = _get_failed_history_str(history)
+-    return f"""You are a debugging assistant. 
+- 
+- Given the following information about a Python function that failed tests: 
+- 
++def _build_analysis_planning_prompt(
++    problem_data,
++    code_with_prints,
++    captured_prints_output,
++    history,
++    exact_test_context: str = "",
++) -> str:
++    """Builds the prompt for the first step (analysis and planning) in the two-step method."""
++    failed_attempts_feedback_str = _get_failed_history_str(history)
++    exact_test_section = ""
++    if str(exact_test_context or "").strip():
++        exact_test_section = f"""
++ 4. Exact failing test context (verbatim excerpts from `test_buggy.py`, selected under budget):
++ 
++ ```python 
++ 
++ {exact_test_context} 
++ 
++ ``` 
++ """
++    return f"""You are a debugging assistant. 
++ 
++ Given the following information about a Python function that failed tests: 
++ 
+  1. Original Problem Description: 
+  
+  ```python 
+@@ -156,14 +181,15 @@ def _build_analysis_planning_prompt(problem_data, code_with_prints, captured_pri
+  
+  ```text 
+  
+- {str(captured_prints_output)} 
+- 
+- ``` 
+- 
+- 4. MISTAKES TO AVOID (Review these previous failed attempts for this problem instance. Identify why they failed and how your current analysis suggests a different, better approach.): 
+- 
+- ``` 
+- 
++ {str(captured_prints_output)} 
++ 
++ ``` 
++{exact_test_section}
++ 
++ 5. MISTAKES TO AVOID (Review these previous failed attempts for this problem instance. Identify why they failed and how your current analysis suggests a different, better approach.): 
++ 
++ ``` 
++ 
+  {failed_attempts_feedback_str} 
+  
+  ``` 
+@@ -239,38 +265,79 @@ END_CODE
+ """
+ 
+ 
+-def _parse_implementation_output(response_text: str) -> str:
+-    """
+-    Parses the LLM's response from the implementation prompt to extract the full code.
+-    This is a simplified parser for the "CODE:" block.
+-    """
+-    # Look for the CODE: block with ```python
+-    full_code_match = re.search(r"CODE:\s*```python\n(.*?)\n```", response_text, re.DOTALL)
+-    if full_code_match:
+-        return full_code_match.group(1).strip()
+-    
+-    # Fallback for ``` without language tag
+-    full_code_match = re.search(r"CODE:\s*```\n(.*?)\n```", response_text, re.DOTALL)
+-    if full_code_match:
+-        return full_code_match.group(1).strip()
+-
+-    # Fallback for cases where the code block is not perfectly formatted but follows CODE:
+-    code_marker_match = re.search(r"CODE:(.*)", response_text, re.DOTALL | re.IGNORECASE)
+-    if code_marker_match:
+-        potential_code = code_marker_match.group(1).strip()
+-        # Clean up potential markdown fences that might still be there
+-        if potential_code.startswith("```python"):
+-            potential_code = potential_code[len("```python"):].strip()
+-        if potential_code.startswith("```"):
+-            potential_code = potential_code[len("```"):].strip()
+-        if potential_code.endswith("```"):
+-            potential_code = potential_code[:-len("```")].strip()
+-        return potential_code
+-
+-    return "" # Return empty string if no code is found
++def _parse_implementation_output(response_text: str) -> str:
++    """
++    Parses the LLM's response from the implementation prompt to extract the full code.
++    Tries multiple strategies with decreasing specificity.
++    """
++    # Strategy 1: Look for the CODE: block with ```python (strict format)
++    full_code_match = re.search(r"CODE:\s*```python\n(.*?)\n```", response_text, re.DOTALL)
++    if full_code_match:
++        return full_code_match.group(1).strip()
++
++    # Strategy 2: CODE: with ``` without language tag
++    full_code_match = re.search(r"CODE:\s*```\n(.*?)\n```", response_text, re.DOTALL)
++    if full_code_match:
++        return full_code_match.group(1).strip()
++
++    # Strategy 3: CODE: with flexible whitespace and newlines before fence
++    full_code_match = re.search(
++        r"CODE:\s*\n*\s*```(?:python)?\s*\n(.*?)\n\s*```", response_text, re.DOTALL
++    )
++    if full_code_match:
++        return full_code_match.group(1).strip()
++
++    # Strategy 4: Everything after CODE: marker, cleaned up
++    code_marker_match = re.search(r"CODE:(.*)", response_text, re.DOTALL | re.IGNORECASE)
++    if code_marker_match:
++        potential_code = code_marker_match.group(1).strip()
++        if potential_code.startswith("```python"):
++            potential_code = potential_code[len("```python"):].strip()
++        if potential_code.startswith("```"):
++            potential_code = potential_code[len("```"):].strip()
++        if potential_code.endswith("```"):
++            potential_code = potential_code[:-len("```")].strip()
++        # Strip END_CODE marker if present
++        end_code_pos = potential_code.find("END_CODE")
++        if end_code_pos >= 0:
++            potential_code = potential_code[:end_code_pos].strip()
++        if potential_code:
++            return potential_code
++
++    # Strategy 5: No CODE: marker — extract the LAST ```python block
++    # (models sometimes skip the marker but still produce fenced code)
++    fenced_blocks = list(re.finditer(
++        r"```python\s*\n(.*?)\n\s*```", response_text, re.DOTALL
++    ))
++    if fenced_blocks:
++        # Prefer the last fenced block (most likely the complete corrected code)
++        candidate = fenced_blocks[-1].group(1).strip()
++        if candidate:
++            return candidate
++
++    # Strategy 6: Last ``` block without language tag
++    fenced_blocks = list(re.finditer(r"```\s*\n(.*?)\n\s*```", response_text, re.DOTALL))
++    if fenced_blocks:
++        candidate = fenced_blocks[-1].group(1).strip()
++        # Only accept if it looks like Python (contains def/class/import or assignment)
++        if candidate and re.search(r"^\s*(def |class |import |from |[a-zA-Z_]\w*\s*=)", candidate, re.MULTILINE):
++            return candidate
++
++    return ""
++
++
++def _task_id(problem_data: dict) -> str:
++    task_id = str(problem_data.get("task_id") or "").strip()
++    return task_id or "unknown_task"
++
++
++def _execution_wait_target(problem_data: dict) -> str:
++    if str(problem_data.get("execution_mode") or "").strip() == "llmdebug_native":
++        return "llmdebug_pytest_subprocess"
++    return "instrumented_unittest_subprocess"
+ 
+ 
+-def _load_check_correctness_func(dataset_name: str) -> Callable:
++def _load_check_correctness_func(dataset_name: str) -> Callable:
+     """
+     Dynamically loads and returns the corresponding check_correctness function based on the dataset name.
+     """
+@@ -284,132 +351,1101 @@ def _load_check_correctness_func(dataset_name: str) -> Callable:
+     except AttributeError:
+         raise ImportError(f"'check_correctness' function not found in module '{module_path}'.")
+     except ImportError as e:
+-        raise ImportError(f"Could not import evaluation module '{module_path}': {e}. Ensure __init__.py files exist in package directories.")
+-
+-
+-# --- Core Processing Functions ---
+-def _run_direct_generation(problem_data, args, check_correctness_func_param: Callable): # New parameter
+-    """Executes the first phase: direct code generation and evaluation."""
+-    prompt = problem_data.get('complete_prompt', '')
+-    generated_code, p_tokens, c_tokens = generator(prompt, "code3_generate", args.model)
+-    # Use the passed-in function
+-    eval_result = check_correctness_func_param(problem_data, generated_code, args.timeout)
+-    return {"code": generated_code, "eval_result": eval_result, "prompt_tokens": p_tokens,
+-            "completion_tokens": c_tokens}
+-
+-
+-def _run_self_debugging(initial_code, initial_eval, problem_data, args, check_correctness_func_param: Callable):
+-    """Executes the second phase: self-debugging loop (updated to include complete logic)."""
+-    code_to_debug, last_eval, best_code, best_eval = initial_code, initial_eval, initial_code, initial_eval
+-    log, history, p_tokens, c_tokens, streak = [], [], 0, 0, 0
+-    instrumentation_suggestions = ""  # Initialize suggestions
+-
+-    for attempt in range(1, args.max_debug_attempts + 1):
+-        print(
+-            f"--- Debug attempt: {attempt}/{args.max_debug_attempts} | Best: {best_eval.get('passed_count', 0)}/{best_eval.get('total_count', 1)} ---")
+-
+-        # 1. Instrumentation
+-        captured_prints = "Instrumentation skipped or not applicable."
+-        instrumented_code = code_to_debug  # Default to original if instrumentation fails
+-        if not args.no_instrumentation:
+-            failure_info = format_check_correctness_result(last_eval)
+-            instr_prompt = _build_instrumentation_prompt(code_to_debug, instrumentation_suggestions, failure_info)
+-            instrumented_code_gen, p, c = generator(instr_prompt, "code3_generate", args.model)
+-            p_tokens, c_tokens = p_tokens + p, c_tokens + c
+-
+-            if instrumented_code_gen.strip():
+-                instrumented_code = instrumented_code_gen
+-                exec_result = execute_code_and_capture_prints_last(
+-                    instrumented_code + "\n\n" + problem_data.get('test', ''), timeout_seconds=args.timeout)
+-                captured_prints = exec_result.get('display_output', 'No instrumentation output captured.')
+-
+-        # 2. Analysis and Planning (This is now the unified first step)
+-        analysis_prompt = _build_analysis_planning_prompt(problem_data, instrumented_code, captured_prints, history)
+-        llm_response, p, c = generator(analysis_prompt, "code4_generate", args.model)
+-        p_tokens, c_tokens = p_tokens + p, c_tokens + c
+-        
+-        repair_plan, instrumentation_suggestions = _parse_llm_output(llm_response)
+-        candidate_code = ""
+-
+-        # 3. Code Implementation (This is the unified second step, skipped if no plan)
+-        if repair_plan and repair_plan.strip():
+-            # The two-step repair is now the default if a plan is returned.
+-            # The `no_two_step_repair` flag is implicitly handled by whether a plan is generated.
+-            impl_prompt = _build_code_implementation_prompt(problem_data, code_to_debug, captured_prints, repair_plan)
+-            llm_response_impl, p_impl, c_impl = generator(impl_prompt, "code4_generate", args.model)
+-            p_tokens, c_tokens = p_tokens + p_impl, c_tokens + c_impl
+-            
+-            candidate_code = _parse_implementation_output(llm_response_impl)
+-        else:
+-            # If there's no repair plan, we can't proceed with implementation.
+-            # This also handles the "one-step" case where the analysis prompt might not return a plan.
+-            print("LLM did not provide a repair plan, terminating debugging.")
+-            break
+-
+-        # 3. Evaluation and decision-making
+-        if not candidate_code.strip():
+-            print("LLM did not provide valid code, terminating debugging.")
+-            break
+-
+-        eval_candidate = check_correctness_func_param(problem_data, candidate_code, args.timeout) # Use the passed-in function
+-        print(f"Candidate repair result: {format_check_correctness_result(eval_candidate)}")
+-
+-        attempt_log = {"attempt": attempt, "plan": repair_plan, "eval_result": eval_candidate}
+-        log.append(attempt_log)
+-
+-        if eval_candidate.get('passed'):
+-            best_code, best_eval = candidate_code, eval_candidate
+-            break
+-
+-        if eval_candidate.get('passed_count', 0) > best_eval.get('passed_count', 0):
+-            best_code, best_eval, code_to_debug, last_eval, streak = candidate_code, eval_candidate, candidate_code, eval_candidate, 0
+-        else:
+-            streak += 1
+-
+-        history.append(attempt_log)
+-        if streak >= args.max_no_improvement_streak:
+-            print(f"{streak} consecutive attempts with no improvement, terminating debugging.")
+-            break
+-
+-    return {"final_code": best_code, "final_eval": best_eval, "session_log": log, "prompt_tokens": p_tokens,
+-            "completion_tokens": c_tokens}
+-
+-
+-# The `process_problem` function remains unchanged as it only calls the core functions above
+-def process_problem(problem_data, task_id, args, check_correctness_func_param: Callable): # New parameter
+-    # (This function does not need modification; it is copied from the previous version)
+-    print(f"\n{'=' * 25} Processing problem: {task_id} {'=' * 25}")
+-    start_time = time.time()
+-
+-    gen_res = _run_direct_generation(problem_data, args, check_correctness_func_param) # Pass parameter
++        raise ImportError(f"Could not import evaluation module '{module_path}': {e}. Ensure __init__.py files exist in package directories.")
++
++
++def _call_generator_timed(
++    prompt: str,
++    status: str,
++    model_name: str,
++    *,
++    task_id: str,
++    phase: str,
++    attempt: int = 0,
++    extra: dict[str, Any] | None = None,
++):
++    started_at = time.perf_counter()
++    with progress_span(
++        task_id=task_id,
++        phase=phase,
++        wait_target="llm_api",
++        attempt=attempt,
++        extra=extra,
++    ) as span:
++        (
++            generated_text,
++            prompt_tokens,
++            completion_tokens,
++            usage_reported,
++            completion_chars,
++            failure_kind,
++            failure_meta,
++        ) = generator(
++            prompt,
++            status,
++            model_name,
++            progress_task_id=task_id,
++            progress_phase=phase,
++            progress_attempt=attempt,
++        )
++        if failure_kind:
++            span.update(failure_kind=failure_kind)
++    return (
++        generated_text,
++        prompt_tokens,
++        completion_tokens,
++        usage_reported,
++        len(prompt or ""),
++        max(0, int(completion_chars or 0)),
++        max(0.0, time.perf_counter() - started_at),
++        str(failure_kind or ""),
++        dict(failure_meta or {}),
++    )
++
++
++def _run_check_correctness_timed(
++    problem_data,
++    candidate_code: str,
++    timeout_seconds: int,
++    check_correctness_func_param: Callable,
++    *,
++    task_id: str,
++    phase: str,
++    attempt: int = 0,
++    extra: dict[str, Any] | None = None,
++):
++    started_at = time.perf_counter()
++    with progress_span(
++        task_id=task_id,
++        phase=phase,
++        wait_target=_execution_wait_target(problem_data),
++        attempt=attempt,
++        extra=extra,
++    ):
++        eval_result = check_correctness_func_param(problem_data, candidate_code, timeout_seconds)
++    return eval_result, max(0.0, time.perf_counter() - started_at)
++
++
++def _llm_failure_stop_reason(failure_kind: str, stage: str) -> str:
++    stage_label = {
++        "direct_generation": "direct generation",
++        "instrumentation": "instrumentation",
++        "analysis_planning": "analysis planning",
++        "code_implementation": "code implementation",
++    }.get(stage, stage.replace("_", " "))
++    if failure_kind == "openai_compat_reasoning_only":
++        return f"OpenAI-compatible server returned reasoning without final content during {stage_label}"
++    if failure_kind == "api_timeout":
++        return f"LLM request timed out during {stage_label}"
++    if failure_kind == "rate_limit":
++        return f"LLM request hit rate limit during {stage_label}"
++    return f"LLM request failed during {stage_label}"
++
++
++def _llm_failure_extra(
++    *,
++    failure_kind: str,
++    stage: str,
++    llm_timeout_count: int,
++    failure_meta: dict[str, Any] | None = None,
++) -> dict[str, Any]:
++    if not failure_kind:
++        return {}
++    extra: dict[str, Any] = {
++        "last_llm_failure_kind": failure_kind,
++        "last_llm_failure_stage": stage,
++    }
++    if llm_timeout_count > 0:
++        extra["llm_timeout_count"] = max(0, int(llm_timeout_count))
++    if failure_meta:
++        for key, value in failure_meta.items():
++            if key == "error":
++                continue
++            extra[key] = value
++    return extra
++
++
++def _build_metrics_snapshot(
++    *,
++    task_id: str,
++    args,
++    started_at: float,
++    prompt_tokens: int,
++    completion_tokens: int,
++    prompt_chars_total: int,
++    completion_chars_total: int,
++    llm_call_count: int,
++    usage_reported_call_count: int,
++    usage_missing_call_count: int,
++    llm_duration_sec: float,
++    eval_duration_sec: float,
++    attempts_completed: int,
++    status: str = "running",
++    extra: dict[str, Any] | None = None,
++) -> dict[str, Any]:
++    prompt_tokens = max(0, int(prompt_tokens))
++    completion_tokens = max(0, int(completion_tokens))
++    total_tokens = prompt_tokens + completion_tokens
++    prompt_chars_total = max(0, int(prompt_chars_total))
++    completion_chars_total = max(0, int(completion_chars_total))
++    chars_total = prompt_chars_total + completion_chars_total
++    llm_call_count = max(0, int(llm_call_count))
++    usage_reported_call_count = max(0, min(int(usage_reported_call_count), llm_call_count))
++    usage_missing_call_count = max(0, min(int(usage_missing_call_count), llm_call_count))
++    if usage_reported_call_count + usage_missing_call_count < llm_call_count:
++        usage_missing_call_count = llm_call_count - usage_reported_call_count
++    llm_duration_sec = max(0.0, float(llm_duration_sec))
++    eval_duration_sec = max(0.0, float(eval_duration_sec))
++    internal_total_duration_sec = max(0.0, time.perf_counter() - started_at)
++    orchestration_duration_sec = max(
++        0.0,
++        internal_total_duration_sec - llm_duration_sec - eval_duration_sec,
++    )
++    usage_available = (
++        llm_call_count > 0
++        and usage_reported_call_count == llm_call_count
++        and usage_missing_call_count == 0
++    )
++
++    snapshot: dict[str, Any] = {
++        "schema_version": 1,
++        "baseline": "tracecoder",
++        "status": status,
++        "task_id": task_id,
++        "llm_call_count": llm_call_count,
++        "llm_duration_sec": llm_duration_sec,
++        "eval_duration_sec": eval_duration_sec,
++        "internal_total_duration_sec": internal_total_duration_sec,
++        "orchestration_duration_sec": orchestration_duration_sec,
++        "usage_available": usage_available,
++        "usage_reported_call_count": usage_reported_call_count,
++        "usage_missing_call_count": usage_missing_call_count,
++        "prompt_chars_total": prompt_chars_total,
++        "completion_chars_total": completion_chars_total,
++        "chars_total": chars_total,
++        "reported_chars_prompt": prompt_chars_total,
++        "reported_chars_completion": completion_chars_total,
++        "reported_chars_total": chars_total,
++        "attempts_completed": max(0, int(attempts_completed)),
++        "method_instrumentation": not args.no_instrumentation,
++        "method_two_step_repair": not args.no_two_step_repair,
++    }
++    snapshot.update(current_progress_snapshot(task_id=task_id))
++    if usage_reported_call_count > 0:
++        snapshot.update(
++            {
++                "reported_tokens_prompt": prompt_tokens,
++                "reported_tokens_completion": completion_tokens,
++                "reported_tokens_total": total_tokens,
++            }
++        )
++        if usage_available:
++            snapshot.update(
++                {
++                    "tokens_prompt": prompt_tokens,
++                    "tokens_completion": completion_tokens,
++                    "tokens_total": total_tokens,
++                    "usage_source": "provider_reported",
++                }
++            )
++        else:
++            snapshot["usage_source"] = "partial_provider_reported"
++    elif llm_call_count > 0:
++        snapshot["usage_source"] = "not_reported"
++    if extra:
++        snapshot.update(extra)
++    return snapshot
++
++
++def _maybe_save_metrics_checkpoint(
++    *,
++    task_id: str,
++    args,
++    started_at: float,
++    prompt_tokens: int,
++    completion_tokens: int,
++    prompt_chars_total: int,
++    completion_chars_total: int,
++    llm_call_count: int,
++    usage_reported_call_count: int,
++    usage_missing_call_count: int,
++    llm_duration_sec: float,
++    eval_duration_sec: float,
++    attempts_completed: int,
++    status: str = "running",
++    extra: dict[str, Any] | None = None,
++) -> None:
++    metrics_path = getattr(args, "llmdebug_metrics_path", None)
++    if not metrics_path:
++        return
++    save_metrics_sidecar(
++        _build_metrics_snapshot(
++            task_id=task_id,
++            args=args,
++            started_at=started_at,
++            prompt_tokens=prompt_tokens,
++            completion_tokens=completion_tokens,
++            prompt_chars_total=prompt_chars_total,
++            completion_chars_total=completion_chars_total,
++            llm_call_count=llm_call_count,
++            usage_reported_call_count=usage_reported_call_count,
++            usage_missing_call_count=usage_missing_call_count,
++            llm_duration_sec=llm_duration_sec,
++            eval_duration_sec=eval_duration_sec,
++            attempts_completed=attempts_completed,
++            status=status,
++            extra=extra,
++        ),
++        metrics_path,
++    )
++
++
++# --- Core Processing Functions ---
++def _run_direct_generation(
++    problem_data,
++    args,
++    check_correctness_func_param: Callable,
++    metrics_callback=None,
++): # New parameter
++    """Executes the first phase: direct code generation and evaluation."""
++    prompt = problem_data.get('complete_prompt', '')
++    task_value = _task_id(problem_data)
++    (
++        generated_code,
++        p_tokens,
++        c_tokens,
++        usage_reported,
++        prompt_chars_total,
++        completion_chars_total,
++        llm_duration_sec,
++        failure_kind,
++        failure_meta,
++    ) = _call_generator_timed(
++        prompt,
++        "code3_generate",
++        args.model,
++        task_id=task_value,
++        phase="direct_generation",
++        extra={"stage": "direct_generation"},
++    )
++    llm_timeout_count = 1 if failure_kind == "api_timeout" else 0
++    if failure_kind:
++        eval_result = {
++            "passed": False,
++            "passed_count": 0,
++            "failed_count": 1,
++            "total_count": 1,
++            "result": _llm_failure_stop_reason(failure_kind, "direct_generation"),
++            "status": "timeout" if failure_kind == "api_timeout" else "failure",
++        }
++        eval_duration_sec = 0.0
++        generated_code = ""
++    else:
++        eval_result, eval_duration_sec = _run_check_correctness_timed(
++            problem_data,
++            generated_code,
++            args.timeout,
++            check_correctness_func_param,
++            task_id=task_value,
++            phase="direct_generation_evaluation",
++            extra={"stage": "direct_generation"},
++        )
++    result = {
++        "code": generated_code,
++        "eval_result": eval_result,
++        "prompt_tokens": p_tokens,
++        "completion_tokens": c_tokens,
++        "prompt_chars_total": prompt_chars_total,
++        "completion_chars_total": completion_chars_total,
++        "llm_call_count": 1,
++        "usage_reported_call_count": 1 if usage_reported else 0,
++        "usage_missing_call_count": 0 if usage_reported else 1,
++        "llm_duration_sec": llm_duration_sec,
++        "eval_duration_sec": eval_duration_sec,
++        "llm_timeout_count": llm_timeout_count,
++        "last_llm_failure_kind": failure_kind,
++        "last_llm_failure_stage": "direct_generation" if failure_kind else "",
++        "last_llm_failure_meta": dict(failure_meta or {}),
++    }
++    if metrics_callback is not None:
++        failure_extra = (
++            _llm_failure_extra(
++                failure_kind=failure_kind,
++                stage="direct_generation",
++                llm_timeout_count=llm_timeout_count,
++                failure_meta=failure_meta,
++            )
++            if failure_kind
++            else None
++        )
++        metrics_callback(
++            prompt_tokens=result["prompt_tokens"],
++            completion_tokens=result["completion_tokens"],
++            prompt_chars_total=result["prompt_chars_total"],
++            completion_chars_total=result["completion_chars_total"],
++            llm_call_count=result["llm_call_count"],
++            usage_reported_call_count=result["usage_reported_call_count"],
++            usage_missing_call_count=result["usage_missing_call_count"],
++            llm_duration_sec=result["llm_duration_sec"],
++            eval_duration_sec=result["eval_duration_sec"],
++            attempts_completed=0,
++            extra=failure_extra,
++        )
++    return result
++
++
++def _run_repair_seed(
++    problem_data,
++    args,
++    check_correctness_func_param: Callable,
++    metrics_callback=None,
++):
++    """Start debugging from the provided buggy implementation instead of direct generation."""
++    seeded_code = problem_data.get('buggy_code', '')
++    task_value = _task_id(problem_data)
++    eval_result, eval_duration_sec = _run_check_correctness_timed(
++        problem_data,
++        seeded_code,
++        args.timeout,
++        check_correctness_func_param,
++        task_id=task_value,
++        phase="repair_seed_evaluation",
++        extra={"stage": "repair_seed"},
++    )
++    result = {
++        "code": seeded_code,
++        "eval_result": eval_result,
++        "prompt_tokens": 0,
++        "completion_tokens": 0,
++        "prompt_chars_total": 0,
++        "completion_chars_total": 0,
++        "llm_call_count": 0,
++        "usage_reported_call_count": 0,
++        "usage_missing_call_count": 0,
++        "llm_duration_sec": 0.0,
++        "eval_duration_sec": eval_duration_sec,
++    }
++    if metrics_callback is not None:
++        metrics_callback(
++            prompt_tokens=0,
++            completion_tokens=0,
++            prompt_chars_total=0,
++            completion_chars_total=0,
++            llm_call_count=0,
++            usage_reported_call_count=0,
++            usage_missing_call_count=0,
++            llm_duration_sec=0.0,
++            eval_duration_sec=eval_duration_sec,
++            attempts_completed=0,
++        )
++    return result
+ 
+-    result = {
+-        "task_id": task_id, "model": args.model, "dataset": args.dataset,
+-        "method_instrumentation": not args.no_instrumentation,
+-        "method_two_step_repair": not args.no_two_step_repair,
+-        "direct_gen_code": gen_res["code"], "direct_gen_eval": gen_res["eval_result"],
+-        "direct_gen_passed": gen_res["eval_result"].get("passed", False),
+-    }
+ 
+-    total_p, total_c = gen_res["prompt_tokens"], gen_res["completion_tokens"]
++def _run_self_debugging(
++    initial_code,
++    initial_eval,
++    problem_data,
++    args,
++    check_correctness_func_param: Callable,
++    metrics_callback=None,
++):
++    """Executes the second phase: self-debugging loop (updated to include complete logic)."""
++    task_value = _task_id(problem_data)
++    code_to_debug, last_eval, best_code, best_eval = initial_code, initial_eval, initial_code, initial_eval
++    log, history, p_tokens, c_tokens, streak = [], [], 0, 0, 0
++    prompt_chars_total, completion_chars_total = 0, 0
++    usage_reported_call_count, usage_missing_call_count = 0, 0
++    llm_call_count, llm_duration_sec, eval_duration_sec = 0, 0.0, 0.0
++    llm_timeout_count = 0
++    last_llm_failure_kind = ""
++    last_llm_failure_stage = ""
++    last_llm_failure_meta: dict[str, Any] = {}
++    instrumentation_suggestions = ""  # Initialize suggestions
++    stopped_reason = "Debug cycle completed"
++
++    def _checkpoint(*, attempts_completed: int, extra: dict[str, Any] | None = None) -> None:
++        if metrics_callback is None:
++            return
++        metrics_callback(
++            prompt_tokens=p_tokens,
++            completion_tokens=c_tokens,
++            prompt_chars_total=prompt_chars_total,
++            completion_chars_total=completion_chars_total,
++            llm_call_count=llm_call_count,
++            usage_reported_call_count=usage_reported_call_count,
++            usage_missing_call_count=usage_missing_call_count,
++            llm_duration_sec=llm_duration_sec,
++            eval_duration_sec=eval_duration_sec,
++            attempts_completed=attempts_completed,
++            extra=extra,
++        )
++
++    def _record_llm_failure(*, failure_kind: str, stage: str) -> dict[str, Any] | None:
++        return _record_llm_failure_with_meta(
++            failure_kind=failure_kind,
++            stage=stage,
++            failure_meta=None,
++        )
++
++    def _record_llm_failure_with_meta(
++        *,
++        failure_kind: str,
++        stage: str,
++        failure_meta: dict[str, Any] | None,
++    ) -> dict[str, Any] | None:
++        nonlocal llm_timeout_count, last_llm_failure_kind, last_llm_failure_stage, last_llm_failure_meta
++        if not failure_kind:
++            return None
++        last_llm_failure_kind = failure_kind
++        last_llm_failure_stage = stage
++        last_llm_failure_meta = dict(failure_meta or {})
++        if failure_kind == "api_timeout":
++            llm_timeout_count += 1
++        return _llm_failure_extra(
++            failure_kind=failure_kind,
++            stage=stage,
++            llm_timeout_count=llm_timeout_count,
++            failure_meta=failure_meta,
++        )
++
++    def _current_llm_failure_extra() -> dict[str, Any] | None:
++        if not last_llm_failure_kind:
++            return None
++        return _llm_failure_extra(
++            failure_kind=last_llm_failure_kind,
++            stage=last_llm_failure_stage,
++            llm_timeout_count=llm_timeout_count,
++            failure_meta=last_llm_failure_meta,
++        )
++
++    def _attempt_progress_extra(current_attempt: int) -> dict[str, Any]:
++        return {
++            "best_passed": int(best_eval.get("passed_count", 0) or 0),
++            "best_total": int(best_eval.get("total_count", 1) or 1),
++            "streak": streak,
++            "debug_attempt": current_attempt,
++        }
++ 
++    for attempt in range(1, args.max_debug_attempts + 1):
++        print(
++            f"--- Debug attempt: {attempt}/{args.max_debug_attempts} | Best: {best_eval.get('passed_count', 0)}/{best_eval.get('total_count', 1)} ---")
++
++        # 1. Instrumentation
++        captured_prints = "Instrumentation skipped or not applicable."
++        instrumented_code = code_to_debug  # Default to original if instrumentation fails
++        exact_test_context = ""
++        exact_test_context_meta = {
++            "source": "empty",
++            "chars": 0,
++            "truncated": False,
++            "selected_nodeids": [],
++            "helper_names": [],
++        }
++        exec_result = {}
++        if not args.no_instrumentation:
++            failure_info = format_check_correctness_result(last_eval)
++            instr_prompt = _build_instrumentation_prompt(code_to_debug, instrumentation_suggestions, failure_info)
++            (
++                instrumented_code_gen,
++                p,
++                c,
++                usage_reported,
++                prompt_chars,
++                response_chars,
++                generation_duration_sec,
++                failure_kind,
++                failure_meta,
++            ) = _call_generator_timed(
++                instr_prompt,
++                "code3_generate",
++                args.model,
++                task_id=task_value,
++                phase="instrumentation",
++                attempt=attempt,
++                extra=_attempt_progress_extra(attempt),
++            )
++            p_tokens, c_tokens = p_tokens + p, c_tokens + c
++            prompt_chars_total += prompt_chars
++            completion_chars_total += response_chars
++            llm_call_count += 1
++            if usage_reported:
++                usage_reported_call_count += 1
++            else:
++                usage_missing_call_count += 1
++            llm_duration_sec += generation_duration_sec
++            failure_extra = _record_llm_failure_with_meta(
++                failure_kind=failure_kind,
++                stage="instrumentation",
++                failure_meta=failure_meta,
++            )
++            _checkpoint(attempts_completed=len(log), extra=failure_extra)
++
++            if failure_kind:
++                if failure_kind == "openai_compat_reasoning_only":
++                    stopped_reason = _llm_failure_stop_reason(failure_kind, "instrumentation")
++                    print(f"{stopped_reason}, terminating debugging.")
++                    _checkpoint(
++                        attempts_completed=len(log),
++                        extra={
++                            **(failure_extra or {}),
++                            "stopped_reason": stopped_reason,
++                        },
++                    )
++                    break
++                captured_prints = (
++                    f"{_llm_failure_stop_reason(failure_kind, 'instrumentation')}. "
++                    "Continuing without instrumentation output."
++                )
++            elif instrumented_code_gen.strip():
++                instrumented_code = instrumented_code_gen
++                exec_started_at = time.perf_counter()
++                if problem_data.get('execution_mode') == 'llmdebug_native':
++                    exec_result = execute_llmdebug_case_and_capture_output(
++                        problem_data,
++                        instrumented_code,
++                        timeout_seconds=args.timeout,
++                        task_id=task_value,
++                        phase="instrumentation_execution",
++                        attempt=attempt,
++                    )
++                else:
++                    exec_result = execute_code_and_capture_prints_last(
++                        instrumented_code + "\n\n" + problem_data.get('test', ''),
++                        timeout_seconds=args.timeout,
++                        task_id=task_value,
++                        phase="instrumentation_execution",
++                        attempt=attempt,
++                    )
++                eval_duration_sec += max(0.0, time.perf_counter() - exec_started_at)
++                captured_prints = exec_result.get('display_output', 'No instrumentation output captured.')
++                _checkpoint(attempts_completed=len(log))
++
++        if problem_data.get('execution_mode') == 'llmdebug_native':
++            failed_nodeids = exec_result.get('failed_nodeids') if isinstance(exec_result, dict) else None
++            if not failed_nodeids:
++                failed_nodeids = last_eval.get('_debug_failed_nodeids', [])
++            exact_test_context, exact_test_context_meta = build_exact_test_context(
++                problem_data.get('test', ''),
++                failed_nodeids=failed_nodeids if isinstance(failed_nodeids, list) else [],
++                failure_output=(
++                    captured_prints
++                    if str(captured_prints or "").strip()
++                    else format_check_correctness_result(last_eval)
++                ),
++            )
++
++        # 2. Analysis and Planning (This is now the unified first step)
++        analysis_prompt = _build_analysis_planning_prompt(
++            problem_data,
++            instrumented_code,
++            captured_prints,
++            history,
++            exact_test_context=exact_test_context,
++        )
++        (
++            llm_response,
++            p,
++            c,
++            usage_reported,
++            prompt_chars,
++            response_chars,
++            analysis_duration_sec,
++            analysis_failure_kind,
++            analysis_failure_meta,
++        ) = _call_generator_timed(
++            analysis_prompt,
++            "code4_generate",
++            args.model,
++            task_id=task_value,
++            phase="analysis_planning",
++            attempt=attempt,
++            extra=_attempt_progress_extra(attempt),
++        )
++        p_tokens, c_tokens = p_tokens + p, c_tokens + c
++        prompt_chars_total += prompt_chars
++        completion_chars_total += response_chars
++        llm_call_count += 1
++        if usage_reported:
++            usage_reported_call_count += 1
++        else:
++            usage_missing_call_count += 1
++        llm_duration_sec += analysis_duration_sec
++        analysis_failure_extra = _record_llm_failure_with_meta(
++            failure_kind=analysis_failure_kind,
++            stage="analysis_planning",
++            failure_meta=analysis_failure_meta,
++        )
++        if analysis_failure_kind:
++            stopped_reason = _llm_failure_stop_reason(analysis_failure_kind, "analysis_planning")
++            print(f"{stopped_reason}, terminating debugging.")
++            _checkpoint(
++                attempts_completed=len(log),
++                extra={
++                    **(analysis_failure_extra or {}),
++                    "stopped_reason": stopped_reason,
++                },
++            )
++            break
++        _checkpoint(attempts_completed=len(log), extra=analysis_failure_extra)
++
++        repair_plan, instrumentation_suggestions = _parse_llm_output(llm_response)
++        candidate_code = ""
++ 
++        # 3. Code Implementation (This is the unified second step, skipped if no plan)
++        if repair_plan and repair_plan.strip():
++            # The two-step repair is now the default if a plan is returned.
++            # The `no_two_step_repair` flag is implicitly handled by whether a plan is generated.
++            impl_prompt = _build_code_implementation_prompt(problem_data, code_to_debug, captured_prints, repair_plan)
++            (
++                llm_response_impl,
++                p_impl,
++                c_impl,
++                usage_reported_impl,
++                prompt_chars_impl,
++                response_chars_impl,
++                implementation_duration_sec,
++                implementation_failure_kind,
++                implementation_failure_meta,
++            ) = _call_generator_timed(
++                impl_prompt,
++                "code4_generate",
++                args.model,
++                task_id=task_value,
++                phase="code_implementation",
++                attempt=attempt,
++                extra=_attempt_progress_extra(attempt),
++            )
++            p_tokens, c_tokens = p_tokens + p_impl, c_tokens + c_impl
++            prompt_chars_total += prompt_chars_impl
++            completion_chars_total += response_chars_impl
++            llm_call_count += 1
++            if usage_reported_impl:
++                usage_reported_call_count += 1
++            else:
++                usage_missing_call_count += 1
++            llm_duration_sec += implementation_duration_sec
++            implementation_failure_extra = _record_llm_failure_with_meta(
++                failure_kind=implementation_failure_kind,
++                stage="code_implementation",
++                failure_meta=implementation_failure_meta,
++            )
++            if implementation_failure_kind:
++                stopped_reason = _llm_failure_stop_reason(
++                    implementation_failure_kind,
++                    "code_implementation",
++                )
++                print(f"{stopped_reason}, terminating debugging.")
++                _checkpoint(
++                    attempts_completed=len(log),
++                    extra={
++                        **(implementation_failure_extra or {}),
++                        "stopped_reason": stopped_reason,
++                    },
++                )
++                break
++            _checkpoint(
++                attempts_completed=len(log),
++                extra=implementation_failure_extra,
++            )
++
++            candidate_code = _parse_implementation_output(llm_response_impl)
++        else:
++            # If there's no repair plan, we can't proceed with implementation.
++            # This also handles the "one-step" case where the analysis prompt might not return a plan.
++            print("LLM did not provide a repair plan, terminating debugging.")
++            stopped_reason = "No repair plan produced"
++            failure_extra = _current_llm_failure_extra() or {}
++            _checkpoint(
++                attempts_completed=len(log),
++                extra={
++                    **failure_extra,
++                    "stopped_reason": stopped_reason,
++                },
++            )
++            break
++ 
++        # 3. Evaluation and decision-making
++        if not candidate_code.strip():
++            print("LLM did not provide valid code, terminating debugging.")
++            stopped_reason = "No repaired code produced"
++            failure_extra = _current_llm_failure_extra() or {}
++            _checkpoint(
++                attempts_completed=len(log),
++                extra={
++                    **failure_extra,
++                    "stopped_reason": stopped_reason,
++                },
++            )
++            break
++
++        eval_candidate, candidate_eval_duration_sec = _run_check_correctness_timed(
++            problem_data,
++            candidate_code,
++            args.timeout,
++            check_correctness_func_param,
++            task_id=task_value,
++            phase="candidate_evaluation",
++            attempt=attempt,
++            extra=_attempt_progress_extra(attempt),
++        )
++        eval_duration_sec += candidate_eval_duration_sec
++        print(f"Candidate repair result: {format_check_correctness_result(eval_candidate)}")
++
++        attempt_log = {
++            "attempt": attempt,
++            "plan": repair_plan,
++            "eval_result": eval_candidate,
++            "exact_test_context_meta": dict(exact_test_context_meta),
++        }
++        log.append(attempt_log)
++        _checkpoint(attempts_completed=len(log))
+ 
+-    if result["direct_gen_passed"]:
+-        print("Direct generation passed successfully.")
+-        result.update({"final_code": gen_res["code"], "final_eval": gen_res["eval_result"], "final_passed": True,
+-                       "stopped_reason": "Passed on direct generation"})
+-    else:
+-        print("Direct generation failed, entering self-debugging phase.")
+-        debug_res = _run_self_debugging(gen_res["code"], gen_res["eval_result"], problem_data, args, check_correctness_func_param) # Pass parameter
+-        result.update({
+-            "final_code": debug_res["final_code"], "final_eval": debug_res["final_eval"],
+-            "final_passed": debug_res["final_eval"].get("passed", False),
+-            "debug_session_log": debug_res["session_log"], "stopped_reason": "Debug cycle completed"
+-        })
+-        total_p += debug_res["prompt_tokens"]
+-        total_c += debug_res["completion_tokens"]
++        if eval_candidate.get('passed'):
++            best_code, best_eval = candidate_code, eval_candidate
++            break
++ 
++        if eval_candidate.get('passed_count', 0) > best_eval.get('passed_count', 0):
++            best_code, best_eval, code_to_debug, last_eval, streak = candidate_code, eval_candidate, candidate_code, eval_candidate, 0
++        else:
++            streak += 1
++ 
++        history.append(attempt_log)
++        if streak >= args.max_no_improvement_streak:
++            print(f"{streak} consecutive attempts with no improvement, terminating debugging.")
++            stopped_reason = "No improvement streak reached"
++            break
++ 
++    return {
++        "final_code": best_code,
++        "final_eval": best_eval,
++        "session_log": log,
++        "prompt_tokens": p_tokens,
++        "completion_tokens": c_tokens,
++        "prompt_chars_total": prompt_chars_total,
++        "completion_chars_total": completion_chars_total,
++        "llm_call_count": llm_call_count,
++        "usage_reported_call_count": usage_reported_call_count,
++        "usage_missing_call_count": usage_missing_call_count,
++        "llm_duration_sec": llm_duration_sec,
++        "eval_duration_sec": eval_duration_sec,
++        "llm_timeout_count": llm_timeout_count,
++        "last_llm_failure_kind": last_llm_failure_kind,
++        "last_llm_failure_stage": last_llm_failure_stage,
++        "last_llm_failure_meta": dict(last_llm_failure_meta),
++        "stopped_reason": stopped_reason,
++    }
+ 
+-    result.update({"total_prompt_tokens": total_p, "total_completion_tokens": total_c,
+-                   "processing_time_seconds": time.time() - start_time})
+ 
+-    print(f"Problem {task_id} processing completed. Final result: {'Passed' if result['final_passed'] else 'Failed'}")
+-    return result
++def process_problem(problem_data, task_id, args, check_correctness_func_param: Callable): # New parameter
++    print(f"\n{'=' * 25} Processing problem: {task_id} {'=' * 25}")
++    start_time = time.perf_counter()
++    reset_progress_state()
++    live_metrics: dict[str, Any] = {
++        "prompt_tokens": 0,
++        "completion_tokens": 0,
++        "prompt_chars_total": 0,
++        "completion_chars_total": 0,
++        "llm_call_count": 0,
++        "usage_reported_call_count": 0,
++        "usage_missing_call_count": 0,
++        "llm_duration_sec": 0.0,
++        "eval_duration_sec": 0.0,
++        "attempts_completed": 0,
++        "status": "running",
++        "extra": {},
++    }
++
++    def _write_live_metrics() -> None:
++        _maybe_save_metrics_checkpoint(
++            task_id=task_id,
++            args=args,
++            started_at=start_time,
++            prompt_tokens=int(live_metrics["prompt_tokens"]),
++            completion_tokens=int(live_metrics["completion_tokens"]),
++            prompt_chars_total=int(live_metrics["prompt_chars_total"]),
++            completion_chars_total=int(live_metrics["completion_chars_total"]),
++            llm_call_count=int(live_metrics["llm_call_count"]),
++            usage_reported_call_count=int(live_metrics["usage_reported_call_count"]),
++            usage_missing_call_count=int(live_metrics["usage_missing_call_count"]),
++            llm_duration_sec=float(live_metrics["llm_duration_sec"]),
++            eval_duration_sec=float(live_metrics["eval_duration_sec"]),
++            attempts_completed=int(live_metrics["attempts_completed"]),
++            status=str(live_metrics["status"]),
++            extra=dict(live_metrics["extra"]),
++        )
++
++    def _save_live_metrics(
++        *,
++        prompt_tokens: int,
++        completion_tokens: int,
++        prompt_chars_total: int,
++        completion_chars_total: int,
++        llm_call_count: int,
++        usage_reported_call_count: int,
++        usage_missing_call_count: int,
++        llm_duration_sec: float,
++        eval_duration_sec: float,
++        attempts_completed: int,
++        status: str = "running",
++        extra: dict[str, Any] | None = None,
++    ) -> None:
++        live_metrics.update(
++            {
++                "prompt_tokens": prompt_tokens,
++                "completion_tokens": completion_tokens,
++                "prompt_chars_total": prompt_chars_total,
++                "completion_chars_total": completion_chars_total,
++                "llm_call_count": llm_call_count,
++                "usage_reported_call_count": usage_reported_call_count,
++                "usage_missing_call_count": usage_missing_call_count,
++                "llm_duration_sec": llm_duration_sec,
++                "eval_duration_sec": eval_duration_sec,
++                "attempts_completed": attempts_completed,
++                "status": status,
++                "extra": dict(extra or {}),
++            }
++        )
++        _write_live_metrics()
++
++    emit_progress(
++        task_id=task_id,
++        phase="problem",
++        wait_target="problem_processor",
++        status="start",
++        extra={"dataset": args.dataset},
++    )
++    set_progress_refresh_callback(_write_live_metrics)
++    try:
++        if problem_data.get('repair_seeded'):
++            gen_res = _run_repair_seed(
++                problem_data,
++                args,
++                check_correctness_func_param,
++                metrics_callback=_save_live_metrics,
++            )
++        else:
++            gen_res = _run_direct_generation(
++                problem_data,
++                args,
++                check_correctness_func_param,
++                metrics_callback=_save_live_metrics,
++            )
++
++        result = {
++            "task_id": task_id,
++            "model": args.model,
++            "dataset": args.dataset,
++            "method_instrumentation": not args.no_instrumentation,
++            "method_two_step_repair": not args.no_two_step_repair,
++            "direct_gen_code": gen_res["code"],
++            "direct_gen_eval": gen_res["eval_result"],
++            "direct_gen_passed": gen_res["eval_result"].get("passed", False),
++        }
++
++        total_p, total_c = gen_res["prompt_tokens"], gen_res["completion_tokens"]
++        total_prompt_chars = gen_res.get("prompt_chars_total", 0)
++        total_completion_chars = gen_res.get("completion_chars_total", 0)
++        total_llm_calls = gen_res.get("llm_call_count", 0)
++        total_usage_reported_calls = gen_res.get("usage_reported_call_count", 0)
++        total_usage_missing_calls = gen_res.get("usage_missing_call_count", 0)
++        total_llm_duration_sec = gen_res.get("llm_duration_sec", 0.0)
++        total_eval_duration_sec = gen_res.get("eval_duration_sec", 0.0)
++        total_llm_timeout_count = gen_res.get("llm_timeout_count", 0)
++        last_llm_failure_kind = str(gen_res.get("last_llm_failure_kind") or "")
++        last_llm_failure_stage = str(gen_res.get("last_llm_failure_stage") or "")
++        initial_extra = {"direct_gen_passed": result["direct_gen_passed"]}
++        if isinstance(total_llm_timeout_count, int) and total_llm_timeout_count > 0:
++            initial_extra["llm_timeout_count"] = total_llm_timeout_count
++        if last_llm_failure_kind:
++            initial_extra["last_llm_failure_kind"] = last_llm_failure_kind
++        if last_llm_failure_stage:
++            initial_extra["last_llm_failure_stage"] = last_llm_failure_stage
++        initial_failure_extra = _llm_failure_extra(
++            failure_kind=last_llm_failure_kind,
++            stage=last_llm_failure_stage or "direct_generation",
++            llm_timeout_count=int(total_llm_timeout_count or 0),
++            failure_meta=gen_res.get("last_llm_failure_meta"),
++        )
++        if initial_failure_extra:
++            initial_extra.update(initial_failure_extra)
++        _save_live_metrics(
++            prompt_tokens=total_p,
++            completion_tokens=total_c,
++            prompt_chars_total=total_prompt_chars,
++            completion_chars_total=total_completion_chars,
++            llm_call_count=total_llm_calls,
++            usage_reported_call_count=total_usage_reported_calls,
++            usage_missing_call_count=total_usage_missing_calls,
++            llm_duration_sec=total_llm_duration_sec,
++            eval_duration_sec=total_eval_duration_sec,
++            attempts_completed=0,
++            extra=initial_extra,
++        )
++
++        if result["direct_gen_passed"]:
++            print("Direct generation passed successfully.")
++            result.update(
++                {
++                    "final_code": gen_res["code"],
++                    "final_eval": gen_res["eval_result"],
++                    "final_passed": True,
++                    "stopped_reason": (
++                        "Passed on repair seed"
++                        if problem_data.get('repair_seeded')
++                        else "Passed on direct generation"
++                    ),
++                }
++            )
++        elif last_llm_failure_kind == "openai_compat_reasoning_only":
++            stopped_reason = _llm_failure_stop_reason(
++                last_llm_failure_kind,
++                last_llm_failure_stage or "direct_generation",
++            )
++            print(f"{stopped_reason}, skipping self-debugging.")
++            result.update(
++                {
++                    "final_code": "",
++                    "final_eval": gen_res["eval_result"],
++                    "final_passed": False,
++                    "stopped_reason": stopped_reason,
++                }
++            )
++        else:
++            phase_label = "Repair seed failed" if problem_data.get('repair_seeded') else "Direct generation failed"
++            print(f"{phase_label}, entering self-debugging phase.")
++
++            def _save_debug_metrics(
++                *,
++                prompt_tokens: int,
++                completion_tokens: int,
++                prompt_chars_total: int,
++                completion_chars_total: int,
++                llm_call_count: int,
++                usage_reported_call_count: int,
++                usage_missing_call_count: int,
++                llm_duration_sec: float,
++                eval_duration_sec: float,
++                attempts_completed: int,
++                extra: dict[str, Any] | None = None,
++            ) -> None:
++                merged_extra = {"direct_gen_passed": result["direct_gen_passed"]}
++                if extra:
++                    merged_extra.update(extra)
++                _save_live_metrics(
++                    prompt_tokens=total_p + prompt_tokens,
++                    completion_tokens=total_c + completion_tokens,
++                    prompt_chars_total=total_prompt_chars + prompt_chars_total,
++                    completion_chars_total=total_completion_chars + completion_chars_total,
++                    llm_call_count=total_llm_calls + llm_call_count,
++                    usage_reported_call_count=total_usage_reported_calls + usage_reported_call_count,
++                    usage_missing_call_count=total_usage_missing_calls + usage_missing_call_count,
++                    llm_duration_sec=total_llm_duration_sec + llm_duration_sec,
++                    eval_duration_sec=total_eval_duration_sec + eval_duration_sec,
++                    attempts_completed=attempts_completed,
++                    extra=merged_extra,
++                )
++
++            debug_res = _run_self_debugging(
++                gen_res["code"],
++                gen_res["eval_result"],
++                problem_data,
++                args,
++                check_correctness_func_param,
++                metrics_callback=_save_debug_metrics,
++            )
++            result.update(
++                {
++                    "final_code": debug_res["final_code"],
++                    "final_eval": debug_res["final_eval"],
++                    "final_passed": debug_res["final_eval"].get("passed", False),
++                    "debug_session_log": debug_res["session_log"],
++                    "stopped_reason": debug_res.get("stopped_reason") or "Debug cycle completed",
++                }
++            )
++            total_p += debug_res["prompt_tokens"]
++            total_c += debug_res["completion_tokens"]
++            total_prompt_chars += debug_res.get("prompt_chars_total", 0)
++            total_completion_chars += debug_res.get("completion_chars_total", 0)
++            total_llm_calls += debug_res.get("llm_call_count", 0)
++            total_usage_reported_calls += debug_res.get("usage_reported_call_count", 0)
++            total_usage_missing_calls += debug_res.get("usage_missing_call_count", 0)
++            total_llm_duration_sec += debug_res.get("llm_duration_sec", 0.0)
++            total_eval_duration_sec += debug_res.get("eval_duration_sec", 0.0)
++            total_llm_timeout_count += debug_res.get("llm_timeout_count", 0)
++            debug_failure_kind = str(debug_res.get("last_llm_failure_kind") or "")
++            debug_failure_stage = str(debug_res.get("last_llm_failure_stage") or "")
++            if debug_failure_kind:
++                last_llm_failure_kind = debug_failure_kind
++            if debug_failure_stage:
++                last_llm_failure_stage = debug_failure_stage
++            if isinstance(debug_res.get("last_llm_failure_meta"), dict):
++                gen_res["last_llm_failure_meta"] = debug_res["last_llm_failure_meta"]
++
++        result.update(
++            {
++                "total_prompt_tokens": total_p,
++                "total_completion_tokens": total_c,
++                "prompt_chars_total": total_prompt_chars,
++                "completion_chars_total": total_completion_chars,
++                "chars_total": total_prompt_chars + total_completion_chars,
++                "reported_chars_prompt": total_prompt_chars,
++                "reported_chars_completion": total_completion_chars,
++                "reported_chars_total": total_prompt_chars + total_completion_chars,
++                "total_llm_calls": total_llm_calls,
++                "total_llm_duration_sec": total_llm_duration_sec,
++                "total_eval_duration_sec": total_eval_duration_sec,
++                "processing_time_seconds": time.perf_counter() - start_time,
++            }
++        )
++        final_extra = {
++            "direct_gen_passed": result["direct_gen_passed"],
++            "final_passed": result["final_passed"],
++            "stopped_reason": result.get("stopped_reason"),
++            "debug_added_value": result["final_passed"] and not result["direct_gen_passed"],
++            **(
++                {"llm_timeout_count": total_llm_timeout_count}
++                if int(total_llm_timeout_count or 0) > 0
++                else {}
++            ),
++            **(
++                {"last_llm_failure_kind": last_llm_failure_kind}
++                if last_llm_failure_kind
++                else {}
++            ),
++            **(
++                {"last_llm_failure_stage": last_llm_failure_stage}
++                if last_llm_failure_stage
++                else {}
++            ),
++        }
++        if isinstance(gen_res.get("last_llm_failure_meta"), dict):
++            final_extra.update(gen_res["last_llm_failure_meta"])
++        _save_live_metrics(
++            prompt_tokens=total_p,
++            completion_tokens=total_c,
++            prompt_chars_total=total_prompt_chars,
++            completion_chars_total=total_completion_chars,
++            llm_call_count=total_llm_calls,
++            usage_reported_call_count=total_usage_reported_calls,
++            usage_missing_call_count=total_usage_missing_calls,
++            llm_duration_sec=total_llm_duration_sec,
++            eval_duration_sec=total_eval_duration_sec,
++            attempts_completed=len(result.get("debug_session_log", [])),
++            status="completed",
++            extra=final_extra,
++        )
++
++        emit_progress(
++            task_id=task_id,
++            phase="problem",
++            wait_target="problem_processor",
++            status="finish",
++            extra={
++                "final_passed": result["final_passed"],
++                "stop_reason": result.get("stopped_reason"),
++            },
++        )
++        print(f"Problem {task_id} processing completed. Final result: {'Passed' if result['final_passed'] else 'Failed'}")
++        return result
++    finally:
++        set_progress_refresh_callback(None)
+diff --git a/reporting.py b/reporting.py
+index 8891a3c..9e6208b 100644
+--- a/reporting.py
++++ b/reporting.py
+@@ -1,26 +1,129 @@
+-import os
+-import json
+-import pandas as pd
+-
+-
+-def format_check_correctness_result(result_dict: dict) -> str:
++import os
++import json
++import tempfile
++import pandas as pd
++
++
++def _env_positive_int(name: str, *, default: int) -> int:
++    raw_value = os.getenv(name, "").strip()
++    if not raw_value:
++        return default
++    try:
++        value = int(raw_value)
++    except ValueError:
++        return default
++    return max(1, value)
++
++
++def _compact_text(text: str, *, max_chars: int) -> str:
++    normalized = str(text or "").strip()
++    if len(normalized) <= max(1, int(max_chars)):
++        return normalized
++    if max_chars <= 3:
++        return normalized[: max(0, int(max_chars))]
++    return normalized[: max(0, int(max_chars)) - 3].rstrip() + "..."
++
++
++def _tail_text(text: str, *, max_chars: int) -> str:
++    normalized = str(text or "").strip()
++    limit = max(1, int(max_chars))
++    if len(normalized) <= limit:
++        return normalized
++    if limit <= 3:
++        return normalized[-limit:]
++    return "..." + normalized[-(limit - 3) :]
++
++
++def _tail_section(label: str, text: str, *, max_chars: int) -> str:
++    normalized = str(text or "").strip()
++    if not normalized:
++        return ""
++    return f"{label} tail:\n{_tail_text(normalized, max_chars=max_chars)}"
++
++
++def build_llmdebug_failure_feedback(
++    *,
++    passed_count: int,
++    failed_count: int,
++    total_count: int,
++    exitcode: int,
++    timed_out: bool,
++    stdout_text: str,
++    stderr_text: str,
++    error_text: str,
++    max_chars: int | None = None,
++    tail_max_chars: int | None = None,
++) -> str:
++    total_limit = (
++        max_chars
++        if max_chars is not None
++        else _env_positive_int("TRACECODER_FAILURE_FEEDBACK_MAX_CHARS", default=6000)
++    )
++    tail_limit = (
++        tail_max_chars
++        if tail_max_chars is not None
++        else _env_positive_int("TRACECODER_FAILURE_FEEDBACK_TAIL_MAX_CHARS", default=2000)
++    )
++
++    header = [
++        f"Pytest status: {'timeout' if timed_out else 'failure'}",
++        f"Tests passed: {passed_count}/{total_count}",
++        f"Tests failed: {failed_count}",
++        f"Exit code: {exitcode}",
++    ]
++    sections = [
++        _tail_section("Stdout", stdout_text, max_chars=tail_limit),
++        _tail_section("Stderr", stderr_text, max_chars=tail_limit),
++        _tail_section("Error", error_text, max_chars=max(256, min(tail_limit, 1000))),
++    ]
++    rendered = "\n".join(
++        part for part in ["\n".join(header)] + [section for section in sections if section] if part
++    ).strip()
++    return _compact_text(rendered, max_chars=total_limit)
++
++
++def compact_failure_result_text(
++    text: str,
++    *,
++    max_chars: int | None = None,
++    tail_max_chars: int | None = None,
++) -> str:
++    total_limit = (
++        max_chars
++        if max_chars is not None
++        else _env_positive_int("TRACECODER_FAILURE_FEEDBACK_MAX_CHARS", default=6000)
++    )
++    tail_limit = (
++        tail_max_chars
++        if tail_max_chars is not None
++        else _env_positive_int("TRACECODER_FAILURE_FEEDBACK_TAIL_MAX_CHARS", default=2000)
++    )
++    normalized = str(text or "").strip()
++    if len(normalized) <= total_limit:
++        return normalized
++    return _tail_text(normalized, max_chars=min(total_limit, tail_limit))
++
++
++def format_check_correctness_result(result_dict: dict) -> str:
+     """
+     Formats the evaluation result dictionary into a human-readable string.
+     """
+     if not isinstance(result_dict, dict):
+         return "Invalid evaluation result format."
+     
+-    if result_dict.get('passed', False):
+-        return "All tests passed."
+-
+-    failure_detail = result_dict.get('result', "No specific failure details provided.")
+-    passed_count = result_dict.get('passed_count', -1)
+-    total_count = result_dict.get('total_count', -1)
+-
+-    return f"Failed ({passed_count}/{total_count} passed): {failure_detail}"
++    if result_dict.get('passed', False):
++        return "All tests passed."
++
++    failure_detail = compact_failure_result_text(
++        str(result_dict.get('result', "No specific failure details provided."))
++    )
++    passed_count = result_dict.get('passed_count', -1)
++    total_count = result_dict.get('total_count', -1)
++
++    return f"Failed ({passed_count}/{total_count} passed): {failure_detail}"
+ 
+ 
+-def save_results(results_data, filename):
++def save_results(results_data, filename):
+     """
+     Saves the list of experiment results to a CSV file.
+     """
+@@ -41,8 +144,41 @@ def save_results(results_data, filename):
+ 
+         df.to_csv(filename, index=False, encoding='utf-8-sig')
+         print(f"\nExperiment results have been successfully saved to: {filename}")
+-    except Exception as e:
+-        print(f"Error saving results to CSV: {e}")
++    except Exception as e:
++        print(f"Error saving results to CSV: {e}")
++
++
++def save_metrics_sidecar(metrics, filename):
++    """
++    Saves timeout-safe telemetry to a JSON sidecar via atomic replacement.
++    """
++    if not filename:
++        return
++
++    temp_name = None
++    try:
++        output_dir = os.path.dirname(filename)
++        if output_dir and not os.path.exists(output_dir):
++            os.makedirs(output_dir)
++
++        with tempfile.NamedTemporaryFile(
++            "w",
++            encoding="utf-8",
++            delete=False,
++            dir=output_dir or None,
++            prefix=".llmdebug_metrics_",
++            suffix=".json",
++        ) as handle:
++            json.dump(metrics, handle)
++            temp_name = handle.name
++        os.replace(temp_name, filename)
++    except Exception as e:
++        print(f"Error saving metrics sidecar to {filename}: {e}")
++        if temp_name and os.path.exists(temp_name):
++            try:
++                os.remove(temp_name)
++            except OSError:
++                pass
+ 
+ 
+ def print_summary(results_data: list):
+diff --git a/src/dataset_loader.py b/src/dataset_loader.py
+index 528c535..07c142d 100644
+--- a/src/dataset_loader.py
++++ b/src/dataset_loader.py
+@@ -10,11 +10,11 @@ def load_dataset(dataset_name: str, dataset_path: str):
+     if not os.path.exists(dataset_path):
+         raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
+ 
+-    if dataset_name == 'bigcodebench':
+-        return load_parquet_dataset(dataset_path)
+-    elif dataset_name == 'humaneval':
+-        # HumanEval is typically a jsonl file
+-        return load_jsonl_dataset(dataset_path)
++    if dataset_name == 'bigcodebench':
++        return load_parquet_dataset(dataset_path)
++    elif dataset_name in {'humaneval', 'llmdebug'}:
++        # HumanEval is typically a jsonl file
++        return load_jsonl_dataset(dataset_path)
+     # More dataset loading logic can be added here
+     else:
+         raise ValueError(f"Unsupported dataset name: {dataset_name}")
+diff --git a/src/generation.py b/src/generation.py
+index df1cb5b..5f577a5 100644
+--- a/src/generation.py
++++ b/src/generation.py
+@@ -1,20 +1,32 @@
+-import time
+-import re
+-import ast
+-from typing import Tuple, Any, List
+-import torch
+-from openai import OpenAI, APIError, Timeout, RateLimitError
+-from transformers import AutoTokenizer
+-import logging # Added import
+-
+-# Import function from a sibling module
+-from .postprocessing import extract_python_code
+-
+-# --- OpenAI/Compatible API Client Configuration ---
+-client = OpenAI(
+-    api_key="your_api_key_here",
+-    base_url="your_base_url_here"
+-)
++import ast
++import json
++import logging
++import os
++import re
++import time
++from pathlib import Path
++from typing import Any, Tuple
++
++try:
++    import torch
++except Exception:  # pragma: no cover - optional for API-backed runs
++    torch = None
++
++from openai import APIError, OpenAI, RateLimitError, Timeout
++from baselines.openai_compat import (
++    OpenAICompatResponseError,
++    apply_compat_request_profile,
++    compat_config_from_extra,
++    normalize_chat_completion_response,
++    require_final_content,
++    response_error_meta,
++)
++
++# Import function from a sibling module
++from .postprocessing import extract_python_code
++from .progress import emit_progress, progress_span
++
++_MOCK_RESPONSES: list[dict[str, Any]] | None = None
+ 
+ # Configure logger
+ logger = logging.getLogger(__name__)
+@@ -87,49 +99,285 @@ def extract_python_code_with_logic(text: str, remove_main: bool = True, remove_p
+ 
+ 
+ # --- API Call Function ---
+-def call_api(prompt, model, max_tokens_response=4096):
+-    try:
+-        response = client.chat.completions.create(
+-            model=model,
+-            messages=[
+-                {"role": "system",
+-                 "content": "You are a helpful assistant specialized in code generation and debugging."},
+-                {"role": "user", "content": prompt}
+-            ],
+-            temperature=0.2,
+-        )
+-        result_text = response.choices[0].message.content
+-        prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+-        completion_tokens = response.usage.completion_tokens if response.usage else 0
+-        time.sleep(1) # Wait for 1 second after each successful call
+-        return result_text, prompt_tokens, completion_tokens
+-    except RateLimitError as e:
+-        logger.warning(f"API rate limit error: {e}. May need to wait longer before retrying.") # logger is now defined
+-        # A longer wait time or a specific retry strategy can be added here
+-        return None, 0, 0
+-    except APIError as e:
+-        logger.error(f"An error occurred during the API call: {e}") # logger is now defined
+-        return None, 0, 0
+-    except Timeout as e:
+-        logger.error(f"API call timed out: {e}") # logger is now defined
+-        return None, 0, 0
+-    except Exception as e: # Catch all other unexpected exceptions
+-        logger.error(f"An unknown error occurred when calling the API: {e}") # logger is now defined
+-        return None, 0, 0
++def _normalize_base_url(value: str) -> str | None:
++    normalized = value.strip()
++    if not normalized:
++        return None
++    if not normalized.endswith("/v1"):
++        normalized = f"{normalized.rstrip('/')}/v1"
++    return normalized
++
++
++def _configured_api_timeout_sec() -> float | None:
++    raw_value = os.getenv("TRACECODER_OPENAI_TIMEOUT_SEC", "").strip()
++    if not raw_value:
++        return None
++    try:
++        timeout_sec = float(raw_value)
++    except ValueError:
++        return None
++    return timeout_sec if timeout_sec > 0.0 else None
++
++
++def _configured_stage_max_tokens(env_name: str, *, default: int) -> int:
++    raw_value = os.getenv(env_name, "").strip()
++    if not raw_value:
++        return default
++    try:
++        value = int(raw_value)
++    except ValueError:
++        return default
++    return max(1, value)
++
++
++def _max_tokens_for_request(*, status: str, progress_phase: str) -> int:
++    normalized_phase = str(progress_phase or "").strip().lower()
++    analysis_max_tokens = _configured_stage_max_tokens(
++        "TRACECODER_ANALYSIS_MAX_TOKENS",
++        default=4096,
++    )
++    implementation_max_tokens = _configured_stage_max_tokens(
++        "TRACECODER_IMPLEMENTATION_MAX_TOKENS",
++        default=4096,
++    )
++    if normalized_phase in {"instrumentation", "analysis_planning"}:
++        return analysis_max_tokens
++    if normalized_phase in {"direct_generation", "code_implementation"}:
++        return implementation_max_tokens
++    if status == "code4_generate":
++        return analysis_max_tokens
++    return implementation_max_tokens
++
++
++def _compat_config_from_env():
++    return compat_config_from_extra(
++        {
++            "baseline_openai_compat_profile": os.getenv(
++                "LLMDEBUG_BASELINE_OPENAI_COMPAT_PROFILE",
++                "auto",
++            ),
++            "baseline_openai_allow_reasoning_fallback": os.getenv(
++                "LLMDEBUG_BASELINE_OPENAI_ALLOW_REASONING_FALLBACK",
++                "",
++            ).strip().lower()
++            in {"1", "true", "yes", "on"},
++            "baseline_openai_enable_thinking": os.getenv(
++                "LLMDEBUG_BASELINE_OPENAI_ENABLE_THINKING",
++                "",
++            ).strip().lower()
++            in {"1", "true", "yes", "on"},
++        }
++    )
++
++
++def _build_client() -> OpenAI:
++    client_kwargs: dict[str, Any] = {
++        "api_key": os.getenv("OPENAI_API_KEY", "sk-placeholder"),
++        "base_url": _normalize_base_url(os.getenv("OPENAI_BASE_URL", "")),
++    }
++    timeout_sec = _configured_api_timeout_sec()
++    if timeout_sec is not None:
++        client_kwargs["timeout"] = timeout_sec
++    return OpenAI(
++        **client_kwargs,
++    )
++
++
++def _parse_optional_nonnegative_int(raw: Any) -> int | None:
++    try:
++        value = int(raw)
++    except (TypeError, ValueError):
++        return None
++    return max(0, value)
++
++
++def _usage_mapping(payload: Any) -> dict[str, Any]:
++    if isinstance(payload, dict):
++        return payload
++    model_dump = getattr(payload, "model_dump", None)
++    if callable(model_dump):
++        dumped = model_dump()
++        if isinstance(dumped, dict):
++            return dumped
++    to_dict = getattr(payload, "to_dict", None)
++    if callable(to_dict):
++        dumped = to_dict()
++        if isinstance(dumped, dict):
++            return dumped
++    out: dict[str, Any] = {}
++    for key in (
++        "prompt_tokens",
++        "completion_tokens",
++        "input_tokens",
++        "output_tokens",
++        "total_tokens",
++    ):
++        value = getattr(payload, key, None)
++        if value is not None:
++            out[key] = value
++    return out
++
++
++def _usage_counts_from_payload(payload: Any) -> tuple[int, int, bool]:
++    usage = _usage_mapping(payload)
++    if not usage:
++        return 0, 0, False
++
++    prompt_tokens = _parse_optional_nonnegative_int(usage.get("prompt_tokens"))
++    completion_tokens = _parse_optional_nonnegative_int(usage.get("completion_tokens"))
++    if prompt_tokens is None and completion_tokens is None:
++        prompt_tokens = _parse_optional_nonnegative_int(usage.get("input_tokens"))
++        completion_tokens = _parse_optional_nonnegative_int(usage.get("output_tokens"))
++
++    usage_reported = any(
++        _parse_optional_nonnegative_int(usage.get(key)) is not None
++        for key in (
++            "prompt_tokens",
++            "completion_tokens",
++            "input_tokens",
++            "output_tokens",
++            "total_tokens",
++        )
++    )
++    return prompt_tokens or 0, completion_tokens or 0, usage_reported
++
++
++def _next_mock_response() -> tuple[str, int, int, bool, int, str, dict[str, Any]] | None:
++    raw_path = os.getenv("TRACECODER_FAKE_RESPONSES_PATH", "").strip()
++    if not raw_path:
++        return None
++
++    global _MOCK_RESPONSES
++    if _MOCK_RESPONSES is None:
++        payload = json.loads(Path(raw_path).read_text(encoding="utf-8"))
++        if not isinstance(payload, list):
++            raise RuntimeError("TRACECODER_FAKE_RESPONSES_PATH must point to a JSON list")
++        _MOCK_RESPONSES = []
++        for item in payload:
++            if not isinstance(item, dict):
++                raise RuntimeError("mock TraceCoder responses must be objects")
++            _MOCK_RESPONSES.append(item)
++
++    if not _MOCK_RESPONSES:
++        raise RuntimeError("TraceCoder mock responses exhausted")
++
++    item = _MOCK_RESPONSES.pop(0)
++    prompt_tokens, completion_tokens, usage_reported = _usage_counts_from_payload(item)
++    text = str(item.get("text") or "")
++    return (
++        text,
++        prompt_tokens,
++        completion_tokens,
++        usage_reported,
++        len(text),
++        "",
++        {},
++    )
++
++
++def call_api(prompt, model, max_tokens_response=4096):
++    mocked = _next_mock_response()
++    if mocked is not None:
++        return mocked
++
++    client = _build_client()
++    compat_config = _compat_config_from_env()
++    compat_base_url = _normalize_base_url(os.getenv("OPENAI_BASE_URL", "")) or ""
++    try:
++        request_kwargs, request_meta = apply_compat_request_profile(
++            {
++                "model": model,
++                "messages": [
++                {"role": "system",
++                 "content": "You are a helpful assistant specialized in code generation and debugging."},
++                {"role": "user", "content": prompt}
++            ],
++                "temperature": 0.2,
++                "max_tokens": max(1, int(max_tokens_response)),
++            },
++            compat_config=compat_config,
++            base_url=compat_base_url,
++        )
++        response = client.chat.completions.create(
++            **request_kwargs,
++        )
++        prompt_tokens, completion_tokens, usage_reported = _usage_counts_from_payload(
++            getattr(response, "usage", None)
++            or _usage_mapping(getattr(response, "model_extra", {})).get("usage")
++        )
++        normalized = normalize_chat_completion_response(
++            response,
++            compat_config=compat_config,
++            base_url=compat_base_url,
++            request_meta=request_meta,
++        )
++        result_text = require_final_content(normalized, base_url=compat_base_url)
++        finish_reason = ""
++        choices = getattr(response, "choices", None)
++        if isinstance(choices, list) and choices:
++            finish_reason = str(getattr(choices[0], "finish_reason", "") or "").strip()
++        time.sleep(1) # Wait for 1 second after each successful call
++        return (
++            result_text,
++            prompt_tokens,
++            completion_tokens,
++            usage_reported,
++            len(normalized.content_text or normalized.reasoning_content or normalized.reasoning or ""),
++            "",
++            {
++                "finish_reason": finish_reason,
++                "max_tokens_requested": max(1, int(max_tokens_response)),
++            },
++        )
++    except OpenAICompatResponseError as exc:
++        logger.error(f"OpenAI-compatible response error: {exc}")
++        return (
++            None,
++            0,
++            0,
++            False,
++            0,
++            "openai_compat_reasoning_only",
++            response_error_meta(exc),
++        )
++    except RateLimitError as e:
++        logger.warning(f"API rate limit error: {e}. May need to wait longer before retrying.") # logger is now defined
++        # A longer wait time or a specific retry strategy can be added here
++        return None, 0, 0, False, 0, "rate_limit", {}
++    except APIError as e:
++        logger.error(f"An error occurred during the API call: {e}") # logger is now defined
++        return None, 0, 0, False, 0, "api_error", {}
++    except Timeout as e:
++        logger.error(f"API call timed out: {e}") # logger is now defined
++        return None, 0, 0, False, 0, "api_timeout", {}
++    except Exception as e: # Catch all other unexpected exceptions
++        logger.error(f"An unknown error occurred when calling the API: {e}") # logger is now defined
++        return None, 0, 0, False, 0, "exception", {}
+ 
+ 
+ # --- Main Generator Function ---
+-def generator(text: str, status: str, model_name: str, models=None, tokenizers=None) -> Tuple[Any, int, int]:
+-    """
+-    Calls different models or APIs to generate content based on the status.
+-    Returns: (generated content, prompt_tokens, completion_tokens)
+-    """
++def generator(
++    text: str,
++    status: str,
++    model_name: str,
++    progress_task_id: str = "unknown_task",
++    progress_phase: str = "",
++    progress_attempt: int = 0,
++    models=None,
++    tokenizers=None,
++) -> Tuple[Any, int, int, bool, int, str, dict[str, Any]]:
++    """
++    Calls different models or APIs to generate content based on the status.
++    Returns: (generated content, prompt_tokens, completion_tokens, usage_reported, response_chars, failure_kind)
++    """
+     # If local models and tokenizers are provided
+     if models and tokenizers:
+         # Local model generation logic is preserved here
+         messages = [{"role": "user", "content": text}]
+-        inputs = tokenizers.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(
+-            models.device)
++        if torch is None:
++            raise RuntimeError("torch is required for local-model TraceCoder generation")
++        inputs = tokenizers.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(
++            models.device)
+         outputs = models.generate(inputs, max_new_tokens=4096, eos_token_id=tokenizers.eos_token_id)
+ 
+         prompt_tokens = len(inputs[0])
+@@ -142,38 +390,147 @@ def generator(text: str, status: str, model_name: str, models=None, tokenizers=N
+         # More status handling logic can be added for local models
+ 
+         torch.cuda.empty_cache()
+-        return generation, prompt_tokens, completion_tokens
+-
+-    # If using an API model
+-    else:
+-        max_retries = 5
+-        retry_count = 0
+-
+-        while retry_count < max_retries:
+-            raw_generation, p_tokens, c_tokens = call_api(prompt=text, model=model_name)
+-
+-            if raw_generation is not None:
+-                # Post-process the raw output based on the status
+-                if status in ["code3_generate", "code5_generate"]:
+-                    processed_generation = extract_python_code(raw_generation)
+-                    print(f"################# PROCESSED ({status}) #################\n{processed_generation}")
+-                    return processed_generation, p_tokens, c_tokens
+-
+-                elif status in ["code4_generate", "code6_generate"]:
+-                    # These statuses need to return the original text containing analysis and code
+-                    print(f"################# RAW ({status}) #################\n{raw_generation}")
+-                    return raw_generation, p_tokens, c_tokens
+-
+-                else:
+-                    # Default behavior: return the raw text
+-                    return raw_generation, p_tokens, c_tokens
+-
+-            retry_count += 1
+-            print(f"API call failed, retrying... (Attempt {retry_count}/{max_retries})")
+-            if retry_count < max_retries:
+-                time.sleep(5)
+-
+-        # All retries failed
+-        error_message = f"Error: API call still failed after {max_retries} retries (status: '{status}')."
+-        print(error_message)
+-        return error_message, 0, 0
++        return generation, prompt_tokens, completion_tokens, True, len(generation), "", {}
++
++    # If using an API model
++    else:
++        max_retries = 5
++        retry_count = 0
++        last_failure_kind = ""
++        last_failure_meta: dict[str, Any] = {}
++        last_prompt_tokens = 0
++        last_completion_tokens = 0
++        last_usage_reported = False
++        last_response_chars = 0
++        phase_name = str(progress_phase or status or "llm_request")
++        api_timeout_sec = _configured_api_timeout_sec()
++        span_extra = {"model": model_name}
++        if api_timeout_sec is not None:
++            span_extra["api_timeout_sec"] = api_timeout_sec
++
++        while retry_count < max_retries:
++            request_number = retry_count + 1
++            with progress_span(
++                task_id=progress_task_id,
++                phase=phase_name,
++                wait_target="llm_api",
++                attempt=progress_attempt,
++                extra={**span_extra, "request": request_number},
++            ) as span:
++                (
++                    raw_generation,
++                    p_tokens,
++                    c_tokens,
++                    usage_reported,
++                    response_chars,
++                    failure_kind,
++                    failure_meta,
++                ) = call_api(
++                    prompt=text,
++                    model=model_name,
++                    max_tokens_response=_max_tokens_for_request(
++                        status=status,
++                        progress_phase=progress_phase,
++                    ),
++                )
++                last_prompt_tokens = p_tokens
++                last_completion_tokens = c_tokens
++                last_usage_reported = usage_reported
++                last_response_chars = response_chars
++                if raw_generation is not None:
++                    span.update(request_status="done", request=request_number)
++                else:
++                    span.update(
++                        request_status="failed",
++                        request=request_number,
++                        failure_kind=failure_kind or "api_call_failed",
++                    )
++
++            if raw_generation is not None:
++                # Post-process the raw output based on the status
++                if status in ["code3_generate", "code5_generate"]:
++                    processed_generation = extract_python_code(raw_generation)
++                    print(f"################# PROCESSED ({status}) #################\n{processed_generation}")
++                    return (
++                        processed_generation,
++                        p_tokens,
++                        c_tokens,
++                        usage_reported,
++                        response_chars,
++                        "",
++                        {},
++                    )
++
++                elif status in ["code4_generate", "code6_generate"]:
++                    # These statuses need to return the original text containing analysis and code
++                    print(f"################# RAW ({status}) #################\n{raw_generation}")
++                    return raw_generation, p_tokens, c_tokens, usage_reported, response_chars, "", {}
++
++                else:
++                    # Default behavior: return the raw text
++                    return raw_generation, p_tokens, c_tokens, usage_reported, response_chars, "", {}
++
++            retry_count += 1
++            last_failure_kind = failure_kind or "api_call_failed"
++            last_failure_meta = dict(failure_meta or {})
++            if last_failure_kind == "openai_compat_reasoning_only":
++                print("OpenAI-compatible response omitted final content; stopping without retries.")
++                break
++            if last_failure_kind == "api_timeout":
++                print(f"API call timed out, retrying... (Attempt {retry_count}/{max_retries})")
++            else:
++                print(f"API call failed, retrying... (Attempt {retry_count}/{max_retries})")
++            if retry_count < max_retries:
++                emit_progress(
++                    task_id=progress_task_id,
++                    phase=phase_name,
++                    wait_target="retry_sleep",
++                    status="heartbeat",
++                    attempt=progress_attempt,
++                    elapsed_sec=0.0,
++                    extra={
++                        "retry": retry_count,
++                        "max_retries": max_retries,
++                        "failure_kind": last_failure_kind,
++                    },
++                )
++                time.sleep(5)
++
++        # All retries failed
++        if last_failure_kind == "api_timeout":
++            timeout_sec = _configured_api_timeout_sec()
++            timeout_suffix = f" with timeout={timeout_sec:g}s" if timeout_sec is not None else ""
++            error_message = (
++                f"Error: API timeout after {max_retries} retries{timeout_suffix} "
++                f"(status: '{status}')."
++            )
++        elif last_failure_kind == "openai_compat_reasoning_only":
++            error_message = str(
++                last_failure_meta.get("compat_message")
++                or "Error: OpenAI-compatible response contained reasoning but no final content."
++            )
++        else:
++            error_message = f"Error: API call still failed after {max_retries} retries (status: '{status}')."
++        print(error_message)
++        emit_progress(
++            task_id=progress_task_id,
++            phase=phase_name,
++            wait_target="llm_api",
++            status="finish",
++            attempt=progress_attempt,
++            elapsed_sec=0.0,
++            extra={
++                "request_status": "failed",
++                "failure_kind": last_failure_kind or "api_call_failed",
++                "max_retries": max_retries,
++            },
++        )
++        return (
++            error_message,
++            last_prompt_tokens,
++            last_completion_tokens,
++            last_usage_reported,
++            last_response_chars,
++            last_failure_kind or "api_call_failed",
++            last_failure_meta,
++        )
+diff --git a/src/traceRunner.py b/src/traceRunner.py
+index d982581..d8abc47 100644
+--- a/src/traceRunner.py
++++ b/src/traceRunner.py
+@@ -1,12 +1,48 @@
+-import subprocess
+-import tempfile
+-import os
+-import sys
+-import time  # Explicitly import the time module
+-import json
+-import io  # Required for io.StringIO
+-import traceback  # Required for formatting exception information
+-import re  # Used for preprocessing the code string
++import base64
++import io  # Required for io.StringIO
++import json
++import os
++import queue
++import re  # Used for preprocessing the code string
++import signal
++import subprocess
++import sys
++import tempfile
++import threading
++import time  # Explicitly import the time module
++import traceback  # Required for formatting exception information
++from pathlib import Path
++
++from .progress import PROGRESS_PREFIX
++
++
++def _env_positive_int(name: str, *, default: int) -> int:
++    raw_value = os.getenv(name, "").strip()
++    if not raw_value:
++        return default
++    try:
++        value = int(raw_value)
++    except ValueError:
++        return default
++    return max(1, value)
++
++
++def _limit_display_output(text: str) -> str:
++    normalized = str(text or "").strip()
++    if not normalized:
++        return ""
++    max_lines = _env_positive_int("TRACECODER_INSTRUMENTATION_OUTPUT_MAX_LINES", default=80)
++    max_chars = _env_positive_int("TRACECODER_INSTRUMENTATION_OUTPUT_MAX_CHARS", default=12000)
++    lines = normalized.splitlines()
++    if len(lines) > max_lines:
++        omitted = len(lines) - max_lines
++        lines = [f"... ({omitted} earlier lines omitted)"] + lines[-max_lines:]
++    limited = "\n".join(lines).strip()
++    if len(limited) <= max_chars:
++        return limited
++    if max_chars <= 3:
++        return limited[-max_chars:]
++    return "..." + limited[-(max_chars - 3) :]
+ 
+ # --- Helper code to be injected into the user's code ---
+ HELPER_CODE_TEMPLATE = """
+@@ -17,26 +53,67 @@ import json
+ import traceback
+ import os # Not used directly, but may be useful for more complex test loading scenarios
+ 
+-# --- JSON result markers for parsing by the main process ---
+-JSON_RESULTS_START_MARKER = "---JSON_RESULTS_START---"
+-JSON_RESULTS_END_MARKER = "---JSON_RESULTS_END---"
+-
+-class EnhancedTestResult(unittest.TestResult):
+-    def __init__(self, *args, **kwargs):
+-        super().__init__(*args, **kwargs)
+-        self.results_data = [] # Stores detailed information for each test
+-        self._original_stdout = None
+-        self._original_stderr = None
+-        self._current_test_stdout = None
+-        self._current_test_stderr = None
+-
+-    def startTest(self, test):
+-        super().startTest(test)
+-        self._original_stdout = sys.stdout
+-        self._original_stderr = sys.stderr
+-        self._current_test_stdout = io.StringIO()
+-        self._current_test_stderr = io.StringIO()
+-        sys.stdout = self._current_test_stdout
++# --- JSON result markers for parsing by the main process ---
++JSON_RESULTS_START_MARKER = "---JSON_RESULTS_START---"
++JSON_RESULTS_END_MARKER = "---JSON_RESULTS_END---"
++PROGRESS_PREFIX = "[TRACECODER_PROGRESS]"
++
++
++def _progress_meta():
++    return {
++        "task": " ".join(os.getenv("TRACECODER_PROGRESS_TASK_ID", "unknown_task").split()) or "unknown_task",
++        "phase": " ".join(os.getenv("TRACECODER_PROGRESS_PHASE", "unknown_phase").split()) or "unknown_phase",
++        "wait": " ".join(os.getenv("TRACECODER_PROGRESS_WAIT_TARGET", "unknown_wait").split()) or "unknown_wait",
++        "attempt": int(os.getenv("TRACECODER_PROGRESS_ATTEMPT", "0") or "0"),
++    }
++
++
++def _sanitize_progress_value(value):
++    if isinstance(value, bool):
++        text = "true" if value else "false"
++    elif isinstance(value, float):
++        text = f"{value:.1f}"
++    else:
++        text = str(value)
++    return "_".join(text.strip().split())
++
++
++def emit_progress(status, **extra):
++    meta = _progress_meta()
++    fields = [
++        ("task", meta["task"]),
++        ("phase", meta["phase"]),
++        ("wait", meta["wait"]),
++        ("status", status),
++        ("attempt", meta["attempt"]),
++        ("elapsed", 0.0),
++    ]
++    for key, value in sorted(extra.items()):
++        sanitized = _sanitize_progress_value(value)
++        if sanitized:
++            fields.append((_sanitize_progress_value(key), sanitized))
++    message = " ".join(f"{key}={_sanitize_progress_value(value)}" for key, value in fields if _sanitize_progress_value(value))
++    sys.__stderr__.write(PROGRESS_PREFIX + " " + message + "\n")
++    sys.__stderr__.flush()
++
++class EnhancedTestResult(unittest.TestResult):
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self.results_data = [] # Stores detailed information for each test
++        self._original_stdout = None
++        self._original_stderr = None
++        self._current_test_stdout = None
++        self._current_test_stderr = None
++        self._completed_count = 0
++
++    def startTest(self, test):
++        super().startTest(test)
++        emit_progress("heartbeat", node=test.id(), event="test_start", completed=self._completed_count)
++        self._original_stdout = sys.stdout
++        self._original_stderr = sys.stderr
++        self._current_test_stdout = io.StringIO()
++        self._current_test_stderr = io.StringIO()
++        sys.stdout = self._current_test_stdout
+         sys.stderr = self._current_test_stderr
+ 
+     def _get_captured_outputs_and_restore_streams(self):
+@@ -62,39 +139,45 @@ class EnhancedTestResult(unittest.TestResult):
+ 
+         return stdout_val, stderr_val
+ 
+-    def addSuccess(self, test):
+-        super().addSuccess(test)
+-        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
+-        self.results_data.append({
+-            "name": test.id(),
+-            "status": "PASSED",
+-            "stdout": stdout_val,
+-            "stderr": stderr_val,
++    def addSuccess(self, test):
++        super().addSuccess(test)
++        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
++        self._completed_count += 1
++        emit_progress("heartbeat", node=test.id(), event="test_finish", outcome="passed", completed=self._completed_count)
++        self.results_data.append({
++            "name": test.id(),
++            "status": "PASSED",
++            "stdout": stdout_val,
++            "stderr": stderr_val,
+         })
+ 
+-    def addError(self, test, err):
+-        super().addError(test, err)
+-        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
+-        exc_type, exc_value, exc_tb = err
+-        tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+-        self.results_data.append({
+-            "name": test.id(),
+-            "status": "ERROR",
+-            "stdout": stdout_val,
+-            "stderr": stderr_val,
++    def addError(self, test, err):
++        super().addError(test, err)
++        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
++        exc_type, exc_value, exc_tb = err
++        tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
++        self._completed_count += 1
++        emit_progress("heartbeat", node=test.id(), event="test_finish", outcome="error", completed=self._completed_count)
++        self.results_data.append({
++            "name": test.id(),
++            "status": "ERROR",
++            "stdout": stdout_val,
++            "stderr": stderr_val,
+             "traceback": "".join(tb_lines)
+         })
+ 
+-    def addFailure(self, test, err):
+-        super().addFailure(test, err)
+-        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
+-        exc_type, exc_value, exc_tb = err
+-        tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+-        self.results_data.append({
+-            "name": test.id(),
+-            "status": "FAILED",
+-            "stdout": stdout_val,
+-            "stderr": stderr_val,
++    def addFailure(self, test, err):
++        super().addFailure(test, err)
++        stdout_val, stderr_val = self._get_captured_outputs_and_restore_streams()
++        exc_type, exc_value, exc_tb = err
++        tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
++        self._completed_count += 1
++        emit_progress("heartbeat", node=test.id(), event="test_finish", outcome="failed", completed=self._completed_count)
++        self.results_data.append({
++            "name": test.id(),
++            "status": "FAILED",
++            "stdout": stdout_val,
++            "stderr": stderr_val,
+             "traceback": "".join(tb_lines)
+         })
+ 
+@@ -109,26 +192,29 @@ def run_tests_with_custom_result():
+     runner_stream = io.StringIO()
+     loader = unittest.TestLoader()
+ 
+-    try:
+-        # Load tests from the main module where the user's code is executed
+-        suite = loader.loadTestsFromModule(sys.modules['__main__'])
+-    except Exception as e:
+-        # This error occurs if test loading itself fails
+-        print(f"Error loading tests: {{str(e)}}", file=sys.stderr) # To actual stderr
+-        sys.stderr.flush()
+-
+-        # Ensure we're writing JSON to the original process stdout
+-        print("\\n" + JSON_RESULTS_START_MARKER)
+-        json.dump({
+-            "runner_summary": f"Error: Failed to load test cases: {{str(e)}}. No tests were run.",
++    try:
++        # Load tests from the main module where the user's code is executed
++        suite = loader.loadTestsFromModule(sys.modules['__main__'])
++        emit_progress("heartbeat", event="collection_complete", collected=suite.countTestCases())
++    except Exception as e:
++        # This error occurs if test loading itself fails
++        print(f"Error loading tests: {{str(e)}}", file=sys.stderr) # To actual stderr
++        sys.stderr.flush()
++        emit_progress("finish", event="collection_error", error=type(e).__name__)
++
++        # Ensure we're writing JSON to the original process stdout
++        print("\\n" + JSON_RESULTS_START_MARKER)
++        json.dump({
++            "runner_summary": f"Error: Failed to load test cases: {{str(e)}}. No tests were run.",
+             "detailed_results": []
+         }, sys.stdout)
+         print("\\n" + JSON_RESULTS_END_MARKER)
+         sys.stdout.flush()
+         return
+-
+-    runner = unittest.TextTestRunner(stream=runner_stream, verbosity=2, resultclass=EnhancedTestResult)
+-    result_object = runner.run(suite)
++
++    runner = unittest.TextTestRunner(stream=runner_stream, verbosity=2, resultclass=EnhancedTestResult)
++    result_object = runner.run(suite)
++    emit_progress("finish", event="runner_complete", completed=len(result_object.results_data))
+ 
+     # Prepare the data to be output as JSON
+     output_data = {
+@@ -148,7 +234,7 @@ if __name__ == '__main__':
+ """
+ 
+ 
+-def _preprocess_code_string_to_deactivate_main(code_string: str) -> str:
++def _preprocess_code_string_to_deactivate_main(code_string: str) -> str:
+     """
+     Attempts to disable `unittest.main()` calls in the user's code string by commenting them out,
+     preventing them from running before our custom runner.
+@@ -173,14 +259,179 @@ def _preprocess_code_string_to_deactivate_main(code_string: str) -> str:
+             # Add a pass statement in case the call was the only line in a block (e.g., inside an if)
+             new_lines.append(f"{indent}pass # Placeholder in case the original call is the only statement in the block")
+         else:
+-            new_lines.append(line)
+-    return "\n".join(new_lines)
+-
+-
+-def execute_code_and_capture_prints_last(
+-        code_string: str,
+-        timeout_seconds: int = 10,
+-        n_last_lines: int = 50
++            new_lines.append(line)
++    return "\n".join(new_lines)
++
++
++def _tracecoder_repo_root() -> Path:
++    return Path(__file__).resolve().parents[1]
++
++
++def _with_tracecoder_pythonpath(env: dict[str, str]) -> dict[str, str]:
++    repo_root = str(_tracecoder_repo_root())
++    existing = str(env.get("PYTHONPATH") or "").strip()
++    if not existing:
++        env["PYTHONPATH"] = repo_root
++    else:
++        env["PYTHONPATH"] = repo_root if existing.split(os.pathsep)[0] == repo_root else f"{repo_root}{os.pathsep}{existing}"
++    env["PYTHONUNBUFFERED"] = "1"
++    return env
++
++
++def _progress_env(
++    *,
++    base_env: dict[str, str] | None,
++    task_id: str,
++    phase: str,
++    wait_target: str,
++    attempt: int,
++) -> dict[str, str]:
++    env = dict(base_env or os.environ.copy())
++    env["TRACECODER_PROGRESS_TASK_ID"] = str(task_id or "unknown_task")
++    env["TRACECODER_PROGRESS_PHASE"] = str(phase or "unknown_phase")
++    env["TRACECODER_PROGRESS_WAIT_TARGET"] = str(wait_target or "unknown_wait")
++    env["TRACECODER_PROGRESS_ATTEMPT"] = str(max(0, int(attempt)))
++    return _with_tracecoder_pythonpath(env)
++
++
++def _is_progress_line(line: str) -> bool:
++    return str(line or "").lstrip().startswith(PROGRESS_PREFIX)
++
++
++def _forward_progress_line(line: str) -> None:
++    try:
++        sys.stderr.write(line if line.endswith("\n") else line + "\n")
++        sys.stderr.flush()
++    except Exception:
++        return
++
++
++def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
++    if process.poll() is not None:
++        return
++    if os.name == "posix":
++        try:
++            os.killpg(process.pid, signal.SIGTERM)
++        except ProcessLookupError:
++            return
++        except Exception:
++            process.terminate()
++        try:
++            process.wait(timeout=0.5)
++            return
++        except subprocess.TimeoutExpired:
++            pass
++        try:
++            os.killpg(process.pid, signal.SIGKILL)
++        except ProcessLookupError:
++            return
++        except Exception:
++            process.kill()
++        return
++    process.terminate()
++    try:
++        process.wait(timeout=0.5)
++        return
++    except subprocess.TimeoutExpired:
++        pass
++    process.kill()
++
++
++def _run_monitored_child_process(
++    command: list[str],
++    *,
++    cwd: str | None = None,
++    env: dict[str, str] | None = None,
++    timeout_seconds: int = 10,
++) -> dict:
++    event_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
++    stdout_chunks: list[str] = []
++    stderr_chunks: list[str] = []
++    stream_done = {"stdout": False, "stderr": False}
++    started_at = time.perf_counter()
++    process = subprocess.Popen(
++        command,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        text=True,
++        encoding='utf-8',
++        errors='replace',
++        cwd=cwd,
++        env=env,
++        bufsize=1,
++        start_new_session=(os.name == "posix"),
++    )
++
++    if process.stdout is None or process.stderr is None:
++        raise RuntimeError("subprocess pipes unavailable")
++
++    def _reader(stream_name: str, pipe) -> None:
++        try:
++            for line in iter(pipe.readline, ""):
++                event_queue.put((stream_name, line))
++        finally:
++            event_queue.put((stream_name, None))
++            try:
++                pipe.close()
++            except Exception:
++                return
++
++    threads = [
++        threading.Thread(target=_reader, args=("stdout", process.stdout), daemon=True),
++        threading.Thread(target=_reader, args=("stderr", process.stderr), daemon=True),
++    ]
++    for thread in threads:
++        thread.start()
++
++    timed_out = False
++    deadline = started_at + max(0, int(timeout_seconds))
++
++    while True:
++        now = time.perf_counter()
++        timeout_remaining = max(0.0, deadline - now)
++        queue_timeout = min(0.2, timeout_remaining) if not timed_out else 0.2
++        try:
++            source, text = event_queue.get(timeout=queue_timeout)
++        except queue.Empty:
++            source = ""
++            text = ""
++        else:
++            if text is None:
++                stream_done[source] = True
++            elif source == "stderr" and _is_progress_line(text):
++                _forward_progress_line(text)
++            elif source == "stdout":
++                stdout_chunks.append(text)
++            else:
++                stderr_chunks.append(text)
++
++        now = time.perf_counter()
++        if (not timed_out) and timeout_seconds > 0 and now >= deadline and process.poll() is None:
++            timed_out = True
++            _terminate_process_tree(process)
++
++        if process.poll() is not None and all(stream_done.values()) and event_queue.empty():
++            break
++
++    for thread in threads:
++        thread.join(timeout=0.5)
++    return {
++        "returncode": process.poll() if process.poll() is not None else process.wait(timeout=1.0),
++        "stdout": "".join(stdout_chunks),
++        "stderr": "".join(stderr_chunks),
++        "timed_out": timed_out,
++        "duration_sec": max(0.0, time.perf_counter() - started_at),
++    }
++
++
++def execute_code_and_capture_prints_last(
++        code_string: str,
++        timeout_seconds: int = 10,
++        n_last_lines: int = 50,
++        *,
++        task_id: str = "",
++        phase: str = "",
++        attempt: int = 0,
+ ) -> dict:
+     """
+     Executes the given Python code string (expected to contain unittest test cases),
+@@ -472,10 +723,201 @@ def execute_code_and_capture_prints_last(
+         if not other_info_section_str:
+             other_info_section_str = display_output_str
+ 
+-    return {
+-        "passed_section": passed_section_str.strip(),
+-        "failed_errored_section": failed_errored_section_str.strip(),
+-        "other_info_section": other_info_section_str.strip(),
+-        "display_output": display_output_str,
+-        "error_occurred": error_occurred_flag
+-    }
++    return {
++        "passed_section": passed_section_str.strip(),
++        "failed_errored_section": failed_errored_section_str.strip(),
++        "other_info_section": other_info_section_str.strip(),
++        "display_output": display_output_str,
++        "error_occurred": error_occurred_flag
++    }
++
++
++_LLMDEBUG_PYTEST_RUNNER = r"""
++import io
++import json
++import sys
++import traceback
++from contextlib import redirect_stderr, redirect_stdout
++
++import pytest
++
++
++class CounterPlugin:
++    def __init__(self):
++        self.total = 0
++        self.failed = set()
++        self.passed = set()
++
++    def pytest_collection_finish(self, session):
++        self.total = len(session.items)
++
++    def pytest_runtest_logreport(self, report):
++        if report.failed and report.when in {"setup", "call", "teardown"}:
++            self.failed.add(report.nodeid)
++            self.passed.discard(report.nodeid)
++        elif report.when == "call" and report.passed and report.nodeid not in self.failed:
++            self.passed.add(report.nodeid)
++
++
++def main() -> int:
++    args = json.loads(sys.argv[1])
++    plugin = CounterPlugin()
++    stdout_buffer = io.StringIO()
++    stderr_buffer = io.StringIO()
++    payload = {
++        "exitcode": 1,
++        "stdout": "",
++        "stderr": "",
++        "passed_count": 0,
++        "failed_count": 0,
++        "total_count": 0,
++    }
++    try:
++        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
++            exitcode = pytest.main(args, plugins=[plugin])
++        payload["exitcode"] = int(exitcode)
++    except BaseException as exc:
++        payload["error"] = f"{type(exc).__name__}: {exc}"
++        payload["traceback"] = traceback.format_exc()
++    payload["stdout"] = stdout_buffer.getvalue()
++    payload["stderr"] = stderr_buffer.getvalue()
++    payload["total_count"] = int(plugin.total)
++    payload["passed_count"] = len(plugin.passed)
++    payload["failed_count"] = max(len(plugin.failed), payload["total_count"] - payload["passed_count"])
++    payload["failed_nodeids"] = sorted(plugin.failed)
++    sys.stdout.write(json.dumps(payload))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
++"""
++
++
++def _normalize_python_args(problem_data: dict) -> list[str]:
++    python_args = [str(arg) for arg in problem_data.get("python_args", []) if str(arg)]
++    if python_args[:2] != ["-m", "pytest"]:
++        raise ValueError(f"unsupported python_args for llmdebug TraceCoder run: {python_args!r}")
++    return python_args[2:] or ["-q", "test_buggy.py"]
++
++
++def _decode_case_file(row: dict) -> tuple[str, bytes]:
++    path = str(row.get("path") or "")
++    encoding = str(row.get("encoding") or "utf-8")
++    content = row.get("content")
++    if encoding == "base64":
++        payload = base64.b64decode(str(content or "").encode("ascii"))
++    else:
++        payload = str(content or "").encode("utf-8")
++    return path, payload
++
++
++def _materialize_llmdebug_workspace(problem_data: dict, code_string: str) -> tuple[tempfile.TemporaryDirectory[str], Path]:
++    temp_dir = tempfile.TemporaryDirectory(prefix="tracecoder_llmdebug_")
++    work_dir = Path(temp_dir.name)
++    files = problem_data.get("files", [])
++    if not isinstance(files, list):
++        raise ValueError("llmdebug problem_data.files must be a list")
++    for row in files:
++        if not isinstance(row, dict):
++            continue
++        relative_path, payload = _decode_case_file(row)
++        if not relative_path:
++            continue
++        path = work_dir / relative_path
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_bytes(payload)
++    (work_dir / "buggy.py").write_text(code_string, encoding="utf-8")
++    return temp_dir, work_dir
++
++
++def run_llmdebug_pytest_case(problem_data: dict, code_string: str, timeout_seconds: int = 10) -> dict:
++    temp_dir, work_dir = _materialize_llmdebug_workspace(problem_data, code_string)
++    try:
++        pytest_args = _normalize_python_args(problem_data)
++        env = os.environ.copy()
++        env.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
++        completed = subprocess.run(
++            [sys.executable, "-c", _LLMDEBUG_PYTEST_RUNNER, json.dumps(pytest_args)],
++            capture_output=True,
++            text=True,
++            timeout=timeout_seconds,
++            cwd=str(work_dir),
++            env=env,
++        )
++    except subprocess.TimeoutExpired as exc:
++        return {
++            "exitcode": 124,
++            "stdout": (exc.stdout or ""),
++            "stderr": (exc.stderr or ""),
++            "passed_count": 0,
++            "failed_count": 0,
++            "total_count": 0,
++            "failed_nodeids": [],
++            "timed_out": True,
++            "error": f"Timed out after {timeout_seconds} seconds",
++        }
++    finally:
++        temp_dir.cleanup()
++
++    try:
++        payload = json.loads(completed.stdout or "{}")
++    except json.JSONDecodeError:
++        payload = {
++            "exitcode": completed.returncode or 1,
++            "stdout": completed.stdout or "",
++            "stderr": completed.stderr or "",
++            "passed_count": 0,
++            "failed_count": 0,
++            "total_count": 0,
++            "failed_nodeids": [],
++            "error": "invalid_pytest_runner_output",
++        }
++    if completed.stderr:
++        payload["stderr"] = ((payload.get("stderr") or "") + ("\n" if payload.get("stderr") else "") + completed.stderr).strip()
++    payload.setdefault("exitcode", completed.returncode)
++    payload.setdefault("stdout", "")
++    payload.setdefault("stderr", "")
++    payload.setdefault("passed_count", 0)
++    payload.setdefault("failed_count", 0)
++    payload.setdefault("total_count", 0)
++    payload.setdefault("failed_nodeids", [])
++    payload["timed_out"] = bool(payload.get("timed_out", False))
++    return payload
++
++
++def execute_llmdebug_case_and_capture_output(
++    problem_data: dict,
++    code_string: str,
++    timeout_seconds: int = 10,
++    *,
++    task_id: str = "",
++    phase: str = "",
++    attempt: int = 0,
++) -> dict:
++    # task_id/phase/attempt accepted for call-site compatibility with progress-tracking kwargs
++    payload = run_llmdebug_pytest_case(problem_data, code_string, timeout_seconds=timeout_seconds)
++    lines = []
++    stdout_text = str(payload.get("stdout") or "").strip()
++    stderr_text = str(payload.get("stderr") or "").strip()
++    if stdout_text:
++        lines.append("--- Pytest Standard Output ---")
++        lines.extend(stdout_text.splitlines())
++    if stderr_text:
++        lines.append("--- Pytest Standard Error ---")
++        lines.extend(stderr_text.splitlines())
++    error_text = str(payload.get("error") or "").strip()
++    if error_text:
++        lines.append("--- Execution Error ---")
++        lines.append(error_text)
++    display_output = _limit_display_output("\n".join(lines).strip())
++    if not display_output:
++        display_output = "No instrumentation output captured."
++    return {
++        "passed_section": "",
++        "failed_errored_section": "",
++        "other_info_section": display_output,
++        "display_output": display_output,
++        "error_occurred": bool(payload.get("exitcode", 1)),
++        "failed_nodeids": list(payload.get("failed_nodeids") or []),
++    }
+diff --git a/trace_learn_coder.py b/trace_learn_coder.py
+index f06d560..09d97eb 100644
+--- a/trace_learn_coder.py
++++ b/trace_learn_coder.py
+@@ -9,6 +9,7 @@ from reporting import save_results, print_summary
+ # Import process_problem and _load_check_correctness_func from problem_processor
+ from problem_processor import process_problem, _load_check_correctness_func
+ from src.dataset_loader import load_dataset
++from src.progress import emit_progress, progress_span, reset_progress_state
+ 
+ 
+ def main():
+@@ -18,6 +19,8 @@ def main():
+     # 1. Setup and parse arguments
+     parser = setup_arg_parser()
+     args = parser.parse_args()
++    llmdebug_metrics_path = getattr(args, "llmdebug_metrics_path", None)
++    reset_progress_state()
+ 
+     # 2. Generate experiment ID and output filename
+     EXPERIMENT_ID = f"{args.dataset}_{args.model.replace('/', '_')}_{time.strftime('%Y%m%d_%H%M%S')}"
+@@ -29,9 +32,15 @@ def main():
+         sys.exit(1)
+ 
+     try:
+-        # Get 'data_path' from the DATASET_PATHS[args.dataset] dictionary
+-        actual_dataset_path = DATASET_PATHS[args.dataset]["data_path"]
+-        datasets = load_dataset(args.dataset, actual_dataset_path)
++        with progress_span(
++            task_id=f"dataset:{args.dataset}",
++            phase="dataset_load",
++            wait_target="dataset_loader",
++            extra={"dataset": args.dataset},
++        ):
++            # Get 'data_path' from the DATASET_PATHS[args.dataset] dictionary, unless overridden.
++            actual_dataset_path = args.dataset_path or DATASET_PATHS[args.dataset]["data_path"]
++            datasets = load_dataset(args.dataset, actual_dataset_path)
+     except (FileNotFoundError, ValueError) as e:
+         print(f"Error loading dataset: {e}")
+         sys.exit(1)
+@@ -49,6 +58,8 @@ def main():
+ 
+     print(f"--- Experiment Start: {EXPERIMENT_ID} ---")
+     print(f"Arguments: {vars(args)}")
++    if llmdebug_metrics_path:
++        print(f"Telemetry sidecar: {llmdebug_metrics_path}")
+ 
+     # 4. Set up the problem iterator
+     problem_keys = list(datasets.keys())
+@@ -63,14 +74,33 @@ def main():
+     # 5. Main loop
+     try:
+         for task_id in tqdm(problem_iterator, total=(end_index - start_index), desc="Processing problems"):
+-            # Pass the loaded check_correctness_func down
++            emit_progress(
++                task_id=str(task_id),
++                phase="task",
++                wait_target="problem_processor",
++                status="start",
++                extra={"dataset": args.dataset},
++            )
+             problem_result = process_problem(datasets[task_id], task_id, args, check_correctness_func)
+             results_data.append(problem_result)
++            emit_progress(
++                task_id=str(task_id),
++                phase="task",
++                wait_target="problem_processor",
++                status="finish",
++                extra={"final_passed": problem_result.get("final_passed", False)},
++            )
+     except KeyboardInterrupt:
+         print("\nManual interruption detected. Saving existing results...")
+     finally:
+         # 6. Save results and print summary
+-        save_results(results_data, OUTPUT_CSV_FILENAME)
++        with progress_span(
++            task_id=f"dataset:{args.dataset}",
++            phase="save_results",
++            wait_target="csv_writer",
++            extra={"output": OUTPUT_CSV_FILENAME},
++        ):
++            save_results(results_data, OUTPUT_CSV_FILENAME)
+         print_summary(results_data)
+ 
+ 
+diff --git a/src/exact_test_context.py b/src/exact_test_context.py
+new file mode 100644
+index 0000000..cc48a15
+--- /dev/null
++++ b/src/exact_test_context.py
+@@ -0,0 +1,471 @@
++from __future__ import annotations
++
++import ast
++import os
++import re
++from dataclasses import dataclass
++from typing import Any
++
++_DEFAULT_MAX_CHARS = 3000
++_MAX_FALLBACK_LINE_RADIUS = 20
++_MAX_HELPER_BLOCKS = 3
++_FIXTURE_DECORATOR_NAMES = {"fixture"}
++_LINE_ANCHOR_RE = re.compile(r"test_buggy\.py:(\d+)")
++
++
++def _env_positive_int(name: str, *, default: int) -> int:
++    raw_value = os.getenv(name, "").strip()
++    if not raw_value:
++        return default
++    try:
++        value = int(raw_value)
++    except ValueError:
++        return default
++    return max(1, value)
++
++
++@dataclass(frozen=True)
++class _SelectedBlock:
++    start: int
++    end: int
++    text: str
++    name: str
++    priority: int
++    is_fixture: bool = False
++
++
++@dataclass(frozen=True)
++class _ClassSelection:
++    start: int
++    header: str
++    methods: list[_SelectedBlock]
++    name: str
++
++
++def build_exact_test_context(
++    test_code: str,
++    *,
++    failed_nodeids: list[str] | tuple[str, ...] | None,
++    failure_output: str,
++    max_chars: int | None = None,
++) -> tuple[str, dict[str, Any]]:
++    normalized_test_code = str(test_code or "").strip()
++    limit = (
++        max(1, int(max_chars))
++        if max_chars is not None
++        else _env_positive_int("TRACECODER_EXACT_TEST_CONTEXT_MAX_CHARS", default=_DEFAULT_MAX_CHARS)
++    )
++    normalized_nodeids: list[str] = []
++    for nodeid in (failed_nodeids or []):
++        normalized = str(nodeid).strip()
++        if normalized and normalized not in normalized_nodeids:
++            normalized_nodeids.append(normalized)
++
++    if not normalized_test_code:
++        return "", {
++            "source": "empty",
++            "chars": 0,
++            "truncated": False,
++            "selected_nodeids": [],
++            "helper_names": [],
++        }
++
++    if len(normalized_test_code) <= limit:
++        return normalized_test_code, {
++            "source": "full_file",
++            "chars": len(normalized_test_code),
++            "truncated": False,
++            "selected_nodeids": normalized_nodeids,
++            "helper_names": [],
++        }
++
++    try:
++        tree = ast.parse(normalized_test_code)
++    except SyntaxError:
++        rendered = _render_line_anchor_fallback(
++            normalized_test_code,
++            failure_output=failure_output,
++            max_chars=limit,
++        )
++        return rendered, {
++            "source": "line_anchors_fallback",
++            "chars": len(rendered),
++            "truncated": bool(rendered and rendered != normalized_test_code),
++            "selected_nodeids": normalized_nodeids,
++            "helper_names": [],
++        }
++
++    layout = _build_layout(normalized_test_code, tree=tree)
++    if not layout:
++        rendered = _render_line_anchor_fallback(
++            normalized_test_code,
++            failure_output=failure_output,
++            max_chars=limit,
++        )
++        return rendered, {
++            "source": "line_anchors_fallback",
++            "chars": len(rendered),
++            "truncated": bool(rendered and rendered != normalized_test_code),
++            "selected_nodeids": normalized_nodeids,
++            "helper_names": [],
++        }
++
++    selected_nodeids: list[str] = []
++    selected_classes: dict[str, _ClassSelection] = {}
++    selected_top_level_blocks: list[_SelectedBlock] = []
++    remaining_blocks_by_name = dict(layout["top_level_by_name"])
++    class_methods_by_name = dict(layout["class_methods_by_name"])
++    classes_by_name = dict(layout["classes_by_name"])
++
++    for nodeid in normalized_nodeids:
++        matched = _select_from_nodeid(
++            nodeid,
++            classes_by_name=classes_by_name,
++            class_methods_by_name=class_methods_by_name,
++            remaining_blocks_by_name=remaining_blocks_by_name,
++        )
++        if not matched:
++            continue
++        selection_kind, selection_value = matched
++        selected_nodeids.append(nodeid)
++        if selection_kind == "class":
++            existing = selected_classes.get(selection_value.name)
++            if existing is None:
++                selected_classes[selection_value.name] = selection_value
++            else:
++                merged_methods = _merge_methods(existing.methods, selection_value.methods)
++                selected_classes[selection_value.name] = _ClassSelection(
++                    start=existing.start,
++                    header=existing.header,
++                    methods=merged_methods,
++                    name=existing.name,
++                )
++        else:
++            if selection_value.name not in {item.name for item in selected_top_level_blocks}:
++                selected_top_level_blocks.append(selection_value)
++
++    primary_sections: list[str] = []
++    current_chars = 0
++
++    for section in _render_primary_sections(
++        selected_classes=list(selected_classes.values()),
++        selected_top_level_blocks=selected_top_level_blocks,
++    ):
++        if not section:
++            continue
++        primary_sections, current_chars = _append_section(
++            primary_sections,
++            current_chars=current_chars,
++            section=section,
++            max_chars=limit,
++        )
++
++    source = "nodeids"
++    if not primary_sections:
++        fallback_section = _render_line_anchor_fallback(
++            normalized_test_code,
++            failure_output=failure_output,
++            max_chars=limit,
++        )
++        if fallback_section:
++            primary_sections = [fallback_section]
++            current_chars = len(fallback_section)
++            source = "line_anchors_fallback"
++
++    helper_names: list[str] = []
++    if primary_sections:
++        imports_block = str(layout["imports_block"])
++        if imports_block:
++            primary_sections, current_chars = _append_section(
++                primary_sections,
++                current_chars=current_chars,
++                section=imports_block,
++                max_chars=limit,
++            )
++
++        helper_candidates = _collect_referenced_helpers(
++            primary_sections=primary_sections,
++            top_level_blocks=layout["top_level_blocks"],
++        )
++        for helper_block in helper_candidates[:_MAX_HELPER_BLOCKS]:
++            next_sections, next_chars = _append_section(
++                primary_sections,
++                current_chars=current_chars,
++                section=helper_block.text,
++                max_chars=limit,
++            )
++            if next_chars == current_chars:
++                continue
++            primary_sections = next_sections
++            current_chars = next_chars
++            helper_names.append(helper_block.name)
++
++    rendered = "\n\n".join(section for section in primary_sections if section).strip()
++    if not rendered:
++        return "", {
++            "source": "empty",
++            "chars": 0,
++            "truncated": False,
++            "selected_nodeids": selected_nodeids,
++            "helper_names": [],
++        }
++    return rendered, {
++        "source": source,
++        "chars": len(rendered),
++        "truncated": len(rendered) < len(normalized_test_code),
++        "selected_nodeids": selected_nodeids,
++        "helper_names": helper_names,
++    }
++
++
++def _build_layout(test_code: str, *, tree: ast.AST) -> dict[str, Any]:
++    lines = test_code.splitlines()
++    top_level_blocks: list[_SelectedBlock] = []
++    top_level_by_name: dict[str, _SelectedBlock] = {}
++    classes_by_name: dict[str, ast.ClassDef] = {}
++    class_methods_by_name: dict[str, dict[str, _SelectedBlock]] = {}
++    import_lines: list[str] = []
++
++    for stmt in getattr(tree, "body", []):
++        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
++            segment = ast.get_source_segment(test_code, stmt)
++            if segment:
++                import_lines.append(segment.strip())
++            continue
++        if isinstance(stmt, ast.ClassDef):
++            classes_by_name[stmt.name] = stmt
++            class_methods_by_name[stmt.name] = _class_methods(test_code, cls=stmt)
++            if not stmt.name.startswith("Test"):
++                block = _block_from_node(test_code, stmt)
++                if block is not None:
++                    top_level_blocks.append(block)
++                    top_level_by_name[block.name] = block
++            continue
++        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
++            block = _block_from_node(test_code, stmt)
++            if block is None:
++                continue
++            top_level_blocks.append(block)
++            top_level_by_name[block.name] = block
++
++    return {
++        "lines": lines,
++        "top_level_blocks": top_level_blocks,
++        "top_level_by_name": top_level_by_name,
++        "classes_by_name": classes_by_name,
++        "class_methods_by_name": class_methods_by_name,
++        "imports_block": "\n".join(import_lines).strip(),
++    }
++
++
++def _class_methods(test_code: str, *, cls: ast.ClassDef) -> dict[str, _SelectedBlock]:
++    methods: dict[str, _SelectedBlock] = {}
++    for stmt in cls.body:
++        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
++            block = _block_from_node(test_code, stmt)
++            if block is not None:
++                methods[block.name] = block
++    return methods
++
++
++def _block_from_node(test_code: str, node: ast.AST) -> _SelectedBlock | None:
++    segment = ast.get_source_segment(test_code, node)
++    if not segment:
++        return None
++    start = int(getattr(node, "lineno", 1))
++    end = int(getattr(node, "end_lineno", start))
++    name = str(getattr(node, "name", "") or "")
++    is_fixture = any(
++        _decorator_name(decorator) in _FIXTURE_DECORATOR_NAMES
++        for decorator in getattr(node, "decorator_list", [])
++    )
++    priority = 0 if name.startswith("test") else 1
++    if is_fixture:
++        priority = -1
++    return _SelectedBlock(
++        start=start,
++        end=end,
++        text=segment.strip(),
++        name=name,
++        priority=priority,
++        is_fixture=is_fixture,
++    )
++
++
++def _decorator_name(node: ast.AST) -> str:
++    if isinstance(node, ast.Name):
++        return node.id
++    if isinstance(node, ast.Attribute):
++        return node.attr
++    if isinstance(node, ast.Call):
++        return _decorator_name(node.func)
++    return ""
++
++
++def _select_from_nodeid(
++    nodeid: str,
++    *,
++    classes_by_name: dict[str, ast.ClassDef],
++    class_methods_by_name: dict[str, dict[str, _SelectedBlock]],
++    remaining_blocks_by_name: dict[str, _SelectedBlock],
++) -> tuple[str, Any] | None:
++    parts = [part for part in str(nodeid).split("::") if part]
++    if not parts:
++        return None
++
++    if len(parts) >= 3:
++        class_name = parts[1]
++        method_name = parts[2].split("[", 1)[0]
++        cls = classes_by_name.get(class_name)
++        if cls is None:
++            return None
++        method_map = class_methods_by_name.get(class_name, {})
++        selected_methods: list[_SelectedBlock] = []
++        for support_name in ("setUpClass", "tearDownClass", "setUp", "tearDown"):
++            block = method_map.get(support_name)
++            if block is not None:
++                selected_methods.append(block)
++        selected_methods.extend(
++            block
++            for name, block in method_map.items()
++            if name == method_name or name.startswith("test")
++            and name == method_name
++        )
++        seen: set[str] = set()
++        ordered_methods: list[_SelectedBlock] = []
++        for block in sorted(selected_methods, key=lambda item: (item.start, item.end)):
++            if block.name in seen:
++                continue
++            seen.add(block.name)
++            ordered_methods.append(block)
++        if not ordered_methods:
++            return None
++        header = f"class {class_name}:"
++        return "class", _ClassSelection(
++            start=int(getattr(cls, "lineno", 1)),
++            header=header,
++            methods=ordered_methods,
++            name=class_name,
++        )
++
++    if len(parts) >= 2:
++        test_name = parts[1].split("[", 1)[0]
++        block = remaining_blocks_by_name.get(test_name)
++        if block is None:
++            return None
++        return "top_level", block
++
++    return None
++
++
++def _render_primary_sections(
++    *,
++    selected_classes: list[_ClassSelection],
++    selected_top_level_blocks: list[_SelectedBlock],
++) -> list[str]:
++    sections: list[str] = []
++    for block in sorted(selected_top_level_blocks, key=lambda item: (item.start, item.end)):
++        sections.append(block.text)
++    for class_selection in sorted(selected_classes, key=lambda item: (item.start, item.name)):
++        rendered = [class_selection.header]
++        for method in sorted(class_selection.methods, key=lambda item: (item.start, item.end)):
++            rendered.append(_indent_block(method.text))
++        sections.append("\n".join(rendered).strip())
++    return sections
++
++
++def _merge_methods(
++    existing_methods: list[_SelectedBlock],
++    new_methods: list[_SelectedBlock],
++) -> list[_SelectedBlock]:
++    merged: list[_SelectedBlock] = []
++    seen: set[str] = set()
++    for block in sorted([*existing_methods, *new_methods], key=lambda item: (item.start, item.end)):
++        if block.name in seen:
++            continue
++        seen.add(block.name)
++        merged.append(block)
++    return merged
++
++
++def _append_section(
++    sections: list[str],
++    *,
++    current_chars: int,
++    section: str,
++    max_chars: int,
++) -> tuple[list[str], int]:
++    normalized_section = str(section or "").strip()
++    if not normalized_section:
++        return sections, current_chars
++    candidate = "\n\n".join([*sections, normalized_section]).strip()
++    if len(candidate) > max_chars:
++        return sections, current_chars
++    return [*sections, normalized_section], len(candidate)
++
++
++def _collect_referenced_helpers(
++    *,
++    primary_sections: list[str],
++    top_level_blocks: list[_SelectedBlock],
++) -> list[_SelectedBlock]:
++    combined_text = "\n".join(primary_sections)
++    helper_candidates = [
++        block
++        for block in top_level_blocks
++        if not block.name.startswith("test") and re.search(rf"\b{re.escape(block.name)}\b", combined_text)
++    ]
++    return sorted(
++        helper_candidates,
++        key=lambda block: (block.priority, block.start, block.end),
++    )
++
++
++def _render_line_anchor_fallback(test_code: str, *, failure_output: str, max_chars: int) -> str:
++    lines = test_code.splitlines()
++    if not lines:
++        return ""
++    anchored_ranges = _line_anchor_ranges(
++        failure_output=failure_output,
++        line_count=len(lines),
++    )
++    if not anchored_ranges:
++        return test_code[:max_chars].rstrip()
++    sections: list[str] = []
++    for start, end in anchored_ranges:
++        excerpt_lines = lines[start - 1 : end]
++        rendered = [f"# test_buggy.py:{start}-{end}", *excerpt_lines]
++        candidate = "\n\n".join([*sections, "\n".join(rendered).strip()]).strip()
++        if len(candidate) > max_chars:
++            break
++        sections.append("\n".join(rendered).strip())
++    if not sections:
++        start, end = anchored_ranges[0]
++        excerpt_lines = lines[start - 1 : end]
++        return "\n".join([f"# test_buggy.py:{start}-{end}", *excerpt_lines]).strip()[:max_chars].rstrip()
++    return "\n\n".join(sections).strip()
++
++
++def _line_anchor_ranges(*, failure_output: str, line_count: int) -> list[tuple[int, int]]:
++    anchors = sorted(
++        {
++            max(1, min(line_count, int(match.group(1))))
++            for match in _LINE_ANCHOR_RE.finditer(str(failure_output or ""))
++        }
++    )
++    if not anchors:
++        return []
++    ranges: list[tuple[int, int]] = []
++    for anchor in anchors:
++        start = max(1, anchor - _MAX_FALLBACK_LINE_RADIUS)
++        end = min(line_count, anchor + _MAX_FALLBACK_LINE_RADIUS)
++        if ranges and start <= ranges[-1][1] + 1:
++            previous_start, previous_end = ranges[-1]
++            ranges[-1] = (previous_start, max(previous_end, end))
++            continue
++        ranges.append((start, end))
++    return ranges
++
++
++def _indent_block(text: str) -> str:
++    return "\n".join(f"    {line}" if line else "" for line in str(text).splitlines())
+diff --git a/src/progress.py b/src/progress.py
+new file mode 100644
+index 0000000..e788970
+--- /dev/null
++++ b/src/progress.py
+@@ -0,0 +1,307 @@
++from __future__ import annotations
++
++import itertools
++import re
++import sys
++import threading
++import time
++from collections.abc import Callable, Mapping
++from dataclasses import dataclass, field
++from typing import Any
++
++PROGRESS_PREFIX = "[TRACECODER_PROGRESS]"
++PROGRESS_HEARTBEAT_SEC = 5.0
++
++_PROGRESS_LOCK = threading.RLock()
++_ACTIVE_SPANS: list["_SpanRecord"] = []
++_LAST_PROGRESS_STATE: dict[str, Any] = {}
++_REFRESH_CALLBACK: Callable[[], None] | None = None
++_SPAN_IDS = itertools.count(1)
++
++
++def _sanitize_progress_value(value: Any) -> str:
++    if value is None:
++        return ""
++    if isinstance(value, bool):
++        return "true" if value else "false"
++    if isinstance(value, float):
++        text = f"{value:.1f}"
++    else:
++        text = str(value)
++    collapsed = " ".join(text.strip().split())
++    if not collapsed:
++        return ""
++    return re.sub(r"[^A-Za-z0-9._:/@+\-]", "_", collapsed)
++
++
++@dataclass
++class _SpanRecord:
++    span_id: int
++    task_id: str
++    phase: str
++    wait_target: str
++    attempt: int
++    started_at: float
++    extra: dict[str, str] = field(default_factory=dict)
++
++
++def reset_progress_state() -> None:
++    with _PROGRESS_LOCK:
++        _ACTIVE_SPANS.clear()
++        _LAST_PROGRESS_STATE.clear()
++
++
++def set_progress_refresh_callback(callback: Callable[[], None] | None) -> None:
++    global _REFRESH_CALLBACK
++    with _PROGRESS_LOCK:
++        _REFRESH_CALLBACK = callback
++
++
++def _refresh_sidecar() -> None:
++    callback = None
++    with _PROGRESS_LOCK:
++        callback = _REFRESH_CALLBACK
++    if callback is None:
++        return
++    try:
++        callback()
++    except Exception:
++        return
++
++
++def _active_span_locked() -> _SpanRecord | None:
++    if not _ACTIVE_SPANS:
++        return None
++    return _ACTIVE_SPANS[-1]
++
++
++def current_progress_snapshot(*, task_id: str | None = None) -> dict[str, Any]:
++    with _PROGRESS_LOCK:
++        snapshot: dict[str, Any] = {}
++        current = _active_span_locked()
++        last_state = dict(_LAST_PROGRESS_STATE)
++        if current is not None and (task_id is None or current.task_id == task_id):
++            snapshot["current_phase"] = current.phase
++            snapshot["current_attempt"] = current.attempt
++            snapshot["current_wait_target"] = current.wait_target
++            snapshot["phase_elapsed_sec"] = max(0.0, time.perf_counter() - current.started_at)
++        elif task_id is None or str(last_state.get("task_id") or "") == str(task_id):
++            phase = str(last_state.get("phase") or "").strip()
++            wait_target = str(last_state.get("wait_target") or "").strip()
++            attempt = last_state.get("attempt")
++            elapsed_sec = last_state.get("elapsed_sec")
++            if phase:
++                snapshot["current_phase"] = phase
++            if wait_target:
++                snapshot["current_wait_target"] = wait_target
++            if isinstance(attempt, int):
++                snapshot["current_attempt"] = max(0, attempt)
++            if isinstance(elapsed_sec, (int, float)):
++                snapshot["phase_elapsed_sec"] = max(0.0, float(elapsed_sec))
++        last_message = str(last_state.get("message") or "").strip()
++        if last_message and (task_id is None or str(last_state.get("task_id") or "") == str(task_id)):
++            snapshot["last_progress_message"] = last_message
++        return snapshot
++
++
++def emit_progress(
++    *,
++    task_id: str,
++    phase: str,
++    wait_target: str,
++    status: str,
++    attempt: int = 0,
++    elapsed_sec: float = 0.0,
++    extra: Mapping[str, Any] | None = None,
++    stream: Any | None = None,
++) -> str:
++    task_value = _sanitize_progress_value(task_id) or "unknown_task"
++    phase_value = _sanitize_progress_value(phase) or "unknown_phase"
++    wait_value = _sanitize_progress_value(wait_target) or "unknown_wait"
++    status_value = _sanitize_progress_value(status) or "update"
++    attempt_value = max(0, int(attempt))
++    elapsed_value = max(0.0, float(elapsed_sec))
++
++    ordered_fields: list[tuple[str, str]] = [
++        ("task", task_value),
++        ("phase", phase_value),
++        ("wait", wait_value),
++        ("status", status_value),
++        ("attempt", str(attempt_value)),
++        ("elapsed", f"{elapsed_value:.1f}"),
++    ]
++    normalized_extra: dict[str, str] = {}
++    if isinstance(extra, Mapping):
++        for key, raw_value in extra.items():
++            key_text = _sanitize_progress_value(key)
++            value_text = _sanitize_progress_value(raw_value)
++            if key_text and value_text:
++                normalized_extra[key_text] = value_text
++    for key in sorted(normalized_extra):
++        ordered_fields.append((key, normalized_extra[key]))
++    message = " ".join(f"{key}={value}" for key, value in ordered_fields)
++    line = f"{PROGRESS_PREFIX} {message}"
++    output = stream if stream is not None else sys.stderr
++    try:
++        output.write(line + "\n")
++        output.flush()
++    except Exception:
++        pass
++
++    with _PROGRESS_LOCK:
++        _LAST_PROGRESS_STATE.clear()
++        _LAST_PROGRESS_STATE.update(
++            {
++                "task_id": task_value,
++                "phase": phase_value,
++                "wait_target": wait_value,
++                "status": status_value,
++                "attempt": attempt_value,
++                "elapsed_sec": elapsed_value,
++                "message": message,
++                **normalized_extra,
++            }
++        )
++    _refresh_sidecar()
++    return line
++
++
++class _ProgressSpan:
++    def __init__(
++        self,
++        *,
++        task_id: str,
++        phase: str,
++        wait_target: str,
++        attempt: int = 0,
++        extra: Mapping[str, Any] | None = None,
++        heartbeat_sec: float = PROGRESS_HEARTBEAT_SEC,
++    ) -> None:
++        self.task_id = str(task_id or "unknown_task")
++        self.phase = str(phase or "unknown_phase")
++        self.wait_target = str(wait_target or "unknown_wait")
++        self.attempt = max(0, int(attempt))
++        self._started_at = 0.0
++        self._finished = False
++        self._heartbeat_sec = max(0.1, float(heartbeat_sec))
++        self._extra: dict[str, str] = {}
++        if isinstance(extra, Mapping):
++            for key, value in extra.items():
++                key_text = _sanitize_progress_value(key)
++                value_text = _sanitize_progress_value(value)
++                if key_text and value_text:
++                    self._extra[key_text] = value_text
++        self._stop_event = threading.Event()
++        self._thread: threading.Thread | None = None
++        self._span_id = next(_SPAN_IDS)
++
++    def __enter__(self) -> "_ProgressSpan":
++        self._started_at = time.perf_counter()
++        with _PROGRESS_LOCK:
++            _ACTIVE_SPANS.append(
++                _SpanRecord(
++                    span_id=self._span_id,
++                    task_id=self.task_id,
++                    phase=self.phase,
++                    wait_target=self.wait_target,
++                    attempt=self.attempt,
++                    started_at=self._started_at,
++                    extra=dict(self._extra),
++                )
++            )
++        emit_progress(
++            task_id=self.task_id,
++            phase=self.phase,
++            wait_target=self.wait_target,
++            status="start",
++            attempt=self.attempt,
++            elapsed_sec=0.0,
++            extra=self._extra,
++        )
++        self._thread = threading.Thread(
++            target=self._heartbeat_loop,
++            name=f"tracecoder-progress-{self._span_id}",
++            daemon=True,
++        )
++        self._thread.start()
++        return self
++
++    def __exit__(self, exc_type, exc, tb) -> None:
++        self.finish()
++
++    def update(self, **extra: Any) -> None:
++        updated: dict[str, str] = {}
++        for key, value in extra.items():
++            key_text = _sanitize_progress_value(key)
++            value_text = _sanitize_progress_value(value)
++            if key_text and value_text:
++                updated[key_text] = value_text
++        if not updated:
++            return
++        with _PROGRESS_LOCK:
++            self._extra.update(updated)
++            for record in reversed(_ACTIVE_SPANS):
++                if record.span_id == self._span_id:
++                    record.extra.update(updated)
++                    break
++
++    def finish(self, *, extra: Mapping[str, Any] | None = None) -> None:
++        if self._finished:
++            return
++        self._finished = True
++        if isinstance(extra, Mapping):
++            self.update(**dict(extra))
++        self._stop_event.set()
++        if self._thread is not None:
++            self._thread.join(timeout=0.2)
++        elapsed_sec = max(0.0, time.perf_counter() - self._started_at)
++        emit_progress(
++            task_id=self.task_id,
++            phase=self.phase,
++            wait_target=self.wait_target,
++            status="finish",
++            attempt=self.attempt,
++            elapsed_sec=elapsed_sec,
++            extra=self._extra,
++        )
++        with _PROGRESS_LOCK:
++            for index in range(len(_ACTIVE_SPANS) - 1, -1, -1):
++                if _ACTIVE_SPANS[index].span_id == self._span_id:
++                    _ACTIVE_SPANS.pop(index)
++                    break
++
++    def _heartbeat_loop(self) -> None:
++        while not self._stop_event.wait(self._heartbeat_sec):
++            with _PROGRESS_LOCK:
++                active = _active_span_locked()
++                if active is None or active.span_id != self._span_id:
++                    continue
++                extra = dict(active.extra)
++            emit_progress(
++                task_id=self.task_id,
++                phase=self.phase,
++                wait_target=self.wait_target,
++                status="heartbeat",
++                attempt=self.attempt,
++                elapsed_sec=max(0.0, time.perf_counter() - self._started_at),
++                extra=extra,
++            )
++
++
++def progress_span(
++    *,
++    task_id: str,
++    phase: str,
++    wait_target: str,
++    attempt: int = 0,
++    extra: Mapping[str, Any] | None = None,
++    heartbeat_sec: float = PROGRESS_HEARTBEAT_SEC,
++) -> _ProgressSpan:
++    return _ProgressSpan(
++        task_id=task_id,
++        phase=phase,
++        wait_target=wait_target,
++        attempt=attempt,
++        extra=extra,
++        heartbeat_sec=heartbeat_sec,
++    )

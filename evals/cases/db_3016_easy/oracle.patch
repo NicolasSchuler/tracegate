@@ -1,0 +1,25 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,15 +5,18 @@
+ import bisect
+ import itertools
+ import functools
++
++
+ class Solution:
+     def canThreePartsEqualSum(self, arr: List[int]) -> bool:
+         total = sum(arr)
+-        each_sum = total//3
+-        if total % 3 != 0: return False
++        each_sum = total // 3
++        if total % 3 != 0:
++            return False
+         sumi = count = 0
+         for x in arr:
+             if count == 2:
+-                /*return True*/
++                return True
+             sumi += x
+             if sumi == each_sum:
+                 sumi = 0

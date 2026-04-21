@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ 
+ str = ""
+ 
+-for i in range(len(S) - 1):
++for i in range(len(S)):
+     if i == 0:
+         str = S[0]
+     elif s.count(S[i]) > s.count(str):

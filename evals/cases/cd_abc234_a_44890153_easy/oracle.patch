@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ 
+ 
+ t = int(input())
+-print((f(f(t) + t) + f(f(t))))
++print(f(f(f(t) + t) + f(f(t))))

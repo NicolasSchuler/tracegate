@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+     flg = 0
+     strthree = str(i)
+     if len(strthree) == 1:
+-        # print(i)
++        print(i)
+         break
+     for j in range(len(strthree) // 2):
+         # print(j)

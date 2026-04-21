@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ if A[N - 1] - A[N - 2] >= 2:
+     print("Alice")
+     exit()
+-if N % 2 == A[N - 1] % 2:
++if (N - 1) % 2 == A[N - 1] % 2:
+     print("Bob")
+ else:
+     print("Alice")

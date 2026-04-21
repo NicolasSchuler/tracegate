@@ -1,0 +1,7 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,3 @@
+ def parse_amount(raw: str) -> float:
+-    return float(raw)
++    normalized = raw.replace(",", ".")
++    return float(normalized)

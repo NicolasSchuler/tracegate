@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,5 +19,5 @@
+     temp = A[i] // s
+     A[i] -= temp * s
+     A[i + 1] += temp * t
+-    print(A)
++    # print(A)
+ print(A[N - 1])

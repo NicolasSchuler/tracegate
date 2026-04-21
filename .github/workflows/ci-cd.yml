@@ -1,0 +1,108 @@
+# CI/CD pipeline: runs lint, type-check, and tests across the Python version
+# matrix, then enforces the full quality contract (coverage, security, deps, etc.).
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# Least-privilege: only read access needed; no publishing happens here.
+permissions:
+  contents: read
+
+# Cancel redundant runs: use PR number for PRs (so re-pushes cancel the old run)
+# and ref for branch pushes (so tag pushes stay independent).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Fast feedback ──────────────────────────────────────────────────
+  # Run lint + type-check + tests on every supported Python version.
+  # This catches version-specific regressions early and cheaply (no coverage).
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Don't abort siblings on first failure; we want the full compatibility picture.
+      fail-fast: false
+      matrix:
+        # Mirrors requires-python = ">=3.10" from pyproject.toml.
+        # 3.10 is the minimum supported; 3.13 is the latest stable.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv manages virtualenvs, dependency resolution, and Python installs.
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Verify Python version
+        run: uv python install $PYTHON_VERSION && uv run --python $PYTHON_VERSION python -c "import sys; print(sys.version)"
+
+      - name: Install dependencies
+        run: uv sync --group dev --python $PYTHON_VERSION
+
+      # Ruff linter + format check (fast, deterministic).
+      - name: Lint
+        run: just lint
+
+      # Pyright strict-mode type check.
+      - name: Type check
+        run: just typecheck
+
+      # Tests without coverage — coverage is enforced once in the quality job.
+      - name: Run tests
+        run: just test-no-cov
+
+  # ── Full quality gate ──────────────────────────────────────────────
+  # Runs after all matrix legs pass. Executes the single-version quality
+  # contract: coverage (with no-regression gate), dependency audit, security
+  # scan (bandit), dead-code detection, complexity gate, and docs drift check.
+  quality:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # fetch-depth: 0 is required for diff-coverage to compare against origin/main.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Shared composite action (see .github/actions/run-quality-contract).
+      # Runs `just quality` and, on PRs only, the diff-coverage gate.
+      - name: Run shared quality contract
+        uses: ./.github/actions/run-quality-contract
+        with:
+          python-version: "3.13"
+          # diff-coverage only makes sense on PRs where there is a meaningful
+          # diff against main; on push-to-main there are no "changed lines" to gate.
+          run-diff-coverage: ${{ github.event_name == 'pull_request' }}
+
+      - name: Provision baseline repos and smoke envs
+        run: |
+          chmod +x baselines/setup_repos.sh
+          ./baselines/setup_repos.sh
+          BASELINE_ENV_MODE="smoke" bash baselines/setup_envs.sh
+
+      - name: Run integration test lane
+        run: PYTHON_VERSION="3.13" just test-integration
+
+      - name: Run baseline runtime integration lane (informational)
+        continue-on-error: true
+        run: PYTHON_VERSION="3.13" just test-baseline-runtime
+
+      - name: Run eval static checks (informational)
+        continue-on-error: true
+        run: PYTHON_VERSION="3.13" just typecheck-evals

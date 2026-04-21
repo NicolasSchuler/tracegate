@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+     if func(a, left_b) >= N:
+         return left_b
+     while right_b - left_b > 1:
+-        if func(a, center_b) <= N:
++        if func(a, center_b) < N:
+             left_b = max(center_b, left_b + 1)
+             center_b = (left_b + right_b) // 2
+         else:

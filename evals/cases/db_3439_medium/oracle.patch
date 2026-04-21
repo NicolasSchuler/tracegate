@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+             if tot % seats == 0:
+                 res[0] += tot // seats
+             else:
+-                res[0] += tot // seats
++                res[0] += tot // seats + 1
+             return tot
+ 
+         for i in adjacencyList[0]:

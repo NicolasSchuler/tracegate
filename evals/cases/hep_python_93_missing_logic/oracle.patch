@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+     >>> encode('This is a message')
+     'tHKS KS C MGSSCGG'
+     """
+-    vowels = "aeiou"
++    vowels = "aeiouAEIOU"
+     vowels_replace = dict([(i, chr(ord(i) + 2)) for i in vowels])
+     message = message.swapcase()
+     return ''.join([vowels_replace[i] if i in vowels else i for i in message])

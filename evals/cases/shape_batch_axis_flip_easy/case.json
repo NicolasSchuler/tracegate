@@ -1,0 +1,19 @@
+{
+  "description": "Batch concat uses wrong axis and raises shape mismatch.",
+  "category": "data_shape_runtime",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "ValueError",
+  "tags": [
+    "numpy",
+    "shape"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

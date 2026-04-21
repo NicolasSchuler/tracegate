@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,4 +21,4 @@
+             vis[nv] = 1
+             q += [nv]
+             ans += 1
+-print(ans)
++print(ans - m)

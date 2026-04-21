@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,7 +18,7 @@
+             if (
+                 s[i + k + 1][j] == "#"
+                 and s[i][j + k + 1] == "#"
+-                and s[i + 1][j + 2 * (k + 1)] == "#"
++                and s[i + k + 1][j + 2 * (k + 1)] == "#"
+                 and s[i + 2 * (k + 1)][j + k + 1] == "#"
+             ):
+                 ans += 1

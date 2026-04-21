@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         pass
+     else:
+         call.add(a[i])
+-print(sorted(call))
++# print(sorted(call))
+ no_call = []
+ for i in range(1, n + 1):
+     if i not in call:

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,4 +17,4 @@
+     return p * min(A, B) + min(q, B - 1)
+ 
+ 
+-print(f(N) - f(A - 1))
++print(max(f(N) - f(A - 1), 0))

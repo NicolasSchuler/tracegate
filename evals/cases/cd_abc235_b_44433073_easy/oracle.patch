@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ N = int(input())
+ H = list(map(int, input().split()))
+ 
+-ans = 0
++ans = H[0]
+ for n in range(N - 1):
+     if H[n + 1] > H[n]:
+         ans = H[n + 1]

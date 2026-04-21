@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,5 +3,5 @@
+ n = N + 100000 - 1
+ a, b, c, d, e, f = str(n)
+ 
+-P = f"{a}{a}{b}{b}{c}{d}{d}{e}{f}{e}"
++P = f"{a}{a}{b}{c}{d}{d}{e}{f}{e}"
+ print(P)

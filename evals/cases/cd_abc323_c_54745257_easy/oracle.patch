@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,7 +21,7 @@
+         if ms <= score[i]:
+             break
+         index = C[j]
+-        if S[i][j] != "o":
++        if S[i][index] != "o":
+             score[i] += A[index]
+             count += 1
+     print(count)

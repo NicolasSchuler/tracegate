@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     >>> strlen('abc')
+     3
+     """
+-    return len(string) - 1
++    return len(string)

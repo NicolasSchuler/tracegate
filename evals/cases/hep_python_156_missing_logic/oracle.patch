@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -20,6 +20,7 @@
+         div = number // num[i] 
+         number %= num[i] 
+         while div: 
+-            res += sym[i]
++            res += sym[i] 
++            div -= 1
+         i -= 1
+     return res.lower()

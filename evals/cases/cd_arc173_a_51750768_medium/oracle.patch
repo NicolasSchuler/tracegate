@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -39,7 +39,7 @@
+ 
+ 
+ def solve_Test(K):
+-    l = 1
++    l = 0
+     r = 1 << 60
+     while r - l > 1:
+         mid = (l + r) // 2

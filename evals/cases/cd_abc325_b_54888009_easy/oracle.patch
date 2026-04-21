@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,5 +7,5 @@
+ 
+ res = 0
+ for i in range(0, 24):
+-    res = max(res, max(A[9 + i : 19 + i]))
++    res = max(res, sum(A[9 + i : 18 + i]))
+ print(res)

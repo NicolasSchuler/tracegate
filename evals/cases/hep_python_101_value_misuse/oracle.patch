@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,7 +15,7 @@
+ 
+     for letter in s:
+         if letter == ',':
+-            s_list.append(',')
++            s_list.append(' ')
+         else:
+             s_list.append(letter)
+ 

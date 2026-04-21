@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -75,7 +75,8 @@
+     goal = rot(*goal)
+ 
+ x, y = ppl
+-h, w = goal
++w, h = goal
++
+ 
+ if h == 0:
+     if x > 0 and y == 0:

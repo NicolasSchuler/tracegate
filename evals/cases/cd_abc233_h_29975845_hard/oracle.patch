@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -63,6 +63,9 @@
+         for p in point[i]:
+             bit.add(p, 1)
+     for i in range(q):
++        if R[i] == L[i] + 1:
++            continue
++
+         if count[i] >= ABK[i][2]:
+             R[i] = (L[i] + R[i]) // 2
+         else:

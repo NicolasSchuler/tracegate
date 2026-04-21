@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+     a, b, c = l[e[i] - 1]
+     if dp[a] != float("inf"):
+         dp[b] = min(dp[b], dp[a] + c)
+-print(dp[n])
++print(dp[n] if dp[n] != float("inf") else -1)

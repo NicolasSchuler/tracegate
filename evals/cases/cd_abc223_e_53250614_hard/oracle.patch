@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -90,7 +90,7 @@
+         """
+ 
+         def ceil(xxx, yyy):
+-            return xxx / yyy + int(xxx % yyy != 0)
++            return xxx // yyy + int(xxx % yyy != 0)
+ 
+         x, y, a, b, c = ac.read_list_ints()
+         for perm in permutations([a, b, c], 3):

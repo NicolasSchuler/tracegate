@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,6 +13,6 @@
+     False
+     """
+     for i in range(len(text)):
+-        if text[i] != text[len(text) - i]:
++        if text[i] != text[len(text) - 1 - i]:
+             return False
+     return True

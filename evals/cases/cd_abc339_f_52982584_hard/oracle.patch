@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ A = sorted(int(input()) for _ in range(N))
+ ans = 0
+ 
+-for i in range(N - 1):
++for i in range(N):
+     for j in range(i, N):
+         x = A[i] * A[j]
+         idx = bisect_left(A, x)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -40,7 +40,7 @@
+         print(3)
+     elif len(L) == 0:
+         print(0)
+-    elif w2 == 1:
++    elif w2 == 1 and no_w2 == 0:
+         print(num_1 // 2 + 1)
+     else:
+         print(num_1 // 2)

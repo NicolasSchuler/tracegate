@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -96,7 +96,7 @@
+ for l, r in lr:
+     mx = seg._get(0, d[l])
+     mx = max(mx, l - 1 - segr._get(d[l - 1]))
+-    segr._set(d[l], d[r] + 1, l - mx)
++    segr._set(d[l], d[r] + 1, l - mx - 1)
+     seg._set(d[r], mx + r - l + 1)
+ 
+ print(seg._get(0, len(s) + 2))

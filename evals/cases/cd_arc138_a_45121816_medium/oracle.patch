@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ B = []
+ for i, a in enumerate(A):
+     B.append((a, i))
+-B.sort()
++B.sort(key=lambda x: (x[0], -x[1]))
+ INF = N + 10
+ ans = INF
+ now = -1

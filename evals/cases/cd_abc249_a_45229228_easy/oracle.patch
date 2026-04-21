@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ ta = (x // (a + c)) * a * b + min(x % (a + c), a) * b
+ ao = (x // (d + f)) * d * e + min(x % (d + f), d) * e
+ if ta > ao:
+-    print("takahashi")
++    print("Takahashi")
+ elif ao > ta:
+     print("Aoki")
+ else:

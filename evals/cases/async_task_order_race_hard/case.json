@@ -1,0 +1,19 @@
+{
+  "description": "Task result is read before awaiting completion.",
+  "category": "async_temporal",
+  "difficulty": "hard",
+  "snapshot_dependency": "required",
+  "expected_exception": "InvalidStateError",
+  "tags": [
+    "asyncio",
+    "race"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

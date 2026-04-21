@@ -1,0 +1,7 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ c = int(input()[3:])
+-print("yes" if (c < 350 and c != 0 and c != 316) else "No")
++print("Yes" if (0 < c < 350 and c != 316) else "No")

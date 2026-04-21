@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,6 +25,8 @@
+             results.append(item)
+     except StopAsyncIteration:
+         pass
++    finally:
++        loop.run_until_complete(gen.aclose())
+     loop.close()
+     cleaned = len(cleanup_done) > 0
+     return results, cleaned

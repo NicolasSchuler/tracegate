@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ N = int(input())
+ S = list(input())
+-if "○" in S and "x" not in S:
++if "o" in S and "x" not in S:
+     print("Yes")
+ else:
+     print("No")

@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ A, B, D = map(int, input().split())
+ ans = [A]
+-while A <= B:
++while A + D <= B:
+     ans.append(A + D)
+     A += D
+ print(*ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -29,7 +29,7 @@
+ for _ in range(n):
+     num = int(input())
+     l = 0
+-    r = 10**12
++    r = 10**16
+     md = (l + r) // 2
+     while l + 1 < r:
+         ret = calc(md)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+ 
+ ans = False
+ for y in lx:
+-    ans |= y in rx and max(lx) > min(rx)
++    ans |= y in rx and max(lx[y]) > min(rx[y])
+ if ans:
+     print("Yes")
+ else:

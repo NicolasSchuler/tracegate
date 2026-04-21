@@ -1,0 +1,19 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,6 +11,7 @@
+     pair = (u - 1, v - 1)
+     if pair in pairs:
+         continue
++    pairs.add(pair)
+     graph[u - 1].append(v - 1)
+     reversed_graph[v - 1].add(u - 1)
+     if v - 1 in que:
+@@ -25,6 +26,7 @@
+     now = heapq.heappop(que)
+     answers.append(now + 1)
+     for to in graph[now]:
++        reversed_graph[to].remove(now)
+         if len(reversed_graph[to]) == 0:
+             heapq.heappush(que, to)
+ 

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+         elif c == 2:
+             cards[x] += 2
+         else:
+-            if cards[x] == 2:
++            if cards[x] >= 2:
+                 print("Yes")
+             else:
+                 print("No")

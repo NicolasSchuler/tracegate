@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,9 +11,9 @@
+     def minimumDeletions(self, nums: List[int]) -> int:
+         return min(
+             (
+-                min(nums.index(self.min(nums)) + 1, len(nums) - nums.index(self.min(nums)))
+-                + min(nums.index(self.max(nums)) + 1, len(nums) - nums.index(self.max(nums)))
++                min(nums.index(min(nums)) + 1, len(nums) - nums.index(min(nums)))
++                + min(nums.index(max(nums)) + 1, len(nums) - nums.index(max(nums)))
+             ),
+-            max(nums.index(self.min(nums)) + 1, nums.index(self.max(nums)) + 1),
+-            max(len(nums) - nums.index(self.min(nums)), len(nums) - nums.index(self.max(nums))),
++            max(nums.index(min(nums)) + 1, nums.index(max(nums)) + 1),
++            max(len(nums) - nums.index(min(nums)), len(nums) - nums.index(max(nums))),
+         )

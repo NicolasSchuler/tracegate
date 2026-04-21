@@ -1,0 +1,20 @@
+{
+  "description": "asyncio.Lock is not reentrant; nested acquire deadlocks.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "TimeoutError",
+  "tags": [
+    "asyncio",
+    "lock",
+    "deadlock"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

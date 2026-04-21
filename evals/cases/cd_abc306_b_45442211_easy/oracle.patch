@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ 
+ import math
+ 
+-for i in range(63):
++for i in range(64):
+     S = S + A[i] * (pow(2, i))
+ 
+ print(S)

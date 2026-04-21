@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,6 +11,6 @@
+         o[i] += B(d, A[i + k] - k)
+         d[B(d, A[i])] = A[i]
+     o = o[::-1]
+-    A = [-e for e in A][~0:0:-1]
++    A = [-e for e in A][::-1][1:]
+     A += (F,)
+ print(max(o))

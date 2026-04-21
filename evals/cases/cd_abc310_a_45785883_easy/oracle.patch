@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,7 +9,7 @@
+ def main():
+     n, p, q = getIntMap()
+     a = getIntList()
+-    b = min([p - q + a[i] for i in range(n)])
++    b = min([q + a[i] for i in range(n)])
+ 
+     print(b if b < p else p)
+ 

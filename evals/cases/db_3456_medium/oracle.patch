@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+ class Solution:
+     def flipgame(self, fronts: List[int], backs: List[int]) -> int:
+         bad = set(i for i, j in zip(fronts, backs) if i == j)
+-        for i in sorted(set(fronts - backs)):
++        for i in sorted(set(fronts + backs)):
+             if i in bad:
+                 continue
+             return i

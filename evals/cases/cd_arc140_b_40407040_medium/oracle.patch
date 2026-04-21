@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+             As = 0
+     if st:
+         rs[-1] = min(rs[-1], Cs)
+-    print(rs)
++    # print(rs)
+     sil, gold = 0, deque()
+     for r in rs:
+         if r == 0:

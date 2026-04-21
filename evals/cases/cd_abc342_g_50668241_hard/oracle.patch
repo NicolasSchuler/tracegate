@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -53,7 +53,7 @@
+                 Lt += 1
+             if Rt & 1:
+                 Rt -= 1
+-                heapq.heappush(delete[Lt], x)
++                heapq.heappush(delete[Rt], x)
+             Lt >>= 1
+             Rt >>= 1
+ 

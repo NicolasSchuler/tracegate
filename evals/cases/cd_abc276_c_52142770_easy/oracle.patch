@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+ P[l], P[r] = P[r], P[l]
+ 
+ L = P[: l + 1]
+-R = P[r - 1 :]
++R = P[l + 1 :]
+ 
+ R = sorted(R, reverse=True)
+ 

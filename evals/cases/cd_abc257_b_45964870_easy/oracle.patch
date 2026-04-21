@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+ for i in range(k):
+     masu[a[i] - 1] = 1
+ 
+-print(masu)
++# print(masu)
+ 
+ for i in range(q):
+     c = 0

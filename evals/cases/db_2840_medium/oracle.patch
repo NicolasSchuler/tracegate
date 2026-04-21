@@ -1,0 +1,21 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,10 +9,10 @@
+     def maximumNumber(self, num: str, change: List[int]) -> str:
+         num = list(num)
+         on = False 
+-     for i, ch in enumerate(num): 
+-         x = int(ch)
+-         if x < change[x]: 
+-              on = True
+-              num[i] = str(change[x])
+-         elif x > change[x] and on: break
+-    return "".join(num)
++        for i, ch in enumerate(num): 
++            x = int(ch)
++            if x < change[x]: 
++                on = True
++                num[i] = str(change[x])
++            elif x > change[x] and on: break
++        return "".join(num)

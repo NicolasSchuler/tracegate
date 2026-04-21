@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n = int(input())
+ S = input()
+-s = set((0, 0))
++s = {(0, 0)}
+ x = 0
+ y = 0
+ for c in S:

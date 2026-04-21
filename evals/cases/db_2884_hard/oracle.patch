@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -42,7 +42,7 @@
+             lca = LCA(i, j)
+             path = []
+             while i != lca:
+-                freq[i] += 2
++                freq[i] += 1
+                 i = parent[i]
+             freq[i] += 1
+             while j != lca:
+@@ -61,4 +61,4 @@
+         ans = 0
+         for i in range(n):
+             ans += freq[i] * price[i]
+-        return ans - max(dp(0, -1))
++        return ans - max(dp(0, -1))

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+ 
+ cand = set()
+ for a in range(10**6 + 1):
+-    l, r = 0, 10**6 + 10
++    l, r = -1, 10**6 + 10
+     while r - l > 1:
+         m = (l + r) // 2
+ 

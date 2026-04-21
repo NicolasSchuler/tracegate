@@ -1,0 +1,20 @@
+{
+  "description": "Circular index wrap uses truncation division instead of floor modulo, failing for negative indices.",
+  "category": "logic_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "logic_error",
+    "modulo",
+    "negative_index"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

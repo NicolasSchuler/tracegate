@@ -1,0 +1,101 @@
+# =============================================================================
+# .dockerignore — keep the Docker build context minimal.
+#
+# Only three Dockerfiles consume this context:
+#   Dockerfile.llama       needs: llama-entrypoint.sh
+#   evals/docker/eval.Dockerfile  needs: pyproject.toml, uv.lock, README.md,
+#                                        src/, evals/, baselines/
+#   evals/docker/runner.Dockerfile needs: uv.lock
+#
+# Everything else is excluded.
+# =============================================================================
+
+# ── Large data & generated output ────────────────────────────────────────────
+data/
+results/
+reports/
+evals/artifacts/
+evals/results/
+evals/swebench_runs/
+evals/swebench_pro_runs/
+evals/swebench_pro_assets/
+analysis/figures/
+baselines/repos/
+baselines/envs/
+
+# ── Version control ──────────────────────────────────────────────────────────
+.git/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+.venv/
+.venv*/
+venv/
+ENV/
+
+# ── Python build artifacts ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Testing, coverage & benchmarks ──────────────────────────────────────────
+tests/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage*.json
+.benchmarks/
+.mutmut-cache/
+
+# ── IDE & editor ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── llmdebug snapshots (dev) ─────────────────────────────────────────────────
+.llmdebug/
+**/.llmdebug/
+
+# ── Documentation & repo metadata (only README.md is needed) ─────────────────
+docs/
+logo/
+AGENTS.md
+CHANGELOG.md
+CLAUDE.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+EVAL_CONDITIONS.md
+EVAL_FRAMEWORK_INDEX.md
+EVAL_PROMPTS_REFERENCE.md
+SECURITY.md
+EXECUTIVE_SUMMARY.txt
+SWEBENCH_*.md
+SWEBENCH_*.txt
+SWEBENCH_*.csv
+improvements.md
+
+# ── Dev tooling configs (not used inside any container) ──────────────────────
+pyrightconfig*.json
+justfile
+vulture_whitelist.py
+Dockerfile.*
+evals/docker/*.Dockerfile
+
+# ── Misc caches & local state ───────────────────────────────────────────────
+.ruff_cache/
+.uv-cache/
+.last
+scripts/
+quality/
+swebench-*.log
+swebench-*.out

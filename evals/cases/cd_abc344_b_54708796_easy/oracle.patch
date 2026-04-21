@@ -1,0 +1,15 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,9 +1,10 @@
+ a_s = []
+ while True:
+     a = int(input())
++    a_s.append(a)
+     if a == 0:
+         break
+-    a_s.append(a)
++
+ 
+ for a in reversed(a_s):
+     print(a)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+             if 1 << (jn - 1) <= M < 1 << jn:
+                 dp[i + 1][jn] += dp[i][j] * (M - (1 << (jn - 1)) + 1)
+                 dp[i + 1][jn] %= p
+-            elif M > 1 << jn:
++            elif M >= 1 << jn:
+                 dp[i + 1][jn] += dp[i][j] * pow(2, jn - 1, p)
+                 dp[i + 1][jn] %= p
+ 

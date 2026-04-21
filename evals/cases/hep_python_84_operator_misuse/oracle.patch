@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,4 +13,4 @@
+     Output:
+          a string of binary number
+     """
+-    return bin([int(i) for i in str(N)][-1])[2:]
++    return bin(sum(int(i) for i in str(N)))[2:]

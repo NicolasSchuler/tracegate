@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -175,7 +175,7 @@
+     s = S()
+ 
+     s_set = list(set(s))
+-    if len(s_set) == 1 and s_set[0] == "-":
++    if len(s_set) == 1:
+         print(-1)
+         exit()
+ 

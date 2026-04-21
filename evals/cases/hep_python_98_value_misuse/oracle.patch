@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,5 +11,5 @@
+     count = 0
+     for i in range(0,len(s),2):
+         if s[i] in "AEIOU":
+-            count += 2
++            count += 1
+     return count

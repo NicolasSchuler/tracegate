@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -42,7 +42,7 @@
+ 
+ 
+ suki = 10**9 + 5
+-kirai = -1
++kirai = 0
+ while suki - kirai > 1:
+     targ = (suki + kirai) // 2
+     if canreach(targ):

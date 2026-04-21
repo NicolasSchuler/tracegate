@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -82,7 +82,9 @@
+         if num[elem] == 0:
+             print("Yes " + str(dist[elem]))
+         else:
+-            print("No " + str(num[elem] if (dist[elem] + direction) % 2 == 0 else -num[elem]))
++            print(
++                "No " + str(num[elem] if (dist[elem] + (direction == -1)) % 2 == 0 else -num[elem])
++            )
+ 
+ 
+ # region fastio

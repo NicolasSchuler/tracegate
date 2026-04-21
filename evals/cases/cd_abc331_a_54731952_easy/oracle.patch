@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,6 +8,8 @@
+         d += 1
+     if m + sm == M + 1:
+         m, sy = 1, 1
++    else:
++        m += sm
+     y += sy
+     return (y, m, d)
+ 

@@ -1,0 +1,17 @@
+from typing import List, Optional, Tuple, Dict, Set
+from collections import defaultdict, Counter, deque
+import heapq
+import math
+import bisect
+import itertools
+import functools
+
+
+class Solution:
+    def longestWPI(self, A):
+        curr, ans, D = 0, 0, {}
+        for e, i in enumerate(map(lambda x: (-1, 1)[x > 8], A)):
+            curr += i
+            D[curr] = D.get(curr, e)
+            ans = e + 1 if curr > 0 else max(ans, e - D.get(curr - 1, e))
+        return ans_longestWPI

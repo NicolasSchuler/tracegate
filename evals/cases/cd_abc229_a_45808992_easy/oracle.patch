@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,3 +6,5 @@
+     print("No")
+ elif S1 == "#." and S2 == ".#":
+     print("No")
++else:
++    print("Yes")

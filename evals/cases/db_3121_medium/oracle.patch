@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+ class Solution:
+     def longestSubstring(self, s: str, k: int) -> int:
+         x = self.recursion(s, k)
+-        if k == 0:
++        if x >= k:
+             return x
+         else:
+             return 0

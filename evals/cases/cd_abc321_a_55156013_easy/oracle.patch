@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,9 +4,9 @@
+ def is321():
+     a = int(N[0])
+     for n in N[1:]:
+-        a = int(n)
+         if int(n) >= a:
+             return "No"
++        a = int(n)
+     return "Yes"
+ 
+ 

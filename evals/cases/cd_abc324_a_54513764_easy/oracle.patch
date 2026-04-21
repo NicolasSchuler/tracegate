@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+-result = "Yse"
++result = "Yes"
+ N = int(input())
+ lis = list(map(int, input().split(" ")))
+ 

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -46,7 +46,7 @@
+ 
+ 
+ for i in range(n):
+-    if right[i * ln] > -1:
++    if right[i * ln] > -1 or left[i * ln] > -1:
+         continue
+     p = parent[i]
+     left[i * ln] = p

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     find_max(["name", "enam", "game"]) == "enam"
+     find_max(["aaaaaaa", "bb" ,"cc"]) == ""aaaaaaa"
+     """
+-    return sorted(words)[0]
++    return sorted(words, key = lambda x: (-len(set(x)), x))[0]

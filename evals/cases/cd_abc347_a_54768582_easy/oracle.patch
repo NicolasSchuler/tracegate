@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,6 @@
+ 
+ for i in range(n):
+     if a[i] % k == 0:
+-        ans.append(a[i] // 2)
++        ans.append(a[i] // k)
+ 
+ print(*ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ a = list(map(int, input().split()))
+ a.sort()
+ if ((a[0] == a[1] and a[1] == a[2]) and (a[3] == a[4])) or (
+-    (a[0] == a[1] and a[1] == a[2]) or (a[3] == a[4])
++    (a[0] == a[1]) and (a[2] == a[3] and a[3] == a[4])
+ ):
+     print("Yes")
+ else:

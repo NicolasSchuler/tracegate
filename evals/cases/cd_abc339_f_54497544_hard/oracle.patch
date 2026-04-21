@@ -1,0 +1,14 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,8 +2,9 @@
+ from random import randint
+ 
+ n = int(input())
+-a_list = [int(input()) for _ in range(n)]
+ m = randint(10**32, 10**33)
++a_list = [int(input()) % m for _ in range(n)]
++
+ 
+ d = defaultdict(lambda: 0)
+ 

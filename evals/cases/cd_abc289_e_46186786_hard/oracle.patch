@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -30,6 +30,8 @@
+                 if c[p1nex] != c[p2nex] and (p1nex, p2nex) not in visited:
+                     dq.append((p1nex, p2nex, cnt + 1))
+                     visited.add((p1nex, p2nex))
++    print(-1)
++    return
+ 
+ 
+ T = int(input())

@@ -1,0 +1,6 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1 +1 @@
+-print(input().replace("0", "1").replace("1", "0"))
++print("".join(map(str, [(i + 1) % 2 for i in map(int, list(input()))])))

@@ -1,0 +1,19 @@
+{
+  "description": "asyncio.run() called inside an already-running event loop.",
+  "category": "async_temporal",
+  "difficulty": "easy",
+  "snapshot_dependency": "required",
+  "expected_exception": "RuntimeError",
+  "tags": [
+    "asyncio",
+    "event_loop"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

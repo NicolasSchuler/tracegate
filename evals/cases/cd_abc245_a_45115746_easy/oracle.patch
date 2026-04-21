@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ a, b, c, d = map(int, input().split())
+ if a < c:
+     print("Takahashi")
+-if a == c:
++elif a == c:
+     if b <= d:
+         print("Takahashi")
+     else:

@@ -1,0 +1,16 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,9 +12,9 @@
+         before = 0
+         after = len(s) - 1
+         l = [i for i in s]
+-        while before <= len(s):
+-            l[before] = self.min(l[before], l[after])
++        while before <= len(s) / 2:
++            l[before] = min(l[before], l[after])
+             l[after] = l[before]
+             before += 1
+-            after += 1
++            after -= 1
+         return "".join(l)

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,4 +4,4 @@
+ if b == l_2[1]:
+     print("Yes")
+ else:
+-    print("no")
++    print("No")

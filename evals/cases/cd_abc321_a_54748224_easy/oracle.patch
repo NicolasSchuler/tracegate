@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ n = input()
+ last = 10
+ for c in n:
+-    if 1 <= int(c) < last:
++    if int(c) < last:
+         last = int(c)
+     else:
+         print("No")

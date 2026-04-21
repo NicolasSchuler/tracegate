@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -28,7 +28,7 @@
+                 if i + 2 <= a:
+                     dp[i + 2][j][k] += dp[i][j][k] * inv % mod
+                 if k + 1 <= c:
+-                    dp[i][j][k + 1] = dp[i][j][k] * inv % mod
++                    dp[i][j][k + 1] += dp[i][j][k] * inv % mod
+                 if i + 1 <= a and j + 1 <= b:
+                     dp[i + 1][j + 1][k] += dp[i][j][k] * inv % mod
+     print(dp[a][b][c])

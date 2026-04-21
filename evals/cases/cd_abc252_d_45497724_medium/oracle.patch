@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+ for i in B:
+     ans -= i * (i - 1) / 2 * (N - i)
+     ans -= i * (i - 1) * (i - 2) / 6
+-print(ans)
++print(int(ans))

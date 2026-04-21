@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,6 +18,6 @@
+             while s and nums[s[-1]] < x:
+                 buff.append(s.pop())
+             while buff:
+-                s.append(buff.pop())
++                ss.append(buff.pop())
+             s.append(i)
+         return ans

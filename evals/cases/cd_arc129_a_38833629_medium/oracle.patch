@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+             ans += 2 ** (i + 1) - l
+         elif 2**i <= r < 2 ** (i + 1):
+             ans += r - 2**i + 1
+-        else:
++        elif l <= 2**i < 2 ** (i + 1) < r:
+             ans += 2**i
+ 
+ print(ans)

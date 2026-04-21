@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,4 +15,4 @@
+     c, d = x * 2 % M, f(x, y, *CD[0])[0] * 2 % M
+     b = (d - c) % M
+     g, k = (c * g + b * k) % M, (d * g + c * k) % M
+-print(g if s & 1 else k)
++print(k)

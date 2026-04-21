@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,8 @@
+ 
+ 
+ def f(x):
++    if x in dp:
++        return dp[x]
+     if x // 2 not in dp:
+         dp[x // 2] = f(x // 2)
+     if x // 3 not in dp:

@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     >>> string_to_md5('Hello world') == '3e25960a79dbc69b674cd4ec67a72c62'
+     """
+     import hashlib
+-    return hashlib.md5('text').hexdigest() if text else None
++    return hashlib.md5(text.encode('ascii')).hexdigest() if text else None

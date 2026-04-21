@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+     if K <= 2:
+         D = [abs(S[i] - T[i]) for i in range(2)]
+         ret = min(D) * 2
+-        ret += (max(D) - min(D)) * (K + 1)
++        ret += (max(D) - min(D)) * (K + 1) // 2
+         return ret
+     else:
+         return abs((S[0] + S[1]) - (T[0] + T[1])) + abs((S[0] - S[1]) - (T[0] - T[1]))

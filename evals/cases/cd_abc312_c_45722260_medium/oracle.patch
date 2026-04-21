@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -21,4 +21,4 @@
+     return ng
+ 
+ 
+-print(binary_search(1, 1000000000))
++print(binary_search(0, 1000000001))

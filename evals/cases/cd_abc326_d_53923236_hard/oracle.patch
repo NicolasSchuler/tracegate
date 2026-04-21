@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -94,7 +94,7 @@
+             if check(m):
+                 print("Yes")
+                 for line in m:
+-                    print("".join([" " if c == "" else c for c in line]))
++                    print("".join(["." if c == "" else c for c in line]))
+                 exit()
+         else:
+             for line in create_line_iter(h):

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ flag = True
+ for i, s in enumerate(S):
+     if (i + 1) % 2 == 0:
+-        print((i + 1), s)
++        # print((i + 1), s)
+         if s == "0":
+             continue
+         else:

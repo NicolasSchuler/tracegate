@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,4 +13,4 @@
+     """
+     import re
+     sentences = re.split(r'[.?!]\s*', S)
+-    return sum(sentence[0:2] == ' I' for sentence in sentences)
++    return sum(sentence[0:2] == 'I ' for sentence in sentences)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,7 +16,7 @@
+     for word in s.split():
+         n_consonants = 0
+         for i in range(0, len(word)):
+-            if word[i].lower() in ["a","e","i","o","u"]:
++            if word[i].lower() not in ["a","e","i","o","u"]:
+                 n_consonants += 1 
+         if n_consonants == n:
+             result.append(word)

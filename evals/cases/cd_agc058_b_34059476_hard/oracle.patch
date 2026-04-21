@@ -1,0 +1,17 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,7 @@
+ from collections import Counter, defaultdict
+ # from sortedcontainers import SortedSet, SortedList
+ 
++MOD = 998244353
+ n = int(input())
+ arr = list(map(int, input().split()))
+ 
+@@ -14,4 +15,5 @@
+         r += 1
+     for k in range(l, r):
+         dp[k + 1] += dp[k]
++        dp[k + 1] %= MOD
+ print(dp[n])

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+             i = index[c].pop()
+             if l < i < r:
+                 s[l], s[i] = s[i], s[l]
+-                l, r = l + 1, i
++                r = i
+                 break
+             elif i < l:
+                 index[c] = []

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -28,7 +28,7 @@
+     for i in range(k):
+         if i + 2 <= k:
+             for j in range(2):
+-                dp[i + 2][j] = min(dp[i + 1][j], dp[i][j] + v[i + 1] - v[i])
++                dp[i + 2][j] = min(dp[i + 2][j], dp[i][j] + v[i + 1] - v[i])
+         dp[i + 1][1] = min(dp[i + 1][1], dp[i][0])
+     print(min(dp[k][0], dp[k][1]))
+ 

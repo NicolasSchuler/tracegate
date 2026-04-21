@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -36,7 +36,7 @@
+         ndp[1] = 1
+         for j in range(2, i + 1):
+             ndp[j] = dp[i - j][j] + dp[i - 1][j - 1]
+-            if i > m:
++            if j >= m:
+                 ndp[j] -= dp[i - j][j - 1 - m]
+             ndp[j] %= mod
+     for i in dp[n][1:]:

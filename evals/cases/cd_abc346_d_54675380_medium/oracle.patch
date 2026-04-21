@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,7 +26,7 @@
+ 
+         costlist.append(cost1i)
+         costlist.append(cost2i)
+-    return min(costlist[1:])
++    return min(costlist)
+ 
+ 
+ print(changecost(mask, cost1, cost2))

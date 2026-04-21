@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     combinations_list = list(combinations(num_list, num))
+     for combination in combinations_list:
+         # print(combination)
+-        if sum(combination) < W:
++        if sum(combination) <= W:
+             ans.append(sum(combination))
+ 
+     return ans

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -32,7 +32,7 @@
+     my_arr=[]
+     
+     min_value=min(arr)
+-    min_index=sorted_array.index(min_value)
++    min_index=arr.index(min_value)
+     my_arr=arr[min_index:]+arr[0:min_index]
+     for i in range(len(arr)):
+       if my_arr[i]!=sorted_array[i]:

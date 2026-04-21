@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -52,7 +52,7 @@
+             j = 0
+             for nj in range(j, n + 1):
+                 f = C(n - j, n - nj)
+-                if nj & 1 == Xi:
++                if (n - nj) & 1 == Xi:
+                     nY[nj] = (nY[nj] + Y[j] * f) % P
+         else:
+             j = 0

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+ prev = [-1 for _ in range(N + 1)]
+ seen = [False for _ in range(N + 1)]
+ dfs(X, prev, seen)
+-print(prev)
++# print(prev)
+ 
+ # ゴールから dist の数値を頼りに逆にたどり、最後に配列を反転させて経路を取得する。
+ root = list()

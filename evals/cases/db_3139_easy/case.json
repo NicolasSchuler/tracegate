@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3139: logic error/variable error (easy)",
+  "category": "logic_error",
+  "difficulty": "easy",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "IndexError",
+  "tags": [
+    "debugbench",
+    "logic_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 2,
+  "source_id": "debugbench_3139"
+}

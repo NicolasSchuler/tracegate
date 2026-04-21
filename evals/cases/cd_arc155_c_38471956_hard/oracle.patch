@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+         ans[-1].append(x)
+     odd, even = [], []
+     for x in ans:
+-        if len(x) > 2:
++        if len(x) > 2 and x[0] % 2 == 0:
+             x.sort()
+         if len(x) > 0:
+             if x[0] % 2 == 0:

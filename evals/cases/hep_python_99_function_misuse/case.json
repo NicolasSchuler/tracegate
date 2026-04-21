@@ -1,0 +1,21 @@
+{
+  "description": "HumanEvalPack Python/99: function misuse",
+  "category": "cross_file_contract",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "humanevalpack",
+    "function_misuse"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "humanevalpack",
+  "contamination_risk": "high",
+  "expected_fix_lines": 4,
+  "source_id": "Python/99"
+}

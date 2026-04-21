@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -17,7 +17,7 @@
+     data: dict[str, object] = {}
+     try:
+         await asyncio.wait_for(slow_compute(data), timeout=10.0)
+-    except (TimeoutError, asyncio.CancelledError):
++    except TimeoutError:
+         data["status"] = "partial"
+         return data
+     data["status"] = "complete"

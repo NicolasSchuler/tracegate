@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+                     low[row] = 1
+                     upper[n - 1 + col - row] = 1
+                     lower[row + col] = 1
+-                    solve(NULL, board, low, upper, lower, ans, n)
++                    solve(col + 1, board, low, upper, lower, ans, n)
+                     low[row] = 0
+                     upper[n - 1 + col - row] = 0
+                     lower[row + col] = 0

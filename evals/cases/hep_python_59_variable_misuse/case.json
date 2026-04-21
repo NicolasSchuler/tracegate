@@ -1,0 +1,21 @@
+{
+  "description": "HumanEvalPack Python/59: variable misuse",
+  "category": "reference_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "none",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "humanevalpack",
+    "variable_misuse"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "humanevalpack",
+  "contamination_risk": "high",
+  "expected_fix_lines": 2,
+  "source_id": "Python/59"
+}

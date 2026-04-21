@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+-N, X, Y, Z = input().split()
++N, X, Y, Z = map(int, input().split())
+ 
+ start = min(X, Y)
+ end = max(X, Y)

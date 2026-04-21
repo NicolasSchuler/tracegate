@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,7 +23,7 @@
+     cnt = 0
+     cnt += (b + x - 1) // x
+     cnt += (c + x - 1) // x
+-    return cnt <= x
++    return cnt <= y
+ 
+ 
+ for perm1 in permutations([X, Y]):

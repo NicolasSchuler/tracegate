@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+ flg = 1
+ if abs(xy - yx) >= 2:
+     flg = 0
+-if xx > 0 and xx > 0 and yx == 0 and xy == 0:
++if xx > 0 and yy > 0 and yx == 0 and xy == 0:
+     flg = 0
+ 
+ print("Yes" if flg else "No")

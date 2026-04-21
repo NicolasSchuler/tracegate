@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+                 d[S[i][j]] += 1
+     check = 0
+     for key, value in d.items():
+-        if value >= K:
++        if value == K:
+             check += 1
+ 
+     ans = max(ans, check)

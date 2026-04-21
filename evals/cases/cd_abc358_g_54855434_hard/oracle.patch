@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -31,6 +31,8 @@
+ for i in range(trial + 1):
+     for h in range(H):
+         for w in range(W):
++            if dp[i][h][w] == -1:
++                continue
+             maxv = max(maxv, dp[i][h][w] + A[h][w] * (K - i))
+ 
+ print(maxv)

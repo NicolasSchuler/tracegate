@@ -1,0 +1,21 @@
+{
+  "description": "Condition.notify() called before any coroutine enters wait(), causing a lost wakeup and deadlock.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "TimeoutError",
+  "tags": [
+    "asyncio",
+    "condition",
+    "synchronization",
+    "deadlock"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

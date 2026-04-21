@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,4 +1,4 @@
+ K = int(input())
+ 
+ for i in range(K):
+-    print(chr(64 + i), end="")
++    print(chr(65 + i), end="")

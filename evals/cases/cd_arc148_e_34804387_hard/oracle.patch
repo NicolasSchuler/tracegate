@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,7 +24,7 @@
+     x *= t * (t - 1)
+     x %= mod
+     t -= 1
+-for i in range(t + 1):
++for i in range(t):
+     x *= i + 1
+     x %= mod
+ print(x)

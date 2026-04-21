@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -69,5 +69,5 @@
+     tmp = s + t * (c - 1) + c * (c - 1)
+     fwt.add(i, tmp % MOD)
+ 
+-ans = fwt.sum(n) + c
++ans = (fwt.sum(n) + c) % MOD
+ print(ans)

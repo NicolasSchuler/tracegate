@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,3 +6,7 @@
+         return string * 3
+     else:
+         return string * 2
++
++
++string = str(input("")).lower()
++print(solution(string))

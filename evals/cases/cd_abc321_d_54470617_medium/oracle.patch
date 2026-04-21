@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,5 +15,5 @@
+             l = m
+         else:
+             r = m
+-    res += (S[l] + A[i] if l >= 0 else 0) + P * (M - r)
++    res += (S[l] + r * A[i] if l >= 0 else 0) + P * (M - r)
+ print(res)

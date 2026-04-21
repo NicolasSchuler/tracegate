@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -204,4 +204,4 @@
+ A = [1]
+ for i in uf.roots():
+     A = convolve(A, X[i], K + 1)
+-print(sum(A))
++print(sum(A) % P)

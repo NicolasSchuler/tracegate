@@ -1,0 +1,1 @@
+"""INTERVENOR baseline adapter."""

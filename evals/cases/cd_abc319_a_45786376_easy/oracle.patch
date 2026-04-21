@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,4 +11,4 @@
+     "semiexp": "3481",
+ }
+ 
+-print = dir[input()]
++print(dir[input()])

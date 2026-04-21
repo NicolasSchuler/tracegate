@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+         odd.append(ai)
+ odd.sort()
+ even.sort()
+-print(max(odd[-1] + even[-1], odd[-1] + odd[-2], even[-1] + even[-2], -1))
++print(max(odd[-1] + odd[-2], even[-1] + even[-2], -1))

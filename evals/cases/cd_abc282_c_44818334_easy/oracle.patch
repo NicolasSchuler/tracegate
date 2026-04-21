@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+     if s[i] == '"':
+         cnt += 1
+     if s[i] == ",":
+-        if cnt % 2 == 1:
++        if cnt % 2 == 0:
+             s[i] = "."
+ ans = ""
+ for i in range(n):

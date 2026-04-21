@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,4 +12,4 @@
+         if x > y:
+             x, y = y, x
+ 
+-        return min(x + y, 2 * x + 1) * 2 - 2 * z
++        return min(x + y, 2 * x + 1) * 2 + 2 * z

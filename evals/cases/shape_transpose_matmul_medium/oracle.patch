@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@ def project_features(X: np.ndarray, W: np.ndarray) -> np.ndarray:
+     Returns (batch, out) matrix.
+     """
+     # Bug: transposes axis 0 and 1 of X instead of W when shapes mismatch
+-    return X.T @ W
++    return X @ W

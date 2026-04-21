@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,6 +7,6 @@
+     flag[b - 1] = 0
+ 
+ if sum(flag) == 1:
+-    print(flag.index(1))
++    print(flag.index(1) + 1)
+ else:
+     print(-1)

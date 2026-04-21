@@ -1,0 +1,19 @@
+{
+  "description": "Semaphore released without matching acquire in error path causes ValueError.",
+  "category": "async_temporal",
+  "difficulty": "medium",
+  "snapshot_dependency": "required",
+  "expected_exception": "ValueError",
+  "tags": [
+    "asyncio",
+    "semaphore"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

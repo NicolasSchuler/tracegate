@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,6 +2,6 @@
+ n = len(s)
+ answer = 0
+ for i in range(n):
+-    if s[i] == "W":
++    if s[i] == "w":
+         answer += 1
+ print(answer + n)

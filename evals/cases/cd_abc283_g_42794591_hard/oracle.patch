@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,9 +14,6 @@
+         base[i] = min(base[i], base[i] ^ base[j])
+ 
+ 
+-for i in base:
+-    print(format(i, "08b"))
+-
+ ans = []
+ l -= 1
+ while l != r:

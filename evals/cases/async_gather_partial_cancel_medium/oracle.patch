@@ -1,0 +1,9 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,7 +26,7 @@
+     await asyncio.sleep(0.05)
+     tasks[1].cancel()
+-    results = await asyncio.gather(*tasks)
++    results = await asyncio.gather(*tasks, return_exceptions=True)
+     return [r for r in results if isinstance(r, str)]
+

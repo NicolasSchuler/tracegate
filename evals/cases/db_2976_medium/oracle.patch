@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -15,5 +15,5 @@
+         if K < mid:
+             return self.findKthBit(N - 1, K, R)
+         if K > mid:
+-            return self.callUndefinedMethod(N - 1, 2 * mid - K, not R)
++            return self.findKthBit(N - 1, 2 * mid - K, not R)
+         return "1" if R else "0"

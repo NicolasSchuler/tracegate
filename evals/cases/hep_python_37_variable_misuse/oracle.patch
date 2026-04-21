@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+     """
+     evens = l[::2]
+     odds = l[1::2]
+-    odds.sort()
++    evens.sort()
+     ans = []
+     for e, o in zip(evens, odds):
+         ans.extend([e, o])

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -96,7 +96,7 @@
+         for j in range(i):
+             if prime[As[i] + As[j]] == As[i] + As[j]:
+                 ic, jc = i, j
+-                if i & 1 and i != 1:
++                if As[i] & 1:
+                     ic, jc = jc, ic
+                 T.addedge(ic, jc, INF)
+ 

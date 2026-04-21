@@ -1,0 +1,18 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,6 @@
+                         freq[i] -= 1
+                     else:
+                         del freq[i]
+-                        self.undefinedMethod()
+ 
+             for i in letters[::-1]:
+                 if i in freq:
+@@ -34,6 +33,5 @@
+                         freq[i] -= 1
+                     else:
+                         del freq[i]
+-                        self.undefinedMethod()
+ 
+         return res

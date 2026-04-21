@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -23,4 +23,4 @@
+         ends.pop()
+         n_active_intervals -= 1
+ 
+-print(n_active_intervals)
++print(n_overlaps)

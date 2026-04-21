@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -10,7 +10,7 @@
+     for j in range(i + 1, N):
+         for k in range(j + 1, N):
+             # print(i,j,k)
+-            if (XY[k][1] - XY[i][1]) * (XY[j][0] - XY[i][0]) != (XY[j][0] - XY[i][0]) * (
++            if (XY[k][1] - XY[i][1]) * (XY[j][0] - XY[i][0]) != (XY[j][1] - XY[i][1]) * (
+                 XY[k][0] - XY[i][0]
+             ):
+                 count += 1

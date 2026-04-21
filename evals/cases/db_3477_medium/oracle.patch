@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -16,5 +16,5 @@
+             curr = 10 * curr + int(d)
+             if curr > k:
+                 ans += 1
+-                curr = d
++                curr = int(d)
+         return ans

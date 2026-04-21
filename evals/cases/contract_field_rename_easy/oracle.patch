@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,4 +3,4 @@
+ 
+ def read_user_id(user_id: int) -> int:
+     payload = build_user_payload(user_id)
+-    return payload["uid"]
++    return payload["user_id"]

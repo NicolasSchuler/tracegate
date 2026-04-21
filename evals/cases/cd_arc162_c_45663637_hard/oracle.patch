@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -18,6 +18,6 @@
+             for j in range(k):
+                 if dp[i][j] == 0:
+                     cnt += 1
+-            if dp[i][k] == 0 and cnt <= 1:
++            if dp[i][k] == 0 and cnt <= 1 and cnt <= dp[i][n + 1]:
+                 answer = True
+     print("Alice" if answer else "Bob")

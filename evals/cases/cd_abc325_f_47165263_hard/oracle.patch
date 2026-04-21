@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -39,7 +39,7 @@
+ D = list(map(int, readline().split()))
+ L0, C0, K0 = map(int, readline().split())
+ L1, C1, K1 = map(int, readline().split())
+-inf = 1 << 30
++inf = 1 << 60
+ dp = [0] * (K0 + 1)
+ for d in D:
+     prev = dp

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -43,7 +43,7 @@
+ def resolve():
+     inf = 10**18 + 1
+     N, X = map(int, input()[:-1].split(" "))
+-    c = num2alpha((X // N) - 1)
++    c = num2alpha(((X - N - 1) // N) + 1)
+ 
+     print(c)
+ 

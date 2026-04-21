@@ -1,0 +1,20 @@
+{
+  "description": "Merge sort uses >= instead of <= in merge step, producing descending-biased output.",
+  "category": "logic_error",
+  "difficulty": "medium",
+  "snapshot_dependency": "helpful",
+  "expected_exception": "AssertionError",
+  "tags": [
+    "logic_error",
+    "sorting",
+    "comparison"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "hand_crafted",
+  "contamination_risk": "none"
+}

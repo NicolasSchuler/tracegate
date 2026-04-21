@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,6 +24,6 @@
+                             rgb.append(rings[j - 1])
+                         if rings[j - 1] == "B":
+                             rgb.append(rings[j - 1])
+-                if len(set(rgb)) == 2:
++                if len(set(rgb)) == 3:
+                     count += 1
+         return count

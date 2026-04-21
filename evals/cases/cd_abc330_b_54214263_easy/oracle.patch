@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,7 +2,7 @@
+ a = list(map(int, input().split()))
+ ans = []
+ for i in a:
+-    if i < L:
++    if i <= L:
+         ans.append(L)
+     elif i > L and i < R:
+         ans.append(i)

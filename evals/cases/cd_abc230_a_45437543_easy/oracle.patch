@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,4 +5,4 @@
+ elif int(N) < 10:
+     print("AGC00" + N)
+ else:
+-    print("AGC00" + N)
++    print("AGC0" + N)

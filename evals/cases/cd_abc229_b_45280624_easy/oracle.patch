@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ while a > 0 and b > 0:
+     if (a % 10) + (b % 10) >= 10:
+         print("Hard")
+-        break
++        exit()
+     a //= 10
+     b //= 10
+ 

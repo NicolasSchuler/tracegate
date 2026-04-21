@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -198,6 +198,8 @@
+         prod %= MOD
+         components_prob[j] += ans[j][i]
+         components_prob[j] %= MOD
++        if components_prob[j] == 0:
++            zeros += 1
+ 
+     ans_lst[i] = prod - prob
+     prob = prod

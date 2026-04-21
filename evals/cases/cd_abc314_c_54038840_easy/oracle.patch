@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -11,7 +11,7 @@
+ m = defaultdict(list)
+ for i in range(N):
+     m[C[i]].append([S[i], i])
+-print(m)
++# print(m)
+ # 8 3
+ # apzbqrcs
+ # 1 2 3 1 2 2 1 2

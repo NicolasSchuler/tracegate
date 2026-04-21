@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+                 res.append([backward[""], i])
+ 
+             for j in range(len(word)):
+-                if word[j:] in backward and word[:j] == word[j::-1]:
++                if word[j:] in backward and word[:j] == word[j - 1 :: -1]:
+                     res.append([backward[word[j:]], i])
+                 if word[:j] in backward and word[j:] == word[: j - 1 : -1]:
+                     res.append([i, backward[word[:j]]])

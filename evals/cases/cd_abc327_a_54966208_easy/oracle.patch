@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ n = int(input())
+ s = input()
+-if "ab" or "ba" in s:
++if "ab" in s or "ba" in s:
+     print("Yes")
+ else:
+     print("No")

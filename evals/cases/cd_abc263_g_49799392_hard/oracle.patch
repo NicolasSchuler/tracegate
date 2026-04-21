@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -116,4 +116,4 @@
+ Fc = gf.flow(0, N + 1)
+ F0 = gf_.flow(0, N + 1)
+ ans = Fc + (C - (Fc - F0)) // 2
+-print(Fc)
++print(ans)

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -83,7 +83,7 @@
+     Z = Dinic(r + N + 2)
+     e = 0
+     for p in range(1, N):
+-        for q in range(i + 1, N + 1):
++        for q in range(p + 1, N + 1):
+             if p == i or q == i:
+                 continue
+             if p * N + q in used:

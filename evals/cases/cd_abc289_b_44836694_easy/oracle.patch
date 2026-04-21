@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,6 +8,6 @@
+ 
+ result = []
+ for subgraph in graph.split(","):
+-    result += sorted(subgraph.split("v"), reverse=True)
++    result += sorted(list(map(int, subgraph.split("v"))), reverse=True) if len(subgraph) > 0 else []
+ 
+ print(*result)

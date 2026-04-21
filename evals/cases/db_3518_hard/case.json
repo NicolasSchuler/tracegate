@@ -1,0 +1,21 @@
+{
+  "description": "DebugBench #3518: reference error/undefined objects (hard)",
+  "category": "reference_error",
+  "difficulty": "hard",
+  "snapshot_dependency": "none",
+  "expected_exception": "TypeError",
+  "tags": [
+    "debugbench",
+    "reference_error"
+  ],
+  "python_args": [
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "timeout_sec": 30,
+  "bug_source": "debugbench",
+  "contamination_risk": "low",
+  "expected_fix_lines": 4,
+  "source_id": "debugbench_3518"
+}

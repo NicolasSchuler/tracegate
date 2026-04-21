@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ mn = min(C)
+ cnt = N // mn
+ ans = []
+-print(cnt, mn)
++# print(cnt,mn)
+ 
+ for i in range(cnt):
+     for j in range(8, -1, -1):

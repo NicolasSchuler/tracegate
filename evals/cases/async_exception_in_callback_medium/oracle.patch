@@ -1,0 +1,13 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -5,8 +5,8 @@
+
+ def init_callback() -> None:
+     config = {"level": 1}
+-    required_key = config["missing_key"]
+-    state["initialized"] = True
+-    state["level"] = required_key
++    level = config.get("level", 0)
++    state["initialized"] = True
++    state["level"] = level
+

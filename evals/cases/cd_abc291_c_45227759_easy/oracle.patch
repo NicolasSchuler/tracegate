@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+     if S[i] == "D":
+         now = (now[0], now[1] - 1)
+     se.add(now)
+-if len(se) == N + 1:
++if len(se) != N + 1:
+     print("Yes")
+ else:
+     print("No")

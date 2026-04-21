@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,4 +7,4 @@
+     >>> string_sequence(5)
+     '0 1 2 3 4 5'
+     """
+-    return ' '.join([str(x) for x in range(n)])
++    return ' '.join([str(x) for x in range(n + 1)])

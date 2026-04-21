@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -29,7 +29,7 @@
+ S = input()
+ s = set()
+ if "p" not in S or "d" not in S:
+-    print(S)
++    print("d" * N)
+     exit()
+ idxP = S.index("p")
+ dp = str.maketrans({"d": "p", "p": "d"})

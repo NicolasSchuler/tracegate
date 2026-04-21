@@ -1,0 +1,6 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1 +1 @@
+-" %s" % [*open(0)][1].find("ABC")
++print(f" {[*open(0)][1]}".find("ABC"))

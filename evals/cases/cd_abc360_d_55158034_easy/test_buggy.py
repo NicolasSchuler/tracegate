@@ -1,0 +1,32 @@
+import subprocess
+import sys
+
+
+def test_condefects_0():
+    proc = subprocess.run(
+        [sys.executable, "buggy.py"],
+        input='6 3\n101010\n-5 -1 0 1 2 4\n',
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = '5\n'
+    actual = proc.stdout.strip()
+    assert actual == expected.strip(), (
+        f"Expected {expected.strip()!r}, got {actual!r}"
+    )
+
+
+def test_condefects_1():
+    proc = subprocess.run(
+        [sys.executable, "buggy.py"],
+        input='13 656320850\n0100110011101\n-900549713 -713494784 -713078652 -687818593 -517374932 -498415009 -472742091 -390030458 -379340552 -237481538 -44636942 352721061 695864366\n',
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    expected = '14\n'
+    actual = proc.stdout.strip()
+    assert actual == expected.strip(), (
+        f"Expected {expected.strip()!r}, got {actual!r}"
+    )

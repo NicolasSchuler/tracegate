@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,8 @@
+ x, y, z = map(int, input().split())
+ 
+ if y < 0 < x or y > 0 > x:
++    print(abs(x))
++elif 0 < x < y or 0 > x > y:
+     print(abs(x))
+ elif 0 < y < x or 0 > y > x:
+     if 0 < y < z or 0 > y > z:

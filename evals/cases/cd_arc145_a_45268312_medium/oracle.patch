@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,6 +8,8 @@
+     if a[0] != b[0]:
+         if a[0] == "A":
+             return False
++        if n == 2:
++            return False
+ 
+     return True
+ 

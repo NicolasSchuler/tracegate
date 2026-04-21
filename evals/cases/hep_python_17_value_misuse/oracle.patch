@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,5 +14,5 @@
+     >>> parse_music('o o| .| o| o| .| .| .| .| o o')
+     [4, 2, 1, 2, 2, 1, 1, 1, 1, 4, 4]
+     """
+-    note_map = {'o': 3, 'o|': 2, '.|': 1}
++    note_map = {'o': 4, 'o|': 2, '.|': 1}
+     return [note_map[x] for x in music_string.split(' ') if x]

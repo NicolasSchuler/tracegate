@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -125,7 +125,7 @@
+ 
+ res = 0
+ 
+-for k in range(1, n + 1):
++for k in range(1, n + 2):
+     res = (res + f[p][k]) % mod
+ 
+ print(res)

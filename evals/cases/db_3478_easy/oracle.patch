@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,4 +19,4 @@
+                 arr.append("Buzz")
+             else:
+                 arr.append(str(i))
+-        return results
++        return arr

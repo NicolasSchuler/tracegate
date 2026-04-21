@@ -1,0 +1,77 @@
+[run_eval]
+# External baseline: upstream RLM (native iterative REPL baseline).
+# Copy this file, set your own run_id, then pass:
+#   --config <your_file.toml>
+# `baseline = "rlm"` is shorthand for
+# `--patcher baseline --baseline-name rlm`.
+run_id = "replace-me"
+baseline = "rlm"
+# Pin the resolved benchmark condition explicitly for config/lockfile comparability.
+conditions = "rlm"
+max_cases = 0
+k = 2
+jobs = 3
+retry_prompt_mode = "full"
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+baseline_process_timeout_sec = 600.0
+# Keep the adapter-level inner loop conservative. RLM gets extra search depth
+# through its native inner loop below, still bounded by the same timeout.
+baseline_max_iterations = 2
+# Shipped baseline templates assume the repo's local llama.cpp / model-template
+# workflow, with reasoning fallback enabled and thinking left on by default
+# where the compat profile can express it. Override to `qwen_openai_raw` or
+# `qwen_dashscope` for request-shaped Qwen backends.
+baseline_openai_compat_profile = "lmstudio_model_yaml"
+baseline_openai_allow_reasoning_fallback = true
+baseline_openai_enable_thinking = true
+# Adaptive+baseline hybrids: keep `tuned_v1` for current behavior or switch to
+# `fair_v1` for the shared canonical augmentation lane.
+baseline_hybrid_guidance_mode = "tuned_v1"
+
+# Secret policy: use env indirection, not plaintext keys.
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "Qwen3.5-35B-A3B-UD-Q4_K_M"
+http2 = true
+timeout_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.adaptive]
+online_policy_mode = "off"
+budget_policy_mode = "off"
+max_helper_calls = 0
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true
+
+[run_eval.baseline_rlm]
+max_depth = 2
+max_iterations = 24
+# Keep the inner RLM timeout aligned with the shared baseline budget.
+timeout_sec = 600
+max_errors = 5
+max_tokens = 3072
+# Keep the per-call cap unchanged, but allow longer native searches that showed
+# real solves beyond the earlier 50k total-token ceiling.
+max_total_tokens = 200000
+compaction = false
+compaction_threshold_pct = 0.85
+verbose = false
+prompt_contract = "canonical"
+controller_guidance_max_chars = 2500
+failure_feedback_max_chars = 3500
+failure_feedback_meta_max_chars = 2000

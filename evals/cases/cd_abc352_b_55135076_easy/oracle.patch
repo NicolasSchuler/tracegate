@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,4 +13,4 @@
+         pass
+     c.append(b)
+ 
+-print(c[0])
++print(*c[0])

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,7 +8,7 @@
+ s = ""
+ for i in S:
+     # print(i)
+-    if i == "o" and cnt < 3:
++    if i == "o" and cnt < K:
+         cnt += 1
+         s = s + i
+     elif i == "o":

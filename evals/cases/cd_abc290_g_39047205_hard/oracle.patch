@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -27,7 +27,7 @@
+     d1 = 0
+     tmp = [0]
+     ans = float("inf")
+-    while tmp[-1] < x:
++    while len(tmp) <= d + 2:
+         tmp.append(tmp[-1] + k**d1)
+         ans = min(ans, solve1(x, k, tmp, d))
+         d1 += 1

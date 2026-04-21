@@ -1,0 +1,11 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,7 +6,7 @@
+ def build_message(header: str, raw_chunks: list[bytes]) -> str:
+     """Build a text message: header followed by decoded payload."""
+     payload = read_chunks(raw_chunks)
+-    return header + ": " + payload
++    return header + ": " + payload.decode("utf-8")
+ 
+ 
+ def parse_pipeline(header: str, raw_chunks: list[bytes]) -> dict[str, str]:

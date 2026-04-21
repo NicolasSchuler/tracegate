@@ -1,0 +1,6 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,2 +1,2 @@
+ def last_item(values: list[int]) -> int:
+-    return values[len(values)]
++    return values[len(values) - 1]

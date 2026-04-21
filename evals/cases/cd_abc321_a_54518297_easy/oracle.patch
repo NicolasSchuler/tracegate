@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,7 +4,7 @@
+ b = 0
+ for i in range(p):
+     N = int(S[i])
+-    if o < N:
++    if o > N:
+         o = N
+         b = b + 1
+ if b == p:

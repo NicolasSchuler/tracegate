@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,4 @@
+     """
+     import collections
+     c = collections.Counter(numbers)
+-    return [n for n in numbers if c[n] < 1]
++    return [n for n in numbers if c[n] <= 1]

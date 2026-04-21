@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,5 +1,5 @@
+ N = int(input())
+-word_list = map(str, input().split())
++word_list = list(map(str, input().split()))
+ keywords = ["and", "not", "that", "the", "you"]
+ 
+ found = False

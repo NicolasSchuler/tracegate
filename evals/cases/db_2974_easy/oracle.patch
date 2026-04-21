@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,4 @@
+             if num == 0:
+                 continue
+             uniq_non_zero.add(num)
+-        return len(uniqueCount(uniq_non_zero))
+-
+-    def uniqueCount(self, num_set: set) -> int:
+-        return len(num_set)
++        return len(uniq_non_zero)

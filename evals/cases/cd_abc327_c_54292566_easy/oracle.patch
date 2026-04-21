@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -12,7 +12,7 @@
+         if not rows[i][num - 1] and not cols[j][num - 1] and not blocks[i // n][j // n][num - 1]:
+             rows[i][num - 1] = True
+             cols[j][num - 1] = True
+-            blocks[i % n][j % n][num - 1] = True
++            blocks[i // n][j // n][num - 1] = True
+         else:
+             valid = False
+             break

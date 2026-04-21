@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+         right = len(nums) - 1
+         total = 0
+         while left <= right:
+-            if left > right:
++            if left < right:
+                 total += int(str(nums[left]) + str(nums[right]))
+             else:
+                 total += nums[left]

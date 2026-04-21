@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,5 +9,5 @@
+     """
+     for e in l:
+         if e >= t:
+-            return True
+-    return False
++            return False
++    return True

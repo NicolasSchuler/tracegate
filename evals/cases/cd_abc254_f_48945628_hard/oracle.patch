@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -185,4 +185,4 @@
+     h2 -= 1
+     w1 -= 1
+     w2 -= 1
+-    print(math.gcd(A[h1] + B[w1]), seg1.prod(h1, h2), seg2.prod(w1, w2))
++    print(math.gcd(A[h1] + B[w1], seg1.prod(h1, h2), seg2.prod(w1, w2)))

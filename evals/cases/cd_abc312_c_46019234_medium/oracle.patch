@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -25,7 +25,7 @@
+ # 二分探索する
+ 
+ left = -1
+-right = 1000000000
++right = 10000000000
+ 
+ while right > (1 + left):
+     mid = (left + right) // 2

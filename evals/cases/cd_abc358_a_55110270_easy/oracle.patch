@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,6 +1,6 @@
+ s, t = input().split()
+ 
+-if s == "Atcoder" and t == "Land":
++if s == "AtCoder" and t == "Land":
+     print("Yes")
+ else:
+     print("No")

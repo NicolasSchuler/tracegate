@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,7 +7,7 @@
+     if a == b:
+         # 成功
+         return a
+-    elif (a - b) % 3 == 0 and (a - b) // 3 <= c:
++    elif (a - b) % 3 == 0:
+         return a
+     else:
+         return -1

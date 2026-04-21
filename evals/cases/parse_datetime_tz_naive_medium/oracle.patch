@@ -1,0 +1,8 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -2,4 +2,4 @@
+ 
+ 
+ def parse_timestamp(raw: str) -> datetime:
+-    return datetime.strptime(raw, "%Y-%m-%d %H:%M")
++    return datetime.fromisoformat(raw)

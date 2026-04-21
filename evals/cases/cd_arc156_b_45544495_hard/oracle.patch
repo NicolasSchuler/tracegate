@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -24,6 +24,8 @@
+         return 1
+     elif a < b:
+         return 0
++    elif a == b:
++        return 1
+     return fib[a - 1] * pow(fib[a - b - 1], -1, mod) % mod * pow(fib[b - 1], -1, mod) % mod
+ 
+ 

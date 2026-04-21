@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -28,7 +28,7 @@
+ # 先頭を1つずつ後ろにずらしていく
+ for i in range(n - 1):
+     before = count[i]
+-    if head != tail[i]:
++    if tail[i] != "A":
+         after = before - 2
+     else:
+         after = before

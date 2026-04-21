@@ -1,0 +1,11 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -4,6 +4,6 @@
+ k = 3
+ if t[0:n] == s:
+     k -= 2
+-elif t[-n::] == s:
++if t[-n::] == s:
+     k -= 1
+ print(k)

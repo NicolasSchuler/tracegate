@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -26,5 +26,5 @@
+ dfs((0, 0))
+ ans = 0
+ for v in visited:
+-    ans = max(ans, v[0] + v[1])
++    ans = max(ans, v[0] + v[1] + 1)
+ print(ans)

@@ -1,0 +1,13 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,8 +7,8 @@
+         Mi = M
+     else:
+         if Gi + Mi > G:
++            Mi = Mi - (G - Gi)
+             Gi = G
+-            Mi = Mi - (G - Gi)
+         else:
+             Gi = Gi + Mi
+             Mi = 0

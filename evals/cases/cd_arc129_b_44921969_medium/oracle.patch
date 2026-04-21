@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,4 +8,4 @@
+     if a <= b:
+         print(0)
+     else:
+-        print((a - b) // 2)
++        print((a - b + 1) // 2)

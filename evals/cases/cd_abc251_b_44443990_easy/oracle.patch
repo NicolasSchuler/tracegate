@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -19,7 +19,7 @@
+ 
+ cnt = 0
+ for i in range(w):
+-    if i in sum_set:
++    if i + 1 in sum_set:
+         cnt += 1
+ 
+ print(cnt)

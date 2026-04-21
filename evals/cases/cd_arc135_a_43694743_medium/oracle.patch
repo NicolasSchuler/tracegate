@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -49,7 +49,7 @@
+ 
+ 
+ def resolve():
+-    X = 10**18
++    X = I()
+     mod = 998244353
+ 
+     @lru_cache(maxsize=None)

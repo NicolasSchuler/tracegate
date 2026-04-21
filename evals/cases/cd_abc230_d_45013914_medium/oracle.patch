@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -3,7 +3,7 @@
+ n, d = map(int, input().split())
+ wall = [list(map(int, input().split())) for _ in range(n)]
+ 
+-wall.sort()
++wall.sort(key=lambda x: x[1])
+ q = deque(wall)
+ ans = 0
+ now = 0

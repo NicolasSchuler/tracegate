@@ -1,0 +1,15 @@
+--- a/buggy.py
++++ b/buggy.py
+@@ -7,10 +7,8 @@
+
+
+ async def main() -> str:
+-    coro = greet("World")
+-    task1 = asyncio.create_task(coro)
++    task1 = asyncio.create_task(greet("World"))
+     result1 = await task1
+-    # Bug: reuses already-awaited coroutine object
+-    task2 = asyncio.create_task(coro)
++    task2 = asyncio.create_task(greet("World"))
+     result2 = await task2
+     return f"{result1} {result2}"

@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -14,7 +14,7 @@
+     out = ''
+     for c in s:
+         if c in d:
+-            out += d[(d.index(c)+2*2) % 24]
++            out += d[(d.index(c)+2*2) % 26]
+         else:
+             out += c
+     return out

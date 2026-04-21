@@ -1,0 +1,9 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -6,4 +6,4 @@
+ while n % 2 == 0:
+     n //= 2
+ 
+-print("Yes" if n == 0 else "No")
++print("Yes" if n == 1 else "No")

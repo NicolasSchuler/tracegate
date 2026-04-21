@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -22,7 +22,7 @@
+ count = 0
+ ans = []
+ for i in kouho:
+-    if C[i] == min(C):
++    if C[i] == min_C:
+         count += 1
+         ans.append(i + 1)
+ print(count)

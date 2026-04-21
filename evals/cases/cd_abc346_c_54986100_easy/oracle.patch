@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -1,7 +1,7 @@
+ N, K = map(int, input().split())
+ A = set(map(int, input().split()))
+ 
+-sum = int((K * (K + 1)) / 2)
++sum = K * (K + 1) // 2
+ for a in A:
+     if 1 <= a <= K:
+         sum -= a

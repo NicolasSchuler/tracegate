@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -8,5 +8,4 @@
+     >>> filter_integers([1, 2, 3, 'abc', {}, []])
+     [1, 2, 3]
+     """
+-    out = [x for x in values if isinstance(x, int)]
+-    return values
++    return [x for x in values if isinstance(x, int)]

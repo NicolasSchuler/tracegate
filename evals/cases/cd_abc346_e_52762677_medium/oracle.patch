@@ -1,0 +1,12 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -13,7 +13,7 @@
+             if not a[k] in S_col:
+                 S_col.add(a[k])
+                 cnt[x[k]] += h - len(S_row)
+-    cnt[0] = h * w - sum(cnt.values())
++    cnt[0] = h * w - sum(num for color, num in cnt.items() if color != 0)
+     return {color: num for color, num in cnt.items() if num > 0}
+ 
+ 

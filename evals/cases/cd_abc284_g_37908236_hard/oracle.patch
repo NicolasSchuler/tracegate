@@ -1,0 +1,10 @@
+diff --git a/buggy.py b/buggy.py
+--- a/buggy.py
++++ b/buggy.py
+@@ -9,4 +9,5 @@
+ 
+     ans += f * (y - 1) * y // 2
+     ans %= M
+-    print(ans * N % M)
++
++print(ans * N % M)
