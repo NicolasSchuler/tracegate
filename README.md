@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="logo/bird.png" alt="TraceGate logo" width="200">
-</p>
-
 <h1 align="center">TraceGate</h1>
 
 <p align="center">Structured debug snapshots for LLM-assisted debugging.</p>
