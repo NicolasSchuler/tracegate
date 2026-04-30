@@ -755,7 +755,7 @@ class RichRunDisplay:
         table.add_column(style="bold cyan", ratio=1)
         table.add_column(style="white", ratio=3)
         for label, value in section.rows:
-            table.add_row(label, value)
+            table.add_row(Text(str(label)), Text(str(value)))
         return Panel(table, title=section.title, border_style="blue", expand=expand)
 
     def update_summary(self, summary: DisplayRunSummary) -> None:

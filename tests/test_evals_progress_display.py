@@ -926,6 +926,32 @@ def test_rich_run_display_render_startup_featured_and_remaining(
     assert "Sec3" in rendered
 
 
+@pytest.mark.skipif(not progress_display.HAS_RICH, reason="rich not installed")
+def test_rich_run_display_render_startup_treats_paths_as_plain_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = RichConsole(width=120)
+    monkeypatch.setattr(progress_display, "Console", lambda **kwargs: console)
+    monkeypatch.setattr(progress_display, "Live", _FakeLive)
+    display = progress_display.RichRunDisplay(total_units=1, verbosity="basic")
+
+    sections = [
+        progress_display.StartupSection(
+            title="Resolved Config / Selection Filters",
+            rows=(
+                (
+                    "case_list_file",
+                    "[/repo/evals/artifacts/case_list_mounts/20260430T123633/001_cases.txt]",
+                ),
+            ),
+        ),
+    ]
+    with console.capture() as capture:
+        display.render_startup(sections)
+
+    assert "001_cases.txt" in capture.get()
+
+
 # ---------------------------------------------------------------------------
 # Line 736: start_runtime called twice - second call returns early
 # ---------------------------------------------------------------------------
