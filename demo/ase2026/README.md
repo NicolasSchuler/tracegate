@@ -46,6 +46,14 @@ From the repository root:
 demo/ase2026/run_demo.sh
 ```
 
+The demo uses the Docker eval wrapper by default (`RUNNER=docker`). For
+INTERVENOR, the wrapper selects the baseline-capable image and rebuilds it when
+the image is missing or stale. To force the rebuild step on screen:
+
+```bash
+LLMDEBUG_EVAL_BUILD=1 RUN_ID=ase2026-intervenor9b-demo demo/ase2026/run_demo.sh
+```
+
 Common overrides:
 
 ```bash
@@ -55,12 +63,19 @@ RUN_ID=ase2026-intervenor9b-demo \
 demo/ase2026/run_demo.sh
 ```
 
+For local debugging without the Docker wrapper:
+
+```bash
+RUNNER=local demo/ase2026/run_demo.sh
+```
+
 The script sets `HELPER_EPSILON=0.0` and `BUDGET_EPSILON=0.0` by default after
 warm-starting, which makes the demo less dependent on exploration randomness.
 Set either variable to the paper-run values if you want exploration visible.
 
 The Rich live dashboard is enabled by default for a real terminal by unsetting
-`NO_COLOR` and setting a fallback `TERM=xterm-256color`. Disable that setup with
+`NO_COLOR`, setting a fallback `TERM=xterm-256color`, and passing
+`LLMDEBUG_EVAL_DOCKER_TTY=1` to the Docker wrapper. Disable that setup with
 `ENABLE_TUI=0` if you want plain logs:
 
 ```bash

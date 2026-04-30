@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 RUN_ID="${RUN_ID:-ase2026-intervenor9b-demo-$(date +%Y%m%dT%H%M%S)}"
+RUNNER="${RUNNER:-docker}"
 BASELINE="${BASELINE:-intervenor}"
 CONFIG="${CONFIG:-evals/configs/baseline_intervenor.template.toml}"
 CASE_LIST="${CASE_LIST:-demo/ase2026/cases.txt}"
@@ -84,9 +85,10 @@ echo "  model:  $OPENAI_MODEL"
 echo "  url:    $OPENAI_BASE_URL"
 echo "  policy: $ONLINE_INIT_STATE"
 echo "  budget: $BUDGET_INIT_STATE"
+echo "  runner: $RUNNER"
 echo "  tui:    $ENABLE_TUI"
 
-uv run python -m evals.run_eval \
+eval_args=(
   --config "$CONFIG" \
   --baseline "$BASELINE" \
   --conditions layered_adaptive_llm \
@@ -117,5 +119,23 @@ uv run python -m evals.run_eval \
   --progress-verbosity detailed \
   --progress-heartbeat-sec 15 \
   "${keep_args[@]}"
+)
+
+case "$RUNNER" in
+  docker)
+    # The Docker wrapper auto-selects the baseline-capable image for
+    # --baseline runs, rebuilds when the image is missing/stale, and translates
+    # localhost model endpoints for container networking.
+    LLMDEBUG_EVAL_DOCKER_TTY="${LLMDEBUG_EVAL_DOCKER_TTY:-$ENABLE_TUI}" \
+      bash evals/docker/run_eval_docker.sh "${eval_args[@]}"
+    ;;
+  local)
+    uv run python -m evals.run_eval "${eval_args[@]}"
+    ;;
+  *)
+    echo "Unsupported RUNNER=$RUNNER; expected docker or local." >&2
+    exit 2
+    ;;
+esac
 
 uv run python demo/ase2026/summarize_demo.py --run-id "$RUN_ID"
