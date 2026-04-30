@@ -105,6 +105,21 @@ To summarize an existing run:
 uv run python demo/ase2026/summarize_demo.py --run-id <run-id>
 ```
 
+## Inspect a Completed Run
+
+Use the inspector for the screencast artifact tour. It prints a stable overview,
+attempt timeline, selected policy decisions, artifact paths, and short previews.
+It is for demo navigation, not benchmark analysis.
+
+```bash
+demo/ase2026/inspect_run.sh ase2026-intervenor9b-demo
+demo/ase2026/inspect_run.sh ase2026-intervenor9b-demo cd_abc353_a_55035442_easy 2
+demo/ase2026/inspect_run.sh ase2026-intervenor9b-demo cd_abc357_a_55021619_easy 1
+```
+
+The first command automatically selects a useful successful attempt, preferring
+one with materialized helper evidence.
+
 ## Screencast Timing
 
 - 0:00-0:30: Show `demo/ase2026/cases.txt` and the Zenodo-backed event logs in
