@@ -379,6 +379,68 @@ _rewrite_config_paths_for_container() {
     EVAL_ARGS=("${out[@]}")
 }
 
+_rewrite_case_list_paths_for_container() {
+    local case_list_stage_id
+    case_list_stage_id="$(date +%Y%m%dT%H%M%S)-$$-$RANDOM"
+    local host_mount_dir="$REPO_ROOT/evals/artifacts/case_list_mounts/$case_list_stage_id"
+    local guest_mount_dir="/repo/evals/artifacts/case_list_mounts/$case_list_stage_id"
+    local out=()
+    local expect_value=0
+    local case_list_index=0
+    local arg
+
+    for arg in "${EVAL_ARGS[@]}"; do
+        if [[ $expect_value -eq 1 ]]; then
+            local host_path
+            host_path="$(_expand_config_path "$arg")"
+            if [[ ! -f "$host_path" ]]; then
+                echo ">>> ERROR: Case-list file not found: $arg" >&2
+                exit 2
+            fi
+            mkdir -p "$host_mount_dir"
+            _register_cleanup_path "$host_mount_dir"
+            case_list_index=$((case_list_index + 1))
+            local staged_name
+            staged_name="$(printf "%03d_%s" "$case_list_index" "$(basename "$host_path")")"
+            cp "$host_path" "$host_mount_dir/$staged_name"
+            out+=(--case-list-file "$guest_mount_dir/$staged_name")
+            expect_value=0
+            continue
+        fi
+
+        if [[ "$arg" == "--case-list-file" ]]; then
+            expect_value=1
+            continue
+        fi
+        if [[ "$arg" == --case-list-file=* ]]; then
+            local raw_path="${arg#--case-list-file=}"
+            local host_path
+            host_path="$(_expand_config_path "$raw_path")"
+            if [[ ! -f "$host_path" ]]; then
+                echo ">>> ERROR: Case-list file not found: $raw_path" >&2
+                exit 2
+            fi
+            mkdir -p "$host_mount_dir"
+            _register_cleanup_path "$host_mount_dir"
+            case_list_index=$((case_list_index + 1))
+            local staged_name
+            staged_name="$(printf "%03d_%s" "$case_list_index" "$(basename "$host_path")")"
+            cp "$host_path" "$host_mount_dir/$staged_name"
+            out+=("--case-list-file=$guest_mount_dir/$staged_name")
+            continue
+        fi
+
+        out+=("$arg")
+    done
+
+    if [[ $expect_value -eq 1 ]]; then
+        echo ">>> ERROR: --case-list-file requires a path value" >&2
+        exit 2
+    fi
+
+    EVAL_ARGS=("${out[@]}")
+}
+
 _collect_raw_config_paths() {
     local out=()
     local expect_value=0
@@ -653,6 +715,7 @@ fi
 
 # Stage and rewrite --config file paths so they are readable inside the container.
 _rewrite_config_paths_for_container
+_rewrite_case_list_paths_for_container
 
 # OpenAI defaults are resolved into CLI args so values are deterministic and
 # localhost URL translation can safely rewrite the effective value.
@@ -755,8 +818,10 @@ if [[ -n "${OPENAI_BASE_URL_EFFECTIVE:-}" ]] \
     fi
 fi
 
-# Force local executor (the whole point of this container)
-EVAL_ARGS+=(--executor local)
+# Force local executor (the whole point of this container). Pass the selected
+# wrapper image into eval metadata too, so local-executor runs do not emit the
+# unrelated implicit testcontainers image warning.
+EVAL_ARGS+=(--executor local --container-image "$IMAGE")
 
 # ---------------------------------------------------------------------------
 # Ensure output directories exist on host (docker mount creates them as root otherwise)

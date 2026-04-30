@@ -242,6 +242,7 @@ def test_run_eval_docker_forwards_openai_autoswitch_flags_and_forces_local_execu
     assert "--container-network" not in eval_args
     assert "testcontainers" not in eval_args
     assert _arg_value(eval_args, "--executor") == "local"
+    assert _arg_value(eval_args, "--container-image") == "llmdebug-eval:latest"
 
 
 def test_run_eval_docker_forwards_no_openai_http2_flag(tmp_path: Path) -> None:
@@ -440,7 +441,10 @@ def test_run_eval_docker_forwards_case_list_and_transport_retry_flags(tmp_path: 
 
     assert proc.returncode == 0, proc.stderr
     _, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
-    assert _arg_value(eval_args, "--case-list-file") == str(case_list_path)
+    rewritten_case_list = _arg_value(eval_args, "--case-list-file")
+    assert rewritten_case_list is not None
+    assert rewritten_case_list.startswith("/repo/evals/artifacts/case_list_mounts/")
+    assert rewritten_case_list.endswith("/001_failed_cases.txt")
     assert _arg_value(eval_args, "--openai-transport-max-retries") == "9"
     assert _arg_value(eval_args, "--openai-transport-retry-backoff-base-sec") == "1.5"
     assert _arg_value(eval_args, "--openai-transport-retry-backoff-max-sec") == "12.0"
