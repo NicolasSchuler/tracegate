@@ -1,0 +1,15 @@
+# ASE 2026 screencast residual-repair micro-run.
+#
+# These 10 cases are INTERVENOR/Qwen-9B residual failures in
+# analysis/data/final-intervenor-9b.failed.txt and were useful policy-behavior
+# examples in analysis/data/final-intervenor-adaptive-repair-9b.jsonl.
+cd_abc353_a_55035442_easy
+cd_abc247_b_46174870_easy
+cd_abc357_a_55021619_easy
+cd_abc322_a_46216252_easy
+cd_arc173_a_54010856_medium
+cd_arc171_a_55000897_medium
+cd_abc357_a_55033452_easy
+cd_abc226_c_45527659_medium
+cd_abc289_b_44836694_easy
+cd_abc230_a_45743291_easy
