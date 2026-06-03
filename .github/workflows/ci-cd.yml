@@ -37,10 +37,10 @@ jobs:
       PYTHON_VERSION: ${{ matrix.python-version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # uv manages virtualenvs, dependency resolution, and Python installs.
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -76,7 +76,7 @@ jobs:
 
     steps:
       # fetch-depth: 0 is required for diff-coverage to compare against origin/main.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
