@@ -42,7 +42,7 @@ evals = [
     "polars>=1.12.0",     # Eval/report analytics
     "scikit-learn>=1.4.0",# Eval/report metrics
     "scipy>=1.13",        # Eval/report stats
-    "docker>=6.0.0",      # Docker SDK for SWE-bench Pro container-based scoring
+    "docker>=7.1.0",      # Docker SDK for SWE-bench Pro container-based scoring
     "swebench==4.1.0",    # Pin official evaluator CLI for reproducible publication scoring
     "testcontainers>=4.13.2",
     "tiktoken>=0.9.0",    # Optional exact token telemetry for eval/report diagnostics
