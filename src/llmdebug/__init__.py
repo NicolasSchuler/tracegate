@@ -15,8 +15,16 @@ if TYPE_CHECKING:
     from .middleware import LLMDebugASGIMiddleware as LLMDebugASGIMiddleware
     from .middleware import LLMDebugWSGIMiddleware as LLMDebugWSGIMiddleware
 
+from ._version import __version__ as __version__
 from .capture import capture_exception
-from .config import DetailLevel, GitDirtyMode, LocalsMode, OutputFormat, SnapshotConfig, SourceMode
+from .config import (
+    DetailLevel,
+    GitDirtyMode,
+    LocalsMode,
+    OutputFormat,
+    SnapshotConfig,
+    SourceMode,
+)
 from .detail_filter import filter_snapshot
 from .hooks import PII_PATTERNS, install_hooks, uninstall_hooks
 from .log_capture import install_log_handler as enable_log_capture
@@ -27,7 +35,6 @@ from .redaction_policy import (
     resolve_redaction_policy,
 )
 
-__version__ = "3.1.0"
 _unredacted_default_warning_emitted = False
 _UNREDACTED_DEFAULT_WARNING = (
     "llmdebug: no redaction settings were provided for snapshot capture. "
@@ -39,7 +46,9 @@ _LEGACY_CAPTURE_KWARGS_DEPRECATION = (
     "Pass config=SnapshotConfig(...) instead."
 )
 _legacy_capture_kwargs_warning_emitted: set[str] = set()
-_SNAPSHOT_CONFIG_FIELD_NAMES = frozenset(field.name for field in fields(SnapshotConfig))
+_SNAPSHOT_CONFIG_FIELD_NAMES = frozenset(
+    field.name for field in fields(SnapshotConfig) if field.init and not field.name.startswith("_")
+)
 __all__ = [
     "PII_PATTERNS",
     "DetailLevel",
@@ -116,13 +125,22 @@ def _resolve_snapshot_config(
     if config is not None:
         if not isinstance(config, SnapshotConfig):
             raise TypeError(f"{api}() config must be a SnapshotConfig instance")
-        _maybe_warn_about_unredacted_defaults(
-            redaction_profile=config.redaction_profile,
-            redact=config.redact,
-            redact_keys=config.redact_keys,
-            redact_traceback=config.redact_traceback,
-            redact_exception_strings=config.redact_exception_strings,
-        )
+        if config.has_explicit_redaction_settings:
+            _maybe_warn_about_unredacted_defaults(
+                redaction_profile=config.redaction_profile,
+                redact=config.redact,
+                redact_keys=config.redact_keys,
+                redact_traceback=config.redact_traceback,
+                redact_exception_strings=config.redact_exception_strings,
+            )
+        else:
+            _maybe_warn_about_unredacted_defaults(
+                redaction_profile=None,
+                redact=None,
+                redact_keys=None,
+                redact_traceback=None,
+                redact_exception_strings=None,
+            )
         return config
 
     unknown_keys = sorted(set(legacy_kwargs) - _SNAPSHOT_CONFIG_FIELD_NAMES)

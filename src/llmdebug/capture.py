@@ -19,7 +19,7 @@ from ._debug_session import (
     build_debug_session,
     split_extra_context,
 )
-from .config import SnapshotConfig
+from .config import SnapshotConfig, resolve_snapshot_config
 from .output import write_bundle
 from .serialize import (
     compile_redactors,
@@ -48,9 +48,11 @@ def _serialize_config(cfg: SnapshotConfig) -> dict[str, Any]:
     """Build a JSON-serialisable dict representation of the active capture config."""
     import dataclasses
 
-    result = dataclasses.asdict(cfg)
+    result = {
+        key: value for key, value in dataclasses.asdict(cfg).items() if not key.startswith("_")
+    }
     # Pattern objects aren't JSON-serializable — convert to pattern strings
-    result["redact"] = [p if isinstance(p, str) else p.pattern for p in cfg.redact]
+    result["redact"] = [p if isinstance(p, str) else p.pattern for p in (cfg.redact or ())]
     # Convert tuple to list for JSON
     if cfg.include_modules:
         result["include_modules"] = list(cfg.include_modules)
@@ -413,7 +415,7 @@ def collect_frames(
     effective_redactors = (
         redactors
         if redactors is not None
-        else (compile_redactors(cfg.redact) if cfg.locals_mode == "safe" else [])
+        else (compile_redactors(cfg.redact or ()) if cfg.locals_mode == "safe" else [])
     )
     paired = _extract_tb_pairs(tb, cfg)
     total = len(paired)
@@ -463,7 +465,7 @@ def _redact_context(
     if not context_payload or not redactors:
         return context_payload
     try:
-        cleaned = redact_jsonlike(context_payload, redactors, redact_keys=cfg.redact_keys)
+        cleaned = redact_jsonlike(context_payload, redactors, redact_keys=bool(cfg.redact_keys))
         if isinstance(cleaned, dict):
             return cleaned
         _warn(warnings, "context redaction returned non-dict payload; preserving original context")
@@ -524,8 +526,9 @@ def capture_exception(
             envelope.  Keys ``"_trace"`` and ``"_eval"`` are reserved and
             split into their own top-level payloads.
     """
+    cfg = resolve_snapshot_config(cfg)
     warnings: list[str] = []
-    redactors = compile_redactors(cfg.redact)
+    redactors = compile_redactors(cfg.redact or ())
     frames = (
         collect_frames(tb, cfg, warnings=warnings, redactors=redactors) if tb is not None else []
     )
@@ -540,7 +543,7 @@ def capture_exception(
             cfg,
             warnings=warnings,
             redactors=redactors,
-            redact_strings=cfg.redact_exception_strings,
+            redact_strings=bool(cfg.redact_exception_strings),
             max_depth=cfg.max_exception_depth,
         ),
         "traceback": traceback_text,
@@ -553,7 +556,7 @@ def capture_exception(
     context_payload, trace_payload, eval_payload = _collect_context(cfg, warnings, redactors, extra)
 
     try:
-        from . import __version__ as llmdebug_version
+        from ._version import __version__ as llmdebug_version
     except Exception as e:
         llmdebug_version = "unknown"
         _warn(warnings, f"version detection failed: {type(e).__name__}: {e}")

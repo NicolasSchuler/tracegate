@@ -5,18 +5,21 @@ from __future__ import annotations
 import builtins
 import importlib
 import warnings
+from dataclasses import replace
+from importlib.metadata import version
 from typing import Any
 
 import pytest
 
 import llmdebug
-from llmdebug.config import SnapshotConfig
+from llmdebug.config import SnapshotConfig, resolve_snapshot_config
 from llmdebug.output import get_latest_snapshot
 
 
 def test_init_module_reload_executes_top_level_exports() -> None:
     reloaded = importlib.reload(llmdebug)
     assert reloaded.__version__
+    assert reloaded.__version__ == version("llmdebug")
     assert "debug_snapshot" in reloaded.__all__
     assert "load_jupyter" in reloaded.__all__
 
@@ -148,6 +151,125 @@ def test_debug_snapshot_accepts_snapshot_config_without_deprecation(
     snapshot = get_latest_snapshot(str(tmp_path))
     assert snapshot is not None
     assert snapshot["name"] == "_boom"
+
+
+def test_snapshot_config_without_redaction_settings_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llmdebug, "_unredacted_default_warning_emitted", False)
+
+    with pytest.warns(UserWarning, match="no redaction settings were provided"):
+
+        @llmdebug.debug_snapshot(config=SnapshotConfig())
+        def _noop() -> None:
+            pass
+
+
+def test_snapshot_config_public_redaction_attributes_are_concrete() -> None:
+    cfg = SnapshotConfig()
+
+    assert cfg.redact == ()
+    assert tuple(cfg.redact) == ()
+    assert cfg.redact_keys is False
+    assert cfg.redact_traceback is False
+    assert cfg.redact_exception_strings is False
+    assert cfg.has_explicit_redaction_settings is False
+    assert SnapshotConfig(redact=()).has_explicit_redaction_settings is True
+
+
+def test_snapshot_config_replace_preserves_unrelated_inheritance() -> None:
+    inherited_prod = SnapshotConfig(redaction_profile="prod")
+    moved = replace(inherited_prod, out_dir="other-snapshots")
+
+    assert moved.redact
+    assert moved.redact_traceback is True
+    assert moved.redact_exception_strings is True
+
+
+def test_snapshot_config_profile_replace_requires_intent_aware_update() -> None:
+    with pytest.raises(ValueError, match=r"SnapshotConfig\.with_updates"):
+        replace(SnapshotConfig(), redaction_profile="prod")
+
+    promoted = SnapshotConfig().with_updates(redaction_profile="prod")
+    keep_strict_traceback = SnapshotConfig(redaction_profile="prod").with_updates(
+        redaction_profile="ci",
+        redact_traceback=True,
+    )
+    explicit_prod_override = SnapshotConfig(redaction_profile="ci").with_updates(
+        redaction_profile="prod",
+        redact_traceback=False,
+    )
+
+    assert promoted.redact
+    assert promoted.redact_traceback is True
+    assert keep_strict_traceback.redact_traceback is True
+    assert explicit_prod_override.redact_traceback is False
+
+
+def test_snapshot_config_replace_preserves_explicit_overrides() -> None:
+    explicit = SnapshotConfig(
+        redaction_profile="prod",
+        redact=(),
+        redact_traceback=False,
+        redact_exception_strings=False,
+    )
+    moved = replace(explicit, out_dir="other-snapshots")
+    overridden_after_construction = replace(SnapshotConfig(redaction_profile="prod"), redact=())
+
+    assert moved.redact == ()
+    assert moved.redact_traceback is False
+    assert moved.redact_exception_strings is False
+    assert overridden_after_construction.redact == ()
+
+
+def test_snapshot_config_with_updates_rejects_unknown_fields() -> None:
+    with pytest.raises(TypeError, match="unknown fields: 'redact_tracback'"):
+        SnapshotConfig().with_updates(redact_tracback=True)
+
+
+def test_snapshot_config_redaction_profile_is_applied_to_capture(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(llmdebug, "_unredacted_default_warning_emitted", False)
+    cfg = SnapshotConfig(
+        out_dir=str(tmp_path),
+        redaction_profile="prod",
+        include_git=False,
+        include_env=False,
+        include_async_context=False,
+    )
+
+    @llmdebug.debug_snapshot(config=cfg)
+    def _boom() -> None:
+        raise ValueError("password=secret123")
+
+    with pytest.raises(ValueError, match="password=secret123"):
+        _boom()
+
+    snapshot = get_latest_snapshot(str(tmp_path))
+    assert snapshot is not None
+    assert "password=secret123" not in snapshot["exception"]["message"]
+    assert "[REDACTED]" in snapshot["exception"]["message"]
+    assert "password=secret123" not in snapshot["traceback"]
+    assert snapshot["capture_config"]["redaction_profile"] == "prod"
+    assert snapshot["capture_config"]["redact_traceback"] is True
+    assert snapshot["capture_config"]["redact_exception_strings"] is True
+    assert not any(key.startswith("_") for key in snapshot["capture_config"])
+
+
+def test_snapshot_config_explicit_redaction_overrides_profile() -> None:
+    resolved = resolve_snapshot_config(
+        SnapshotConfig(
+            redaction_profile="prod",
+            redact=(),
+            redact_traceback=False,
+            redact_exception_strings=False,
+        )
+    )
+
+    assert resolved.redact == ()
+    assert resolved.redact_traceback is False
+    assert resolved.redact_exception_strings is False
 
 
 def test_snapshot_section_accepts_snapshot_config_without_deprecation(

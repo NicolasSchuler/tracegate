@@ -66,11 +66,17 @@ GitHub Actions runs both in the single-version 3.13 quality job: the blocking
 ### Full suite
 
 ```bash
-just quality  # mirrors GitHub CI: deps, audit, docs-check, complexity, security
-just ci       # alias for the single-version local CI contract
+just quality  # blocking local quality contract
+just ci       # exact alias for just quality
 just baseline-boundary-coverage  # focused 4-module seam coverage gate for baseline patching
 just lint-evals  # blocking eval-harness lint/format check used by just quality
 ```
+
+The shared GitHub action runs `just quality`, adds `just diff-coverage` on pull
+requests, and runs `just test-evals-cov` followed by
+`just eval-coverage-no-regression` as an informational step. The workflow then
+runs the blocking integration lane and the separate informational
+baseline-runtime and eval-typing lanes.
 
 `just audit` runs `pip-audit` with a narrow temporary ignore for
 `GHSA-5239-wwwm-4pmq` / `CVE-2026-4539` because PyPI/OSV do not yet publish a
@@ -98,7 +104,8 @@ If you touch eval tooling or case metadata, also run:
 ```bash
 uv run python -m evals.validate_cases --schema-only
 just typecheck-evals
-just test-evals-cov              # evals/ coverage with baseline regression check
+just test-evals-cov              # generate evals/ coverage measurement
+just eval-coverage-no-regression # compare with the informational ratchet
 just test-combined-cov           # src + evals combined coverage report
 ```
 
@@ -113,9 +120,9 @@ that encapsulates `just quality` for CI, so quality gate changes need only one e
 These checks are part of the normal review contract, not optional extras:
 
 - **Line coverage floor**: `--cov-fail-under=95` (src/llmdebug)
-- **Branch coverage no-regression** against `quality/coverage_baseline.json`
+- **Line and branch coverage no-regression** against `quality/coverage_baseline.json`
 - **Eval harness lint/format** via `just lint-evals`
-- **Evals coverage no-regression** against `quality/coverage_evals_baseline.json` (96.9% line / 93.7% branch)
+- **Evals coverage no-regression** against `quality/coverage_evals_baseline.json` (98.2% line / 95.7% branch)
 - **Public type-completeness no-regression** against `quality/type_coverage_baseline.json`
 - **Baseline patch seam coverage** via `just baseline-boundary-coverage`
 - **Diff coverage floor**: `diff-cover --fail-under=80` on changed lines
@@ -133,30 +140,35 @@ The staged eval typing pass is tracked separately:
 
 Evals coverage is also tracked separately:
 
-- `just test-evals-cov` runs evals tests with coverage and baseline regression check
+- `just test-evals-cov` runs evals tests and writes `coverage-evals.json`
+- `just eval-coverage-no-regression` compares that report with the committed ratchet
 - `just test-combined-cov` reports combined src + evals coverage
-- Baseline is `quality/coverage_evals_baseline.json` (96.9% line / 93.7% branch)
+- Baseline is `quality/coverage_evals_baseline.json` (98.2% line / 95.7% branch)
 - The evals coverage gate is informational in CI (`continue-on-error: true`); promotion to blocking is planned once the eval harness type adoption reaches basic-mode clean (tracked via `just typecheck-evals`)
 
-To intentionally ratchet the branch coverage baseline after improvements:
+To intentionally ratchet the package line and branch coverage baseline after
+improvements:
 
 ```bash
 uv run pytest --cov=src/llmdebug --cov-branch --cov-report=json --cov-report=xml --cov-fail-under=95
 ```
 
-Then update `quality/coverage_baseline.json` with the new `branch_percent` value and the current UTC timestamp in `updated_at_utc`:
+Then update `quality/coverage_baseline.json` with both percentages from
+`coverage.json` totals and the current UTC timestamp in `updated_at_utc`:
 
 ```json
 {
-  "line_percent": 76.61,
-  "branch_percent": 72.40,
+  "line_percent": 99.2,
+  "branch_percent": 98.2,
   "source": "main",
-  "updated_at_utc": "2026-03-09T12:00:00Z"
+  "updated_at_utc": "2026-03-26T12:50:58Z"
 }
 ```
 
-To ratchet the evals coverage baseline, run `just test-evals-cov` and update
-`quality/coverage_evals_baseline.json` similarly.
+To assess or ratchet eval coverage, run `just test-evals-cov` followed by
+`just eval-coverage-no-regression`; only update
+`quality/coverage_evals_baseline.json` after an intentional, evidence-backed
+ratchet decision.
 
 ## Benchmarking
 

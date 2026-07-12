@@ -46,19 +46,70 @@ pip install llmdebug           # Core library + pytest plugin only
 pip install 'llmdebug[mcp]'    # MCP server for IDE integration
 ```
 
-Other extras: `jupyter`, `toon`, `evals` — see [Configuration Reference](docs/configuration.md#installation-extras).
+Other extras: `jupyter`, `toon`, `analysis`, `evals` — see [Configuration Reference](docs/configuration.md#installation-extras).
+
+## Quick Start
+
+Create and inspect a real example snapshot without pytest, Docker, a model, or
+research data:
+
+```bash
+llmdebug quickstart
+```
+
+The command writes one synthetic failure to `.llmdebug/`, displays the normal
+crash summary, and prints the exact `show` and `list` commands to run next. Use
+`llmdebug quickstart --dir <path>` to keep the example in another directory.
+
+### Pytest (automatic)
+
+Failing tests automatically create `.llmdebug/latest.json`:
+
+```bash
+pytest                                  # Failures create .llmdebug/latest.json
+llmdebug                                # View crash summary
+llmdebug show --detail context          # Full context (git, env, repro command)
+llmdebug diff                           # Compare latest vs previous
+```
+
+### Decorator
+
+```python
+from llmdebug import SnapshotConfig, debug_snapshot
+
+cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="ci")
+
+@debug_snapshot(config=cfg)
+def main():
+    data = load_data()
+    process(data)
+```
+
+### Context Manager
+
+```python
+from llmdebug import SnapshotConfig, snapshot_section
+
+cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="prod")
+
+with snapshot_section("data_processing", config=cfg):
+    result = transform(data)
+```
+
+More entry points (production hooks, web middleware, Jupyter) in the [Configuration Reference](docs/configuration.md#capture-entry-points).
 
 ## Start Here
 
-- **Use the package**: start with the quick start below, then the [Configuration Reference](docs/configuration.md), [CLI Reference](docs/cli-reference.md), and [MCP Reference](docs/mcp-reference.md).
+- **Use the package**: start with the quick start above, then the [Configuration Reference](docs/configuration.md), [CLI Reference](docs/cli-reference.md), and [MCP Reference](docs/mcp-reference.md).
 - **Contribute to the package**: read [Contributing](CONTRIBUTING.md), [Testing Guide](docs/testing-guide.md), and [Quality Map](docs/quality-map.md).
 - **Run evals locally or in Docker**: start with the [Eval Quickstart](docs/eval_quickstart.md), then [Eval Framework](evals/README.md), [Eval Configs](evals/configs/README.md), and the [Local/Docker Eval Runbook](docs/local_docker_eval_runbook.md).
 - **Find any command fast**: [Master Runbook](docs/runbook.md) — setup, quality, debug CLI, eval ops, analysis, and maintenance all in one place.
 - **Browse canonical docs first**: [Docs Index](docs/README.md) separates active product docs from dated research notes and analyses.
 
-## Reproduce
+## Research-Evaluation Reproduction
 
-The eval workflow assumes Docker, `uv`, and a local OpenAI-compatible model
+This heavier workflow reproduces the research evaluation; it is not required to
+use the package. It assumes Docker, `uv`, and a local OpenAI-compatible model
 endpoint.
 
 ```bash
@@ -147,51 +198,12 @@ bash evals/docker/run_eval_docker.sh \
   --openai-model "$MODEL"
 ```
 
-## Quick Start
-
-### Pytest (automatic)
-
-Failing tests automatically create `.llmdebug/latest.json`:
-
-```bash
-pytest                                  # Failures create .llmdebug/latest.json
-llmdebug                                # View crash summary
-llmdebug show --detail context          # Full context (git, env, repro command)
-llmdebug diff                           # Compare latest vs previous
-```
-
-### Decorator
-
-```python
-from llmdebug import SnapshotConfig, debug_snapshot
-
-cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="ci")
-
-@debug_snapshot(config=cfg)
-def main():
-    data = load_data()
-    process(data)
-```
-
-### Context Manager
-
-```python
-from llmdebug import SnapshotConfig, snapshot_section
-
-cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="prod")
-
-with snapshot_section("data_processing", config=cfg):
-    result = transform(data)
-```
-
-More entry points (production hooks, web middleware, Jupyter) in the [Configuration Reference](docs/configuration.md#capture-entry-points).
-
 ## Features
 
 - **Automatic capture** — pytest plugin, decorator, context manager, production hooks, web middleware
 - **Rich snapshots** — exception chain, prioritized frames, typed locals (array shapes, dtypes), source context
 - **Layered detail** — `crash` (~2K tokens) → `full` (~5K) → `context` (~10K) disclosure levels
-- **CLI inspection** — `show`, `list`, `frames`, `diff`, `git-context`, `clean`
+- **CLI inspection** — `quickstart`, `show`, `list`, `frames`, `diff`, `git-context`, `clean`
 - **Shareable exports** — `llmdebug export` generates single-file artifacts or redacted bundle reports for CI/team sharing
 - **MCP server** — 9 tools for Claude Code, Cursor, and other MCP-capable editors
 - **Hypothesis engine** — auto-generated ranked debugging hypotheses from snapshot patterns
@@ -202,6 +214,7 @@ More entry points (production hooks, web middleware, Jupyter) in the [Configurat
 ## CLI
 
 ```bash
+llmdebug quickstart                     # Create and inspect an offline example
 llmdebug                                # Latest snapshot (crash detail)
 llmdebug show --detail full             # All frames
 llmdebug show --detail context          # Everything (git, env, repro)

@@ -2089,19 +2089,20 @@ wheels = [
 
 [[package]]
 name = "llmdebug"
-version = "3.1.0"
+version = "3.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "filelock" },
     { name = "orjson" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "polars" },
-    { name = "seaborn" },
     { name = "xxhash" },
 ]
 
 [package.optional-dependencies]
+analysis = [
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "seaborn" },
+]
 cli = [
     { name = "click" },
     { name = "rich" },
@@ -2232,9 +2233,8 @@ requires-dist = [
     { name = "nbformat", marker = "extra == 'dev'", specifier = ">=5.10" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.20" },
     { name = "orjson", specifier = ">=3.10.0" },
-    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.3.3" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.9.0" },
-    { name = "polars", specifier = ">=1.38.1" },
     { name = "polars", marker = "extra == 'dev'", specifier = ">=1.12.0" },
     { name = "polars", marker = "extra == 'evals'", specifier = ">=1.12.0" },
     { name = "pydantic", marker = "extra == 'evals'", specifier = ">=2.0" },
@@ -2251,7 +2251,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.4.0" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "scipy", marker = "extra == 'evals'", specifier = ">=1.13" },
-    { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "seaborn", marker = "extra == 'analysis'", specifier = ">=0.13.2" },
     { name = "swebench", marker = "extra == 'evals'", specifier = "==4.1.0" },
     { name = "testcontainers", marker = "extra == 'evals'", specifier = ">=4.13.2" },
     { name = "tiktoken", marker = "extra == 'dev'", specifier = ">=0.9.0" },
@@ -2262,7 +2262,7 @@ requires-dist = [
     { name = "xenon", marker = "extra == 'dev'", specifier = ">=0.9.3" },
     { name = "xxhash", specifier = ">=3.6.0" },
 ]
-provides-extras = ["cli", "mcp", "toon", "jupyter", "evals", "dev"]
+provides-extras = ["cli", "mcp", "toon", "jupyter", "analysis", "evals", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

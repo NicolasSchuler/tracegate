@@ -11,7 +11,7 @@ quality gates.
 | `score_swebench_lite_official.sh` | Run official SWE-Bench Lite scoring on generated predictions | Docker machine |
 | `score_swebench_pro_official.sh` | Run Docker-based SWE-Bench Pro scoring on generated predictions | Docker machine |
 | `smoke_swebench_lite_official.sh` | Quick smoke-test for official scoring on a small paired subset | Docker machine |
-| `quality/check_coverage_no_regression.py` | Fail CI when branch coverage regresses below the configured baseline | Local / CI |
+| `quality/check_coverage_no_regression.py` | Fail CI when line or branch coverage regresses below the configured baseline | Local / CI |
 | `quality/check_type_coverage.py` | Report and optionally gate public type-completeness vs the committed baseline | Local / CI |
 | `quality/check_boundary_module_coverage.py` | Enforce focused per-module coverage thresholds for the baseline patch seam | Local / CI |
 | `quality/check_bench_regression.py` | Compare capture-overhead benchmark medians against a local baseline | Local |
@@ -80,8 +80,9 @@ check before committing to the full evaluation.
 
 ### quality/check_coverage_no_regression.py
 
-Compares current branch coverage against `quality/coverage_baseline.json` and
-exits non-zero if it regressed beyond a configurable tolerance.
+Compares current line and branch coverage against
+`quality/coverage_baseline.json` and exits non-zero if either metric regressed
+beyond a configurable tolerance.
 
 ```bash
 python scripts/quality/check_coverage_no_regression.py \

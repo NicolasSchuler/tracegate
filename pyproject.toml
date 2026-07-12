@@ -1,6 +1,6 @@
 [project]
 name = "llmdebug"
-version = "3.1.0"
+version = "3.2.0"
 description = "TraceGate: structured debug snapshots for LLM-assisted debugging"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,9 +23,6 @@ classifiers = [
 dependencies = [
     "filelock>=3.0",
     "orjson>=3.10.0",
-    "pandas>=2.3.3",
-    "polars>=1.38.1",
-    "seaborn>=0.13.2",
     "xxhash>=3.6.0",
 ]
 
@@ -34,6 +31,10 @@ cli = ["click>=8.0", "rich>=13.0"]
 mcp = ["mcp>=1.0"]
 toon = ["toons>=0.1"]
 jupyter = ["ipython>=8.0"]
+analysis = [
+    "pandas>=2.3.3",
+    "seaborn>=0.13.2",
+]
 evals = [
     "datasets>=2.0",      # HuggingFace datasets for importers
     "httpx[http2]>=0.27.0",
@@ -262,6 +263,8 @@ DEP002 = [
     "testcontainers",
     "tiktoken",
     "polars",
+    "pandas",
+    "seaborn",
     "scikit-learn",
     "scipy",
 ]

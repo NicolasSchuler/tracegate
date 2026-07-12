@@ -441,7 +441,7 @@ def install_hooks(
         )
 
         # Validate redaction patterns at install time (fail fast)
-        for pattern in cfg.redact:
+        for pattern in cfg.redact or ():
             if isinstance(pattern, str):
                 try:
                     re.compile(pattern)

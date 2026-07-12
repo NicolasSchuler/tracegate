@@ -107,9 +107,9 @@ def test_collect_frames_warns_when_locals_count_fails(monkeypatch):
 
 def test_capture_exception_emits_debug_warnings(tmp_path, monkeypatch, capsys):
     """Debug mode should emit capture warnings to stderr."""
-    import llmdebug as llmdebug_package
+    import llmdebug._version as version_module
 
-    monkeypatch.delattr(llmdebug_package, "__version__", raising=False)
+    monkeypatch.delattr(version_module, "__version__", raising=False)
 
     def _meta_failure():
         raise RuntimeError("meta failure")

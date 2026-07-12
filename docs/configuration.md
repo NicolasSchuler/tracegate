@@ -11,6 +11,7 @@ pip install 'llmdebug[cli]'       # + Click-based CLI (recommended)
 pip install 'llmdebug[mcp]'       # + MCP server for IDE integration
 pip install 'llmdebug[jupyter]'   # + Jupyter/IPython integration
 pip install 'llmdebug[toon]'      # + TOON output format
+pip install 'llmdebug[analysis]'  # + pandas/seaborn notebook analysis
 pip install 'llmdebug[evals]'     # + Eval harness dependencies
 ```
 
@@ -176,10 +177,10 @@ cfg = SnapshotConfig(
 
     # -- Redaction and privacy --
     redaction_profile="dev",        # Optional: "dev" | "ci" | "prod"
-    redact=[r"api_key=.*"],         # Regex patterns to redact
-    redact_keys=False,              # Keep dict keys stable by default
-    redact_traceback=False,         # Redact traceback text
-    redact_exception_strings=False, # Redact exception message/args/notes
+    # redact=(r"token=\\S+",),       # Optional explicit pattern override
+    # redact_keys=False,             # Optional explicit profile override
+    # redact_traceback=False,        # Optional explicit profile override
+    # redact_exception_strings=True, # Optional explicit profile override
 
     # -- Context enrichment --
     include_env=True,               # Include Python/platform info
@@ -212,7 +213,28 @@ def main():
 - `ci`: stronger string redaction for non-local workflows
 - `prod`: strictest defaults (includes traceback/exception-string redaction)
 
-Profiles are additive: explicit `redact`/`redact_*` options always take precedence.
+Profiles provide preset values; explicit `redact`/`redact_*` options always
+take precedence. Omit an option to inherit its profile value, use `()` to
+explicitly disable profile patterns, and use `True`/`False` to explicitly
+override a profile boolean. The resulting `SnapshotConfig` attributes are
+always concrete tuples and booleans.
+
+`SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a
+redaction profile or override so inherited-versus-explicit intent remains
+unambiguous:
+
+```python
+prod_cfg = SnapshotConfig(redaction_profile="prod")
+ci_but_strict_tracebacks = prod_cfg.with_updates(
+    redaction_profile="ci",
+    redact_traceback=True,
+)
+```
+
+`dataclasses.replace()` remains safe for unrelated fields such as `out_dir`,
+but intentionally rejects profile changes while any redaction setting is
+inherited; it cannot distinguish an omitted setting from an explicitly
+repeated resolved value.
 
 Redaction defaults to leaf string values only. This avoids accidental key collisions
 in nested dicts. Set `redact_keys=True` only if you explicitly need key-name redaction

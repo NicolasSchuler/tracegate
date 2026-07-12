@@ -14,6 +14,17 @@ from .eval_types import (
 )
 
 
+def _tep_jaccard_similarity(text_a: str, text_b: str) -> float:
+    """Return word-level Jaccard similarity for retry-plan convergence."""
+    words_a = set(text_a.lower().split())
+    words_b = set(text_b.lower().split())
+    if not words_a and not words_b:
+        return 1.0
+    if not words_a or not words_b:
+        return 0.0
+    return len(words_a & words_b) / len(words_a | words_b)
+
+
 @dataclass(frozen=True)
 class StageBPromptInputs:
     """Inputs needed to assemble a Stage-B repair prompt.
@@ -276,8 +287,6 @@ def maybe_run_retry_plan_then_patch(
     tep_eq_iterations = 1
     tep_eq_converged = False
     if retry_plan_succeeded and tep_equilibrium_check and tep_equilibrium_max_iterations > 1:
-        from evals.eval_attempt_flow import _tep_jaccard_similarity
-
         for _eq_round in range(tep_equilibrium_max_iterations - 1):
             prev_plan = retry_plan_text
             new_raw, _, _ = run_plan_patch(planning_prompt_result.prompt)

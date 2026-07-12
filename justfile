@@ -46,9 +46,13 @@ test-integration:
 test-baseline-runtime:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} pytest -m "integration and baseline_runtime" -v
 
-# Run tests with evals/ coverage measurement
+# Run tests with evals/ coverage and write coverage-evals.json
 test-evals-cov:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} pytest -m "not integration" --cov=evals --cov-branch --cov-report=term-missing --cov-report=json:coverage-evals.json --ignore=evals/cases --ignore=evals/artifacts --ignore=evals/results
+
+# Compare an existing eval coverage report with the committed informational ratchet
+eval-coverage-no-regression:
+    uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} python scripts/quality/check_coverage_no_regression.py --coverage-json coverage-evals.json --baseline-json quality/coverage_evals_baseline.json
 
 # Run tests with combined src+evals coverage
 test-combined-cov:
@@ -156,7 +160,7 @@ diff-coverage:
     git fetch origin main --depth=1
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} diff-cover coverage.xml --compare-branch=origin/main --fail-under=80
 
-# Coverage no-regression gate (branch coverage only)
+# Coverage no-regression gate (line and branch coverage)
 coverage-no-regression:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} python scripts/quality/check_coverage_no_regression.py --coverage-json coverage.json --baseline-json quality/coverage_baseline.json
 

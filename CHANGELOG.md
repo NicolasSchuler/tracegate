@@ -1,6 +1,24 @@
 # CHANGELOG
 
-## Unreleased
+## Unreleased (3.2.0)
+
+### Features
+
+- Add an offline `llmdebug quickstart` command that creates and displays a real synthetic snapshot.
+
+### Bug Fixes
+
+- Apply `SnapshotConfig` redaction-profile defaults on the config-first capture path, preserve explicit overrides, and provide intent-aware frozen-config updates.
+- Compare both line and branch coverage in no-regression quality checks.
+
+### Refactoring
+
+- Remove a Stage-B reverse dependency and consolidate legacy eval metadata plumbing behind typed request objects.
+- Move notebook/eval analytics libraries out of the core install and behind explicit extras.
+
+### Documentation
+
+- Align architecture, coverage, testing, and first-run guidance with the executable repository contracts.
 
 ## v3.1.0 (2026-04-07)
 

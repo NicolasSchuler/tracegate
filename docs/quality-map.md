@@ -11,12 +11,22 @@ when deciding which commands to run before a PR.
 | `just check` | `src/llmdebug` + default tests | Yes | Fastest full pre-PR pass |
 | `just quality` | Repo-wide quality contract | Yes | Mirrors the shared GitHub quality gate, including eval lint |
 | `just baseline-boundary-coverage` | Baseline patch seam modules | Yes | Focused per-module coverage gate for adapter-to-harness patch flow |
-| `just test-integration` | Blocking `@pytest.mark.integration` tests excluding `baseline_runtime` | No | Heavy locally; CI runs this lane after provisioning in the 3.13 quality job |
+| `just test-integration` | Blocking `@pytest.mark.integration` tests excluding `baseline_runtime` | Yes | CI runs this lane after provisioning in the 3.13 quality job |
 | `just test-baseline-runtime` | Provisioned baseline repo/env/runtime tests | No | Informational CI lane after `setup_repos.sh` and `setup_envs.sh` |
 | `just type-coverage` | Public package type completeness | No | Informational snapshot of `pyright --verifytypes` |
 | `just type-coverage-strict` | Public package type completeness | Yes | Fails on regression vs `quality/type_coverage_baseline.json` |
 | `just lint-evals` | `evals/` Ruff lint + format check | Yes | Blocking eval-harness lint lane used by `just quality` |
 | `just typecheck-evals` | Bounded eval modules | No | Staged `pyright` pass in `basic` mode |
+| `just test-evals-cov` | `evals/` line + branch coverage | No | Writes `coverage-evals.json`; informational in CI |
+| `just eval-coverage-no-regression` | Eval coverage ratchet | No | Compares the existing report with the committed baseline; informational in CI |
+
+`just quality` directly composes `check`, `lint-evals`,
+`coverage-no-regression`, `baseline-boundary-coverage`, `deps`, `audit`,
+`docs-check`, `dead-code`, `complexity`, `complexity-gate`, `security`,
+`type-coverage-strict`, and `dependency-sync`. `just ci` is exactly an alias
+for `just quality`. Diff coverage, eval coverage, integration tests, the
+baseline-runtime lane, and eval typing are orchestrated separately in GitHub
+Actions as described below.
 
 ## Blocking contract for `src/llmdebug`
 
@@ -25,8 +35,8 @@ These checks are part of the normal shipping gate for the package:
 - `ruff check` and `ruff format --check`
 - strict `pyright` on `src/llmdebug`
 - pytest with coverage over `src/llmdebug`
-- line coverage floor `>= 85`
-- branch coverage no-regression against `quality/coverage_baseline.json`
+- line coverage floor `>= 95`
+- line and branch coverage no-regression against `quality/coverage_baseline.json`
 - public type-completeness no-regression against
   `quality/type_coverage_baseline.json`
 - focused seam coverage via `just baseline-boundary-coverage`
@@ -55,6 +65,14 @@ and staged coverage promotion remain separate.
   - `evals/report_run_metrics.py`
 - this pass uses `basic` mode and is currently surfaced in CI as
   informational (`continue-on-error: true`)
+- `just test-evals-cov` generates `coverage-evals.json`; the separate
+  `just eval-coverage-no-regression` recipe checks line and branch coverage
+  against `quality/coverage_evals_baseline.json`
+- the current eval baseline is 98.2% line / 95.7% branch; this lane is also
+  informational in CI (`continue-on-error: true`)
+- the July 12, 2026 local measurement is 97.6278% line / 90.4516% branch, so
+  the informational ratchet currently exposes existing debt rather than
+  claiming a green baseline
 
 ## Test routing
 
@@ -72,10 +90,15 @@ and staged coverage promotion remain separate.
 
 ## Updating baselines
 
-Coverage and type-completeness baselines are both committed quality assets.
+Package coverage, eval coverage, and type-completeness baselines are committed
+quality assets.
 
-- Coverage baseline: `quality/coverage_baseline.json`
+- Package coverage baseline: `quality/coverage_baseline.json`
+- Eval coverage baseline: `quality/coverage_evals_baseline.json`
 - Type-completeness baseline: `quality/type_coverage_baseline.json`
 
 When intentionally ratcheting the package quality floor, regenerate the metric,
 update the committed JSON file, and include the reason in the PR description.
+Use `just test-evals-cov` followed by `just eval-coverage-no-regression` before
+ratcheting the eval baseline, and use `check_type_coverage.py --update-baseline`
+to ratchet type completeness.

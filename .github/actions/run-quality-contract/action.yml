@@ -1,9 +1,9 @@
 # Composite action: shared quality contract used by CI.
 # Encapsulates the full uv + just bootstrap so the workflow stays DRY.
-# Runs `just quality` which includes: package/test lint, eval-harness lint,
-# typecheck, tests with coverage, coverage no-regression gate, focused
-# baseline-boundary coverage, dependency audit, security scan (bandit),
-# dead-code detection (vulture), complexity gate (xenon), and docs drift check.
+# Runs `just quality`, whose direct dependencies are `check`, `lint-evals`,
+# `coverage-no-regression`, `baseline-boundary-coverage`, `deps`, `audit`,
+# `docs-check`, `dead-code`, `complexity`, `complexity-gate`, `security`,
+# `type-coverage-strict`, and `dependency-sync`.
 name: Run Quality Contract
 description: Bootstrap uv/Python and run the shared local quality contract.
 
@@ -40,10 +40,8 @@ runs:
       shell: bash
       run: uv sync --group dev --python "${{ inputs.python-version }}"
 
-    # `just quality` = lint + lint-evals + typecheck + test (with
-    # branch-coverage ≥95%) + coverage-no-regression +
-    # baseline-boundary-coverage + deps + audit + docs-check + dead-code +
-    # complexity + complexity-gate + security + type-coverage-strict.
+    # `check` expands to lint + typecheck + tests with the 95% coverage floor.
+    # The other direct dependencies are listed in the action header above.
     - name: Run local quality contract
       shell: bash
       run: PYTHON_VERSION="${{ inputs.python-version }}" just quality
@@ -66,6 +64,4 @@ runs:
       shell: bash
       run: |
         PYTHON_VERSION="${{ inputs.python-version }}" just test-evals-cov
-        uv run python scripts/quality/check_coverage_no_regression.py \
-          --coverage-json coverage-evals.json \
-          --baseline-json quality/coverage_evals_baseline.json
+        PYTHON_VERSION="${{ inputs.python-version }}" just eval-coverage-no-regression

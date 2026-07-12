@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import time
 from pathlib import Path
 
@@ -15,6 +16,16 @@ from llmdebug.config import SnapshotConfig
 from llmdebug.output import write_bundle
 from llmdebug.rca_backend import persist_rca_record
 from llmdebug.rca_state import derive_session_id
+
+
+def test_main_help_lists_quickstart() -> None:
+    """Top-level help should expose the offline first-run command."""
+    runner = CliRunner(mix_stderr=False)
+
+    result = runner.invoke(main, ["--help"])
+
+    assert result.exit_code == 0
+    assert "quickstart" in result.output
 
 
 @pytest.fixture
@@ -275,6 +286,8 @@ class TestShow:
         result = runner.invoke(main, ["show", "--dir", str(tmp_path)])
         assert result.exit_code == 1
         assert "No snapshots found" in result.stderr
+        expected = shlex.join(("llmdebug", "quickstart", "--dir", str(tmp_path)))
+        assert f"Try: {expected}" in result.stderr
 
     def test_show_uses_latest_pointer_when_only_latest_json_exists(self, tmp_path: Path) -> None:
         payload = {
@@ -375,10 +388,13 @@ class TestList:
         assert "UTC" in result.output
 
     def test_list_empty_dir(self, tmp_path: Path) -> None:
+        empty_dir = tmp_path / "custom snapshot store"
         runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(main, ["list", "--dir", str(tmp_path)])
+        result = runner.invoke(main, ["list", "--dir", str(empty_dir)])
         assert result.exit_code == 0
         assert "No snapshots found" in result.output
+        expected = shlex.join(("llmdebug", "quickstart", "--dir", str(empty_dir)))
+        assert f"Try: {expected}" in result.output
 
     def test_list_truncates_long_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
         now = time.time()

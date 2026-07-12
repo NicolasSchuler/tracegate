@@ -278,7 +278,13 @@ from evals.native_openai_attempt_flow import (
 from evals.native_openai_attempt_flow import (
     sync_openai_response_mode_autoswitch_metadata as _sync_openai_response_mode_autoswitch_metadata,
 )
-from evals.native_stage_b_flow import StageBPromptInputs, build_stage_b_prompt_sections
+from evals.native_stage_b_flow import (
+    StageBPromptInputs,
+    build_stage_b_prompt_sections,
+)
+from evals.native_stage_b_flow import (
+    _tep_jaccard_similarity as _tep_jaccard_similarity,
+)
 from evals.patchers.base import Patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import normalize_feature_scaling_profile, scale_feature_mapping
@@ -383,17 +389,6 @@ def _reset_patch_usage_sync_metadata(patch_meta: dict[str, Any]) -> None:
     """Clear attempt-synced usage fields before merging fresh patch metadata."""
     for key in _PATCH_USAGE_SYNC_META_KEYS:
         patch_meta.pop(key, None)
-
-
-def _tep_jaccard_similarity(text_a: str, text_b: str) -> float:
-    """Word-level Jaccard similarity between two texts."""
-    words_a = set(text_a.lower().split())
-    words_b = set(text_b.lower().split())
-    if not words_a and not words_b:
-        return 1.0
-    if not words_a or not words_b:
-        return 0.0
-    return len(words_a & words_b) / len(words_a | words_b)
 
 
 def _build_full_tep_node_packets(

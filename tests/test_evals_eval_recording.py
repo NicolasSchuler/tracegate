@@ -16,6 +16,7 @@ import builtins
 import errno
 import sys
 import types
+import warnings
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -31,6 +32,7 @@ from evals.attempt_metadata import (
     StageAAttemptMetadata,
     SyntaxPreflightMetadata,
     build_attempt_metadata_request,
+    build_attempt_metadata_request_from_legacy_kwargs,
 )
 from evals.eval_recording import (
     _build_base_record,
@@ -597,6 +599,12 @@ class TestBuildRunMetadata:
 # ── _materialize_attempt_metadata ────────────────────────────────────────
 
 
+def test_run_eval_preserves_private_materializer_alias() -> None:
+    from evals import run_eval
+
+    assert run_eval._materialize_attempt_metadata is _materialize_attempt_metadata
+
+
 class TestMaterializeAttemptMetadata:
     """Lines 1222-1233 (breakdown merge) and 1237-1249 (evidence/prompt full)."""
 
@@ -784,6 +792,68 @@ class TestMaterializeAttemptMetadata:
             stage_a_request_payload={"files": ["a.py"]},  # type: ignore[arg-type]
         )
         assert meta.get("stage_a_response_xxh3_128") is not None
+
+    def test_legacy_adapter_defaults_match_typed_request(self, tmp_path: Path) -> None:
+        attempt_dir = tmp_path / "defaults"
+        attempt_dir.mkdir()
+        required: dict[str, Any] = {
+            "attempt_dir": attempt_dir,
+            "attempt": 1,
+            "max_attempts": 2,
+            "evidence": {},
+            "prompt": "repair",
+            "record_prompt": "none",
+            "record_evidence": "none",
+            "context_protocol": "monolithic",
+        }
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            legacy_meta = _materialize_attempt_metadata(**required)
+        with pytest.warns(DeprecationWarning, match="legacy_kwargs") as captured:
+            legacy_request = build_attempt_metadata_request_from_legacy_kwargs(**required)
+        assert Path(captured[0].filename).resolve() == Path(__file__).resolve()
+        grouped_meta = _materialize_attempt_metadata_request(
+            request=build_attempt_metadata_request(**required)
+        )
+
+        assert legacy_meta == grouped_meta
+        assert _materialize_attempt_metadata_request(request=legacy_request) == grouped_meta
+
+    def test_legacy_adapter_rejects_unknown_keyword(self, tmp_path: Path) -> None:
+        attempt_dir = tmp_path / "unknown"
+        attempt_dir.mkdir()
+
+        with pytest.raises(
+            TypeError,
+            match=r"unexpected keyword argument 'adaptive_polciy'",
+        ):
+            _materialize_attempt_metadata(
+                attempt_dir=attempt_dir,
+                attempt=1,
+                max_attempts=2,
+                evidence={},
+                prompt="repair",
+                record_prompt="none",
+                record_evidence="none",
+                context_protocol="monolithic",
+                adaptive_polciy="balanced",
+            )
+
+    def test_legacy_adapter_rejects_missing_required_keyword(self, tmp_path: Path) -> None:
+        attempt_dir = tmp_path / "missing"
+        attempt_dir.mkdir()
+
+        with pytest.raises(TypeError, match=r"required keyword argument: 'context_protocol'"):
+            _materialize_attempt_metadata(
+                attempt_dir=attempt_dir,
+                attempt=1,
+                max_attempts=2,
+                evidence={},
+                prompt="repair",
+                record_prompt="none",
+                record_evidence="none",
+            )
 
     @pytest.mark.parametrize(
         ("name", "case"),

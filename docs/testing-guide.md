@@ -24,7 +24,9 @@ Common task recipes (via `just`):
 | `just quality`         | Full CI mirror: eval lint, deps, audit, docs    |
 | `just lint-evals`      | Blocking Ruff lint/format check for `evals/`    |
 | `just typecheck-evals` | Staged eval static check in `basic` mode        |
-| `just ci`              | Alias for `just quality`                        |
+| `just test-evals-cov`  | Generate the eval coverage report               |
+| `just eval-coverage-no-regression` | Compare eval report with informational ratchet |
+| `just ci`              | Exact alias for `just quality`                  |
 
 Run a single test file or function:
 
@@ -338,7 +340,8 @@ more integration-heavy and may carry the `slow` marker.
 | Gate                    | Threshold | Enforced by                       |
 |-------------------------|-----------|-----------------------------------|
 | Line coverage floor     | 95%       | `--cov-fail-under=95`             |
-| Branch coverage         | no regress| `quality/coverage_baseline.json`  |
+| Package line + branch coverage | no regress | `quality/coverage_baseline.json` |
+| Eval line + branch coverage | 98.2% line / 95.7% branch | `quality/coverage_evals_baseline.json` (informational CI) |
 | Baseline patch seam coverage | per-module | `just baseline-boundary-coverage` |
 | Diff coverage (PRs)     | 80%       | `diff-cover --fail-under=80`      |
 
@@ -356,7 +359,10 @@ uv run pytest \
 
 # Or via just
 just test
+just coverage-no-regression
 just baseline-boundary-coverage
+just test-evals-cov
+just eval-coverage-no-regression
 ```
 
 ### Diff-Cover on Changed Lines
@@ -368,24 +374,31 @@ just diff-coverage
 # uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=80
 ```
 
-### Updating the Branch Coverage Baseline
+### Updating the Coverage Baselines
 
-After improving coverage, ratchet the baseline:
+After improving package coverage, generate the report and confirm the ratchet:
 
 ```bash
 just test   # generates coverage.json
+just coverage-no-regression
 ```
 
-Then edit `quality/coverage_baseline.json`:
+Then edit both percentages in `quality/coverage_baseline.json`:
 
 ```json
 {
-  "line_percent": 85.00,
-  "branch_percent": 75.00,
+  "line_percent": 99.2,
+  "branch_percent": 98.2,
   "source": "main",
-  "updated_at_utc": "2026-03-09T12:00:00Z"
+  "updated_at_utc": "2026-03-26T12:50:58Z"
 }
 ```
+
+For eval coverage, `just test-evals-cov` generates `coverage-evals.json`; then
+`just eval-coverage-no-regression` checks both metrics against
+`quality/coverage_evals_baseline.json`. The current eval baseline is 98.2% line
+/ 95.7% branch. Update both values and `updated_at_utc` manually only after an
+intentional, evidence-backed ratchet decision.
 
 ### Coverage Exclusions
 
@@ -513,20 +526,31 @@ Tests use named config fixtures to isolate what's being measured:
 
 ### What CI Runs
 
-The GitHub Actions workflow runs `just ci`, which expands to:
+The shared GitHub action runs `just quality`; `just ci` is exactly a local
+alias for that recipe. `just quality` has these direct recipe dependencies:
 
+```text
+just check
+just lint-evals
+just coverage-no-regression
+just baseline-boundary-coverage
+just deps
+just audit
+just docs-check
+just dead-code
+just complexity
+just complexity-gate
+just security
+just type-coverage-strict
+just dependency-sync
 ```
-just check               # lint + typecheck + test (with coverage)
-just coverage-no-regression  # branch coverage vs baseline
-just deps                # deptry dependency hygiene
-just audit               # pip-audit scan (one documented temporary Pygments ignore)
-just docs-check          # documentation drift detection
-just dead-code           # vulture dead code scan
-just complexity          # radon complexity report
-just complexity-gate     # xenon complexity threshold
-just security            # bandit security scan
-just type-coverage-strict    # public type-completeness no-regression
-```
+
+`just check` expands to package/test lint and format checks, strict package
+typing, and the non-integration package test run with the 95% coverage floor.
+On pull requests, the shared action additionally runs blocking diff coverage.
+It also runs `just test-evals-cov` followed by
+`just eval-coverage-no-regression` as an informational eval line/branch
+coverage check; both recipes are intentionally outside `just quality`.
 
 GitHub Actions also runs `just test-integration` as a separate 3.13 lane and
 surfaces `just typecheck-evals` as an informational staged eval-typing pass.
@@ -543,19 +567,16 @@ reachable local OpenAI-compatible model server.
 ### Reproducing CI Locally
 
 ```bash
-# Full CI contract (identical to GitHub Actions)
+# Blocking local quality contract
 just ci
 
-# Or step by step
-just lint
-just lint-evals
-just typecheck
-just test
-just coverage-no-regression
-just diff-coverage        # Only meaningful on branches vs main
-just security
-just dead-code
-just deps
+# Additional action/workflow lanes
+just diff-coverage        # Blocking; only meaningful on PR branches vs main
+just test-evals-cov       # Generate the informational eval coverage report
+just eval-coverage-no-regression  # Informational; currently exposes existing debt
+just typecheck-evals      # Informational in CI
+just test-integration     # Blocking after baseline provisioning
+just test-baseline-runtime  # Informational after baseline provisioning
 ```
 
 ### Multi-Python Testing
@@ -582,7 +603,8 @@ uv run python -m evals.validate_cases --schema-only
 | Format             | ruff format     | Check mode                 |
 | Types              | pyright         | Strict, zero errors        |
 | Line coverage      | pytest-cov      | ≥ 95%                      |
-| Branch coverage    | custom script   | No regression vs baseline  |
+| Package line/branch baseline | custom script | No regression vs baseline |
+| Eval line/branch baseline | custom script | No regression; informational CI |
 | Diff coverage      | diff-cover      | ≥ 80% on changed lines     |
 | Complexity         | xenon           | max-absolute C, avg B      |
 | Security           | bandit          | Zero unsuppressed findings |

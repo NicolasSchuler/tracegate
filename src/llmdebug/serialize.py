@@ -44,13 +44,14 @@ _last_redactor_patterns: tuple[str | Pattern[str], ...] | None = None
 _last_redactor_result: list[Pattern[str]] = []
 
 
-def compile_redactors(patterns: tuple[str | Pattern[str], ...]) -> list[Pattern[str]]:
+def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[Pattern[str]]:
     """Compile regex patterns for redaction."""
     global _last_redactor_patterns, _last_redactor_result
-    if patterns is _last_redactor_patterns:
+    normalized_patterns = patterns or ()
+    if normalized_patterns is _last_redactor_patterns:
         return _last_redactor_result
     compiled: list[Pattern[str]] = []
-    for p in patterns:
+    for p in normalized_patterns:
         if isinstance(p, str):
             try:
                 compiled.append(re.compile(p))
@@ -60,7 +61,7 @@ def compile_redactors(patterns: tuple[str | Pattern[str], ...]) -> list[Pattern[
                 sys.stderr.write(f"llmdebug: invalid redaction pattern {p!r}: {e}\n")
         else:
             compiled.append(p)
-    _last_redactor_patterns = patterns
+    _last_redactor_patterns = normalized_patterns
     _last_redactor_result = compiled
     return compiled
 
@@ -837,7 +838,7 @@ def serialize_locals_bundle(
             values[key] = to_jsonlike(value, cfg)
         metadata[str(key)] = _build_local_metadata_entry(value)
 
-    cleaned = redact_jsonlike(values, redactors, redact_keys=cfg.redact_keys)
+    cleaned = redact_jsonlike(values, redactors, redact_keys=bool(cfg.redact_keys))
     if not isinstance(cleaned, dict):
         raise TypeError(f"redact_jsonlike returned {type(cleaned).__name__}, expected dict")
     cleaned_metadata: dict[str, dict[str, Any]] = metadata

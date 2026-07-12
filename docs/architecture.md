@@ -15,8 +15,10 @@ integration, and web middleware.
 
 ## Layer Diagram
 
-The codebase follows a strict three-layer dependency rule:
-**Interfaces → Core → Persistence** (no reverse imports).
+The package protects its most important dependency boundary: reusable capture,
+analysis, and storage code must not import user-facing adapters. The internal
+application and storage modules are intentionally more pragmatic: coordinating
+services such as `output.py` may combine formatting, codecs, and persistence.
 
 ```mermaid
 graph TD
@@ -29,7 +31,7 @@ graph TD
         INITAPI["__init__.py<br/>@debug_snapshot · snapshot_section"]
     end
 
-    subgraph Core
+    subgraph Application["Application and Core"]
         CAP[capture.py]
         SER[serialize.py]
         FILT[detail_filter.py]
@@ -44,10 +46,10 @@ graph TD
         RCA_ENGINE[rca_engine.py · rca_transitions.py]
         GATES[gates.py]
         RCA_ID[rca_identity.py]
+        OUT[output.py<br/>snapshot repository coordinator]
     end
 
-    subgraph Persistence
-        OUT[output.py]
+    subgraph Infrastructure["Storage and Codecs"]
         STATEDB[state_db.py]
         RCA_STORE[rca_store.py · rca_backend.py]
         JSON["_json.py · compact_keys.py<br/>toon_encoder.py"]
@@ -82,9 +84,9 @@ flowchart LR
     EXC((Exception<br/>raised)) --> CAP[capture.py<br/>Walk stack · collect<br/>frames · env · git]
     CAP --> SER[serialize.py<br/>Safe-repr locals ·<br/>array stats · redact]
     SER --> SESSION["_debug_session.py<br/>Build schema-versioned<br/>snapshot dict"]
-    SESSION --> FILT[detail_filter.py<br/>Trim to detail level<br/>crash / full / context]
-    FILT --> OUT[output.py<br/>Write JSON · rotate ·<br/>update latest.json]
+    SESSION --> OUT[output.py<br/>Write JSON · rotate ·<br/>update latest.json]
     OUT --> DB[(state_db.py<br/>SQLite index)]
+    OUT -. read-time view .-> FILT[detail_filter.py<br/>Trim to detail level<br/>crash / full / context]
 
     style EXC fill:#e74c3c,color:#fff
     style DB fill:#3498db,color:#fff
@@ -161,7 +163,7 @@ same state (default: 3), moving the session to `stalled` with coaching hints.
 | Module | Layer | Responsibility |
 |---|---|---|
 | `__init__.py` | Interface | Public API: `@debug_snapshot`, `snapshot_section`, `install_hooks` |
-| `cli.py` | Interface | Click-based CLI: `llmdebug show`, `llmdebug diff`, `llmdebug list` |
+| `cli.py` | Interface | Click-based CLI: `llmdebug quickstart`, `show`, `diff`, and `list` |
 | `mcp_server.py` | Interface | MCP server exposing tools to IDE agents (stdio transport) |
 | `mcp_rca.py` | Interface | MCP tools for RCA state transitions |
 | `mcp_git_context.py` | Interface | MCP tool for enhanced git context |
@@ -189,12 +191,12 @@ same state (default: 3), moving the session to `stalled` with coaching hints.
 | `_debug_session.py` | Core | Schema-versioned snapshot assembly |
 | `_snapshot_loader.py` | Core | Snapshot file discovery and loading |
 | `_presentation.py` / `_formatting.py` | Core | Human-readable frame and snapshot formatting |
-| `output.py` | Persistence | File I/O, rotation, `latest.json` management |
-| `state_db.py` | Persistence | SQLite database (WAL mode) for snapshot + RCA metadata |
-| `rca_store.py` | Persistence | SQLite-backed RCA record CRUD |
-| `rca_backend.py` | Persistence | Backend adapter (SQLite primary, JSONL fallback) |
-| `_json.py` / `compact_keys.py` | Persistence | JSON encoding, compact-key mapping |
-| `toon_encoder.py` | Persistence | TOON (text-optimised object notation) format encoder |
+| `output.py` | Application | Snapshot repository coordinator: file I/O, rotation, latest-pointer and index updates |
+| `state_db.py` | Infrastructure | SQLite database (WAL mode) for snapshot + RCA metadata |
+| `rca_store.py` | Infrastructure | SQLite-backed RCA record CRUD |
+| `rca_backend.py` | Infrastructure | Backend adapter (SQLite primary, JSONL fallback) |
+| `_json.py` / `compact_keys.py` | Infrastructure | JSON encoding, compact-key mapping |
+| `toon_encoder.py` | Infrastructure | TOON (text-optimised object notation) format encoder |
 
 ## Key Design Decisions
 
@@ -207,10 +209,12 @@ same state (default: 3), moving the session to `stalled` with coaching hints.
   (~5 K), or `context` (~10 K). This lets an LLM start cheap and escalate only
   when needed.
 
-- **Pure-core / thin-interface split.** Capture, serialization, RCA logic, and
-  gate evaluation are pure functions with no framework dependencies. Interface
-  modules (`cli.py`, `mcp_server.py`, `pytest_plugin.py`, etc.) are kept thin
-  and import inward only.
+- **Thin-interface / composable-core split.** Framework adapters (`cli.py`,
+  `mcp_server.py`, `pytest_plugin.py`, etc.) delegate to reusable capture,
+  serialization, presentation, RCA, and storage modules. Pure domain logic is
+  kept separate where it matters (`rca_engine.py`, `rca_transitions.py`, and
+  `gates.py`); capture and output are coordinating application services and do
+  perform I/O.
 
 - **Evidence-first RCA protocol.** The state machine enforces a discipline:
   bind evidence → hypothesize → plan → change → verify → resolve. Gate modes
@@ -234,27 +238,32 @@ same state (default: 3), moving the session to `stalled` with coaching hints.
 ## Dependency Rules
 
 ```
-Interfaces  ──►  Core  ──►  Persistence
-     │              │              │
-  cli.py        capture.py     output.py
-  mcp_server    serialize.py   state_db.py
-  pytest_plugin rca_engine.py  rca_store.py
-  middleware    gates.py       _json.py
+Interfaces  ──►  Application / Core  ──►  Infrastructure
+     │                    │                    │
+  cli.py              capture.py           state_db.py
+  mcp_server          output.py            rca_store.py
+  pytest_plugin       rca_engine.py        rca_backend.py
+  middleware          serialize.py         _json.py
 ```
 
-1. **Interface modules import Core and Persistence—never the reverse.**
-   `capture.py` must not import from `cli.py` or `mcp_server.py`.
+1. **Interface adapters import inward—never the reverse.** `capture.py`,
+   `output.py`, and storage modules must not import `cli.py`, `mcp_server.py`,
+   the pytest/Jupyter plugins, middleware, or their adapter helpers.
 
-2. **Core modules may import other Core modules and Persistence.**
-   `capture.py` → `serialize.py` → `config.py` is fine.
+2. **Application modules may coordinate core and infrastructure code.**
+   `capture.py` → `serialize.py` and `capture.py` → `output.py` → `state_db.py`
+   are deliberate flows. `output.py` is therefore an application repository
+   coordinator, not a dependency-free persistence primitive.
 
-3. **Persistence modules only import other Persistence modules or stdlib.**
-   `state_db.py` does not import `capture.py`.
+3. **Domain logic stays isolated where it is explicitly modelled.** RCA state
+   transitions and gate evaluation remain separate from persistence adapters;
+   entrypoints should not accumulate reusable decision logic.
 
 4. **Optional dependencies are guarded.** `click`, `rich`, `mcp`, and
    `ipython` are imported behind try/except blocks so the core library
    stays dependency-light.
 
-These rules are enforced by code review and the architecture guardrails in
-[`AGENTS.md`](../AGENTS.md). Violations show up as circular imports at
-runtime and are caught by `deptry` in CI.
+The interface edge is enforced by
+`tests/test_architecture_boundaries.py`, including imports nested inside
+functions. `deptry` serves a different purpose: it checks declared external
+package dependencies and does not enforce internal package layering.

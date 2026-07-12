@@ -1,6 +1,6 @@
 # Master Runbook
 
-Last verified: April 7, 2026
+Last verified: July 12, 2026
 
 All shell commands, `just` recipes, and CLI invocations in one place.
 For detailed prose, context, and config examples, follow the cross-references.
@@ -37,6 +37,7 @@ just quality                                       # full CI contract
 just test-quick                                    # fast fail-fast tests only
 
 # --- Debug CLI ---
+llmdebug quickstart                                # create + inspect an offline example
 llmdebug                                           # latest snapshot (crash view)
 llmdebug diff                                      # compare latest vs previous
 
@@ -138,7 +139,8 @@ just test              # full suite with coverage (--cov-fail-under=95)
 just test-quick        # fail-fast, no coverage
 just test-integration  # blocking integration lane, excludes baseline_runtime
 just test-baseline-runtime  # provisioned baseline repo/env/runtime lane
-just test-evals-cov    # evals/ coverage + baseline regression check
+just test-evals-cov    # generate evals/ coverage report
+just eval-coverage-no-regression  # compare report with informational ratchet
 just test-combined-cov # combined src + evals coverage report
 
 # direct equivalents
@@ -155,7 +157,7 @@ uv run pytest -m "not integration" \
 
 ```bash
 just diff-coverage            # changed-line coverage gate (>=80%) vs origin/main
-just coverage-no-regression   # branch coverage no-regression vs quality/coverage_baseline.json
+just coverage-no-regression   # line + branch no-regression vs quality/coverage_baseline.json
 just baseline-boundary-coverage   # focused seam gate for baseline patching
 
 # direct equivalents
@@ -239,6 +241,7 @@ Requires `pip install 'llmdebug[cli]'`.
 ### show
 
 ```bash
+llmdebug quickstart                   # create and inspect an offline example
 llmdebug                              # latest snapshot (crash-level detail)
 llmdebug show                         # same as above
 llmdebug show previous                # second most recent snapshot
@@ -877,7 +880,7 @@ ls .llmdebug/latest.json
 ```bash
 # Run coverage, then update quality/coverage_baseline.json
 uv run pytest --cov=src/llmdebug --cov-branch --cov-report=json --cov-report=xml --cov-fail-under=95
-# update quality/coverage_baseline.json with new branch_percent + updated_at_utc
+# update line_percent, branch_percent, and updated_at_utc in the baseline
 ```
 
 ### Server command convention (long-running eval jobs)

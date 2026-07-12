@@ -331,6 +331,12 @@ def test_jax_array_summary(jax_numpy_module):
 # ============================================================================
 
 
+def test_compile_redactors_treats_unresolved_patterns_as_empty() -> None:
+    compile_redactors(("password",))
+
+    assert compile_redactors(None) == []
+
+
 def test_redact_text_basic():
     """Test direct redact_text function with simple pattern."""
     redactors = compile_redactors(("password",))

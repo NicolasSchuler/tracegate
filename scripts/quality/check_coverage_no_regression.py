@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fail when branch coverage regresses below the repository baseline."""
+"""Fail when line or branch coverage regresses below the repository baseline."""
 
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
 
@@ -26,45 +27,100 @@ def _load_json(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
-def _extract_branch_percent(coverage_payload: dict[str, Any]) -> float:
-    totals_raw = coverage_payload.get("totals")
-    if not isinstance(totals_raw, dict):
-        raise RuntimeError("coverage.json is missing the 'totals' object")
-    totals = totals_raw
-
-    num_branches = totals.get("num_branches")
-    covered_branches = totals.get("covered_branches")
-    if not isinstance(num_branches, int) or not isinstance(covered_branches, int):
+def _extract_count(
+    totals: dict[str, Any],
+    *,
+    key: str,
+    metric: str,
+    guidance: str,
+) -> int:
+    value = totals.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError(
-            "coverage.json is missing branch metrics. "
-            "Run pytest with '--cov-branch --cov-report=json'."
+            f"coverage report totals field '{key}' must be an integer for {metric} coverage. "
+            f"{guidance}"
         )
-    if num_branches <= 0:
-        raise RuntimeError(
-            "coverage.json reports zero executable branches. "
-            "Run pytest with '--cov-branch'."
-        )
-    if covered_branches < 0 or covered_branches > num_branches:
-        raise RuntimeError(
-            "coverage.json has inconsistent branch counts "
-            f"(covered={covered_branches}, total={num_branches})."
-        )
-
-    return 100.0 * float(covered_branches) / float(num_branches)
+    return value
 
 
-def _extract_baseline_percent(baseline_payload: dict[str, Any]) -> float:
-    value = baseline_payload.get("branch_percent")
-    if isinstance(value, (int, float)):
-        return float(value)
-    raise RuntimeError(
-        "coverage baseline is missing numeric 'branch_percent' in quality/coverage_baseline.json"
+def _extract_metric_percent(
+    totals: dict[str, Any],
+    *,
+    total_key: str,
+    covered_key: str,
+    metric: str,
+    guidance: str,
+) -> float:
+    total = _extract_count(
+        totals,
+        key=total_key,
+        metric=metric,
+        guidance=guidance,
     )
+    covered = _extract_count(
+        totals,
+        key=covered_key,
+        metric=metric,
+        guidance=guidance,
+    )
+    if total <= 0:
+        raise RuntimeError(
+            f"coverage report totals field '{total_key}' must be greater than zero. {guidance}"
+        )
+    if covered < 0 or covered > total:
+        raise RuntimeError(
+            f"coverage report has inconsistent {metric} counts (covered={covered}, total={total})."
+        )
+    return covered / total * 100.0
+
+
+def _extract_coverage_percentages(coverage_payload: dict[str, Any]) -> dict[str, float]:
+    totals_raw = coverage_payload.get("totals")
+    if totals_raw is None:
+        raise RuntimeError("coverage report is missing the 'totals' object")
+    if not isinstance(totals_raw, dict):
+        raise RuntimeError("coverage report field 'totals' must be a JSON object")
+
+    return {
+        "line": _extract_metric_percent(
+            totals_raw,
+            total_key="num_statements",
+            covered_key="covered_lines",
+            metric="line",
+            guidance="Run pytest with '--cov-report=json'.",
+        ),
+        "branch": _extract_metric_percent(
+            totals_raw,
+            total_key="num_branches",
+            covered_key="covered_branches",
+            metric="branch",
+            guidance="Run pytest with '--cov-branch --cov-report=json'.",
+        ),
+    }
+
+
+def _extract_baseline_percentages(baseline_payload: dict[str, Any]) -> dict[str, float]:
+    percentages: dict[str, float] = {}
+    for metric in ("line", "branch"):
+        key = f"{metric}_percent"
+        value = baseline_payload.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(f"coverage baseline field '{key}' must be a number")
+        try:
+            percentage = float(value)
+        except OverflowError as exc:
+            raise RuntimeError(f"coverage baseline field '{key}' must be finite") from exc
+        if not math.isfinite(percentage) or not 0.0 <= percentage <= 100.0:
+            raise RuntimeError(
+                f"coverage baseline field '{key}' must be a finite number between 0 and 100"
+            )
+        percentages[metric] = percentage
+    return percentages
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fail when branch coverage regresses below the configured baseline."
+        description="Fail when line or branch coverage regresses below the configured baseline."
     )
     parser.add_argument(
         "--coverage-json",
@@ -91,25 +147,34 @@ def main() -> int:
     args = parse_args()
 
     try:
+        if not math.isfinite(args.tolerance) or args.tolerance < 0.0:
+            raise RuntimeError("tolerance must be a finite, non-negative number")
         coverage_payload = _load_json(args.coverage_json, label="coverage report")
         baseline_payload = _load_json(args.baseline_json, label="coverage baseline")
-        current_branch_percent = _extract_branch_percent(coverage_payload)
-        baseline_branch_percent = _extract_baseline_percent(baseline_payload)
+        current_percentages = _extract_coverage_percentages(coverage_payload)
+        baseline_percentages = _extract_baseline_percentages(baseline_payload)
     except RuntimeError as exc:
         print(f"coverage no-regression: ERROR: {exc}")
         return 2
 
-    delta = current_branch_percent - baseline_branch_percent
-    print(
-        "coverage no-regression: "
-        f"branch current={current_branch_percent:.4f}% "
-        f"baseline={baseline_branch_percent:.4f}% "
-        f"delta={delta:+.4f}pp "
-        f"tolerance={args.tolerance:.4f}pp"
-    )
+    regressions: list[str] = []
+    for metric in ("line", "branch"):
+        current_percent = current_percentages[metric]
+        baseline_percent = baseline_percentages[metric]
+        delta = current_percent - baseline_percent
+        print(
+            "coverage no-regression: "
+            f"{metric} current={current_percent:.4f}% "
+            f"baseline={baseline_percent:.4f}% "
+            f"delta={delta:+.4f}pp "
+            f"tolerance={args.tolerance:.4f}pp"
+        )
+        if delta + args.tolerance < 0.0:
+            regressions.append(metric)
 
-    if delta + args.tolerance < 0.0:
-        print("coverage no-regression: FAIL: branch coverage regressed below baseline.")
+    if regressions:
+        for metric in regressions:
+            print(f"coverage no-regression: FAIL: {metric} coverage regressed below baseline.")
         return 1
 
     print("coverage no-regression: PASS")

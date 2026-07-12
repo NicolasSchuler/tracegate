@@ -63,6 +63,7 @@ If you touch the eval harness or baseline adapters, also run:
 just lint-evals
 just typecheck-evals
 just test-evals-cov
+just eval-coverage-no-regression  # informational; currently exposes existing debt
 ```
 
 If you touch integration-marked flows, containers, or baseline env wiring, also run:
@@ -90,7 +91,8 @@ just quality
 `just check` runs lint, typecheck, and coverage-gated tests. `just quality` is the shared quality contract used by CI/release automation. Additional coverage recipes:
 
 ```bash
-just test-evals-cov       # evals/ coverage with baseline regression check
+just test-evals-cov       # generate evals/ coverage measurement
+just eval-coverage-no-regression  # compare it with the informational ratchet
 just test-combined-cov    # combined src + evals coverage report
 ```
 
@@ -159,8 +161,8 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - Framework: `pytest` with `testpaths = ["tests"]`.
 - Add a regression test for each bug fix or behavior change when feasible.
 - Use async tests when touching coroutine paths.
-- Coverage floor is `>=95%` for `src/llmdebug`; branch coverage must not regress versus `quality/coverage_baseline.json`; changed-line coverage is `>=80%` on PRs.
-- Evals coverage is tracked via `quality/coverage_evals_baseline.json` (96.9% line / 93.7% branch); run `just test-evals-cov` when touching eval code. This gate is informational in CI (`continue-on-error: true`).
+- Coverage floor is `>=95%` for `src/llmdebug`; line and branch coverage must not regress versus `quality/coverage_baseline.json`; changed-line coverage is `>=80%` on PRs.
+- Evals coverage is tracked via `quality/coverage_evals_baseline.json` (98.2% line / 95.7% branch); run `just test-evals-cov` and then `just eval-coverage-no-regression` when touching eval code. The ratchet is informational in CI (`continue-on-error: true`) and currently exposes documented existing debt.
 - Public type completeness must not regress versus `quality/type_coverage_baseline.json`; `just quality` enforces this via `just type-coverage-strict`.
 - Baseline patch-boundary coverage is enforced via `just baseline-boundary-coverage` when touching the adapter-to-harness seam.
 - `just quality` also enforces eval-harness lint (`just lint-evals`) and dev dependency-list sync (`just dependency-sync`).

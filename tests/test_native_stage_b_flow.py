@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import ast
+import sys
+from pathlib import Path
+
 from evals import native_stage_b_flow as flow
 from evals.eval_prompts import _build_stage_b_prompt_sections
 from evals.eval_types import PromptBudgetResult
@@ -163,6 +167,61 @@ def test_maybe_run_retry_plan_then_patch_tep_equilibrium_converges(monkeypatch) 
     assert result.tep_equilibrium_iterations == 2
     assert result.tep_equilibrium_converged is True
     assert result.retry_plan_text == "plan alpha"
+
+
+def test_tep_equilibrium_is_independent_of_attempt_orchestrator(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "evals.eval_attempt_flow", None)
+    monkeypatch.setattr(
+        flow,
+        "build_stage_b_prompt_with_budget",
+        lambda **kwargs: flow.StageBPromptBuildResult(
+            prompt="plan-prompt" if kwargs.get("planning_mode") else "final-prompt",
+            prompt_budget_result=PromptBudgetResult(
+                prompt="plan-prompt" if kwargs.get("planning_mode") else "final-prompt",
+                used_chars=20,
+                overflow_chars=0,
+                dropped_sections=[],
+                section_status={"retry_repair_plan": "kept"},
+            ),
+            include_stage_a_evidence_index=kwargs["include_stage_a_evidence_index"],
+            stage_a_index_reason=kwargs["stage_a_index_reason"],
+        ),
+    )
+    plans = iter([("plan alpha", "raw", {}), ("plan alpha", "raw2", {})])
+
+    result = flow.maybe_run_retry_plan_then_patch(
+        enabled=True,
+        plan_on_first_attempt=False,
+        attempt=2,
+        prompt_inputs=_prompt_inputs(),
+        attempt_prompt_budget={"total_chars": 200},
+        is_delta_retry=False,
+        include_stage_a_evidence_index=False,
+        stage_a_index_reason="redundant_skipped",
+        run_plan_patch=lambda _prompt: next(plans),
+        tep_equilibrium_check=True,
+        tep_equilibrium_max_iterations=3,
+        tep_equilibrium_similarity_threshold=0.95,
+    )
+
+    assert result.tep_equilibrium_converged is True
+
+
+def test_native_stage_b_flow_does_not_import_attempt_orchestrator() -> None:
+    module = ast.parse(Path(flow.__file__).read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+
+    assert "evals.eval_attempt_flow" not in imported_modules
 
 
 def test_maybe_run_retry_plan_then_patch_tep_equilibrium_stops_at_max_iterations(

@@ -8,6 +8,8 @@ path.
 
 from __future__ import annotations
 
+import shlex
+
 try:
     import click
 except ImportError:
@@ -112,12 +114,24 @@ class _ExportPayloadTarget:
     compare_snapshot: dict[str, Any] | None
 
 
+def _quickstart_hint(out_dir: str | Path) -> str:
+    """Return a copy-paste-safe quickstart command for a snapshot store."""
+    return shlex.join(("llmdebug", "quickstart", "--dir", str(out_dir)))
+
+
+def _echo_snapshot_error(error: Exception, *, out_dir: str | Path) -> None:
+    """Print a snapshot-loading error with an actionable empty-store hint."""
+    click.echo(str(error), err=True)
+    if isinstance(error, FileNotFoundError) and str(error).startswith("No snapshots found"):
+        click.echo(f"Try: {_quickstart_hint(out_dir)}", err=True)
+
+
 def _load_snapshot(path: str | None, out_dir: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction] — used in tests
     """Load a snapshot from an explicit path or fall back to latest."""
     try:
         return _load_snapshot_impl(path, out_dir, _trust_path=True)
     except FileNotFoundError as e:
-        click.echo(str(e), err=True)
+        _echo_snapshot_error(e, out_dir=out_dir)
         raise SystemExit(1) from e
 
 
@@ -126,7 +140,7 @@ def _load_snapshot_raw(path: str | None, out_dir: str) -> dict[str, Any]:  # pyr
     try:
         return _load_snapshot_raw_impl(path, out_dir, _trust_path=True)
     except FileNotFoundError as e:
-        click.echo(str(e), err=True)
+        _echo_snapshot_error(e, out_dir=out_dir)
         raise SystemExit(1) from e
 
 
@@ -136,7 +150,7 @@ def _load_snapshot_ref(ref: str | None, out_dir: str) -> dict[str, Any]:
         path = _resolve_snapshot_ref_path_impl(ref, out_dir, _trust_path=True)
         return _load_snapshot_from_file_impl(path)
     except (FileNotFoundError, ImportError, ValueError) as e:
-        click.echo(str(e), err=True)
+        _echo_snapshot_error(e, out_dir=out_dir)
         raise SystemExit(1) from e
 
 
@@ -146,7 +160,7 @@ def _load_snapshot_ref_raw(ref: str | None, out_dir: str) -> dict[str, Any]:
         path = _resolve_snapshot_ref_path_impl(ref, out_dir, _trust_path=True)
         return _load_snapshot_from_file_raw_impl(path)
     except (FileNotFoundError, ImportError, ValueError) as e:
-        click.echo(str(e), err=True)
+        _echo_snapshot_error(e, out_dir=out_dir)
         raise SystemExit(1) from e
 
 
@@ -445,6 +459,35 @@ def show(
     _print_show_footer(snapshot, console)
 
 
+@main.command()
+@click.option(
+    "--dir",
+    "out_dir",
+    type=click.Path(path_type=Path),
+    default=Path(".llmdebug"),
+    help="Snapshot directory",
+)
+@click.pass_context
+def quickstart(ctx: click.Context, out_dir: Path) -> None:
+    """Create and display an offline example failure snapshot."""
+    from ._quickstart import create_quickstart_snapshot
+
+    result = create_quickstart_snapshot(out_dir)
+    ctx.invoke(
+        show,
+        snapshot_ref=str(result.snapshot_path),
+        full=False,
+        as_json=False,
+        detail="crash",
+        raw_session=False,
+        out_dir=str(out_dir),
+    )
+    click.echo(f"\nSnapshot written to: {result.snapshot_path}")
+    click.echo("Next commands:")
+    click.echo(f"  {result.show_command}")
+    click.echo(f"  {result.list_command}")
+
+
 @main.command(name="list")
 @click.option("--limit", "-n", default=10, type=int, help="Max snapshots to show")
 @click.option("--search", default="", help="Case-insensitive metadata search query")
@@ -455,6 +498,7 @@ def list_cmd(limit: int, search: str, out_dir: str) -> None:
 
     if not entries:
         click.echo(f"No snapshots found in {out_dir}")
+        click.echo(f"Try: {_quickstart_hint(out_dir)}")
         if _stdout_is_tty():
             click.echo("Run a failing test to create a snapshot, or pass --dir to another folder.")
         return
@@ -580,7 +624,7 @@ def export(
     try:
         export_state = _load_export_state(snapshot_ref, compare_ref, out_dir)
     except (FileNotFoundError, ImportError, ValueError) as e:
-        click.echo(str(e), err=True)
+        _echo_snapshot_error(e, out_dir=out_dir)
         raise SystemExit(1) from e
 
     effective_mode, effective_redaction_profile = _resolve_export_defaults(

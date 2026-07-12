@@ -7,6 +7,22 @@ Requires the `cli` extra: `pip install 'llmdebug[cli]'`
 
 ## Commands
 
+### quickstart
+
+Create one real synthetic failure snapshot and display it at the normal crash
+detail level:
+
+```bash
+llmdebug quickstart
+llmdebug quickstart --dir "snapshot examples"
+```
+
+This first-run path works offline and does not require pytest, Docker, a model,
+or evaluation data. It disables environment and git enrichment for the example
+and never removes existing snapshots. After displaying the failure, it prints
+the snapshot path and copy-paste-safe `show` and `list` commands for the chosen
+directory.
+
 ### show
 
 Display a snapshot with configurable detail level.

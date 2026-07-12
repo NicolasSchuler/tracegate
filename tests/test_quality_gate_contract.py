@@ -15,6 +15,21 @@ from llmdebug import _json as json
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW_PATH = ".github/workflows/ci-cd.yml"
 QUALITY_ACTION_PATH = ".github/actions/run-quality-contract/action.yml"
+QUALITY_DEPENDENCIES = (
+    "check",
+    "lint-evals",
+    "coverage-no-regression",
+    "baseline-boundary-coverage",
+    "deps",
+    "audit",
+    "docs-check",
+    "dead-code",
+    "complexity",
+    "complexity-gate",
+    "security",
+    "type-coverage-strict",
+    "dependency-sync",
+)
 
 
 def _read_repo_text(path: str) -> str:
@@ -44,6 +59,22 @@ def _extract_xenon_tuples(text: str) -> set[tuple[str, str, str]]:
     ):
         tuples.add((absolute, modules, average))
     return tuples
+
+
+def _extract_just_dependencies(text: str, recipe: str) -> tuple[str, ...]:
+    match = re.search(rf"^{re.escape(recipe)}:(?P<body>[^\n]*)$", text, flags=re.MULTILINE)
+    assert match is not None, f"missing just recipe: {recipe}"
+    return tuple(match.group("body").split())
+
+
+def _extract_just_body(text: str, recipe: str) -> str:
+    match = re.search(
+        rf"^{re.escape(recipe)}:\s*$\n(?P<body>(?:^[ \t]+.*(?:\n|\Z))*)",
+        text,
+        flags=re.MULTILINE,
+    )
+    assert match is not None, f"missing just recipe body: {recipe}"
+    return match.group("body")
 
 
 def test_coverage_threshold_and_flags_aligned_between_pyproject_and_justfile() -> None:
@@ -92,6 +123,9 @@ def test_shared_quality_action_delegates_to_just_contract() -> None:
     shared_action = _read_repo_text(QUALITY_ACTION_PATH)
     assert "just quality" in shared_action
     assert "just diff-coverage" in shared_action
+    assert shared_action.count("just test-evals-cov") == 1
+    assert shared_action.count("just eval-coverage-no-regression") == 1
+    assert "scripts/quality/check_coverage_no_regression.py" not in shared_action
 
 
 def test_ci_workflow_uses_shared_quality_action() -> None:
@@ -109,6 +143,27 @@ def test_just_quality_wires_coverage_no_regression_gate() -> None:
     assert "scripts/quality/check_coverage_no_regression.py" in justfile
     assert "--coverage-json coverage.json" in justfile
     assert "--baseline-json quality/coverage_baseline.json" in justfile
+
+
+def test_just_quality_and_ci_membership_are_exact() -> None:
+    justfile = _read_repo_text("justfile")
+
+    assert _extract_just_dependencies(justfile, "quality") == QUALITY_DEPENDENCIES
+    assert _extract_just_dependencies(justfile, "ci") == ("quality",)
+
+
+def test_eval_coverage_measurement_and_ratchet_are_separate() -> None:
+    justfile = _read_repo_text("justfile")
+    measurement_recipe = _extract_just_body(justfile, "test-evals-cov")
+    ratchet_recipe = _extract_just_body(justfile, "eval-coverage-no-regression")
+
+    assert "--cov=evals" in measurement_recipe
+    assert "--cov-branch" in measurement_recipe
+    assert "--cov-report=json:coverage-evals.json" in measurement_recipe
+    assert "check_coverage_no_regression.py" not in measurement_recipe
+    assert ratchet_recipe.count("scripts/quality/check_coverage_no_regression.py") == 1
+    assert "--coverage-json coverage-evals.json" in ratchet_recipe
+    assert "--baseline-json quality/coverage_evals_baseline.json" in ratchet_recipe
 
 
 def test_just_quality_wires_baseline_boundary_coverage_gate() -> None:
@@ -157,6 +212,17 @@ def test_coverage_baseline_file_has_required_schema() -> None:
     assert isinstance(payload["updated_at_utc"], str)
 
 
+def test_eval_coverage_baseline_file_has_required_schema() -> None:
+    baseline_path = REPO_ROOT / "quality" / "coverage_evals_baseline.json"
+    assert baseline_path.exists(), "missing quality/coverage_evals_baseline.json"
+    payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    assert isinstance(payload.get("line_percent"), (int, float))
+    assert isinstance(payload.get("branch_percent"), (int, float))
+    assert isinstance(payload.get("source"), str)
+    assert isinstance(payload.get("updated_at_utc"), str)
+
+
 def test_type_coverage_baseline_file_has_required_schema() -> None:
     baseline_path = REPO_ROOT / "quality" / "type_coverage_baseline.json"
     assert baseline_path.exists(), "missing quality/type_coverage_baseline.json"
@@ -186,7 +252,9 @@ def test_deptry_dep002_ignores_eval_only_analytics_dependencies() -> None:
     )
     assert match is not None, "missing DEP002 ignore list in deptry config"
     dep002_ignored_packages = set(re.findall(r'"([^"]+)"', match.group("body")))
-    assert {"polars", "scikit-learn", "scipy"}.issubset(dep002_ignored_packages)
+    assert {"pandas", "polars", "scikit-learn", "scipy", "seaborn"}.issubset(
+        dep002_ignored_packages
+    )
 
 
 def test_evals_extra_declares_pydantic_for_direct_eval_imports() -> None:
@@ -203,6 +271,18 @@ def test_evals_extra_declares_pydantic_for_direct_eval_imports() -> None:
         "evals extra must include pydantic because evals/stage_a_contract.py "
         "and evals/lambda_rlm_backend.py import it directly"
     )
+
+
+def test_analytics_dependencies_do_not_bloat_the_core_install() -> None:
+    payload = tomllib.loads(_read_repo_text("pyproject.toml"))
+    core_dependencies = payload["project"]["dependencies"]
+    optional_dependencies = payload["project"]["optional-dependencies"]
+
+    for package in ("pandas", "polars", "seaborn"):
+        assert not any(dep.startswith(package) for dep in core_dependencies)
+    assert any(dep.startswith("pandas") for dep in optional_dependencies["analysis"])
+    assert any(dep.startswith("seaborn") for dep in optional_dependencies["analysis"])
+    assert any(dep.startswith("polars") for dep in optional_dependencies["evals"])
 
 
 def test_just_quality_wires_type_coverage_regression_gate() -> None:
@@ -347,3 +427,63 @@ def test_docs_reference_staged_type_and_integration_commands() -> None:
     for text in (contributing, testing_guide, tests_readme, quality_map, quality_readme):
         assert "baseline-boundary-coverage" in text
     assert "check_boundary_module_coverage.py" in scripts_readme
+
+
+def test_quality_docs_match_committed_coverage_contract() -> None:
+    pyproject = _read_repo_text("pyproject.toml")
+    coverage_section = _extract_toml_section(pyproject, "tool.coverage.report")
+    threshold_match = re.search(
+        r"^\s*fail_under\s*=\s*(\d+)\s*$", coverage_section, flags=re.MULTILINE
+    )
+    assert threshold_match is not None
+    threshold = int(threshold_match.group(1))
+
+    package_baseline = json.loads(_read_repo_text("quality/coverage_baseline.json"))
+    eval_baseline = json.loads(_read_repo_text("quality/coverage_evals_baseline.json"))
+    assert isinstance(package_baseline, dict)
+    assert isinstance(eval_baseline, dict)
+
+    contributing = _read_repo_text("CONTRIBUTING.md")
+    testing_guide = _read_repo_text("docs/testing-guide.md")
+    quality_map = _read_repo_text("docs/quality-map.md")
+    quality_readme = _read_repo_text("quality/README.md")
+
+    assert f"line coverage floor `>= {threshold}`" in quality_map
+    package_example = (
+        f'"line_percent": {package_baseline["line_percent"]},\n'
+        f'  "branch_percent": {package_baseline["branch_percent"]}'
+    )
+    assert package_example in contributing
+    assert package_example in testing_guide
+
+    eval_summary = (
+        f"{eval_baseline['line_percent']}% line / {eval_baseline['branch_percent']}% branch"
+    )
+    for text in (contributing, testing_guide, quality_map, quality_readme):
+        assert eval_summary in text
+
+    integration_row = re.search(
+        r"^\| `just test-integration` \|.*\| (?P<blocking>Yes|No) \|",
+        quality_map,
+        flags=re.MULTILINE,
+    )
+    assert integration_row is not None
+    assert integration_row.group("blocking") == "Yes"
+    assert "check_type_coverage.py --update-baseline" in quality_readme
+    assert "check_type_coverage.py --update\n" not in quality_readme
+
+
+def test_testing_guide_quality_membership_matches_justfile() -> None:
+    testing_guide = _read_repo_text("docs/testing-guide.md")
+    match = re.search(
+        r"`just quality` has these direct recipe dependencies:\s*"
+        r"```text\n(?P<body>.*?)\n```",
+        testing_guide,
+        flags=re.DOTALL,
+    )
+    assert match is not None, "testing guide must enumerate just quality membership"
+    documented = tuple(
+        line.removeprefix("just ") for line in match.group("body").splitlines() if line.strip()
+    )
+
+    assert documented == QUALITY_DEPENDENCIES

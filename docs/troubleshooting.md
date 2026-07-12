@@ -21,6 +21,16 @@ for the full test workflow see [testing-guide.md](testing-guide.md).
 | Pytest plugin disabled               | See [Plugin not activating](#pytest-plugin-not-activating) |
 | `@pytest.mark.no_snapshot` applied   | Remove the marker if capture is expected   |
 
+For a dependency-light check of capture and display, create an offline example:
+
+```bash
+llmdebug quickstart
+```
+
+This writes a synthetic failure snapshot without pytest, Docker, a model, or
+evaluation data. Use `llmdebug quickstart --dir <path>` when troubleshooting a
+custom snapshot directory.
+
 Quick diagnostic:
 
 ```bash
@@ -386,13 +396,13 @@ error/exception paths, missing branch coverage on `if`/`else` blocks.
 **Fix**: Add targeted tests for the uncovered paths. Use `# pragma: no cover`
 only for genuinely unreachable code (type guards, protocol stubs).
 
-### Branch Coverage Regression
+### Line or Branch Coverage Regression
 
 **Symptoms**: `check_coverage_no_regression.py` fails with a message that
-branch coverage dropped below the baseline.
+line or branch coverage dropped below the baseline.
 
 The script `scripts/quality/check_coverage_no_regression.py` compares the
-current branch coverage against `quality/coverage_baseline.json`:
+current line and branch coverage against `quality/coverage_baseline.json`:
 
 ```json
 {
@@ -410,14 +420,14 @@ ratchet the baseline after an improvement:
 # 1. Run coverage
 uv run pytest --cov=src/llmdebug --cov-branch --cov-report=json --cov-report=xml --cov-fail-under=95
 
-# 2. Update quality/coverage_baseline.json with the new branch_percent
-#    and current UTC timestamp in updated_at_utc
+# 2. Update quality/coverage_baseline.json with the measured line_percent,
+#    branch_percent, and current UTC timestamp in updated_at_utc
 
 # 3. Include the reason for the ratchet in the PR description
 ```
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) (lines 131–149) for the full
-ratchet procedure.
+See the [quality-gates section in CONTRIBUTING.md](../CONTRIBUTING.md#quality-gates)
+for the full ratchet procedure.
 
 ### Type Coverage Regression
 
