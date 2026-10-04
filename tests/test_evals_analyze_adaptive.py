@@ -1266,10 +1266,14 @@ def test_analyze_adaptive_off_policy_estimators_known_values(tmp_path) -> None:
     assert invoke["ips"] == pytest.approx(1.0)
     assert invoke["snips"] == pytest.approx(2.0 / 3.0)
     assert invoke["effective_sample_size"] == pytest.approx(1.8)
-    assert isinstance(invoke["dr"], float)
+    # STA-11: DR is cross-fitted. With two samples per action and support 2, no
+    # held-out fold leaves a training set with both actions, so DR is unsupported
+    # instead of reusing an in-sample fit.
+    assert invoke["dr"] is None
+    assert invoke["dr_reason"] == "insufficient_crossfit_support"
     assert skip["ips"] == pytest.approx(0.0)
     assert skip["snips"] == pytest.approx(0.0)
-    assert isinstance(skip["dr"], float)
+    assert skip["dr_reason"] == "insufficient_crossfit_support"
 
     budget_ope = condition_summary["adaptive_budget_ope"]["targets"]
     increase = budget_ope["always_increase_budget"]
@@ -1278,8 +1282,7 @@ def test_analyze_adaptive_off_policy_estimators_known_values(tmp_path) -> None:
     assert increase["snips"] == pytest.approx(0.3)
     assert keep["ips"] == pytest.approx(-0.1)
     assert keep["snips"] == pytest.approx(-0.1)
-    assert isinstance(increase["dr"], float)
-    assert isinstance(keep["dr"], float)
+    assert {increase["dr_reason"], keep["dr_reason"]} == {"insufficient_crossfit_support"}
 
 
 def test_analyze_adaptive_off_policy_dr_requires_min_support(tmp_path) -> None:
@@ -1438,12 +1441,13 @@ def test_analyze_adaptive_off_policy_zero_support_target_ips_snips_none(tmp_path
 
 def test_analyze_adaptive_off_policy_dr_stratifies_by_feature_scaling_profile(tmp_path) -> None:
     records = []
+    # Three copies per stratum so every cross-fitting fold (STA-11) keeps both actions.
     payloads = [
         ("v1", "invoke_helper", 0.5, 0.4, {"bias": 1.0, "attempt_frac": 0.2}),
         ("v1", "skip_helper", 0.6, 0.1, {"bias": 1.0, "attempt_frac": 0.8}),
         ("none", "invoke_helper", 0.7, 0.6, {"bias": 10.0, "attempt_frac": 2.0}),
         ("none", "skip_helper", 0.8, 0.2, {"bias": 10.0, "attempt_frac": 8.0}),
-    ]
+    ] * 3
     for attempt, (profile, action, propensity, reward, features) in enumerate(payloads, start=1):
         record = _record(
             run_id="run_ope_mixed_profiles",

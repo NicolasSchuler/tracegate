@@ -795,7 +795,7 @@ def test_analyze_ope_and_statistics_helpers(
     )
 
     dr, reason = ar._stratified_doubly_robust_estimate(
-        samples=samples,
+        samples=samples * 3,  # enough per stratum for cross-fitting (STA-11)
         target_action="invoke_helper",
         action_space={"invoke_helper", "skip_helper", "none"},
         min_action_support=1,
@@ -804,6 +804,14 @@ def test_analyze_ope_and_statistics_helpers(
     )
     assert reason == ""
     assert dr is not None
+    assert ar._stratified_doubly_robust_estimate(
+        samples=samples,
+        target_action="invoke_helper",
+        action_space={"invoke_helper", "skip_helper", "none"},
+        min_action_support=1,
+        ridge_alpha=0.1,
+        propensity_floor=0.2,
+    ) == (None, "insufficient_crossfit_support")
     assert ar._stratified_doubly_robust_estimate(
         samples=[],
         target_action="invoke_helper",

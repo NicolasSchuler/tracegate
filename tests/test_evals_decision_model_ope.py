@@ -142,12 +142,13 @@ def test_stochastic_one_hot_target_matches_deterministic_target() -> None:
 def test_stochastic_doubly_robust_uses_fitted_action_models() -> None:
     # Reward is a deterministic function of the action, so the per-action ridge models
     # predict it exactly and the DR correction term vanishes.
+    # Three copies so every cross-fitting fold (STA-11) has both action models.
     samples = [
         _sample(action="skip_helper", propensity=0.5, reward=1.0, features={"x": 0.0}),
         _sample(action="skip_helper", propensity=0.5, reward=1.0, features={"x": 1.0}),
         _sample(action="invoke_helper", propensity=0.5, reward=0.0, features={"x": 0.0}),
         _sample(action="invoke_helper", propensity=0.5, reward=0.0, features={"x": 1.0}),
-    ]
+    ] * 3
     target = ar._stochastic_target_ope(
         samples=samples,
         target_distributions=[{"skip_helper": 0.75, "invoke_helper": 0.25} for _ in samples],

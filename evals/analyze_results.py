@@ -167,6 +167,8 @@ EXTERNAL_BASELINE_CONDITIONS = frozenset(
 # Minimum per-action sample count required for cross-validated alpha selection.
 # Below this threshold we fall back to ADAPTIVE_OPE_RIDGE_ALPHA.
 _RIDGECV_MIN_SAMPLES = 10
+# STA-11: DR reward models are cross-fitted over this many folds per stratum.
+ADAPTIVE_OPE_CROSSFIT_FOLDS = 5
 
 
 def _prompt_hash_field_for_schema(schema_version: int) -> str:
@@ -4614,7 +4616,11 @@ def _adaptive_ope_summary(
             if used_propensities
             else None
         ),
-        "ridge_alpha": ADAPTIVE_OPE_RIDGE_ALPHA,
+        "ridge_alpha_fallback": ADAPTIVE_OPE_RIDGE_ALPHA,
+        "ridge_alphas_selected": _crossfit_alpha_summary(
+            samples=samples, action_space=action_space, min_action_support=support_threshold
+        ),
+        "dr_crossfit_folds": ADAPTIVE_OPE_CROSSFIT_FOLDS,
         "feature_scaling_profiles": feature_scaling_profiles,
         "mean_reward": _mean([float(sample.get("reward") or 0.0) for sample in samples]),
         "propensity_missing_dropped": propensity_missing_dropped,
@@ -4627,6 +4633,27 @@ def _adaptive_ope_summary(
         "target_order": list(targets),
         "targets": targets,
     }
+
+
+def _crossfit_alpha_summary(
+    *, samples: list[dict[str, Any]], action_space: set[str], min_action_support: int
+) -> dict[str, list[float]]:
+    """Distinct ridge alphas the cross-fitted DR models used, per action (STA-11).
+
+    The summary used to report the configured fallback alpha although ``RidgeCV`` picks
+    one per action, stratum and fold.
+    """
+    selected: dict[str, set[float]] = defaultdict(set)
+    for bucket_samples in _samples_by_feature_scaling_profile(samples).values():
+        crossfit = _crossfit_reward_models(
+            samples=bucket_samples,
+            action_space=action_space,
+            min_action_support=min_action_support,
+            ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
+        )
+        for action, alphas in crossfit.alphas.items():
+            selected[action].update(alphas)
+    return {action: sorted(values) for action, values in sorted(selected.items())}
 
 
 def _support_warning_for_target(
@@ -4680,26 +4707,17 @@ def _estimator_agreement_summary(target: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _fit_ridge_action_models(
-    *,
-    samples: list[dict[str, Any]],
-    action_space: set[str],
-    min_action_support: int,
-    ridge_alpha: float,
-) -> tuple[list[str], dict[str, np.ndarray]]:
-    """Fit per-action ridge regression models predicting reward.
+@dataclass(frozen=True)
+class FittedRewardModels:
+    """Per-action reward models and the ridge alpha each one used."""
 
-    When a per-action subset has at least ``_RIDGECV_MIN_SAMPLES`` rows,
-    ``RidgeCV`` with 5-fold cross-validation selects the best alpha from
-    ``ADAPTIVE_OPE_RIDGE_ALPHAS``.  Otherwise the hardcoded *ridge_alpha*
-    fallback is used.
+    feature_names: list[str]
+    models: dict[str, np.ndarray]
+    alphas: dict[str, float]
 
-    Actions with fewer samples than *min_action_support* are skipped.
 
-    Returns:
-        Tuple of (feature_names, models dict mapping action to beta).
-    """
-    feature_names = sorted(
+def _ope_feature_names(samples: list[dict[str, Any]]) -> list[str]:
+    return sorted(
         {
             str(name)
             for sample in samples
@@ -4710,8 +4728,30 @@ def _fit_ridge_action_models(
             )
         }
     )
+
+
+def _fit_action_reward_models(
+    *,
+    samples: list[dict[str, Any]],
+    action_space: set[str],
+    min_action_support: int,
+    ridge_alpha: float,
+    feature_names: list[str] | None = None,
+) -> FittedRewardModels:
+    """Fit per-action ridge regression models predicting reward.
+
+    When a per-action subset has at least ``_RIDGECV_MIN_SAMPLES`` rows,
+    ``RidgeCV`` with 5-fold cross-validation selects the best alpha from
+    ``ADAPTIVE_OPE_RIDGE_ALPHAS``.  Otherwise the hardcoded *ridge_alpha*
+    fallback is used. The alpha used per action is returned (STA-11).
+
+    Actions with fewer samples than *min_action_support* are skipped.
+    """
+    if feature_names is None:
+        feature_names = _ope_feature_names(samples)
     dim = len(feature_names) + 1  # +1 for bias term
     models: dict[str, np.ndarray] = {}
+    alphas: dict[str, float] = {}
     for action in sorted(action_space):
         action_samples = [sample for sample in samples if str(sample.get("action") or "") == action]
         if len(action_samples) < int(min_action_support):
@@ -4735,6 +4775,7 @@ def _fit_ridge_action_models(
             )
             model.fit(X, y)
             beta = np.asarray(model.coef_, dtype=float)
+            alphas[action] = float(model.alpha_)
             logger.info(
                 "RidgeCV selected alpha=%.4g for action=%r (%d samples, %d-fold)",
                 model.alpha_,
@@ -4759,9 +4800,74 @@ def _fit_ridge_action_models(
                 beta = np.linalg.solve(gram, rhs)
             except np.linalg.LinAlgError:
                 beta = np.linalg.pinv(gram) @ rhs
+            alphas[action] = float(ridge_alpha)
 
         models[action] = beta
-    return feature_names, models
+    return FittedRewardModels(feature_names=feature_names, models=models, alphas=alphas)
+
+
+def _fit_ridge_action_models(
+    *,
+    samples: list[dict[str, Any]],
+    action_space: set[str],
+    min_action_support: int,
+    ridge_alpha: float,
+) -> tuple[list[str], dict[str, np.ndarray]]:
+    """Return ``(feature_names, models)`` from :func:`_fit_action_reward_models`."""
+    fitted = _fit_action_reward_models(
+        samples=samples,
+        action_space=action_space,
+        min_action_support=min_action_support,
+        ridge_alpha=ridge_alpha,
+    )
+    return fitted.feature_names, fitted.models
+
+
+@dataclass(frozen=True)
+class CrossFitModels:
+    """Out-of-fold reward models for every sample of one stratum (STA-11)."""
+
+    feature_names: list[str]
+    per_sample: list[dict[str, np.ndarray]]
+    alphas: dict[str, list[float]]
+
+
+def _crossfit_reward_models(
+    *,
+    samples: list[dict[str, Any]],
+    action_space: set[str],
+    min_action_support: int,
+    ridge_alpha: float,
+) -> CrossFitModels:
+    """K-fold cross-fitting: each sample's predictions come from the other folds' models.
+
+    The DR reward model used to be fitted on the same samples whose residuals form the
+    correction term. Folds are assigned by position (``index % K``), so results are
+    deterministic. With fewer than two samples there is nothing to cross-fit and every
+    sample gets an empty model set, which makes DR unsupported.
+    """
+    feature_names = _ope_feature_names(samples)
+    folds = min(ADAPTIVE_OPE_CROSSFIT_FOLDS, len(samples))
+    if folds < 2:
+        return CrossFitModels(feature_names, [{} for _ in samples], {})
+    fold_models: list[dict[str, np.ndarray]] = []
+    alphas: dict[str, list[float]] = defaultdict(list)
+    for fold in range(folds):
+        fitted = _fit_action_reward_models(
+            samples=[sample for idx, sample in enumerate(samples) if idx % folds != fold],
+            action_space=action_space,
+            min_action_support=min_action_support,
+            ridge_alpha=ridge_alpha,
+            feature_names=feature_names,
+        )
+        fold_models.append(fitted.models)
+        for action, alpha in fitted.alphas.items():
+            alphas[action].append(alpha)
+    return CrossFitModels(
+        feature_names=feature_names,
+        per_sample=[fold_models[idx % folds] for idx in range(len(samples))],
+        alphas=dict(alphas),
+    )
 
 
 def _predict_action_reward(
@@ -4872,12 +4978,13 @@ def _stratified_doubly_robust_estimate(
             samples=bucket_samples,
             action_space=action_space,
         )
-        feature_names, models = _fit_ridge_action_models(
+        fitted = _fit_action_reward_models(
             samples=bucket_samples,
             action_space=action_space,
             min_action_support=min_action_support,
             ridge_alpha=ridge_alpha,
         )
+        models = fitted.models
         observed_actions = {
             action for action in action_space if int(action_counts.get(action, 0)) > 0
         }
@@ -4900,11 +5007,19 @@ def _stratified_doubly_robust_estimate(
             return None, "missing_action_model"
         if target_action not in models:
             return None, "missing_target_model"
+        crossfit = _crossfit_reward_models(
+            samples=bucket_samples,
+            action_space=action_space,
+            min_action_support=min_action_support,
+            ridge_alpha=ridge_alpha,
+        )
+        if any(target_action not in sample_models for sample_models in crossfit.per_sample):
+            return None, "insufficient_crossfit_support"
         bucket_dr = _doubly_robust_estimate(
             samples=bucket_samples,
             target_action=target_action,
-            feature_names=feature_names,
-            models=models,
+            feature_names=crossfit.feature_names,
+            models=crossfit.per_sample,
             propensity_floor=propensity_floor,
         )
         weighted_dr_sum += bucket_dr * len(bucket_samples)
@@ -4916,16 +5031,18 @@ def _doubly_robust_estimate(
     samples: list[dict[str, Any]],
     target_action: str,
     feature_names: list[str],
-    models: dict[str, np.ndarray],
+    models: dict[str, np.ndarray] | list[dict[str, np.ndarray]],
     propensity_floor: float,
 ) -> float:
     """Compute a single-stratum doubly-robust reward estimate.
 
     Combines the fitted regression prediction with an IPS correction
-    term for samples matching the target action.
+    term for samples matching the target action. *models* is one shared model set or,
+    when cross-fitted, one out-of-fold set per sample (STA-11).
     """
+    model_sets = models if isinstance(models, list) else [models] * len(samples)
     terms: list[float] = []
-    for sample in samples:
+    for sample, models in zip(samples, model_sets, strict=True):
         action = str(sample.get("action") or "")
         propensity = _sanitize_propensity(sample.get("propensity"), floor=propensity_floor)
         reward = float(sample.get("reward") or 0.0)
@@ -5194,12 +5311,12 @@ def _stratified_stochastic_doubly_robust_estimate(
     for profile in sorted(buckets):
         bucket_samples = [sample for sample, _distribution in buckets[profile]]
         bucket_distributions = [distribution for _sample, distribution in buckets[profile]]
-        feature_names, models = _fit_ridge_action_models(
+        models = _fit_action_reward_models(
             samples=bucket_samples,
             action_space=settings.action_space,
             min_action_support=settings.min_action_support,
             ridge_alpha=settings.ridge_alpha,
-        )
+        ).models
         reason = _stochastic_dr_support_reason(
             target_distributions=bucket_distributions,
             models=models,
@@ -5211,11 +5328,27 @@ def _stratified_stochastic_doubly_robust_estimate(
         )
         if reason:
             return None, reason
+        crossfit = _crossfit_reward_models(
+            samples=bucket_samples,
+            action_space=settings.action_space,
+            min_action_support=settings.min_action_support,
+            ridge_alpha=settings.ridge_alpha,
+        )
+        for sample, distribution, sample_models in zip(
+            bucket_samples, bucket_distributions, crossfit.per_sample, strict=True
+        ):
+            needed = {action for action, prob in distribution.items() if float(prob) > 0.0}
+            if _target_importance_weight(
+                sample, distribution, propensity_floor=settings.propensity_floor
+            ):
+                needed.add(str(sample.get("action") or ""))
+            if not needed <= set(sample_models):
+                return None, "insufficient_crossfit_support"
         weighted_dr_sum += len(bucket_samples) * _stochastic_doubly_robust_estimate(
             samples=bucket_samples,
             target_distributions=bucket_distributions,
-            feature_names=feature_names,
-            models=models,
+            feature_names=crossfit.feature_names,
+            models=crossfit.per_sample,
             propensity_floor=settings.propensity_floor,
         )
     return weighted_dr_sum / float(total), ""
@@ -5249,12 +5382,16 @@ def _stochastic_doubly_robust_estimate(
     samples: list[dict[str, Any]],
     target_distributions: list[dict[str, float]],
     feature_names: list[str],
-    models: dict[str, np.ndarray],
+    models: dict[str, np.ndarray] | list[dict[str, np.ndarray]],
     propensity_floor: float,
 ) -> float:
-    """Single-stratum DR estimate for a per-sample target distribution."""
+    """Single-stratum DR estimate for a per-sample target distribution.
+
+    *models* is one shared model set or one out-of-fold set per sample (STA-11).
+    """
+    model_sets = models if isinstance(models, list) else [models] * len(samples)
     terms: list[float] = []
-    for sample, distribution in zip(samples, target_distributions, strict=True):
+    for sample, distribution, models in zip(samples, target_distributions, model_sets, strict=True):
         features_raw = sample.get("features")
         features = features_raw if isinstance(features_raw, dict) else {}
         direct = 0.0

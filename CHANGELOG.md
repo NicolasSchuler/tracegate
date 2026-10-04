@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- Doubly robust off-policy estimates are cross-fitted (5 folds per stratum) instead of fitting the reward model on the samples it corrects, and the OPE summary reports the ridge alphas actually used per action (`ridge_alphas_selected`, `ridge_alpha_fallback`, `dr_crossfit_folds`) instead of the configured fallback value. Very small strata now report DR as unsupported (`insufficient_crossfit_support`) (STA-11).
 - Off-policy samples without a logged propensity are dropped and counted (`propensity_missing_dropped`) instead of silently getting propensity 1.0 in IPS, SNIPS and DR; the OPE lines print that count and the number of shadow-mode propensities corrected for POL-03 (STA-12).
 - Conditions with different attempt budgets are compared at a common k (STA-13, D12): each condition reports `success_within_common_k`, the share of cases solved within the smallest attempt budget in the bucket (`common_attempt_k`), next to its own-budget `success_rate`; `evals.stats.pass_at_k` adds the unbiased pass@k estimator.
 - `baselines/compare_results` pairs cases through the shared case-level analysis: repeated runs are aggregated by majority vote with `runs_per_case_max` reported, instead of the last run in glob order overwriting the others, and per-category N matches the paired N (BAS-06). An unreadable input file prints a warning instead of raising `TypeError` (BAS-09).
