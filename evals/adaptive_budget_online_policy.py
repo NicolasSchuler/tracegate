@@ -12,21 +12,19 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import (
     coerce_float as _coerce_float,
 )
 from ._policy_utils import (
     coerce_nonnegative_int as _coerce_nonnegative_int,
-)
-from ._policy_utils import (
-    linucb_exploit_explore as _linucb_exploit_explore,
 )
 from ._policy_utils import (
     policy_effective_epsilon as _policy_effective_epsilon,
@@ -404,29 +402,10 @@ class BudgetPolicyEvent:
 
 
 @dataclass
-class LinUCBState:
-    """Mutable state for a per-action LinUCB model (A matrices and b vectors)."""
+class LinUCBState(core.LinUCBState):
+    """The shared LinUCB core state, defaulting to the budget actions."""
 
-    action_names: tuple[str, ...] = field(default_factory=lambda: BUDGET_POLICY_ACTIONS)
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(default_factory=dict)
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        normalized_actions = tuple(str(action) for action in self.action_names)
-        if not normalized_actions:
-            normalized_actions = ("default",)
-        self.action_names = normalized_actions
-        normalized_counts = dict.fromkeys(normalized_actions, 0)
-        for key, value in dict(self.action_counts).items():
-            if key in normalized_counts:
-                normalized_counts[key] = int(value)
-        self.action_counts = normalized_counts
+    action_names: tuple[str, ...] = BUDGET_POLICY_ACTIONS
 
 
 class AdaptiveBudgetPolicyController:
@@ -1062,58 +1041,7 @@ class AdaptiveBudgetPolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in BUDGET_POLICY_ALGOS:
             return
-        if not state.feature_names:
-            state.feature_names = sorted(str(k) for k in cleaned_features)
-            dim = len(state.feature_names)
-            if dim <= 0:
-                state.feature_names = ["bias"]
-                dim = 1
-            state.A = {
-                action: (np.eye(dim, dtype=float) * float(self.config.l2))
-                for action in state.action_names
-            }
-            state.b = {action: np.zeros((dim,), dtype=float) for action in state.action_names}
-            return
-        expanded_feature_names = sorted(
-            set(state.feature_names) | {str(key) for key in cleaned_features}
-        )
-        if expanded_feature_names != state.feature_names:
-            previous_feature_names = list(state.feature_names)
-            previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-            previous_dim = len(previous_feature_names)
-            new_dim = len(expanded_feature_names)
-            state.feature_names = list(expanded_feature_names)
-            for action in state.action_names:
-                previous_A = state.A.get(action)
-                previous_b = state.b.get(action)
-                next_A = np.eye(new_dim, dtype=float) * float(self.config.l2)
-                next_b = np.zeros((new_dim,), dtype=float)
-                if (
-                    isinstance(previous_A, np.ndarray)
-                    and isinstance(previous_b, np.ndarray)
-                    and previous_A.shape == (previous_dim, previous_dim)
-                    and previous_b.shape == (previous_dim,)
-                ):
-                    for new_row, feature_row in enumerate(expanded_feature_names):
-                        old_row = previous_index.get(feature_row)
-                        if old_row is None:
-                            continue
-                        next_b[new_row] = previous_b[old_row]
-                        for new_col, feature_col in enumerate(expanded_feature_names):
-                            old_col = previous_index.get(feature_col)
-                            if old_col is None:
-                                continue
-                            next_A[new_row, new_col] = previous_A[old_row, old_col]
-                state.A[action] = next_A
-                state.b[action] = next_b
-        dim = len(state.feature_names)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or A.shape != (dim, dim):
-                state.A[action] = np.eye(dim, dtype=float) * float(self.config.l2)
-            if b is None or b.shape != (dim,):
-                state.b[action] = np.zeros((dim,), dtype=float)
+        core.ensure_feature_state(state, cleaned_features, l2=float(self.config.l2))
 
     def _feature_vector(
         self,
@@ -1122,65 +1050,27 @@ class AdaptiveBudgetPolicyController:
         cleaned_features: Mapping[str, float],
     ) -> np.ndarray:
         """Build a numpy feature vector aligned with ``feature_names``."""
-        feature_names = state.feature_names or ["bias"]
-        values = np.array(
-            [
-                self._tracked_safe_float(
-                    cleaned_features.get(name, 0.0),
-                    feature_name=name,
-                    default=0.0,
-                )
-                for name in feature_names
-            ],
-            dtype=float,
+        return core.feature_vector(
+            state,
+            cleaned_features,
+            to_float=lambda value, name: self._tracked_safe_float(
+                value, feature_name=name, default=0.0
+            ),
         )
-        return values
 
     def _linucb_scores(self, *, state: LinUCBState, x: np.ndarray) -> dict[str, float]:
         """Compute UCB scores (exploit + alpha * explore) for every action."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "linucb":
             return dict.fromkeys(state.action_names, 0.0)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            exploit, explore, updated_A = _linucb_exploit_explore(
-                A,
-                b,
-                x,
-                l2=float(self.config.l2),
-            )
-            if updated_A is not None:
-                state.A[action] = updated_A
-            scores[action] = exploit + (float(self.config.alpha) * explore)
-        return scores
+        return core.linucb_scores(
+            state, x, l2=float(self.config.l2), alpha=float(self.config.alpha)
+        )
 
     def _thompson_scores(self, *, state: LinUCBState, x: np.ndarray) -> dict[str, float]:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "thompson":
             return dict.fromkeys(state.action_names, 0.0)
-        seed = self.config.random_seed
-        rng = np.random.default_rng(
-            seed=(seed + state.decisions) if seed is not None else None,
-        )
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            try:
-                A_inv = np.linalg.solve(A, np.eye(A.shape[0]))
-                theta_hat = A_inv @ b
-                theta_sample = rng.multivariate_normal(theta_hat, A_inv)
-                scores[action] = float(theta_sample @ x)
-            except np.linalg.LinAlgError:
-                scores[action] = 0.0
-        return scores
+        return core.thompson_scores(state, x, seed=self.config.random_seed)
 
     def _update_model(
         self,
@@ -1197,31 +1087,11 @@ class AdaptiveBudgetPolicyController:
             return False
         x = self._feature_vector(state=state, cleaned_features=feature_values)
         self._apply_recency_decay(state=state)
-        A = state.A.get(action)
-        b = state.b.get(action)
-        if A is None or b is None:
-            return False
-        A += np.outer(x, x)
-        b += float(reward) * x
-        state.A[action] = A
-        state.b[action] = b
-        state.updates = int(state.updates) + 1
-        return True
+        return core.rank_one_update(state, action=action, reward=reward, x=x)
 
     def _apply_recency_decay(self, *, state: LinUCBState) -> None:
         """Exponentially discount prior LinUCB evidence when configured."""
-        if float(self.config.decay) >= 1.0 or not state.feature_names:
-            return
-        dim = len(state.feature_names)
-        prior = np.eye(dim, dtype=float) * float(self.config.l2)
-        decay = float(self.config.decay)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
-                continue
-            state.A[action] = (decay * A) + ((1.0 - decay) * prior)
-            state.b[action] = decay * b
+        core.apply_recency_decay(state, decay=float(self.config.decay), l2=float(self.config.l2))
 
     def _serialize_state(self, state: LinUCBState) -> dict[str, Any]:
         return {

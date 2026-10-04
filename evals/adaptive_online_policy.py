@@ -21,14 +21,12 @@ from typing import Any
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import (
     coerce_float as _coerce_float,
 )
 from ._policy_utils import (
     coerce_nonnegative_int as _coerce_nonnegative_int,
-)
-from ._policy_utils import (
-    linucb_exploit_explore as _linucb_exploit_explore,
 )
 from ._policy_utils import (
     policy_effective_epsilon as _policy_effective_epsilon,
@@ -208,19 +206,10 @@ class OnlinePolicyConfig:
 
 
 @dataclass
-class LinUCBState:
-    """Mutable state for a per-action LinUCB model (A matrices and b vectors)."""
+class LinUCBState(core.LinUCBState):
+    """The shared LinUCB core state over the helper actions."""
 
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(
-        default_factory=lambda: dict.fromkeys(ONLINE_POLICY_ACTIONS, 0)
-    )
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
+    action_names: tuple[str, ...] = ONLINE_POLICY_ACTIONS
 
 
 class AdaptiveOnlinePolicyController:
@@ -762,124 +751,31 @@ class AdaptiveOnlinePolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in ONLINE_POLICY_ALGOS:
             return
-        if not self._state.feature_names:
-            self._state.feature_names = sorted(str(k) for k in cleaned_features)
-            dim = len(self._state.feature_names)
-            if dim <= 0:
-                self._state.feature_names = ["bias"]
-                dim = 1
-            self._state.A = {
-                action: (np.eye(dim, dtype=float) * float(self.config.l2))
-                for action in ONLINE_POLICY_ACTIONS
-            }
-            self._state.b = {
-                action: np.zeros((dim,), dtype=float) for action in ONLINE_POLICY_ACTIONS
-            }
-            return
-        expanded_feature_names = sorted(
-            set(self._state.feature_names) | {str(key) for key in cleaned_features}
-        )
-        if expanded_feature_names != self._state.feature_names:
-            previous_feature_names = list(self._state.feature_names)
-            previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-            previous_dim = len(previous_feature_names)
-            new_dim = len(expanded_feature_names)
-            self._state.feature_names = list(expanded_feature_names)
-            for action in ONLINE_POLICY_ACTIONS:
-                previous_A = self._state.A.get(action)
-                previous_b = self._state.b.get(action)
-                next_A = np.eye(new_dim, dtype=float) * float(self.config.l2)
-                next_b = np.zeros((new_dim,), dtype=float)
-                if (
-                    isinstance(previous_A, np.ndarray)
-                    and isinstance(previous_b, np.ndarray)
-                    and previous_A.shape == (previous_dim, previous_dim)
-                    and previous_b.shape == (previous_dim,)
-                ):
-                    for new_row, feature_row in enumerate(expanded_feature_names):
-                        old_row = previous_index.get(feature_row)
-                        if old_row is None:
-                            continue
-                        next_b[new_row] = previous_b[old_row]
-                        for new_col, feature_col in enumerate(expanded_feature_names):
-                            old_col = previous_index.get(feature_col)
-                            if old_col is None:
-                                continue
-                            next_A[new_row, new_col] = previous_A[old_row, old_col]
-                self._state.A[action] = next_A
-                self._state.b[action] = next_b
-        dim = len(self._state.feature_names)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or A.shape != (dim, dim):
-                self._state.A[action] = np.eye(dim, dtype=float) * float(self.config.l2)
-            if b is None or b.shape != (dim,):
-                self._state.b[action] = np.zeros((dim,), dtype=float)
+        core.ensure_feature_state(self._state, cleaned_features, l2=float(self.config.l2))
 
     def _feature_vector(self, *, cleaned_features: Mapping[str, float]) -> np.ndarray:
         """Build a numpy feature vector aligned with ``feature_names``."""
-        feature_names = self._state.feature_names
-        if not feature_names:
-            feature_names = ["bias"]
-        values = np.array(
-            [
-                self._tracked_safe_float(
-                    cleaned_features.get(name, 0.0),
-                    feature_name=name,
-                    default=0.0,
-                )
-                for name in feature_names
-            ],
-            dtype=float,
+        return core.feature_vector(
+            self._state,
+            cleaned_features,
+            to_float=lambda value, name: self._tracked_safe_float(
+                value, feature_name=name, default=0.0
+            ),
         )
-        return values
 
     def _linucb_scores(self, *, x: np.ndarray) -> dict[str, float]:
         """Compute UCB scores (exploit + alpha * explore) for every action."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "linucb":
             return dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            exploit, explore, updated_A = _linucb_exploit_explore(
-                A,
-                b,
-                x,
-                l2=float(self.config.l2),
-            )
-            if updated_A is not None:
-                self._state.A[action] = updated_A
-            scores[action] = exploit + (float(self.config.alpha) * explore)
-        return scores
+        return core.linucb_scores(
+            self._state, x, l2=float(self.config.l2), alpha=float(self.config.alpha)
+        )
 
     def _thompson_scores(self, *, x: np.ndarray) -> dict[str, float]:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "thompson":
             return dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
-        seed = self.config.random_seed
-        rng = np.random.default_rng(
-            seed=(seed + self._state.decisions) if seed is not None else None,
-        )
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            try:
-                A_inv = np.linalg.solve(A, np.eye(A.shape[0]))
-                theta_hat = A_inv @ b
-                theta_sample = rng.multivariate_normal(theta_hat, A_inv)
-                scores[action] = float(theta_sample @ x)
-            except np.linalg.LinAlgError:
-                scores[action] = 0.0
-        return scores
+        return core.thompson_scores(self._state, x, seed=self.config.random_seed)
 
     def _apply_action_score_biases(self, scores: Mapping[str, float]) -> dict[str, float]:
         """Apply additive score priors without changing feasibility masks."""
@@ -905,31 +801,13 @@ class AdaptiveOnlinePolicyController:
             return False
         x = self._feature_vector(cleaned_features=feature_values)
         self._apply_recency_decay()
-        A = self._state.A.get(action)
-        b = self._state.b.get(action)
-        if A is None or b is None:
-            return False
-        A += np.outer(x, x)
-        b += float(reward) * x
-        self._state.A[action] = A
-        self._state.b[action] = b
-        self._state.updates = int(self._state.updates) + 1
-        return True
+        return core.rank_one_update(self._state, action=action, reward=reward, x=x)
 
     def _apply_recency_decay(self) -> None:
         """Exponentially discount prior LinUCB evidence when configured."""
-        if float(self.config.decay) >= 1.0 or not self._state.feature_names:
-            return
-        dim = len(self._state.feature_names)
-        prior = np.eye(dim, dtype=float) * float(self.config.l2)
-        decay = float(self.config.decay)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
-                continue
-            self._state.A[action] = (decay * A) + ((1.0 - decay) * prior)
-            self._state.b[action] = decay * b
+        core.apply_recency_decay(
+            self._state, decay=float(self.config.decay), l2=float(self.config.l2)
+        )
 
     def _state_payload(self) -> dict[str, Any]:
         """Build a JSON-serialisable snapshot of the full model state."""

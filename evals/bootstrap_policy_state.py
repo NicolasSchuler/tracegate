@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import argparse
 import glob
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import utc_now as _utc_now
 from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ACTIONS,
@@ -58,29 +59,8 @@ class LoadedPolicyEvent:
 
 
 @dataclass
-class ReplayState:
-    """Minimal serializable LinUCB replay state."""
-
-    action_names: tuple[str, ...]
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(default_factory=dict)
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        names = tuple(str(name) for name in self.action_names)
-        if not names:
-            names = ("default",)
-        self.action_names = names
-        normalized_counts = dict.fromkeys(names, 0)
-        for key, value in dict(self.action_counts).items():
-            if key in normalized_counts:
-                normalized_counts[key] = _safe_int(value, default=0)
-        self.action_counts = normalized_counts
+class ReplayState(core.LinUCBState):
+    """Serializable LinUCB replay state (the shared core state)."""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -752,74 +732,16 @@ def _ensure_feature_state(
     cleaned_features: dict[str, float],
     l2: float,
 ) -> None:
-    if not state.feature_names:
-        state.feature_names = sorted(str(key) for key in cleaned_features)
-        dim = len(state.feature_names)
-        if dim <= 0:
-            state.feature_names = ["bias"]
-            dim = 1
-        state.A = {action: (np.eye(dim, dtype=float) * float(l2)) for action in state.action_names}
-        state.b = {action: np.zeros((dim,), dtype=float) for action in state.action_names}
-        return
-    expanded_feature_names = sorted(set(state.feature_names) | {str(k) for k in cleaned_features})
-    if expanded_feature_names != state.feature_names:
-        previous_feature_names = list(state.feature_names)
-        previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-        previous_dim = len(previous_feature_names)
-        new_dim = len(expanded_feature_names)
-        state.feature_names = list(expanded_feature_names)
-        for action in state.action_names:
-            previous_A = state.A.get(action)
-            previous_b = state.b.get(action)
-            next_A = np.eye(new_dim, dtype=float) * float(l2)
-            next_b = np.zeros((new_dim,), dtype=float)
-            if (
-                isinstance(previous_A, np.ndarray)
-                and isinstance(previous_b, np.ndarray)
-                and previous_A.shape == (previous_dim, previous_dim)
-                and previous_b.shape == (previous_dim,)
-            ):
-                for new_row, feature_row in enumerate(expanded_feature_names):
-                    old_row = previous_index.get(feature_row)
-                    if old_row is None:
-                        continue
-                    next_b[new_row] = previous_b[old_row]
-                    for new_col, feature_col in enumerate(expanded_feature_names):
-                        old_col = previous_index.get(feature_col)
-                        if old_col is None:
-                            continue
-                        next_A[new_row, new_col] = previous_A[old_row, old_col]
-            state.A[action] = next_A
-            state.b[action] = next_b
-    dim = len(state.feature_names)
-    for action in state.action_names:
-        matrix = state.A.get(action)
-        vector = state.b.get(action)
-        if matrix is None or matrix.shape != (dim, dim):
-            state.A[action] = np.eye(dim, dtype=float) * float(l2)
-        if vector is None or vector.shape != (dim,):
-            state.b[action] = np.zeros((dim,), dtype=float)
+    core.ensure_feature_state(state, cleaned_features, l2=float(l2))
 
 
 def _apply_recency_decay(*, state: ReplayState, decay: float, l2: float) -> None:
-    if float(decay) >= 1.0 or not state.feature_names:
-        return
-    dim = len(state.feature_names)
-    prior = np.eye(dim, dtype=float) * float(l2)
-    for action in state.action_names:
-        matrix = state.A.get(action)
-        vector = state.b.get(action)
-        if matrix is None or vector is None or matrix.shape != (dim, dim) or vector.shape != (dim,):
-            continue
-        state.A[action] = (float(decay) * matrix) + ((1.0 - float(decay)) * prior)
-        state.b[action] = float(decay) * vector
+    core.apply_recency_decay(state, decay=float(decay), l2=float(l2))
 
 
 def _feature_vector(*, state: ReplayState, feature_values: dict[str, float]) -> np.ndarray:
-    feature_names = state.feature_names or ["bias"]
-    return np.array(
-        [_safe_float(feature_values.get(name, 0.0), default=0.0) for name in feature_names],
-        dtype=float,
+    return core.feature_vector(
+        state, feature_values, to_float=lambda value, _name: _safe_float(value, default=0.0)
     )
 
 
@@ -830,14 +752,8 @@ def _apply_reward_update(
     reward: float,
     feature_values: dict[str, float],
 ) -> None:
-    matrix = state.A.get(action)
-    vector = state.b.get(action)
-    if matrix is None or vector is None:
-        return
     x = _feature_vector(state=state, feature_values=feature_values)
-    state.A[action] = matrix + np.outer(x, x)
-    state.b[action] = vector + (float(reward) * x)
-    state.updates = int(state.updates) + 1
+    core.rank_one_update(state, action=action, reward=reward, x=x)
 
 
 def _update_feature_scaling_caps(*, state: ReplayState, raw_caps: Any) -> None:
