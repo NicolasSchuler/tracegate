@@ -95,10 +95,10 @@ Which existing results to invalidate or re-run is entirely the user's decision. 
 
 ## Phase 0: setup and triage
 
-- [ ] Create the branch from `main`, run `uv sync --group dev` and `just check`, and note the baseline state (coverage, failures).
-- [ ] Send the user decisions D1–D12 in one message, with the recommended defaults.
-- [ ] Re-run the quick repros below. Note in the tracker any that no longer reproduce.
-- [ ] Turn each Critical finding (ATT-01, ATT-02, BAS-01, POL-01, STA-01, STA-02, DAT-03, CAP-01) into a failing regression test, marked `@pytest.mark.xfail(strict=True, reason="<ID>")` until fixed, so progress is visible.
+- [x] Create the branch from `main`, run `uv sync --group dev` and `just check`, and note the baseline state (coverage, failures). *(Branched from the M1 commit `bde82e2` per user decision. Baseline: `just check` green, 7,990 passed, 2 skipped, `src/llmdebug` coverage 99.52%.)*
+- [x] Send the user decisions D1–D12 in one message, with the recommended defaults. *(2026-10-04: user accepted all recommended defaults.)*
+- [x] Re-run the quick repros below. Note in the tracker any that no longer reproduce. *(All reproduce: ORC-01, CAP-01, CAP-03, BAS-01 = 11/1,828, LLM-01, STA-04 = 0.24, ATT-01 end-to-end.)*
+- [x] Turn each Critical finding (ATT-01, ATT-02, BAS-01, POL-01, STA-01, STA-02, DAT-03, CAP-01) into a failing regression test, marked `@pytest.mark.xfail(strict=True, reason="<ID>")` until fixed, so progress is visible.
 
 ### Quick repros
 
