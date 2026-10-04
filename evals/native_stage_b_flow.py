@@ -12,6 +12,7 @@ from .eval_prompts import _apply_prompt_budget, _build_stage_b_prompt_sections
 from .eval_types import (
     OPENAI_CONTEXT_WINDOW_CHARS_PER_TOKEN,
     OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
+    OPENAI_MIN_PROMPT_TOKENS,
     PromptBudgetResult,
 )
 
@@ -100,20 +101,57 @@ class RetryPlanResult:
     tep_equilibrium_converged: bool = False
 
 
+class OpenAIPromptBudgetError(ValueError):
+    """The context window leaves too little prompt budget after ``max_tokens`` (LLM-06)."""
+
+
+def openai_usable_prompt_tokens(
+    *,
+    context_window_tokens: int,
+    max_tokens: int,
+    reserve_tokens: int = OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
+) -> int | None:
+    """Prompt tokens left after the completion and the reserve; ``None`` without a window.
+
+    Raises :class:`OpenAIPromptBudgetError` below ``OPENAI_MIN_PROMPT_TOKENS``. The cap
+    used to collapse to one character, so with ``-c 8192`` and ``--openai-max-tokens
+    8192`` every prompt was a single character and every case looked like a model failure.
+    """
+    normalized_window = max(0, int(context_window_tokens))
+    if normalized_window <= 0:
+        return None
+    completion = max(0, int(max_tokens))
+    reserve = max(0, int(reserve_tokens))
+    usable_tokens = normalized_window - completion - reserve
+    if usable_tokens < OPENAI_MIN_PROMPT_TOKENS:
+        raise OpenAIPromptBudgetError(
+            f"context window of {normalized_window} tokens leaves {usable_tokens} prompt tokens "
+            f"after --openai-max-tokens {completion} and a {reserve}-token reserve; at least "
+            f"{OPENAI_MIN_PROMPT_TOKENS} are needed. Lower --openai-max-tokens or give the "
+            "server a larger context."
+        )
+    return usable_tokens
+
+
 def openai_preflight_total_char_cap(
     *,
     context_window_tokens: int,
     max_tokens: int,
     reserve_tokens: int = OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
 ) -> int:
-    """Convert a token budget into a conservative character cap for prompt assembly."""
-    normalized_window = max(0, int(context_window_tokens))
-    if normalized_window <= 0:
+    """Convert a token budget into a conservative character cap for prompt assembly.
+
+    Returns 0 (no cap) without a known context window; raises
+    :class:`OpenAIPromptBudgetError` when the budget is degenerate.
+    """
+    usable_tokens = openai_usable_prompt_tokens(
+        context_window_tokens=context_window_tokens,
+        max_tokens=max_tokens,
+        reserve_tokens=reserve_tokens,
+    )
+    if usable_tokens is None:
         return 0
-    usable_tokens = normalized_window - max(0, int(max_tokens)) - max(0, int(reserve_tokens))
-    if usable_tokens <= 0:
-        return 1
-    return max(1, usable_tokens * OPENAI_CONTEXT_WINDOW_CHARS_PER_TOKEN)
+    return usable_tokens * OPENAI_CONTEXT_WINDOW_CHARS_PER_TOKEN
 
 
 def stage_a_index_fallback_needed(
@@ -339,6 +377,7 @@ def maybe_run_retry_plan_then_patch(
 
 
 __all__ = [
+    "OpenAIPromptBudgetError",
     "RetryPlanResult",
     "StageBPromptBuildResult",
     "StageBPromptInputs",
@@ -346,5 +385,6 @@ __all__ = [
     "build_stage_b_prompt_with_budget",
     "maybe_run_retry_plan_then_patch",
     "openai_preflight_total_char_cap",
+    "openai_usable_prompt_tokens",
     "stage_a_index_fallback_needed",
 ]

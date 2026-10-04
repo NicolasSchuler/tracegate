@@ -262,7 +262,6 @@ from evals.eval_types import (
     HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
-    OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
     PATCH_VERIFIER_RECOVERY_RESULT_NO_DIFF,
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
@@ -306,6 +305,7 @@ from evals.native_openai_attempt_flow import (
 from evals.native_stage_b_flow import (
     StageBPromptInputs,
     build_stage_b_prompt_sections,
+    openai_usable_prompt_tokens,
 )
 from evals.native_stage_b_flow import (
     _tep_jaccard_similarity as _tep_jaccard_similarity,
@@ -680,17 +680,9 @@ def _openai_preflight_prompt_cap_tokens(
     *, context_window_tokens: int, max_tokens: int
 ) -> int | None:
     """Return the preflight prompt token cap used by the char-cap fallback."""
-    normalized_window = max(0, int(context_window_tokens))
-    if normalized_window <= 0:
-        return None
-    usable_tokens = (
-        normalized_window
-        - max(0, int(max_tokens))
-        - max(0, int(OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS))
+    return openai_usable_prompt_tokens(
+        context_window_tokens=context_window_tokens, max_tokens=max_tokens
     )
-    if usable_tokens <= 0:
-        return 1
-    return usable_tokens
 
 
 def _resolve_stage_b_reveal_policy(

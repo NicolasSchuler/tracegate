@@ -4,6 +4,8 @@ import ast
 import sys
 from pathlib import Path
 
+import pytest
+
 from evals import native_stage_b_flow as flow
 from evals.eval_prompts import _build_stage_b_prompt_sections
 from evals.eval_types import PromptBudgetResult
@@ -31,7 +33,15 @@ def _prompt_inputs() -> flow.StageBPromptInputs:
 
 def test_openai_preflight_total_char_cap_preserves_guard() -> None:
     assert flow.openai_preflight_total_char_cap(context_window_tokens=0, max_tokens=512) == 0
-    assert flow.openai_preflight_total_char_cap(context_window_tokens=1024, max_tokens=2048) == 1
+    # LLM-06: a window that leaves no prompt budget used to give a 1-character cap.
+    with pytest.raises(flow.OpenAIPromptBudgetError, match="--openai-max-tokens 2048"):
+        flow.openai_preflight_total_char_cap(context_window_tokens=1024, max_tokens=2048)
+    with pytest.raises(flow.OpenAIPromptBudgetError):
+        flow.openai_preflight_total_char_cap(context_window_tokens=8192, max_tokens=8192)
+    usable = 8192 - 2048 - flow.OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS
+    assert flow.openai_preflight_total_char_cap(context_window_tokens=8192, max_tokens=2048) == (
+        usable * flow.OPENAI_CONTEXT_WINDOW_CHARS_PER_TOKEN
+    )
 
 
 def test_build_stage_b_prompt_with_budget_reintroduces_stage_a_index_on_truncation(

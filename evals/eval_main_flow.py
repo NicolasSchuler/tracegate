@@ -56,6 +56,7 @@ from evals.eval_main_support import (
 from evals.eval_main_support import (
     RunConditionInputs as _RunConditionInputs,
 )
+from evals.native_stage_b_flow import openai_usable_prompt_tokens
 from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
 from evals.progress_display import DisplayRunSummary, build_startup_sections, create_run_display
 from evals.progress_output import _is_infra_interrupted_records, classify_failure_reason
@@ -201,6 +202,11 @@ def run_main_flow(
         ) = _resolve_openai_context_window_for_run(
             args=args,
             patcher=patcher,
+        )
+        # LLM-06: fail before any case runs when max_tokens leaves no usable prompt.
+        openai_usable_prompt_tokens(
+            context_window_tokens=openai_context_window_tokens_effective,
+            max_tokens=int(getattr(patcher, "max_tokens", 0) or 0),
         )
     except BaseException:
         _close_run_results_io()

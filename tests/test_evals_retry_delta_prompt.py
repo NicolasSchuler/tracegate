@@ -6,7 +6,10 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from evals import run_eval
+from evals.native_stage_b_flow import OpenAIPromptBudgetError
 from evals.patchers.base import ContextRequestResult, PatchResult
 
 
@@ -252,7 +255,7 @@ def test_openai_preflight_context_window_caps_prompt(tmp_path, monkeypatch) -> N
         ),
     )
 
-    context_window_tokens = 3500
+    context_window_tokens = 4500  # 1,428 usable prompt tokens after max_tokens and reserve
     expected_cap = run_eval._openai_preflight_total_char_cap(
         context_window_tokens=context_window_tokens,
         max_tokens=patcher.max_tokens,
@@ -290,9 +293,10 @@ def test_openai_preflight_context_window_caps_prompt(tmp_path, monkeypatch) -> N
     assert patch_meta["openai_preflight_trimmed"] is True
 
 
-def test_openai_preflight_context_window_min_cap_avoids_uncapped_prompt(
+def test_openai_preflight_degenerate_context_window_raises_instead_of_one_char_prompt(
     tmp_path, monkeypatch
 ) -> None:
+    """LLM-06: a window smaller than max_tokens + reserve used to send a 1-character prompt."""
     case = _make_case(tmp_path)
     workdir = tmp_path / "workdir_openai_preflight_min_cap"
     context_dir = tmp_path / "context_openai_preflight_min_cap"
@@ -310,36 +314,22 @@ def test_openai_preflight_context_window_min_cap_avoids_uncapped_prompt(
         ),
     )
 
-    # Smaller than max_tokens + reserve, which previously produced cap=0 (effectively uncapped).
-    context_window_tokens = 2000
-    expected_cap = run_eval._openai_preflight_total_char_cap(
-        context_window_tokens=context_window_tokens,
-        max_tokens=patcher.max_tokens,
-    )
+    with pytest.raises(OpenAIPromptBudgetError):
+        run_eval.run_one_condition(
+            case=case,
+            condition=run_eval.Condition.BASE_REPAIR,
+            workdir=workdir,
+            context_dir_base=context_dir,
+            patcher=patcher,
+            k=1,
+            output_format="json_compact",
+            run_id="run-openai-preflight-min-cap",
+            include_files_context=True,
+            max_context_chars=200_000,
+            force_patch_attempt=False,
+            context_protocol="monolithic",
+            openai_context_window_tokens=2000,
+            prompt_budget_total_chars=180_000,
+        )
 
-    records = run_eval.run_one_condition(
-        case=case,
-        condition=run_eval.Condition.BASE_REPAIR,
-        workdir=workdir,
-        context_dir_base=context_dir,
-        patcher=patcher,
-        k=1,
-        output_format="json_compact",
-        run_id="run-openai-preflight-min-cap",
-        include_files_context=True,
-        max_context_chars=200_000,
-        force_patch_attempt=False,
-        context_protocol="monolithic",
-        openai_context_window_tokens=context_window_tokens,
-        prompt_budget_total_chars=180_000,
-    )
-
-    assert len(records) == 1
-    assert len(patcher.prompts) == 1
-    assert expected_cap == 1
-    assert len(patcher.prompts[0]) <= expected_cap
-
-    attempt_meta = records[0]["attempt_metadata"]
-    assert int(attempt_meta["openai_preflight_prompt_cap_chars"] or 0) == expected_cap
-    assert attempt_meta["openai_preflight_trimmed"] is True
-    assert int(attempt_meta["stage_b_prompt_chars"] or 0) <= expected_cap
+    assert patcher.prompts == []

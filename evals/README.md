@@ -1132,6 +1132,7 @@ Key flags:
 - `--openai-auto-context-window`: opt-in model metadata probe for context window tokens before execution starts (falls back to disabled guard on probe failure).
 - probe adapter order is LM Studio REST (`/api/v1/models`, then `/api/v0/models`) followed by generic OpenAI-compatible `/models`.
 - manual `--openai-context-window-tokens` always takes precedence over `--openai-auto-context-window`.
+- with a known window, the run refuses to start when `window - --openai-max-tokens - 1024` (the reserve) is below 1,024 prompt tokens (`OpenAIPromptBudgetError`, LLM-06); previously the prompt cap collapsed to one character and every case looked like a model failure.
 - `--openai-response-mode edits|diff|full_file`: Stage-B patch contract for the OpenAI patcher. `full_file` asks for the complete repaired contents of one target source file and diffs locally; in v1 it only applies when the copied case workdir has exactly one non-test `.py` file, otherwise it falls back internally to `diff`.
 - `--openai-compat-profile auto|qwen_openai_raw|qwen_dashscope|lmstudio_model_yaml|off`: request-shaping profile for the internal OpenAI patcher. Use `qwen_openai_raw` for raw Qwen endpoints that return reasoning without final `message.content`; it sends `chat_template_kwargs.enable_thinking=false` on each request.
 - `--openai-response-mode-autoswitch off|retry_to_diff`: opt-in retry policy for OpenAI patcher internal syntax/sanitize cycles (`retry_to_diff` switches `edits` → `diff` after retry-triggering failures).

@@ -367,3 +367,56 @@ def test_llm19_bad_json_response_body_is_retried() -> None:
     assert raw is not None
     assert meta["transport_retry_count"] == 1
     assert meta["transport_retry_attempts"][0]["error"] == "bad_json_response"
+
+
+# --- LLM-06: a degenerate prompt budget is a configuration error at startup -------------
+
+
+def test_llm06_run_aborts_before_any_case_when_max_tokens_fills_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from evals import run_eval
+    from evals.native_stage_b_flow import OpenAIPromptBudgetError
+
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", tmp_path)
+    case_dir = tmp_path / "cases" / "c1"
+    case_dir.mkdir(parents=True)
+    (case_dir / "buggy.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    case = run_eval.CaseSpec(
+        case_id="c1",
+        path=case_dir,
+        category="logic",
+        difficulty="easy",
+        snapshot_dependency="none",
+        expected_exception="AssertionError",
+        tags=[],
+        python_args=["-m", "pytest", "-q"],
+        timeout_sec=30,
+    )
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(
+        run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai", max_tokens=8192)
+    )
+    monkeypatch.setattr(
+        run_eval,
+        "run_one_condition",
+        lambda **_kwargs: pytest.fail("no case may run with a degenerate prompt budget"),
+    )
+
+    with pytest.raises(OpenAIPromptBudgetError, match="--openai-max-tokens 8192"):
+        run_eval.main(
+            [
+                "--run-id",
+                "llm06",
+                "--patcher",
+                "null",
+                "--conditions",
+                "base_repair",
+                "--openai-context-window-tokens",
+                "8192",
+                "--executor",
+                "local",
+            ]
+        )
