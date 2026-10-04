@@ -238,3 +238,26 @@ def test_inverse_cache_refreshes_exactly_after_the_refresh_interval() -> None:
             assert entry[2] == step + 1
     assert "a" not in state.inverse_cache  # dropped, recomputed exactly on the next score
     np.testing.assert_allclose(core.arm_inverse(state, "a"), np.linalg.inv(state.A["a"]))
+
+
+def test_scorers_handle_missing_and_singular_arms() -> None:
+    state = core.LinUCBState(action_names=("ok", "singular", "missing"))
+    core.ensure_feature_state(state, ["bias", "x"], l2=1.0)
+    state.A["singular"] = np.zeros((2, 2))
+    del state.A["missing"]
+    x = np.array([1.0, 0.5])
+
+    assert core.arm_inverse(state, "missing") is None
+    assert core.arm_inverse(state, "singular") is None
+    assert "singular" not in state.inverse_cache
+
+    ucb = core.linucb_scores(state, x, l2=1.0, alpha=1.0)
+    assert ucb["missing"] == 0.0
+    assert np.isfinite(ucb["singular"])  # regularized for this score only (POL-22)
+    np.testing.assert_array_equal(state.A["singular"], np.zeros((2, 2)))
+
+    first = core.thompson_scores(state, x, seed=3)
+    assert first["missing"] == 0.0
+    assert first["singular"] == 0.0
+    assert np.isfinite(first["ok"])
+    assert core.thompson_scores(state, x, seed=3) == first
