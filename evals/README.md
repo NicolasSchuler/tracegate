@@ -1240,7 +1240,7 @@ Key flags:
 - `--adaptive-online-warmup-decisions <int>`: uniform warmup decisions before policy exploitation.
 - `--adaptive-online-save-every <int>`: persist policy state every N updates.
 - `--adaptive-online-feature-scaling-profile none|v1|v1_interactions|percentile_v1`: static feature scaling profile for online LinUCB (default `v1`). `v1_interactions` adds the curated helper-policy interaction terms; `percentile_v1` keeps the same feature set but fits scaling caps from observed history.
-- `--adaptive-online-action-score-biases <pairs>`: additive helper-action score priors such as `search_only=-1.00,frame_only=-0.50`. Shared adaptive templates now down-weight `search_only` and `frame_only` more aggressively by default without masking them.
+- `--adaptive-online-action-score-biases <pairs>`: additive helper-action score priors as `action=bias` pairs (default `frame_only=-0.05,search_only=-0.10`; an empty string disables them). Each bias must be within ±0.1 of the success reward (decision D6, POL-07); larger values used to act as a veto on the arm.
 - `--adaptive-online-init-state-path <path>`: warm-start online controller weights from an existing compatible state JSON while still saving to the run-scoped `--adaptive-online-state-path`. This is for warm starts, not exact run continuation.
 - `--adaptive-online-state-path <path>`: policy state JSON path (default `evals/artifacts/policies/<run_id>.json`).
 - `--adaptive-online-events-path <path>`: policy event log JSONL path (default `evals/results/<run_id>.adaptive_policy.jsonl`).

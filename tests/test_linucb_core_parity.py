@@ -5,7 +5,7 @@ in ``adaptive_online_policy``, ``adaptive_budget_online_policy`` and
 ``bootstrap_policy_state``). ``tests/golden/policy_online_parity.golden`` was first captured
 from a seeded online-controller run, plus a bootstrap replay of its events, before the
 extraction; it is regenerated only for intended behaviour changes (POL-01 per-arm decay, POL-24
-random tie-breaking).
+random tie-breaking, POL-07 default score biases).
 """
 
 from __future__ import annotations

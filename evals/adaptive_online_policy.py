@@ -90,10 +90,14 @@ ONLINE_POLICY_ACTIONS = (
 )
 ONLINE_POLICY_MODES = {"off", "shadow", "on"}
 ONLINE_POLICY_ALGOS = {"linucb", "thompson"}
+ONLINE_ACTION_SCORE_BIAS_LIMIT = 0.1
+"""Largest allowed |score bias|: a small prior, at most 0.1 of the success reward of 1.0
+(decision D6, POL-07). Larger biases acted as a veto on the arm."""
 DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES = {
-    ACTION_SEARCH_ONLY: -0.50,
-    ACTION_FRAME_ONLY: -0.25,
+    ACTION_SEARCH_ONLY: -0.10,
+    ACTION_FRAME_ONLY: -0.05,
 }
+"""The one source of the default score biases (POL-07); the CLI default is derived from it."""
 STATE_SCHEMA_VERSION = 4
 # Schema 4 adds ``applied_action_counts`` (POL-24); schema 3 states still load.
 SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
@@ -107,6 +111,20 @@ def default_online_action_score_biases() -> dict[str, float]:
         action: float(DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES.get(action, 0.0))
         for action in ONLINE_POLICY_ACTIONS
     }
+
+
+def format_online_action_score_biases(biases: Mapping[str, float]) -> str:
+    """``action=bias`` pairs for the non-zero biases, in action order (the CLI format)."""
+    return ",".join(
+        f"{action}={float(biases[action]):.2f}"
+        for action in ONLINE_POLICY_ACTIONS
+        if float(biases.get(action, 0.0)) != 0.0
+    )
+
+
+DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES = format_online_action_score_biases(
+    DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES
+)
 
 
 def zero_online_action_score_biases() -> dict[str, float]:

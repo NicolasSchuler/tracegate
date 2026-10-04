@@ -127,9 +127,12 @@ The budget policy uses the same runtime modes as helper policy:
   - `frame_only`: one `frame` plus up to two `local_var` requests
   - `file_only`: one `file` request
   - `search_only`: up to two `search` requests
-- Greedy helper selection can include additive score priors. Shared adaptive
-  defaults down-weight `search_only` by `-0.50` and `frame_only` by `-0.25`
-  without removing either action from exploration or feasibility masks.
+- Greedy helper selection can include additive score priors. The defaults down-weight
+  `search_only` by `-0.10` and `frame_only` by `-0.05` without removing either action from
+  exploration or feasibility masks. They come from one constant
+  (`DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES`), and every bias must stay within ±0.1 of the
+  success reward of 1.0 (decision D6, POL-07); the CLI default used to be `-1.00`/`-0.50`,
+  which acted as a veto.
 - Helper arms are feasibility-masked before selection. Actions that cannot run because of missing
   snapshot state, missing `request_context`, disabled/unsupported compaction, or strict-JSON
   preconditions are excluded from the LinUCB choice set and logged as unavailable.

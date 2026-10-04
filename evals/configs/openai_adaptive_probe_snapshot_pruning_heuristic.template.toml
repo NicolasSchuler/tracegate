@@ -49,7 +49,6 @@ online_warmup_decisions = 20
 online_save_every = 5
 online_decay = 1.0
 online_feature_scaling_profile = "v1"
-online_action_score_biases = "search_only=-1.00,frame_only=-0.50"
 online_init_state_path = ""
 online_state_path = "evals/artifacts/policies/replace-me-snapshot-pruning-heuristic-policy.json"
 online_events_path = "evals/results/replace-me-snapshot-pruning-heuristic-policy-events.jsonl"

@@ -144,10 +144,11 @@ def test_sync_adaptive_online_metadata_copies_tuning_fields(tmp_path) -> None:
     assert patch_meta["adaptive_online_configured_decay"] == pytest.approx(0.85)
     assert patch_meta["adaptive_online_effective_epsilon"] == pytest.approx(0.05)
     assert patch_meta["adaptive_online_warmup_active"] is False
+    # The controller default is -0.10/-0.05 since POL-07 (it was -0.50/-0.25).
     assert attempt_metadata["adaptive_online_action_score_biases"]["search_only"] == pytest.approx(
-        -0.5
+        -0.10
     )
-    assert patch_meta["adaptive_online_action_score_biases"]["frame_only"] == pytest.approx(-0.25)
+    assert patch_meta["adaptive_online_action_score_biases"]["frame_only"] == pytest.approx(-0.05)
     assert attempt_metadata["adaptive_online_reward_success_hint_scale"] == pytest.approx(1.3)
     assert attempt_metadata["adaptive_online_reward_progress_hint_scale"] == pytest.approx(1.4)
     assert attempt_metadata["adaptive_online_reward_stagnation_penalty_scale"] == pytest.approx(1.5)

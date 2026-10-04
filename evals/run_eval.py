@@ -2276,7 +2276,8 @@ def main(argv: list[str] | None = None) -> int:
         "--adaptive-online-action-score-biases",
         default=DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
         help=(
-            "Comma-separated additive helper-action score priors as action=bias pairs "
+            "Comma-separated additive helper-action score priors as action=bias pairs, "
+            "each within +/-0.1 of the success reward "
             f"(default: {DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES})."
         ),
     )

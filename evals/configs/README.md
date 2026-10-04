@@ -56,7 +56,10 @@ Files named `*.template.toml` must be copied and customised before use (set
 after setting `run_id`.
 
 Shared adaptive templates now ship with two paper-facing defaults:
-- helper score priors: `online_action_score_biases = "search_only=-1.00,frame_only=-0.50"`
+- helper score priors: templates don't set `online_action_score_biases`, so they use the one
+  runtime default, `frame_only=-0.05,search_only=-0.10` (POL-07, decision D6). Each bias must
+  stay within ±0.1 of the success reward; the templates used to set `-1.00`/`-0.50`, which
+  vetoed those arms.
 - conservative budget ladder: `budget_policy_tiers = "1.0,1.1,1.2,1.35,1.5"` with `budget_policy_max_ups_per_case = 1`
 
 Two policy-input defaults changed in 2026-10 and are recorded in the run configuration:

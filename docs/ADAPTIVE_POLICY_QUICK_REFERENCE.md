@@ -281,9 +281,11 @@ BudgetPolicyConfig(
 )
 ```
 
-Shared helper defaults also apply additive score priors:
-- `search_only = -0.50`
-- `frame_only = -0.25`
+Shared helper defaults also apply additive score priors (one source,
+`DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES`; each bias at most ±0.1 of the success reward,
+POL-07 / D6):
+- `search_only = -0.10`
+- `frame_only = -0.05`
 
 `hierarchical_v1` also exposes/logs:
 - family availability masks

@@ -43,6 +43,8 @@ from evals.eval_types import (
     CONTEXT_COMPACTION_MODES,
     CONTEXT_COMPACTION_SCOPE_TOKENS,
     CONTEXT_PROTOCOLS,
+    DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
+    ONLINE_ACTION_SCORE_BIAS_LIMIT,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
     PROGRESS_VERBOSITIES,
     PROMPT_ORDER_MODES,
@@ -646,8 +648,9 @@ def prepare_main_setup(
     except (TypeError, ValueError):
         _fail(
             "Invalid --adaptive-online-action-score-biases: expected comma-separated "
-            "action=bias pairs using known helper actions "
-            "(for example: search_only=-1.00,frame_only=-0.50)."
+            "action=bias pairs using known helper actions, each bias within "
+            f"+/-{ONLINE_ACTION_SCORE_BIAS_LIMIT:g} of the success reward "
+            f"(for example: {DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES})."
         )
     _require_choice(
         value=args.adaptive_budget_policy_mode,
