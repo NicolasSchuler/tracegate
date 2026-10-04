@@ -451,7 +451,7 @@ class TestIntervenorAdapter:
         }
         assert duration_sec >= 0.0
         assert meta == {}
-        assert observed["kwargs"]["extra_body"] == {"usage": {"include": True}}
+        assert observed["kwargs"]["extra_body"] == {}  # BAS-17: only for OpenRouter
 
     def test_env_client_requests_usage_and_maps_input_output_tokens(
         self,
@@ -528,7 +528,7 @@ class TestIntervenorAdapter:
             "timeout": 7.0,
             "max_retries": 0,
         }
-        assert observed["kwargs"]["extra_body"] == {"usage": {"include": True}}
+        assert observed["kwargs"]["extra_body"] == {}  # BAS-17: only for OpenRouter
         assert json.loads(response_path.read_text(encoding="utf-8")) == {
             "text": "patched",
             "meta": {},
@@ -562,6 +562,11 @@ class TestIntervenorAdapter:
             model="test-model",
             api_base_url="http://127.0.0.1:9999",
             api_key="sk-test",
+            # BAS-19: the shared default enables the reasoning fallback; disable it here.
+            extra={
+                "baseline_openai_enable_thinking": False,
+                "baseline_openai_allow_reasoning_fallback": False,
+            },
         )
 
         with pytest.raises(OpenAICompatResponseError, match="reasoning but no final answer"):
@@ -589,6 +594,8 @@ class TestIntervenorAdapter:
                     "base_url": "http://127.0.0.1:9999",
                     "api_key": "sk-test",
                     "timeout_sec": 7,
+                    "baseline_openai_enable_thinking": False,
+                    "baseline_openai_allow_reasoning_fallback": False,
                 }
             ),
             encoding="utf-8",
@@ -1323,3 +1330,12 @@ def test_bas10_generation_failure_keeps_candidate_and_usage() -> None:
     assert kept.meta["error"] == "generation_failed"
     assert "TimeoutError" in kept.meta["generation_exc"]
     assert "compat_message" not in kept.meta
+
+
+def test_bas17_usage_extra_body_only_for_endpoints_that_support_it() -> None:
+    from baselines.openai_compat import usage_include_extra_body
+
+    assert usage_include_extra_body("https://openrouter.ai/api/v1") == {"usage": {"include": True}}
+    assert usage_include_extra_body("http://127.0.0.1:8080/v1") == {}
+    assert usage_include_extra_body("https://api.openai.com/v1") == {}
+    assert usage_include_extra_body("https://evil-openrouter.ai.example.com") == {}

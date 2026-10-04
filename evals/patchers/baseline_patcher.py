@@ -37,6 +37,10 @@ from baselines.adapter_base import (
 )
 from baselines.case_information import CASE_INFO_POLICY, MODEL_HIDDEN_CASE_FIELDS
 from baselines.contracts import BASELINE_CONTRACT_VERSION
+from baselines.openai_compat import (
+    BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+    BASELINE_OPENAI_ENABLE_THINKING_DEFAULT,
+)
 from evals.adaptive_controller_packet import (
     HYBRID_GUIDANCE_MODE_FAIR_V1,
     HYBRID_GUIDANCE_MODE_FIXED_V1,
@@ -671,10 +675,15 @@ class BaselinePatcher(Patcher):
                     self.config.extra.get("baseline_openai_compat_profile") or "auto"
                 ),
                 allow_reasoning_fallback=bool(
-                    self.config.extra.get("baseline_openai_allow_reasoning_fallback", True)
+                    self.config.extra.get(
+                        "baseline_openai_allow_reasoning_fallback",
+                        BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+                    )
                 ),
                 enable_thinking=bool(
-                    self.config.extra.get("baseline_openai_enable_thinking", True)
+                    self.config.extra.get(
+                        "baseline_openai_enable_thinking", BASELINE_OPENAI_ENABLE_THINKING_DEFAULT
+                    )
                 ),
                 name=f"{self.adapter.name}_stage_a_helper",
             )

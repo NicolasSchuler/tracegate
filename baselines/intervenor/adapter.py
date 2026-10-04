@@ -37,6 +37,7 @@ from baselines.openai_compat import (
     compat_config_from_extra,
     normalize_chat_completion_response,
     require_final_content,
+    usage_include_extra_body,
 )
 from baselines.pins import get_pinned_repo_commit
 from evals.adaptive_controller_packet import (
@@ -185,10 +186,6 @@ def _accumulate_usage(total: dict[str, int], delta: dict[str, int]) -> dict[str,
     for key, value in delta.items():
         merged[key] = merged.get(key, 0) + value
     return merged
-
-
-def _usage_extra_body() -> dict[str, Any]:
-    return {"usage": {"include": True}}
 
 
 def _coerce_subprocess_output(value: str | bytes | None) -> str:
@@ -962,7 +959,7 @@ class IntervenorAdapter(BaselineAdapter):
                 "temperature": _generation_temperature(config),
                 "max_tokens": _generation_max_tokens(config, max_tokens),
                 **_generation_seed_kwargs(config),
-                "extra_body": _usage_extra_body(),
+                "extra_body": usage_include_extra_body(config.api_base_url if config else ""),
             },
             compat_config=compat_config,
             base_url=str(config.api_base_url if config else ""),

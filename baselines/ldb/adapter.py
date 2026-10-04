@@ -53,6 +53,7 @@ _API_ERROR_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _UPSTREAM_LOCAL_MODELS = frozenset({"starcoder", "codellama"})
+_UPSTREAM_GPT_MODEL_RE = re.compile(r"gpt-4[a-z0-9.-]*|gpt-3\.5-turbo[a-z0-9.-]*")
 
 
 def _resolve_repo_commit(repo: Path) -> str:
@@ -75,7 +76,10 @@ def _resolve_upstream_model_selector(requested_model: str | None) -> tuple[str, 
         return "gpt-4", None
 
     lowered = raw_model.lower()
-    if "gpt-4" in lowered or "gpt-3.5" in lowered or lowered in _UPSTREAM_LOCAL_MODELS:
+    # BAS-16: only genuine GPT-4/3.5 names or upstream local models select an upstream
+    # client by name; anything else (e.g. "my-gpt-4-finetune") routes through the GPT path
+    # with the real model id forwarded for outbound requests.
+    if _UPSTREAM_GPT_MODEL_RE.fullmatch(lowered) or lowered in _UPSTREAM_LOCAL_MODELS:
         return raw_model, raw_model
 
     # Upstream LDB only recognizes a narrow model-name set, so keep its GPT path
@@ -613,12 +617,14 @@ class LDBAdapter(BaselineAdapter):
             ]
 
             # Add port if base URL has one.
+            cli_port: int | None = None
             if config.api_base_url:
                 try:
                     from urllib.parse import urlparse
 
                     parsed = urlparse(config.api_base_url)
                     if parsed.port:
+                        cli_port = int(parsed.port)
                         cmd.extend(["--port", str(parsed.port)])
                 except Exception:
                     pass
@@ -673,12 +679,20 @@ class LDBAdapter(BaselineAdapter):
                 )
 
             # Parse LDB output.
-            return self._parse_output(
+            result = self._parse_output(
                 log_dir=log_dir,
                 stdout=monitored.stdout,
                 stderr=monitored.stderr,
                 returncode=monitored.returncode,
             )
+            # BAS-16: record how the request was routed.
+            result.meta["ldb_model_routing"] = {
+                "cli_model": cli_model_name,
+                "requested_model": requested_model_name,
+                "base_url": config.api_base_url,
+                "cli_port": cli_port,
+            }
+            return result
 
     def _build_timeout_result(
         self,

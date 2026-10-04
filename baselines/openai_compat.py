@@ -109,10 +109,22 @@ class OpenAICompatResponseError(RuntimeError):
         self.meta = dict(meta)
 
 
+BASELINE_OPENAI_ENABLE_THINKING_DEFAULT = True
+BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT = True
+"""Single source for the baseline OpenAI-compatible defaults, matching the CLI (BAS-19)."""
+
+
 def compat_config_from_extra(extra: Mapping[str, Any]) -> BaselineOpenAICompatConfig:
     profile = normalize_compat_profile(extra.get("baseline_openai_compat_profile"))
-    enable_thinking = bool(extra.get("baseline_openai_enable_thinking", False))
-    allow_reasoning_fallback = bool(extra.get("baseline_openai_allow_reasoning_fallback", False))
+    enable_thinking = bool(
+        extra.get("baseline_openai_enable_thinking", BASELINE_OPENAI_ENABLE_THINKING_DEFAULT)
+    )
+    allow_reasoning_fallback = bool(
+        extra.get(
+            "baseline_openai_allow_reasoning_fallback",
+            BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+        )
+    )
     # When thinking is explicitly enabled, auto-enable reasoning fallback so
     # that thinking-model responses that contain only reasoning are usable.
     if enable_thinking and not allow_reasoning_fallback:
@@ -532,3 +544,18 @@ def _extract_think_reasoning(text: str) -> str:
         if chunk:
             chunks.append(chunk)
     return "\n".join(chunks)
+
+
+_USAGE_INCLUDE_HOSTS = ("openrouter.ai",)
+
+
+def usage_include_extra_body(base_url: str) -> dict[str, Any]:
+    """``extra_body`` that asks for usage accounting, only where the endpoint supports it.
+
+    OpenRouter needs ``{"usage": {"include": True}}`` to report usage; other
+    OpenAI-compatible servers may reject unknown fields, so nothing is sent (BAS-17).
+    """
+    host = urlparse(str(base_url or "")).hostname or ""
+    if any(host == known or host.endswith("." + known) for known in _USAGE_INCLUDE_HOSTS):
+        return {"usage": {"include": True}}
+    return {}

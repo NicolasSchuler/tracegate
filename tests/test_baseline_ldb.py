@@ -1090,3 +1090,15 @@ def test_bas15_unrepaired_row_still_reports_metrics_and_usage(tmp_path: Path) ->
     assert result.meta["metrics"]["llm_call_count"] == 3
     assert result.meta["metrics"]["prompt_chars_total"] == 300
     assert result.token_usage
+
+
+def test_bas16_model_routing_matches_gpt_family_exactly() -> None:
+    from baselines.ldb.adapter import _resolve_upstream_model_selector
+
+    assert _resolve_upstream_model_selector("gpt-4") == ("gpt-4", "gpt-4")
+    assert _resolve_upstream_model_selector("gpt-4o-mini") == ("gpt-4o-mini", "gpt-4o-mini")
+    assert _resolve_upstream_model_selector("gpt-3.5-turbo-0613")[0] == "gpt-3.5-turbo-0613"
+    # Names that merely contain "gpt-4" route through the GPT path with the real id.
+    assert _resolve_upstream_model_selector("my-gpt-4-finetune") == ("gpt-4", "my-gpt-4-finetune")
+    assert _resolve_upstream_model_selector("qwen3-coder") == ("gpt-4", "qwen3-coder")
+    assert _resolve_upstream_model_selector("starcoder") == ("starcoder", "starcoder")

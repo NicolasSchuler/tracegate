@@ -18,6 +18,7 @@ from baselines.openai_compat import (  # noqa: E402
     compat_config_from_extra,
     normalize_chat_completion_response,
     require_final_content,
+    usage_include_extra_body,
 )
 
 
@@ -30,10 +31,6 @@ def _usage_int(source: dict[str, Any], *keys: str) -> int | None:
                 return value
             fallback_zero = 0
     return fallback_zero
-
-
-def _usage_extra_body() -> dict[str, Any]:
-    return {"usage": {"include": True}}
 
 
 def _usage_payload(usage: object) -> dict[str, int]:
@@ -133,7 +130,7 @@ def main(argv: list[str]) -> int:
             "temperature": float(payload.get("temperature") or 0.0),
             "max_tokens": int(payload.get("max_tokens") or 1024),
             **({"seed": int(payload["seed"])} if payload.get("seed") is not None else {}),
-            "extra_body": _usage_extra_body(),
+            "extra_body": usage_include_extra_body(base_url),
         },
         compat_config=compat_config,
         base_url=base_url,
