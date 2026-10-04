@@ -1099,7 +1099,9 @@ def test_bas10_timeout_keeps_last_candidate_and_usage(
 
     repo = _make_lambda_repo(tmp_path)
     adapter = LambdaRLMAdapter()
-    config = BaselineConfig(repo_dir=repo, model="test-model", max_attempts=2, process_timeout_sec=30)
+    config = BaselineConfig(
+        repo_dir=repo, model="test-model", max_attempts=2, process_timeout_sec=30
+    )
     adapter.setup(config)
     case_input = convert_case(
         lambda_case,
