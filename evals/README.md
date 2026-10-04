@@ -1203,7 +1203,7 @@ Key flags:
 - `--adaptive-decision-model-role off|shadow|policy|features|prior`: consult a SystemOne-compatible System-1 decision model (for example Cloudflare clef-flash served by llama.cpp through llama-swap, or the `evals/docker/decision_model/` PyTorch sidecar) for `layered_adaptive_llm` helper decisions. `shadow` logs only; `policy` lets it select; `features` adds six diagnostic LinUCB features; `prior` guides warm-up and adds a fading score prior. `policy`/`features`/`prior` require `--adaptive-online-policy-mode on`. See `docs/adaptive_online_policy_design.md`.
 - `--adaptive-decision-model-url <url>` (default `$TRACEGATE_DECISION_MODEL_URL` or `http://127.0.0.1:8090`), `--adaptive-decision-model-api-key <key>` (default `$TRACEGATE_DECISION_MODEL_API_KEY`; bearer token for gateways such as llama-swap, redacted in lockfiles and rejected in config files), `--adaptive-decision-model-name <name>` (`clef-flash`), `--adaptive-decision-model-profile evidence_v1|evidence_v1_noaux|evidence_v1_text|evidence_v1_nohints|evidence_atomic_v1`, `--adaptive-decision-model-timeout-sec <float>` (`10`), `--adaptive-decision-model-temperature <float>` (`0` = argmax), `--adaptive-decision-model-prior-beta` / `--adaptive-decision-model-prior-anneal-updates` / `--adaptive-decision-model-warmup-mix` (`0.5` / `50` / `0.3`), `--adaptive-decision-model-log-state full|hash` (`full` writes rendered states to `<artifacts_root>/decision_model_states.jsonl`). The sidecar is health-checked before the first unit runs. Results carry `adaptive_online_dm_*` fields and policy events schema v5 carries a `decision_model` block.
 - `--prompt-order-mode current|crash_first|evidence_last`: reorder the shared Stage-B prompt sections without changing evidence membership.
-- `--adaptive-reveal-mode full|traceback_first`: either send full adaptive evidence immediately or start from traceback/failure-signature/snapshot-index-only prompting and reveal more only on explicit triggers.
+- `--adaptive-reveal-mode full|traceback_first`: either send the policy-granted adaptive evidence immediately or start from traceback/failure-signature/snapshot-index-only prompting and reveal more only on explicit triggers. Under `full`, the full snapshot is in the prompt only when the executed helper action grants it (ATT-06, D5): rows record `adaptive_snapshot_requested`, `stage_b_snapshot_in_prompt` and `evidence_chars_by_type`.
 - `--snapshot-frame-pruning-mode off|heuristic`: heuristically trim prompt-facing snapshot frames while always keeping the crash frame and adjacent user-code frames.
 - Adaptive helper attempts now persist normalized helper telemetry in eval rows, including `adaptive_helper_outcome`, `adaptive_helper_failure_kind`, `adaptive_helper_retry_count`, and `adaptive_helper_transport_retry_count`.
 - Adaptive helper attempts also persist action telemetry such as `adaptive_helper_action_selected`, `adaptive_helper_action_executed`, `adaptive_helper_action_fallback_reason`, and `adaptive_snapshot_lite_included`.
@@ -1356,7 +1356,10 @@ unsupported and should be regenerated with the current harness before analysis.
   `conftest.py` hooks no longer count (ATT-01); the patch verifier runs for every condition by
   default (ATT-14); `--force-patch-attempt` defaults to off and a forced marker recovery stays
   `patch_apply_failed` (ATT-07); `patch_apply_mode` distinguishes strict from relaxed patch
-  application (ATT-10). Later review fixes extend this list.
+  application (ATT-10); adaptive evidence follows the policy: no fallback or seed bundle for
+  restricted actions, and the full snapshot only when the action grants it (ATT-03, ATT-04,
+  ATT-06; new `seed_bundle_chars`, `evidence_chars_by_type`, `adaptive_snapshot_requested`,
+  `stage_b_snapshot_in_prompt`). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with

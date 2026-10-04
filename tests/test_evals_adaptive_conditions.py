@@ -2014,9 +2014,12 @@ def test_adaptive_llm_discretion_snapshot_lite_not_credited_when_budget_drops_it
     assert "Compact snapshot index:" not in patcher.patch_prompts[0]
 
 
-def test_adaptive_reveal_full_includes_snapshot_even_without_stage_a_snapshot_request(
-    tmp_path, monkeypatch
-) -> None:
+def test_adaptive_reveal_full_omits_snapshot_without_policy_grant(tmp_path, monkeypatch) -> None:
+    """ATT-06 / D5: under full reveal the policy, not the reveal mode, decides the snapshot.
+
+    This test previously asserted the full snapshot was always present while
+    ``adaptive_snapshot_included`` said False; updated deliberately.
+    """
     patcher = _AdaptiveActionCapturePatcher(
         request_payload={
             "need_more_context": True,
@@ -2038,11 +2041,44 @@ def test_adaptive_reveal_full_includes_snapshot_even_without_stage_a_snapshot_re
     attempt_meta = records[0]["attempt_metadata"]
 
     assert patcher.request_calls == 1
+    assert attempt_meta["adaptive_snapshot_requested"] is False
+    assert attempt_meta["stage_b_snapshot_in_prompt"] is False
     assert attempt_meta["adaptive_snapshot_included"] is False
     assert attempt_meta["adaptive_reveal_mode"] == "full"
     assert "Stage-A requested context:" in patcher.patch_prompts[0]
+    assert "=== llmdebug Debug Snapshot ===" not in patcher.patch_prompts[0]
+    assert attempt_meta["evidence_chars_by_type"]["snapshot"] == 0
+    assert attempt_meta["evidence_chars_by_type"]["file"] > 0
+
+
+def test_adaptive_reveal_full_includes_snapshot_when_stage_a_requests_it(
+    tmp_path, monkeypatch
+) -> None:
+    patcher = _AdaptiveActionCapturePatcher(
+        request_payload={
+            "need_more_context": True,
+            "need_snapshot": True,
+            "snapshot_justification": "need the local value of x in f() to see the off-by-one",
+            "requests": [{"type": "file", "path": "buggy.py"}],
+            "sufficiency_rationale": "need helper implementation",
+        }
+    )
+
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_INVOKE_HELPER,
+        run_id="run-adaptive-reveal-full-granted",
+        extra_run_kwargs={"adaptive_reveal_mode": "full"},
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+    assert attempt_meta["adaptive_snapshot_requested"] is True
+    assert attempt_meta["stage_b_snapshot_in_prompt"] is True
+    assert attempt_meta["adaptive_snapshot_included"] is True
     assert "=== llmdebug Debug Snapshot ===" in patcher.patch_prompts[0]
-    assert "Compact snapshot index:" not in patcher.patch_prompts[0]
+    assert attempt_meta["evidence_chars_by_type"]["snapshot"] > 0
 
 
 def test_adaptive_reveal_traceback_first_uses_snapshot_index_without_full_snapshot(
@@ -6671,3 +6707,113 @@ def test_finalize_adaptive_policy_uses_recomputed_progress_metadata() -> None:
     assert attempt_metadata["adaptive_online_reward_stagnation_penalty"] == pytest.approx(0.2)
     assert attempt_metadata["adaptive_budget_reward_progress_hint"] == 0.0
     assert attempt_metadata["adaptive_budget_reward_stagnation_penalty"] == pytest.approx(0.2)
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-04 review, Phase 1C acceptance: evidence enforcement per action.
+# ---------------------------------------------------------------------------
+
+_ASK_FOR_EVERYTHING = {
+    "need_more_context": True,
+    "need_snapshot": True,
+    "snapshot_justification": "need the local value of x in f() to see the wrong helper value",
+    "requests": [
+        {"type": "file", "path": "buggy.py"},
+        {"type": "file", "path": "helper.py"},
+        {"type": "search", "path": "helper.py", "pattern": "return"},
+        {"type": "frame", "index": 0},
+        {"type": "local_var", "frame": 0, "name": "x"},
+    ],
+    "sufficiency_rationale": "need everything",
+}
+
+_RESTRICTED_EVIDENCE = {
+    "frame_only": {"file", "search", "seed", "snapshot"},
+    "file_only": {"search", "frame", "local_var", "seed", "snapshot"},
+    "search_only": {"file", "frame", "local_var", "seed", "snapshot"},
+    "skip_helper": {"file", "search", "frame", "local_var", "seed", "snapshot"},
+    "snapshot_lite": {"file", "search", "frame", "local_var", "seed", "snapshot"},
+    "frame_locals_lite": {"file", "search", "frame", "local_var", "seed", "snapshot"},
+    "snapshot_full_lite": {"file", "search", "frame", "local_var", "seed", "snapshot"},
+}
+
+
+def _evidence_for_action(tmp_path, monkeypatch, action: str) -> tuple[str, dict[str, int]]:
+    patcher = _AdaptiveActionCapturePatcher(request_payload=dict(_ASK_FOR_EVERYTHING))
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path / action,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=action,
+        run_id=f"run-evidence-{action}",
+        extra_run_kwargs={"adaptive_reveal_mode": "full"},
+    )
+    meta = records[0]["attempt_metadata"]
+    assert isinstance(meta, dict)
+    return str(meta["adaptive_helper_action_executed"]), dict(meta["evidence_chars_by_type"])
+
+
+@pytest.mark.parametrize("action", sorted(_RESTRICTED_EVIDENCE))
+def test_restricted_actions_deliver_only_their_evidence_types(
+    tmp_path, monkeypatch, action: str
+) -> None:
+    """ATT-03/04/06: denied evidence types never reach the Stage-B prompt."""
+    (tmp_path / action).mkdir()
+    executed, chars = _evidence_for_action(tmp_path, monkeypatch, action)
+    assert executed == action
+    leaked = {kind for kind in _RESTRICTED_EVIDENCE[action] if chars.get(kind, 0) > 0}
+    assert not leaked, f"{action} leaked {sorted(leaked)}: {chars}"
+    granted = {
+        "frame_only": ("frame",),
+        "file_only": ("file",),
+        "search_only": ("search",),
+        "snapshot_lite": ("snapshot_lite",),
+        "frame_locals_lite": ("snapshot_lite",),
+        "snapshot_full_lite": ("snapshot_lite",),
+    }.get(action, ())
+    assert all(chars.get(kind, 0) > 0 for kind in granted), f"{action} lost its own evidence"
+
+
+def test_no_restricted_action_delivers_more_evidence_than_invoke_helper(
+    tmp_path, monkeypatch
+) -> None:
+    totals: dict[str, int] = {}
+    for action in ["invoke_helper", "frame_only", "file_only", "search_only", "skip_helper"]:
+        (tmp_path / action).mkdir()
+        executed, chars = _evidence_for_action(tmp_path, monkeypatch, action)
+        assert executed == action
+        totals[action] = sum(chars.values())
+    assert totals["invoke_helper"] > 0
+    assert all(totals[action] <= totals["invoke_helper"] for action in totals), totals
+
+
+def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
+    tmp_path, monkeypatch
+) -> None:
+    """POL-12: only decide() knows percentile caps, so no decision means no scaled vector."""
+    from dataclasses import replace as dc_replace
+
+    original_factory = _preferred_action_online_controller
+
+    def _percentile_controller(tmp_path_arg, *, mode: str, preferred_action: str):
+        controller, events = original_factory(
+            tmp_path_arg, mode=mode, preferred_action=preferred_action
+        )
+        controller.config = dc_replace(
+            controller.config, mode="off", feature_scaling_profile="percentile_v1"
+        )
+        return controller, events
+
+    monkeypatch.setitem(globals(), "_preferred_action_online_controller", _percentile_controller)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=_AdaptiveActionCapturePatcher(),
+        preferred_action=ACTION_INVOKE_HELPER,
+        run_id="run-pol12",
+    )
+    meta = records[0]["attempt_metadata"]
+    assert meta["adaptive_online_feature_scaling_profile"] == "percentile_v1"
+    assert meta["adaptive_online_policy_mode"] == "off"
+    assert meta["adaptive_online_feature_vector"] == {}
+    assert meta["adaptive_online_feature_vector_raw"]

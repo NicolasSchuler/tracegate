@@ -211,12 +211,12 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
   - A resume test shows errored predictions are retried.
 
 ### 1C. Evidence enforcement (D5)
-- [ ] **ATT-03:** when a restricted action's filtered request list is empty, return an empty Stage-A context. Add an `allow_fallback` parameter to `execute_context_requests`, and correct `requests_count` and `helper_outcome`.
-- [ ] **ATT-04:** gate or scope the seed bundle by action, and record `seed_bundle_chars`.
-- [ ] **ATT-06:** apply D5. Add `stage_b_snapshot_in_prompt`, and rename the misleading `adaptive_snapshot_included`.
-- [ ] **ATT-20, ATT-21:** validate fallback candidate paths, and make a request budget of 0 mean zero requests.
-- [ ] **POL-12:** log one consistent scaled feature vector, or none when there was no decision.
-- [ ] Add per-attempt `evidence_chars_by_type` (snapshot, seed, stage_a, frame, search, file).
+- [x] **ATT-03:** when a restricted action's filtered request list is empty, return an empty Stage-A context. Add an `allow_fallback` parameter to `execute_context_requests`, and correct `requests_count` and `helper_outcome`. *(Implemented as `deny_fallback_for_restricted_action` at the call sites instead of a parameter: `execute_context_requests` is at its arity budget.)*
+- [x] **ATT-04:** gate or scope the seed bundle by action, and record `seed_bundle_chars`.
+- [x] **ATT-06:** apply D5. Add `stage_b_snapshot_in_prompt`, and rename the misleading `adaptive_snapshot_included`. *("Lite replaces" landed with M1; `adaptive_snapshot_included` is kept for compatibility but now equals `stage_b_snapshot_in_prompt`, and `adaptive_snapshot_requested` carries the old meaning.)*
+- [x] **ATT-20, ATT-21:** validate fallback candidate paths, and make a request budget of 0 mean zero requests.
+- [x] **POL-12:** log one consistent scaled feature vector, or none when there was no decision.
+- [x] Add per-attempt `evidence_chars_by_type` (snapshot, seed, stage_a, frame, search, file).
 - **Acceptance:**
   - A table-driven test over all 10 helper actions and representative request payloads asserts which evidence types reach the Stage-B prompt.
   - No restricted action yields more evidence characters than `invoke_helper` on the same fixture.

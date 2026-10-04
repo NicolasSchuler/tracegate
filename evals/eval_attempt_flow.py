@@ -70,6 +70,7 @@ from evals.attempt_verification import (
     evaluate_syntax_preflight,
     make_syntax_preflight_state,
 )
+from evals.decision_model.config import LITE_SNAPSHOT_SUPPLEMENT
 from evals.decision_model.runtime import (
     AdviceRequest,
     advise_for_attempt,
@@ -168,6 +169,8 @@ from evals.eval_evidence import (
     _render_evidence_items,
     _strip_eval_only_case_artifacts,
     build_fallback_context_bundle,
+    deny_fallback_for_restricted_action,
+    evidence_chars_by_type,
     execute_context_requests,
 )
 from evals.eval_patches import (
@@ -183,6 +186,7 @@ from evals.eval_policy_budget import (
     _sync_adaptive_budget_policy_metadata,
 )
 from evals.eval_policy_features import (
+    LITE_SNAPSHOT_ACTIONS,
     _adaptive_budget_control_changes,
     _adaptive_budget_control_profile_to_dict,
     _adaptive_budget_controls_changed,
@@ -213,6 +217,8 @@ from evals.eval_prompts import (
     _format_frame_locals_section,
     _format_snapshot_full_section,
     _format_snapshot_index_section,
+    _format_snapshot_payload_section,
+    _format_snapshot_section,
     _is_generic_snapshot_justification,
     _render_retry_packet,
     prune_snapshot_for_prompt,
@@ -248,6 +254,9 @@ from evals.eval_types import (
     CONTEXT_PROTOCOLS,
     CONTEXT_RECOVERY_FAILURE_KINDS,
     CONTEXT_RECOVERY_PROMPT_BUDGET,
+    HELPER_FULL_SNAPSHOT_ACTIONS,
+    HELPER_RESTRICTED_STAGE_A_ACTIONS,
+    HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
     OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
@@ -299,7 +308,11 @@ from evals.native_stage_b_flow import (
 from evals.oracle_integrity import restore_test_surface, run_succeeded, with_junit_report
 from evals.patchers.base import Patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
-from evals.policy_feature_scaling import normalize_feature_scaling_profile, scale_feature_mapping
+from evals.policy_feature_scaling import (
+    is_percentile_feature_scaling_profile,
+    normalize_feature_scaling_profile,
+    scale_feature_mapping,
+)
 from evals.stage_a_contract import StageARequestPayloadModel, normalize_stage_a_request_payload
 from evals.token_counting import estimate_text_token_count
 from evals.toon_llm_encoder import estimate_token_savings
@@ -2699,6 +2712,7 @@ def run_one_condition_impl(
         helper_decision_reason = "not_adaptive_condition"
         adaptive_context_requested = False
         adaptive_snapshot_included = False
+        adaptive_snapshot_requested = False
         adaptive_lite_replaced_snapshot = False
         adaptive_snapshot_lite_included = False
         adaptive_snapshot_attempt1_denied = False
@@ -2945,9 +2959,17 @@ def run_one_condition_impl(
                 context_delta_magnitude=context_delta_magnitude,
                 toon_encoding_active=snapshot_prompt_toon_active,
             )
-            budget_policy_features_scaled = scale_feature_mapping(
-                budget_policy_features_raw,
-                profile=normalized_adaptive_budget_feature_scaling_profile,
+            # POL-12: under percentile scaling only decide() knows the caps, so log a
+            # scaled vector only when a decision supplies one.
+            budget_policy_features_scaled = (
+                {}
+                if is_percentile_feature_scaling_profile(
+                    normalized_adaptive_budget_feature_scaling_profile
+                )
+                else scale_feature_mapping(
+                    budget_policy_features_raw,
+                    profile=normalized_adaptive_budget_feature_scaling_profile,
+                )
             )
             budget_policy_eligible = bool(
                 normalized_adaptive_budget_policy_mode in {"shadow", "on"}
@@ -3324,9 +3346,15 @@ def run_one_condition_impl(
             )
             if not adaptive_online_include_case_labels:
                 online_policy_features_raw = drop_case_label_features(online_policy_features_raw)
-            online_policy_features_scaled = scale_feature_mapping(
-                online_policy_features_raw,
-                profile=normalized_adaptive_online_feature_scaling_profile,
+            online_policy_features_scaled = (
+                {}
+                if is_percentile_feature_scaling_profile(
+                    normalized_adaptive_online_feature_scaling_profile
+                )
+                else scale_feature_mapping(
+                    online_policy_features_raw,
+                    profile=normalized_adaptive_online_feature_scaling_profile,
+                )
             )
 
         if is_adaptive_condition:
@@ -3788,6 +3816,10 @@ def run_one_condition_impl(
                     max_requests=stage_a_max_requests,
                     max_total_chars=stage_a_max_chars,
                 )
+                stage_a_data = deny_fallback_for_restricted_action(
+                    stage_a_data,
+                    restricted=helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS,
+                )
                 _stage_a_context_fulfillment_sec = time.perf_counter() - _context_fulfillment_start
                 if is_adaptive_condition:
                     helper_need_more_context = bool(
@@ -3829,15 +3861,18 @@ def run_one_condition_impl(
                         evidence_items=[],
                     )
                 else:
-                    stage_a_data = build_fallback_context_bundle(
-                        root=workdir,
-                        snapshot=snapshot,
-                        stdout=current.stdout,
-                        stderr=current.stderr,
-                        max_total_chars=stage_a_max_chars,
-                        reason=stage_a_failure_reason,
-                        file_index_lines=file_index_lines,
-                        request_raw=stage_a_raw_response,
+                    stage_a_data = deny_fallback_for_restricted_action(
+                        build_fallback_context_bundle(
+                            root=workdir,
+                            snapshot=snapshot,
+                            stdout=current.stdout,
+                            stderr=current.stderr,
+                            max_total_chars=stage_a_max_chars,
+                            reason=stage_a_failure_reason,
+                            file_index_lines=file_index_lines,
+                            request_raw=stage_a_raw_response,
+                        ),
+                        restricted=helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS,
                     )
 
             if stage_a_data.request_payload is None:
@@ -3904,6 +3939,7 @@ def run_one_condition_impl(
                 stage_a_need_snapshot = False
 
             adaptive_snapshot_included = bool(stage_a_need_snapshot and snapshot is not None)
+            adaptive_snapshot_requested = adaptive_snapshot_included
             helper_materialized_context = bool(
                 adaptive_context_requested or adaptive_snapshot_included
             )
@@ -4001,7 +4037,12 @@ def run_one_condition_impl(
         )
 
         structured_seed_data = _empty_stage_a_context()
-        structured_seed_active = is_adaptive_condition and helper_materialized_context
+        # ATT-04: whole-file seed evidence only for actions that may request files anyway.
+        structured_seed_active = bool(
+            is_adaptive_condition
+            and helper_materialized_context
+            and helper_action_executed in HELPER_SEED_BUNDLE_ACTIONS
+        )
         if structured_seed_active:
             structured_seed_data = build_fallback_context_bundle(
                 root=workdir,
@@ -4211,10 +4252,27 @@ def run_one_condition_impl(
         )
         if adaptive_lite_replaced_snapshot:
             include_snapshot_in_prompt = False
+        if is_adaptive_condition and not reveal_policy["applied"]:
+            # ATT-06 / D5: under full reveal the policy decides whether the full snapshot
+            # reaches Stage-B: Stage-A asked for it under an action that allows it, the
+            # action itself carries it, or a lite action supplements it by configuration.
+            include_snapshot_in_prompt = include_snapshot_in_prompt and bool(
+                adaptive_snapshot_requested
+                or helper_action_executed in HELPER_FULL_SNAPSHOT_ACTIONS
+                or (
+                    helper_action_executed in LITE_SNAPSHOT_ACTIONS
+                    and adaptive_lite_snapshot_mode == LITE_SNAPSHOT_SUPPLEMENT
+                )
+            )
         stage_b_snapshot_for_prompt = stage_b_snapshot if include_snapshot_in_prompt else None
         stage_b_snapshot_prompt_text = (
             snapshot_prompt_text if stage_b_snapshot_for_prompt is not None else ""
         )
+        stage_b_snapshot_in_prompt = stage_b_snapshot_for_prompt is not None
+        if is_adaptive_condition:
+            # ATT-06: the field now says whether the snapshot is in the prompt;
+            # adaptive_snapshot_requested keeps the Stage-A request.
+            adaptive_snapshot_included = stage_b_snapshot_in_prompt
         include_pytest_output_in_prompt = True
         include_stage_a_context_in_prompt = bool(reveal_policy["include_stage_a_context"])
         include_project_files_in_prompt = attempt_context_protocol == "monolithic"
@@ -4867,6 +4925,25 @@ def run_one_condition_impl(
                 ),
             )
         )
+        attempt_metadata["adaptive_snapshot_requested"] = adaptive_snapshot_requested
+        attempt_metadata["stage_b_snapshot_in_prompt"] = stage_b_snapshot_in_prompt
+        attempt_metadata["seed_bundle_chars"] = (
+            int(structured_seed_data.chars_returned) if structured_seed_active else 0
+        )
+        stage_b_snapshot_section_text = ""
+        if stage_b_snapshot_in_prompt and not is_delta_retry:
+            # Same rendering as the Stage-B section builder (evals.eval_prompts).
+            stage_b_snapshot_section_text = (
+                _format_snapshot_payload_section(stage_b_snapshot_prompt_text)
+                if stage_b_snapshot_prompt_text.strip()
+                else _format_snapshot_section(stage_b_snapshot_for_prompt or {})
+            )
+        attempt_metadata["evidence_chars_by_type"] = evidence_chars_by_type(
+            snapshot_text=stage_b_snapshot_section_text,
+            snapshot_lite_text=snapshot_lite_context if adaptive_snapshot_lite_included else "",
+            seed=structured_seed_data if structured_seed_active else None,
+            stage_a=stage_a_data,
+        )
         attempt_metadata["prompt_order_mode"] = normalized_prompt_order_mode
         attempt_metadata["adaptive_tep_mode_requested"] = requested_adaptive_tep_mode
         attempt_metadata["adaptive_tep_full_enabled"] = full_tep_enabled
@@ -5228,6 +5305,8 @@ def run_one_condition_impl(
         }
         patch_meta["adaptive_context_requested"] = adaptive_context_requested
         patch_meta["adaptive_snapshot_included"] = adaptive_snapshot_included
+        patch_meta["adaptive_snapshot_requested"] = adaptive_snapshot_requested
+        patch_meta["stage_b_snapshot_in_prompt"] = stage_b_snapshot_in_prompt
         patch_meta["adaptive_snapshot_lite_included"] = adaptive_snapshot_lite_included
         patch_meta["adaptive_snapshot_attempt1_denied"] = adaptive_snapshot_attempt1_denied
         patch_meta["adaptive_snapshot_attempt1_denied_reason"] = (

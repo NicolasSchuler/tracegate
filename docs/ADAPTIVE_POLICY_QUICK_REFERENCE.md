@@ -59,7 +59,10 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
 
 The three `*_lite` actions call no model. Under `--adaptive-reveal-mode full` they replace the
 full snapshot section in the patch prompt (`--adaptive-lite-snapshot-mode replace`, default);
-`supplement` restores the pre-2026-10 behavior of adding them on top.
+`supplement` restores the pre-2026-10 behavior of adding them on top. Under full reveal the
+full snapshot itself is only in the prompt when the executed action grants it (ATT-06, D5);
+restricted actions never fall back to whole files (ATT-03, ATT-04). Check
+`attempt_metadata.evidence_chars_by_type` for what each attempt actually received.
 
 ## 🧠 What Gets Learned
 
