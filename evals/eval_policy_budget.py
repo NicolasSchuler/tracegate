@@ -297,6 +297,35 @@ def _sync_adaptive_budget_policy_metadata(
     update.patch_meta.update(fields)
 
 
+def _escalation_cost_share(*, applied_multiplier: float, default_multiplier: float) -> float:
+    """Share of an escalated attempt's Stage-B cost that the escalation added (POL-08).
+
+    The proposal is paid under either arm, so ``keep_budget`` costs nothing extra and
+    ``increase_budget`` is charged ``1 - default / applied`` of the attempt's tokens and
+    time, treating cost as proportional to the budget multiplier. It used to be charged the
+    whole attempt: about 0.40 of a 1.0 success reward at ``lambda_tokens=0.08`` and 5k
+    tokens.
+    """
+    base = max(0.0, float(default_multiplier))
+    applied = float(applied_multiplier)
+    if base <= 0.0 or applied <= base:
+        return 0.0
+    return 1.0 - base / applied
+
+
+def _escalation_accounting(
+    accounting: AdaptivePolicyLocalAccounting, *, share: float
+) -> AdaptivePolicyLocalAccounting:
+    """*accounting* scaled to the escalation's share of the cost."""
+    return AdaptivePolicyLocalAccounting(
+        llm_call_count=accounting.llm_call_count,
+        tokens_prompt=round(accounting.tokens_prompt * share),
+        tokens_completion=round(accounting.tokens_completion * share),
+        tokens_total=round(accounting.tokens_total * share),
+        wall_sec=float(accounting.wall_sec) * share,
+    )
+
+
 def _finalize_adaptive_budget_policy_attempt(
     *,
     note: str,
@@ -377,7 +406,12 @@ def _finalize_adaptive_budget_policy_attempt(
     request_budget_exceeded = failure_error == "request_budget_exceeded"
     behavior_action, _ = _adaptive_budget_behavior_fields(decision=budget_policy_decision)
     charged_local_accounting = (
-        local_accounting
+        _escalation_accounting(
+            local_accounting,
+            share=_escalation_cost_share(
+                applied_multiplier=applied_multiplier, default_multiplier=default_multiplier
+            ),
+        )
         if behavior_action == ACTION_INCREASE_BUDGET
         else AdaptivePolicyLocalAccounting()
     )

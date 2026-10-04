@@ -92,8 +92,13 @@ Budget-policy reward is local to the patch-proposal family for the attempt:
 Default:
 - `rho_budget_exceeded = 0.5`
 
-Budget local accounting records the proposal-family usage/latency for the attempt, while
-`keep_budget` is still treated as having zero additional budget-cost penalty in the reward update.
+Budget local accounting records the proposal-family usage/latency for the attempt. The
+proposal is paid under either arm, so the token and latency penalties charge only what the
+escalation added (POL-08): `keep_budget` pays nothing extra, and `increase_budget` pays
+`1 - default_multiplier / applied_multiplier` of the attempt's tokens and time (cost treated as
+proportional to the budget multiplier). It used to be charged the whole attempt, about 0.40 of
+a 1.0 success reward at `lambda_tokens = 0.08` and 5k tokens. Events still log the attempt's
+full `local_tokens_*`; `reward_token_penalty` is the charged part.
 
 The budget policy uses the same runtime modes as helper policy:
 - `off`
