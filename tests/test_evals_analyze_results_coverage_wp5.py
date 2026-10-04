@@ -479,3 +479,30 @@ class TestFitRidgeActionModels:
         )
         # Should not raise, and should produce a model
         assert "a" in models
+
+
+def test_sta16_bucket_adaptive_rates_ignore_non_adaptive_conditions() -> None:
+    """STA-16: base_repair rows (no helper possible) diluted the helper invocation rate."""
+    grouped = {}
+    for idx in range(4):
+        grouped[("run", f"c{idx}", "base_repair")] = [
+            _record(case_id=f"c{idx}", condition="base_repair")
+        ]
+        grouped[("run", f"c{idx}", "layered_adaptive_llm")] = [
+            _record(
+                case_id=f"c{idx}",
+                condition="layered_adaptive_llm",
+                attempt_metadata_extra={
+                    "adaptive_mode": "llm",
+                    "adaptive_helper_invoked": idx < 2,
+                },
+            )
+        ]
+    rows = ar._derive_case_condition_rows(grouped)
+    bucket = ar._summarize_bucket(rows)
+
+    assert bucket["adaptive_rollup_conditions"] == ["layered_adaptive_llm"]
+    assert bucket["adaptive_rollup_cases"] == 4
+    # 2 of the 4 adaptive cases invoked the helper; the 4 base_repair rows made it 2/8.
+    assert bucket["layered_adaptive_llm"]["helper_invocation_case_rate"] == pytest.approx(0.5)
+    assert bucket["helper_invocation_case_rate"] == pytest.approx(0.5)

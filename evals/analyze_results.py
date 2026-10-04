@@ -34,6 +34,7 @@ from .decision_model.policy import atomic_action_from_answers
 from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
 from .eval_types import (
     CONDITION_FAMILIES,
+    CONDITION_FAMILY_ADAPTIVE,
     CONDITION_FAMILY_EXTERNAL_BASELINE,
     EVAL_RECORD_SCHEMA_VERSION,
     condition_family,
@@ -1874,15 +1875,20 @@ def _summarize_bucket(
     out["test_touch_attempt_rate"] = (
         (total_test_touch_attempts / total_patch_attempts) if total_patch_attempts > 0 else None
     )
+    # STA-16: bucket-level adaptive rates count only rows with adaptive telemetry; the
+    # non-adaptive conditions used to dilute them.
+    adaptive_rows = [row for row in rows if _has_adaptive_telemetry(row)]
     out.update(
         _adaptive_rollup_metrics(
-            rows,
+            adaptive_rows,
             records_by_case_condition=records_by_case_condition,
             adaptive_ope_min_action_support=min_action_support,
             adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
             include_condition_only_counts=False,
         )
     )
+    out["adaptive_rollup_conditions"] = sorted({str(row["condition"]) for row in adaptive_rows})
+    out["adaptive_rollup_cases"] = len(adaptive_rows)
 
     staged_rows = [
         row
@@ -2047,6 +2053,13 @@ def _increment_string_count(target: dict[str, int], value: Any) -> None:
     if not normalized:
         return
     target[normalized] = int(target.get(normalized, 0) + 1)
+
+
+def _has_adaptive_telemetry(row: dict[str, Any]) -> bool:
+    """An adaptive-family condition, or a run of another condition with an adaptive mode."""
+    if condition_family(row.get("condition")) == CONDITION_FAMILY_ADAPTIVE:
+        return True
+    return str(row.get("adaptive_mode") or "none") != "none"
 
 
 def _adaptive_rollup_metrics(
