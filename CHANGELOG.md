@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- RLM no longer rolls back a candidate whose import smoke test fails or exceeds 10 s; the failure is reported to the model and counted as `import_smoke_failure_count` (BAS-13).
 - Baseline setup fails when an upstream checkout is not at its pinned commit (LDB, INTERVENOR and TraceCoder used to report the pin without checking; BAS-05), and every record carries `baseline_repo_state` (`observed_commit`, `dirty`, `tree_patch_sha256` of the applied patches; BAS-14).
 - Baseline failures keep their progress (BAS-10, BAS-15): a timeout or failed model call in INTERVENOR, lambda-RLM or RLM returns the last candidate and accumulated usage (`error` `timeout`, `env_client_failed` or `generation_failed`) instead of discarding both, and LDB reports metrics and usage for attempts that found no repair.
 - Baselines get retry context (BAS-02, D4): on harness attempt 2+ the failing pytest output is appended to the adapter's task prompt (INTERVENOR, TraceCoder, lambda-RLM, RLM); records carry `baseline_retry_context_consumed` (false for LDB, whose prompt has no free-text field).
