@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- The adaptive `retry_gate_no_new_evidence` gate blocks at most once in a row, and a block no longer consumes a scored attempt: it is recorded as a non-scored `infra_event`, the attempt is retried with `retry_gate_reason="block_cap_reached"`, and the next record carries `retry_gate_blocks_before` (ATT-05, D9). Previously an adaptive case could get one real repair attempt where `base_repair` got k.
 - A unit that raises now writes a terminal `note="unit_runtime_error"` failure record (resume still retries it), so it stays in its condition's denominator (ATT-08); records held back for credit resolution are flushed when a unit raises (ORC-10); and usage a failed unit already streamed counts in the run totals (ORC-17).
 - Baseline OpenAI-compatible plumbing (BAS-16, BAS-17, BAS-19): LDB selects an upstream client only for genuine GPT-4/GPT-3.5 names (others route through the GPT path with the real model id) and records `ldb_model_routing`; the OpenRouter `extra_body={"usage": {"include": true}}` is sent only to OpenRouter via one shared helper; and the baseline thinking/reasoning-fallback defaults come from one pair of constants that match the CLI.
 - RLM no longer rolls back a candidate whose import smoke test fails or exceeds 10 s; the failure is reported to the model and counted as `import_smoke_failure_count` (BAS-13).

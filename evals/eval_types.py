@@ -118,6 +118,8 @@ VALID_CATEGORIES = {
 VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 VALID_SNAPSHOT_DEPENDENCIES = {"required", "helpful", "none"}
 PYTEST_TIMEOUT_RETURNCODE = 124
+RETRY_GATE_MAX_CONSECUTIVE_BLOCKS = 1
+"""ATT-05 / D9: the no-new-evidence retry gate may block at most once in a row."""
 EVAL_RECORD_SCHEMA_VERSION = 7
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}

@@ -5888,17 +5888,20 @@ def test_adaptive_budget_policy_retry_gate_attempts_finalize_budget_bookkeeping(
     finally:
         controller.close()
 
-    assert len(records) == 2
+    # ATT-05 / D9: attempt 1, the unscored gate block, then attempt 2 proposes.
+    assert len(records) == 3
     retry_gate_record = records[1]
     attempt_meta = retry_gate_record["attempt_metadata"]
     assert retry_gate_record["note"] == "retry_gate_no_new_evidence"
+    assert retry_gate_record["record_type"] == "infra_event"
     assert attempt_meta["adaptive_budget_policy_mode"] == mode
     assert attempt_meta["adaptive_budget_update_reason"] == expected_reason
     assert attempt_meta["adaptive_budget_event_logged"] is True
     assert attempt_meta["adaptive_budget_updated"] is expected_updated
     assert isinstance(attempt_meta["adaptive_budget_reward"], float)
     events = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(events) == 2
+    # In shadow mode the budget policy stays eligible on the retried attempt; "on" spent its up.
+    assert len(events) == (3 if mode == "shadow" else 2)
 
 
 def test_adaptive_budget_policy_falls_back_when_budget_override_replace_fails(

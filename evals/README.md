@@ -1374,7 +1374,8 @@ unsupported and should be regenerated with the current harness before analysis.
   `stage_b_snapshot_in_prompt`); runs with both adaptive conditions train separate budget
   controllers with derived seeds (POL-05, POL-23); baseline rows with
   `baseline_supported=False` are excluded from that baseline's rates and paired tests (BAS-01).
-  A unit that raises writes a terminal `unit_runtime_error` failure record (ATT-08).
+  A unit that raises writes a terminal `unit_runtime_error` failure record (ATT-08); a retry-gate
+  block is a non-scored `infra_event` and the attempt is retried once (ATT-05).
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.

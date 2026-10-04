@@ -273,6 +273,7 @@ from evals.eval_types import (
     PATCH_VERIFIER_SCOPE_DISABLED,
     PROMPT_ORDER_MODES,
     RETRY_CONTEXT_MODES,
+    RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
     RETRY_PROMPT_MODES,
     SNAPSHOT_FRAME_PRUNING_MODES,
     AdaptiveProgressState,
@@ -2599,6 +2600,8 @@ def _run_one_condition_attempts(
     # Trigger 6 also requires adaptive_stop_triggered but uses a separate
     # break path at the bottom of the loop body.
     # ───────────────────────────────────────────────────────────────────────
+    retry_gate_consecutive_blocks = 0
+    retry_gate_blocks_pending = 0
     while scored_attempts_consumed < k:
         attempt = scored_attempts_consumed + 1
         _resolve_expired_pending_online_credits(current_attempt=attempt)
@@ -5906,7 +5909,16 @@ def _run_one_condition_attempts(
                 prev_evidence_fingerprint = str(
                     previous_failure_context.get("evidence_fingerprint") or ""
                 )
-            if prev_evidence_fingerprint and prev_evidence_fingerprint == evidence_fingerprint:
+            if (
+                prev_evidence_fingerprint
+                and prev_evidence_fingerprint == evidence_fingerprint
+                and retry_gate_consecutive_blocks >= RETRY_GATE_MAX_CONSECUTIVE_BLOCKS
+            ):
+                # ATT-05 / D9: never block twice in a row; propose a patch instead.
+                patch_meta["retry_gate_reason"] = "block_cap_reached"
+            elif prev_evidence_fingerprint and prev_evidence_fingerprint == evidence_fingerprint:
+                retry_gate_consecutive_blocks += 1
+                retry_gate_blocks_pending += 1
                 patch_meta["retry_gate_blocked"] = True
                 patch_meta["retry_gate_reason"] = "same_signature_without_new_evidence"
                 patch_meta["retry_gate_previous_evidence_fingerprint"] = prev_evidence_fingerprint
@@ -5936,9 +5948,12 @@ def _run_one_condition_attempts(
                     cumulative_runtime_sec=cumulative_runtime_sec,
                     attempt_wall_clock_sec=attempt_wall_sec,
                 )
+                # ATT-05 / D9: a block proposes no patch, so it is a non-scored event and
+                # the scored attempt is retried (the next record reuses this number).
+                record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
+                patch_meta["retry_gate_unscored_block"] = True
                 _queue_pending_online_credit(pending_credit=pending_credit, record=record)
                 _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
                 _capture_attempt_history(
                     attempt=attempt,
                     note="retry_gate_no_new_evidence",
@@ -5955,6 +5970,9 @@ def _run_one_condition_attempts(
                     run=current,
                 )
                 continue
+        retry_gate_consecutive_blocks = 0
+        patch_meta["retry_gate_blocks_before"] = retry_gate_blocks_pending
+        retry_gate_blocks_pending = 0
 
         should_write_adaptive_baseline_sidecars = is_baseline_patcher and is_adaptive_condition
         syntax_state = make_syntax_preflight_state(
