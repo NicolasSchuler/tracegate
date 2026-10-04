@@ -919,6 +919,10 @@ def _resolve_conditions_for_run(
         return resolved_conditions
 
     raw_conditions = [token.strip() for token in str(args.conditions).split(",") if token.strip()]
+    # ORC-15: duplicates would double the work and one copy was silently discarded later.
+    duplicates = sorted({token for token in raw_conditions if raw_conditions.count(token) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate condition(s): {', '.join(duplicates)}")
     native_baseline_mode = str(getattr(args, "native_baseline_mode", "") or "").strip().lower()
     if native_baseline_mode:
         conditions_source = config_state.value_sources.get("conditions", "default")
@@ -947,6 +951,8 @@ def _resolve_conditions_for_run(
         return _finalize(parsed)
 
     if str(args.patcher) != "baseline":
+        if not raw_conditions:
+            raise ValueError("no conditions given")
         return _finalize([Condition(token) for token in raw_conditions])
 
     baseline_name = (getattr(args, "baseline_name", "") or "").strip()
@@ -1130,7 +1136,9 @@ def main(argv: list[str] | None = None) -> int:
     global _ACTIVE_ONLINE_POLICY_CONTROLLER, _ACTIVE_BUDGET_POLICY_CONTROLLER
     argv_tokens = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
-        description="Run the llmdebug multi-condition repair benchmark harness."
+        description="Run the llmdebug multi-condition repair benchmark harness.",
+        # ORC-06: config-file values must not override abbreviated CLI flags.
+        allow_abbrev=False,
     )
     parser.add_argument("--cases-dir", default="evals/cases", help="Cases directory.")
     parser.add_argument("--case", action="append", default=[], help="Case id(s) to run.")

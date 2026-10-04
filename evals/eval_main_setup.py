@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import time
 import uuid
 from dataclasses import dataclass, replace
@@ -284,6 +285,9 @@ def _force_adaptive_policies_off_when_unused(
         )
 
     return False, startup_warnings
+
+
+_RUN_ID_PATTERN = re.compile(r"(?!\.+$)[A-Za-z0-9._-]{1,128}")
 
 
 def _derive_run_paths(*, args: argparse.Namespace, config_state: Any) -> tuple[str, Path, Path]:
@@ -804,6 +808,12 @@ def prepare_main_setup(
         startup_warnings=startup_warnings,
     )
     explicit_run_id = bool(str(args.run_id).strip())
+    if explicit_run_id and not _RUN_ID_PATTERN.fullmatch(str(args.run_id).strip()):
+        # ORC-21: the run id becomes part of results, artifact and policy-state paths.
+        _fail(
+            f"Invalid --run-id {str(args.run_id).strip()!r}: use 1-128 characters from "
+            "A-Z, a-z, 0-9, '.', '_' and '-'."
+        )
     run_id, artifacts_root, results_path = _derive_run_paths(args=args, config_state=config_state)
     if explicit_run_id:
         _append_similar_run_id_warning(

@@ -210,3 +210,34 @@ def test_att10_analysis_counts_relaxed_and_test_surface_attempts() -> None:
     )
     assert rows[0]["relaxed_apply_attempts"] == 1
     assert rows[0]["test_surface_modified_attempts"] == 1
+
+
+def test_orc06_abbreviated_flags_are_rejected(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr("evals.eval_main_flow.run_main_flow", lambda **_kw: 0)
+    with pytest.raises(SystemExit) as excinfo:
+        run_eval.main(["--job", "3"])
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments: --job" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("conditions", "message"),
+    [("base_repair,base_repair", "duplicate condition"), (",", "no conditions given")],
+)
+def test_orc15_conditions_are_validated(conditions: str, message: str, tmp_path: Path) -> None:
+    from argparse import Namespace
+
+    from evals.eval_config import ConfigResolutionState
+
+    args = Namespace(conditions=conditions, patcher="openai", native_baseline_mode="")
+    with pytest.raises(ValueError, match=message):
+        run_eval._resolve_conditions_for_run(
+            args=args, config_state=ConfigResolutionState(config_paths=[], value_sources={})
+        )
+
+
+@pytest.mark.parametrize("run_id", ["..", "a/b", "../escape", "run id", "x" * 129])
+def test_orc21_invalid_run_ids_are_rejected(run_id: str, capsys) -> None:
+    exit_code = run_eval.main(["--run-id", run_id, "--patcher", "null", "--executor", "local"])
+    assert exit_code == 2
+    assert "Invalid --run-id" in capsys.readouterr().out
