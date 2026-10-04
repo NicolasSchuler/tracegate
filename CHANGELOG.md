@@ -87,6 +87,10 @@
 - Move notebook/eval analytics libraries out of the core install and behind explicit extras.
 - Move the helper-policy decision/event records to `evals/adaptive_policy_records.py` (re-exported from `evals.adaptive_online_policy`).
 
+### Performance
+
+- LinUCB scoring uses each arm's cached inverse matrix, kept current by Sherman-Morrison rank-1 updates and recomputed exactly every 64 updates, instead of ten linear solves per decision; an entry is dropped whenever its matrix is replaced (decay, feature expansion, arm reset, load). Score plus update with 53 features and 10 arms went from about 0.19 ms to 0.05 ms per decision, and percentile caps are no longer refitted from a copied, re-sorted history on every decision (POL-20, with POL-09).
+
 ### Documentation
 
 - Align architecture, coverage, testing, and first-run guidance with the executable repository contracts.

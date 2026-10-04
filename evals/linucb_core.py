@@ -7,7 +7,8 @@ expansion, the feature vector, LinUCB and Thompson scores, the rank-1 update and
 decay. They now share these functions, so each later fix lands once (X-04).
 
 The greedy helpers break ties uniformly at random and give the matching
-epsilon-greedy propensity (POL-24).
+epsilon-greedy propensity (POL-24). Each arm's inverse matrix is cached and kept current with
+Sherman-Morrison rank-1 updates (POL-20).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from ._policy_utils import coerce_nonnegative_int, linucb_exploit_explore
 
 # Relative tolerance under which two greedy scores count as tied (POL-24).
 GREEDY_TIE_TOLERANCE = 1e-12
+# Sherman-Morrison updates of a cached inverse before it is recomputed exactly (POL-20).
+INVERSE_REFRESH_UPDATES = 64
 
 
 def _normalized_counts(actions: tuple[str, ...], raw: Mapping[str, Any]) -> dict[str, int]:
@@ -50,6 +53,13 @@ class LinUCBState:
     b: dict[str, np.ndarray] = field(default_factory=dict)
     feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
     feature_scaling_caps: dict[str, float] = field(default_factory=dict)
+    inverse_cache: dict[str, tuple[np.ndarray, np.ndarray, int]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    """Per arm: (the ``A`` it inverts, ``A^-1``, Sherman-Morrison steps since an exact
+    inverse). Not persisted. An entry is valid only while ``A`` is that same object, so
+    decay, feature expansion, arm resets and loads (which all build new matrices)
+    invalidate it (POL-20)."""
 
     def __post_init__(self) -> None:
         normalized_actions = tuple(str(action) for action in self.action_names) or ("default",)
@@ -198,10 +208,30 @@ def feature_vector(
     return np.array([to_float(values.get(name, 0.0), name) for name in names], dtype=float)
 
 
+def arm_inverse(state: LinUCBState, action: str) -> np.ndarray | None:
+    """``A^-1`` for *action* from the cache, computed when missing or stale (POL-20).
+
+    ``None`` when the arm has no matrix or it is singular; nothing is cached then.
+    """
+    A = state.A.get(action)
+    if A is None:
+        return None
+    cached = state.inverse_cache.get(action)
+    if cached is not None and cached[0] is A:
+        return cached[1]
+    try:
+        A_inv = np.linalg.inv(A)
+    except np.linalg.LinAlgError:
+        state.inverse_cache.pop(action, None)
+        return None
+    state.inverse_cache[action] = (A, A_inv, 0)
+    return A_inv
+
+
 def linucb_scores(
     state: LinUCBState, x: np.ndarray, *, l2: float, alpha: float
 ) -> dict[str, float]:
-    """UCB score (exploit + alpha * explore) per action.
+    """UCB score (exploit + alpha * explore) per action, from the cached inverses.
 
     Scoring never changes the model (POL-22): when ``A`` is singular, the re-regularized
     matrix is used for this score only; it used to be written back, adding ``l2 * I``
@@ -214,7 +244,12 @@ def linucb_scores(
         if A is None or b is None:
             scores[action] = 0.0
             continue
-        exploit, explore, _regularized = linucb_exploit_explore(A, b, x, l2=float(l2))
+        A_inv = arm_inverse(state, action)
+        if A_inv is None:
+            exploit, explore, _regularized = linucb_exploit_explore(A, b, x, l2=float(l2))
+        else:
+            exploit = float((A_inv @ b) @ x)
+            explore = float(np.sqrt(max(0.0, float(x @ (A_inv @ x)))))
         scores[action] = exploit + (float(alpha) * explore)
     return scores
 
@@ -229,10 +264,12 @@ def thompson_scores(state: LinUCBState, x: np.ndarray, *, seed: int | None) -> d
         if A is None or b is None:
             scores[action] = 0.0
             continue
+        A_inv = arm_inverse(state, action)
+        if A_inv is None:
+            scores[action] = 0.0
+            continue
         try:
-            A_inv = np.linalg.solve(A, np.eye(A.shape[0]))
-            theta_hat = A_inv @ b
-            scores[action] = float(rng.multivariate_normal(theta_hat, A_inv) @ x)
+            scores[action] = float(rng.multivariate_normal(A_inv @ b, A_inv) @ x)
         except np.linalg.LinAlgError:
             scores[action] = 0.0
     return scores
@@ -269,14 +306,30 @@ def effective_evidence(state: LinUCBState, *, l2: float) -> dict[str, float]:
 
 
 def rank_one_update(state: LinUCBState, *, action: str, reward: float, x: np.ndarray) -> bool:
-    """``A += x x^T`` and ``b += reward * x`` for *action*; ``False`` when it can't apply."""
+    """``A += x x^T`` and ``b += reward * x`` for *action*; ``False`` when it can't apply.
+
+    A cached inverse follows by Sherman-Morrison,
+    ``A^-1 - (A^-1 x)(A^-1 x)^T / (1 + x^T A^-1 x)``, and is recomputed exactly every
+    ``INVERSE_REFRESH_UPDATES`` steps to bound rounding drift (POL-20).
+    """
     A = state.A.get(action)
     b = state.b.get(action)
     if A is None or b is None:
         return False
+    cached = state.inverse_cache.get(action)
     A += np.outer(x, x)
     b += float(reward) * x
     state.A[action] = A
     state.b[action] = b
     state.updates = int(state.updates) + 1
+    if cached is not None and cached[0] is A and cached[2] + 1 < INVERSE_REFRESH_UPDATES:
+        A_inv_x = cached[1] @ x
+        denominator = 1.0 + float(x @ A_inv_x)
+        state.inverse_cache[action] = (
+            A,
+            cached[1] - np.outer(A_inv_x, A_inv_x) / denominator,
+            cached[2] + 1,
+        )
+    else:
+        state.inverse_cache.pop(action, None)
     return True

@@ -187,3 +187,54 @@ def test_pol22_scoring_a_singular_arm_does_not_change_it() -> None:
 
     assert np.isfinite(scores["a"])
     np.testing.assert_array_equal(state.A["a"], before)
+
+
+# --- POL-20: cached inverses ------------------------------------------------------------
+
+
+def test_cached_inverse_tracks_updates_decay_and_expansion() -> None:
+    actions = ("a", "b")
+    rng = np.random.default_rng(5)
+    state = core.LinUCBState(action_names=actions)
+    names = ["bias", "f1", "f2"]
+    for step in range(200):
+        if step == 120:
+            names.append("late")
+        values = {name: float(rng.normal()) for name in names}
+        core.ensure_feature_state(state, values, l2=1.0)
+        x = core.feature_vector(state, values, to_float=lambda v, _n: float(v))
+        scores = core.linucb_scores(state, x, l2=1.0, alpha=0.7)
+        for action in actions:
+            A, b = state.A[action], state.b[action]
+            exact_inv = np.linalg.inv(A)
+            want = float(exact_inv @ b @ x) + 0.7 * float(np.sqrt(x @ exact_inv @ x))
+            assert scores[action] == pytest.approx(want, rel=1e-9, abs=1e-9)
+            np.testing.assert_allclose(core.arm_inverse(state, action), exact_inv, atol=1e-9)
+        action = actions[step % 2]
+        if step % 50 == 49:
+            core.apply_recency_decay(state, action=action, decay=0.9, l2=1.0)
+        core.rank_one_update(state, action=action, reward=float(rng.normal()), x=x)
+
+
+def test_inverse_cache_is_invalidated_when_a_matrix_is_replaced() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, ["bias"], l2=1.0)
+    x = np.array([1.0])
+    assert core.linucb_scores(state, x, l2=1.0, alpha=1.0)["a"] == pytest.approx(1.0)
+    state.A["a"] = np.array([[4.0]])  # e.g. a loaded or reset arm
+    assert core.linucb_scores(state, x, l2=1.0, alpha=1.0)["a"] == pytest.approx(0.5)
+
+
+def test_inverse_cache_refreshes_exactly_after_the_refresh_interval() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, ["bias", "f"], l2=1.0)
+    x = np.array([1.0, 0.5])
+    core.arm_inverse(state, "a")
+    for step in range(core.INVERSE_REFRESH_UPDATES + 3):
+        core.rank_one_update(state, action="a", reward=1.0, x=x)
+        entry = state.inverse_cache.get("a")
+        if step + 1 < core.INVERSE_REFRESH_UPDATES:
+            assert entry is not None
+            assert entry[2] == step + 1
+    assert "a" not in state.inverse_cache  # dropped, recomputed exactly on the next score
+    np.testing.assert_allclose(core.arm_inverse(state, "a"), np.linalg.inv(state.A["a"]))

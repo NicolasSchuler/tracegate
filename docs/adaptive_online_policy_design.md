@@ -148,6 +148,9 @@ The budget policy uses the same runtime modes as helper policy:
   invalid helper payload, `no_progress_v2`, `patch_verifier_rejected`,
   `syntax_preflight_failed`, `retry_gate_no_new_evidence`, or the existing
   `need_more_context` recovery case.
+- Scores use each arm's cached `A^-1`, updated by Sherman-Morrison after every rank-1 update
+  and recomputed exactly every 64 updates; replacing a matrix (decay, feature expansion, arm
+  reset, load) drops its cache entry (POL-20).
 - Optional recency decay (`decay < 1`; the default is 1.0) discounts the updated arm's `A`/`b` toward the prior before its update. Decaying every arm on every update left about 20 observations of evidence in total and is gone (POL-01). Outcome events carry `effective_evidence` (`trace(A_k) - d·λ` per arm).
 - Feature scaling supports:
   - `v1`: fixed log-scaled caps
