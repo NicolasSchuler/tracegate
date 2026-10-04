@@ -3519,6 +3519,7 @@ def make_patcher(args: argparse.Namespace):
         raise SystemExit(str(exc)) from exc
 
     if args.patcher == "baseline":
+        from baselines.adapter_base import BaselineGenerationSettings
         from evals.patchers.baseline_patcher import build_baseline_patcher
 
         baseline_name = (getattr(args, "baseline_name", "") or "").strip()
@@ -3566,7 +3567,16 @@ def make_patcher(args: argparse.Namespace):
             ),
             api_timeout_sec=float(getattr(args, "openai_timeout_sec", 300.0)),
             process_timeout_sec=baseline_process_timeout,
-            timeout_sec=None,
+            # D4 (BAS-03/04/11): the native conditions' sampling, cap and retries.
+            generation=BaselineGenerationSettings(
+                temperature=float(getattr(args, "openai_temperature", 0.0)),
+                seed=getattr(args, "seed", None),
+                max_completion_tokens=int(getattr(args, "openai_max_tokens", 2048)),
+                transport_max_retries=int(getattr(args, "openai_transport_max_retries", 0)),
+                transport_retry_backoff_sec=float(
+                    getattr(args, "openai_transport_retry_backoff_base_sec", 1.0)
+                ),
+            ),
             extra=baseline_extra,
             strict_extra_config=True,
         )

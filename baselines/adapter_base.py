@@ -138,6 +138,9 @@ class BaselineConfig:
     repo_dir: Path = Path(".")
     python_executable: Path | None = None
     extra: dict[str, Any] = field(default_factory=_empty_any_dict)
+    generation: BaselineGenerationSettings = field(
+        default_factory=lambda: BaselineGenerationSettings()
+    )
 
     def __post_init__(self) -> None:
         process_timeout = self.process_timeout_sec
@@ -154,6 +157,43 @@ class BaselineConfig:
         object.__setattr__(self, "api_timeout_sec", max(0.0, float(api_timeout)))
         object.__setattr__(self, "process_timeout_sec", max(0.0, float(process_timeout)))
         object.__setattr__(self, "timeout_sec", max(0.0, float(process_timeout)))
+
+
+@dataclass(frozen=True)
+class BaselineGenerationSettings:
+    """Generation contract shared with the native conditions (decision D4, BAS-03/04/11).
+
+    ``None`` fields keep an adapter's own default, which ``enforced_by`` reports. Adapters
+    that run upstream code with hard-coded sampling (LDB, TraceCoder) receive the values
+    as ``TRACEGATE_BASELINE_*`` environment variables but can't honour them until their
+    upstream patches read those.
+    """
+
+    temperature: float | None = None
+    seed: int | None = None
+    max_completion_tokens: int | None = None
+    transport_max_retries: int = 0
+    transport_retry_backoff_sec: float = 1.0
+
+    def to_env(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        if self.temperature is not None:
+            out["TRACEGATE_BASELINE_TEMPERATURE"] = repr(float(self.temperature))
+        if self.seed is not None:
+            out["TRACEGATE_BASELINE_SEED"] = str(int(self.seed))
+        if self.max_completion_tokens is not None:
+            out["TRACEGATE_BASELINE_MAX_TOKENS"] = str(int(self.max_completion_tokens))
+        return out
+
+    def record(self, *, enforced: bool) -> dict[str, Any]:
+        """Per-record description of the effective contract."""
+        return {
+            "temperature": self.temperature,
+            "seed": self.seed,
+            "max_completion_tokens": self.max_completion_tokens,
+            "transport_max_retries": int(self.transport_max_retries),
+            "enforced": bool(enforced),
+        }
 
 
 @dataclass(frozen=True)
@@ -206,6 +246,9 @@ class BaselineAdapter(ABC):
       against ``buggy.py``.  The default implementation uses ``difflib``
       and should work for most baselines; override only if necessary.
     """
+
+    honours_generation_contract: bool = False
+    """Whether ``run_repair`` applies ``BaselineConfig.generation`` itself (decision D4)."""
 
     #: Fallback model used when the harness does not configure one.
     default_model: str = ""

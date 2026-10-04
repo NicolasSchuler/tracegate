@@ -1832,7 +1832,6 @@ class TestBuildBaselinePatcher:
             repo_dir=repo,
             api_timeout_sec=13,
             process_timeout_sec=27,
-            timeout_sec=None,
         )
 
         assert patcher.config.api_timeout_sec == 13

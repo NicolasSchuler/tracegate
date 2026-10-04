@@ -100,6 +100,8 @@ def _char_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
 class LambdaRLMAdapter(BaselineAdapter):
     """Adapter for a raw lambda-RLM repair baseline."""
 
+    honours_generation_contract = True
+
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
     repo_commit: str = ""
@@ -470,7 +472,9 @@ class LambdaRLMAdapter(BaselineAdapter):
                 if isinstance(call_finish_reason_counts, dict) and call_finish_reason_counts:
                     attempt_summary["call_finish_reason_counts"] = {
                         str(key): int(value)
-                        for key, value in cast(dict[object, object], call_finish_reason_counts).items()
+                        for key, value in cast(
+                            dict[object, object], call_finish_reason_counts
+                        ).items()
                         if isinstance(key, str) and isinstance(value, int)
                     }
                 call_records = call_summary.get("call_records")
@@ -744,6 +748,11 @@ class LambdaRLMAdapter(BaselineAdapter):
         force_task_type = config.extra.get("baseline_lambda_force_task_type")
         if force_task_type:
             payload["force_task_type"] = str(force_task_type)
+        # D4: the shared generation contract unless the baseline-specific knob is set.
+        if config.generation.temperature is not None:
+            payload["temperature"] = float(config.generation.temperature)
+        if config.generation.max_completion_tokens is not None:
+            payload["max_tokens"] = int(config.generation.max_completion_tokens)
         for key in (
             "baseline_lambda_temperature",
             "baseline_lambda_top_p",
@@ -853,12 +862,8 @@ class LambdaRLMAdapter(BaselineAdapter):
             "stopped_reason": str(stopped_reason or "unknown"),
             "method_instrumentation": False,
             "method_two_step_repair": False,
-            "internal_task_detection_call_count": max(
-                0, int(internal_task_detection_call_count)
-            ),
-            "internal_repl_llm_query_call_count": max(
-                0, int(internal_repl_llm_query_call_count)
-            ),
+            "internal_task_detection_call_count": max(0, int(internal_task_detection_call_count)),
+            "internal_repl_llm_query_call_count": max(0, int(internal_repl_llm_query_call_count)),
             "internal_length_finish_count": max(0, int(internal_length_finish_count)),
             "internal_compat_recovery_count": max(0, int(internal_compat_recovery_count)),
             "internal_planned_decomposition_attempt_count": max(

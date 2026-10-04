@@ -321,8 +321,30 @@ def _reported_char_metrics(
     }
 
 
+def _generation_temperature(config: BaselineConfig | None) -> float:
+    """Shared D4 temperature; INTERVENOR's own default is 0.0 (BAS-03)."""
+    if config is None or config.generation.temperature is None:
+        return 0.0
+    return float(config.generation.temperature)
+
+
+def _generation_max_tokens(config: BaselineConfig | None, adapter_default: int) -> int:
+    """Shared D4 completion cap when set, else the teacher/learner default (BAS-04)."""
+    if config is None or config.generation.max_completion_tokens is None:
+        return int(adapter_default)
+    return int(config.generation.max_completion_tokens)
+
+
+def _generation_seed_kwargs(config: BaselineConfig | None) -> dict[str, Any]:
+    if config is None or config.generation.seed is None:
+        return {}
+    return {"seed": int(config.generation.seed)}
+
+
 class IntervenorAdapter(BaselineAdapter):
     """Adapter for the INTERVENOR teacher-learner debugging baseline."""
+
+    honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
@@ -581,7 +603,13 @@ class IntervenorAdapter(BaselineAdapter):
                     },
                 )
 
+            deadline_exceeded = False
             for attempt_idx in range(1, config.max_attempts + 1):
+                deadline_sec = float(config.process_timeout_sec or 0.0)
+                if deadline_sec > 0 and time.perf_counter() - started_at >= deadline_sec:
+                    # BAS-08: one wall-clock deadline for the whole run_repair call.
+                    deadline_exceeded = True
+                    break
                 failure_summary = self._format_failure_feedback(precheck)
                 self._emit_runtime_progress(
                     phase_label="baseline: intervenor teacher",
@@ -830,14 +858,14 @@ class IntervenorAdapter(BaselineAdapter):
         return BaselineResult(
             repaired_code=current_code if current_code != original_code else None,
             success=False,
-            iterations_used=config.max_attempts,
+            iterations_used=len(attempt_summaries) if deadline_exceeded else config.max_attempts,
             token_usage=(
                 accumulated_usage
                 if usage_available and llm_call_count > 0 and accumulated_usage
                 else {}
             ),
             meta={
-                "error": "max_attempts_exhausted",
+                "error": "deadline_exceeded" if deadline_exceeded else "max_attempts_exhausted",
                 "attempts": attempt_summaries,
                 "last_feedback": self._format_failure_feedback(precheck),
                 "test_stdout_tail": precheck.stdout[-2000:],
@@ -862,6 +890,7 @@ class IntervenorAdapter(BaselineAdapter):
             base_url=base_url or None,
             api_key=config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
             timeout=config.api_timeout_sec,
+            max_retries=int(config.generation.transport_max_retries),  # BAS-11
         )
 
     def _generate_text(
@@ -887,8 +916,9 @@ class IntervenorAdapter(BaselineAdapter):
             {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0,
-                "max_tokens": max_tokens,
+                "temperature": _generation_temperature(config),
+                "max_tokens": _generation_max_tokens(config, max_tokens),
+                **_generation_seed_kwargs(config),
                 "extra_body": _usage_extra_body(),
             },
             compat_config=compat_config,
@@ -927,7 +957,10 @@ class IntervenorAdapter(BaselineAdapter):
         payload = {
             "model": model,
             "prompt": prompt,
-            "max_tokens": max_tokens,
+            "max_tokens": _generation_max_tokens(config, max_tokens),
+            "temperature": _generation_temperature(config),
+            "seed": config.generation.seed,
+            "max_retries": int(config.generation.transport_max_retries),
             "base_url": config.api_base_url,
             "api_key": config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
             "timeout_sec": config.api_timeout_sec,

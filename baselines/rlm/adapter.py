@@ -126,6 +126,8 @@ def _is_guard_stop_reason(stop_reason: str) -> bool:
 class RLMAdapter(BaselineAdapter):
     """Adapter for the standalone upstream RLM baseline."""
 
+    honours_generation_contract = True
+
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
     repo_commit: str = ""
@@ -533,7 +535,9 @@ class RLMAdapter(BaselineAdapter):
                 if isinstance(call_finish_reason_counts, dict) and call_finish_reason_counts:
                     attempt_summary["call_finish_reason_counts"] = {
                         str(key): int(value)
-                        for key, value in cast(dict[object, object], call_finish_reason_counts).items()
+                        for key, value in cast(
+                            dict[object, object], call_finish_reason_counts
+                        ).items()
                         if isinstance(key, str) and isinstance(value, int)
                     }
                 call_records = call_summary.get("call_records")
@@ -920,6 +924,11 @@ class RLMAdapter(BaselineAdapter):
         }
         if config.extra.get("baseline_rlm_max_total_tokens") is not None:
             payload["max_total_tokens"] = int(config.extra["baseline_rlm_max_total_tokens"])
+        # D4: the shared generation contract unless the baseline-specific knob is set.
+        if config.generation.temperature is not None:
+            payload["temperature"] = float(config.generation.temperature)
+        if config.generation.max_completion_tokens is not None:
+            payload["max_tokens"] = int(config.generation.max_completion_tokens)
         for source_key, target_key in (
             ("baseline_rlm_temperature", "temperature"),
             ("baseline_rlm_top_p", "top_p"),

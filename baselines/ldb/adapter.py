@@ -550,6 +550,7 @@ class LDBAdapter(BaselineAdapter):
 
             # Build the LDB subprocess command.
             env = os.environ.copy()
+            env.update(config.generation.to_env())  # D4; upstream doesn't read these yet
             env["OPENAI_API_KEY"] = config.api_key or env.get("OPENAI_API_KEY", "sk-placeholder")
             if config.api_base_url:
                 env["OPENAI_BASE_URL"] = config.api_base_url

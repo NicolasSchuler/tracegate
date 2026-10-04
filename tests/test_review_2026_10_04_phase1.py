@@ -360,3 +360,59 @@ def test_bas01_condition_summary_excludes_unsupported_cases() -> None:
     summary = _summarize_bucket(rows)["ldb"]
     assert summary["success_rate"] == 1.0
     assert summary["baseline_unsupported_cases"] == 1
+
+
+def test_d4_every_baseline_gets_one_generation_contract(tmp_path: Path) -> None:
+    """BAS-03/04/08/11: one config, recorded per record with an honest enforcement flag."""
+    from baselines.adapter_base import BaselineGenerationSettings
+    from evals.patchers.baseline_patcher import get_adapter_registry
+
+    generation = BaselineGenerationSettings(
+        temperature=0.0, seed=5, max_completion_tokens=2048, transport_max_retries=6
+    )
+    enforced = {}
+    for name, adapter_cls in sorted(get_adapter_registry().items()):
+        adapter = adapter_cls()
+        enforced[name] = generation.record(
+            enforced=bool(getattr(adapter, "honours_generation_contract", False))
+        )
+    assert {name: record["enforced"] for name, record in enforced.items()} == {
+        "intervenor": True,
+        "lambda_rlm": True,
+        "ldb": False,
+        "rlm": True,
+        "tracecoder": False,
+    }
+    assert {record["max_completion_tokens"] for record in enforced.values()} == {2048}
+    assert generation.to_env() == {
+        "TRACEGATE_BASELINE_TEMPERATURE": "0.0",
+        "TRACEGATE_BASELINE_SEED": "5",
+        "TRACEGATE_BASELINE_MAX_TOKENS": "2048",
+    }
+
+
+def test_d4_intervenor_request_uses_the_shared_contract() -> None:
+    from baselines.adapter_base import BaselineConfig, BaselineGenerationSettings
+    from baselines.intervenor import adapter as intervenor
+
+    config = BaselineConfig(
+        generation=BaselineGenerationSettings(
+            temperature=0.3, seed=9, max_completion_tokens=1000, transport_max_retries=4
+        )
+    )
+    assert intervenor._generation_temperature(config) == 0.3
+    assert intervenor._generation_max_tokens(config, 6144) == 1000
+    assert intervenor._generation_seed_kwargs(config) == {"seed": 9}
+    legacy = BaselineConfig()
+    assert intervenor._generation_temperature(legacy) == 0.0
+    assert intervenor._generation_max_tokens(legacy, 6144) == 6144
+
+
+def test_bas12_tracecoder_test_timeout_falls_back_to_process_timeout() -> None:
+    from baselines.adapter_base import BaselineConfig
+    from baselines.tracecoder.adapter import _case_test_timeout_sec
+
+    config = BaselineConfig(process_timeout_sec=600)
+    assert _case_test_timeout_sec({"timeout_sec": 12}, config) == 12
+    assert _case_test_timeout_sec({}, config) == 600
+    assert _case_test_timeout_sec({"timeout_sec": 0}, config) == 600

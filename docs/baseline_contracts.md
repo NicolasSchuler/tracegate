@@ -46,6 +46,26 @@ decision D1). It fixes which case data any arm may see:
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
   the run-level policy.
 
+## Generation contract (decision D4, BAS-03/04/08/11)
+
+`run_eval` builds one `BaselineGenerationSettings` from the native flags and passes it to
+every adapter through `BaselineConfig.generation`: `--openai-temperature`, `--seed`,
+`--openai-max-tokens` (one completion cap) and `--openai-transport-max-retries`.
+Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
+
+| Adapter | Enforced | How |
+|---|---|---|
+| INTERVENOR | yes | request temperature, `max_tokens`, `seed`; client `max_retries` |
+| lambda-RLM, RLM | yes | env-client payload `temperature` and `max_tokens` |
+| LDB, TraceCoder | no | `TRACEGATE_BASELINE_*` environment variables; the upstream patches still hard-code their own sampling until they read them |
+
+Each record's `patch_meta.baseline_generation` holds the effective values and `enforced`.
+`process_timeout_sec` is one wall-clock deadline per `run_repair` call: INTERVENOR stops
+iterating when it is reached (`error="deadline_exceeded"`), and every record carries
+`baseline_deadline_sec`, `baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
+TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
+(BAS-12).
+
 ## Unsupported cases (BAS-01, decision D3)
 
 A baseline that can't represent a case (for example LDB's converter rejects subprocess-driven,

@@ -31,6 +31,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineCaseIncompatibleError,
     BaselineConfig,
+    BaselineGenerationSettings,
     BaselineResult,
 )
 from baselines.case_information import CASE_INFO_POLICY, MODEL_HIDDEN_CASE_FIELDS
@@ -704,6 +705,9 @@ class BaselinePatcher(Patcher):
             ),
         }
         meta["case_info_policy"] = CASE_INFO_POLICY
+        meta["baseline_generation"] = self.config.generation.record(
+            enforced=bool(getattr(self.adapter, "honours_generation_contract", False))
+        )
         contract = self.adapter.contract()
         meta.update(contract.to_dict())
         if not meta.get("contract_version"):
@@ -818,6 +822,9 @@ class BaselinePatcher(Patcher):
 
         # 2. Run the baseline's repair loop.
         result: BaselineResult
+        repair_started = time.perf_counter()
+        deadline_sec = float(self.config.process_timeout_sec or 0.0)
+        meta["baseline_deadline_sec"] = deadline_sec
         try:
             self.adapter.set_progress_callback(self._current_progress_callback())
             result = self.adapter.run_repair(case_input, self.config)
@@ -827,6 +834,12 @@ class BaselinePatcher(Patcher):
             return PatchResult(diff=None, meta=cast(PatcherMeta, meta))
         finally:
             self.adapter.set_progress_callback(None)
+            # BAS-08: one observed wall clock per run_repair, comparable across adapters.
+            repair_wall_sec = time.perf_counter() - repair_started
+            meta["baseline_run_repair_wall_sec"] = repair_wall_sec
+            meta["baseline_deadline_exceeded"] = bool(
+                deadline_sec > 0 and repair_wall_sec > deadline_sec
+            )
 
         meta["iterations_used"] = result.iterations_used
         meta["baseline_success"] = result.success
@@ -878,7 +891,7 @@ def build_baseline_patcher(
     max_attempts: int = 2,
     api_timeout_sec: float | None = None,
     process_timeout_sec: float | None = None,
-    timeout_sec: float | None = 300.0,
+    generation: BaselineGenerationSettings | None = None,
     extra: dict[str, Any] | None = None,
     strict_extra_config: bool = True,
 ) -> BaselinePatcher:
@@ -905,8 +918,8 @@ def build_baseline_patcher(
         max_attempts=max_attempts,
         api_timeout_sec=api_timeout_sec,
         process_timeout_sec=process_timeout_sec,
-        timeout_sec=timeout_sec,
         repo_dir=Path(repo_dir),
+        generation=generation if generation is not None else BaselineGenerationSettings(),
         python_executable=Path(python_executable).expanduser() if python_executable else None,
         extra={**(extra or {}), "baseline_strict_extra_config": bool(strict_extra_config)},
     )

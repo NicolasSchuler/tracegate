@@ -599,7 +599,10 @@ def test_make_patcher_forwards_split_baseline_timeouts(
 
     assert captured["api_timeout_sec"] == 30.0
     assert captured["process_timeout_sec"] == 45.0
-    assert captured["timeout_sec"] is None
+    # D4: the deprecated timeout alias became the shared generation contract.
+    generation = captured["generation"]
+    assert generation.temperature == 0.0
+    assert generation.max_completion_tokens == 2048
 
 
 def test_validate_external_baseline_runtime_accepts_auto_detected_env(

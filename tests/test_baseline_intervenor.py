@@ -499,11 +499,13 @@ class TestIntervenorAdapter:
                 base_url: str | None = None,
                 api_key: str | None = None,
                 timeout: float | None = None,
+                max_retries: int | None = None,
             ) -> None:
                 observed["constructor"] = {
                     "base_url": base_url,
                     "api_key": api_key,
                     "timeout": timeout,
+                    "max_retries": max_retries,
                 }
                 self.chat = SimpleNamespace(completions=_ChatCompletions())
 
@@ -524,6 +526,7 @@ class TestIntervenorAdapter:
             "base_url": "http://127.0.0.1:9999/v1",
             "api_key": "sk-test",
             "timeout": 7.0,
+            "max_retries": 0,
         }
         assert observed["kwargs"]["extra_body"] == {"usage": {"include": True}}
         assert json.loads(response_path.read_text(encoding="utf-8")) == {

@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -389,6 +390,12 @@ def _live_progress_payload_for_metrics_sidecar(metrics_sidecar_path: Path) -> di
     return payload
 
 
+def _case_test_timeout_sec(case_input: Mapping[str, Any], config: BaselineConfig) -> int:
+    """Per-case test timeout; falls back to the process timeout like the other adapters
+    (BAS-12: it used to fall back to 10 s when the case context was missing)."""
+    return int(case_input.get("timeout_sec") or 0) or max(1, int(config.process_timeout_sec or 0))
+
+
 class TraceCoderAdapter(BaselineAdapter):
     """Adapter for the patched upstream TraceCoder baseline."""
 
@@ -494,6 +501,7 @@ class TraceCoderAdapter(BaselineAdapter):
             dataset_path.write_text(json.dumps(dataset_row) + "\n", encoding="utf-8")
 
             env = os.environ.copy()
+            env.update(config.generation.to_env())  # D4; upstream doesn't read these yet
             env["OPENAI_API_KEY"] = config.api_key or env.get("OPENAI_API_KEY", "sk-placeholder")
             if config.api_base_url:
                 env["OPENAI_BASE_URL"] = config.api_base_url
@@ -547,7 +555,7 @@ class TraceCoderAdapter(BaselineAdapter):
             if fake_responses_path:
                 env["TRACECODER_FAKE_RESPONSES_PATH"] = fake_responses_path
 
-            timeout_sec = int(case_input.get("timeout_sec") or 0) or 10
+            timeout_sec = _case_test_timeout_sec(case_input, config)
             cmd = [
                 str(config.python_executable or Path(sys.executable)),
                 str(repo / "trace_learn_coder.py"),

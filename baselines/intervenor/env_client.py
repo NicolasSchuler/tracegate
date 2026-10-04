@@ -123,14 +123,16 @@ def main(argv: list[str]) -> int:
         base_url=base_url or None,
         api_key=str(payload.get("api_key") or "sk-placeholder"),
         timeout=float(payload.get("timeout_sec") or 0.0) or None,
+        max_retries=int(payload.get("max_retries") or 0),
     )
     compat_config = compat_config_from_extra(cast(dict[str, Any], payload))
     request_kwargs, request_meta = apply_compat_request_profile(
         {
             "model": str(payload.get("model") or ""),
             "messages": [{"role": "user", "content": str(payload.get("prompt") or "")}],
-            "temperature": 0.0,
+            "temperature": float(payload.get("temperature") or 0.0),
             "max_tokens": int(payload.get("max_tokens") or 1024),
+            **({"seed": int(payload["seed"])} if payload.get("seed") is not None else {}),
             "extra_body": _usage_extra_body(),
         },
         compat_config=compat_config,

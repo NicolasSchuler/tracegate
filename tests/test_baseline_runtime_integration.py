@@ -470,7 +470,7 @@ def test_tracecoder_patcher_propagates_mocked_cli_metadata(tmp_path: Path) -> No
         python_executable=_TRACECODER_ENV_PYTHON,
         model="test-model",
         max_attempts=2,
-        timeout_sec=30,
+        process_timeout_sec=30,
         extra={"tracecoder_fake_responses_path": str(responses_path)},
     )
     result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
@@ -543,7 +543,7 @@ def test_tracecoder_patcher_accepts_input_output_usage_fields(tmp_path: Path) ->
         python_executable=_TRACECODER_ENV_PYTHON,
         model="test-model",
         max_attempts=2,
-        timeout_sec=30,
+        process_timeout_sec=30,
         extra={"tracecoder_fake_responses_path": str(responses_path)},
     )
     result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
@@ -602,7 +602,7 @@ def test_tracecoder_patcher_reaches_openai_compat_stub_server(tmp_path: Path) ->
             api_base_url=server.base_url_v1,
             api_key="sk-test",
             max_attempts=2,
-            timeout_sec=30,
+            process_timeout_sec=30,
         )
         result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
 
@@ -652,7 +652,6 @@ def test_ldb_patcher_reaches_openai_compat_stub_server(tmp_path: Path) -> None:
             max_attempts=2,
             api_timeout_sec=15.0,
             process_timeout_sec=30.0,
-            timeout_sec=30.0,
         )
         result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
 
@@ -709,7 +708,6 @@ def test_intervenor_patcher_reaches_openai_compat_stub_server(tmp_path: Path) ->
             max_attempts=1,
             api_timeout_sec=15.0,
             process_timeout_sec=30.0,
-            timeout_sec=30.0,
         )
         result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
 
@@ -768,7 +766,6 @@ def test_lambda_rlm_patcher_reaches_openai_compat_stub_server(tmp_path: Path) ->
             max_attempts=1,
             api_timeout_sec=15.0,
             process_timeout_sec=30.0,
-            timeout_sec=30.0,
         )
         result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
 
@@ -827,7 +824,6 @@ def test_rlm_patcher_reaches_openai_compat_stub_server(tmp_path: Path) -> None:
             max_attempts=1,
             api_timeout_sec=15.0,
             process_timeout_sec=30.0,
-            timeout_sec=30.0,
         )
         result = patcher.propose_patch(prompt="", context_dir=context_dir, cwd=case_dir)
 
