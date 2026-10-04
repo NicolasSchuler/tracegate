@@ -47,6 +47,9 @@ All baselines run under identical constraints:
 - **Same LLM**: Local model via OpenAI-compatible API (same endpoint, same model)
 - **Same budget**: `k=2` repair attempts per case, single-candidate generation
 - **Same scoring**: pytest pass/fail on the patched code, run inside Docker
+- **Same case information**: no arm sees dataset descriptions or labels, and
+  every arm sees the test source (`case_info_policy = neutral_v1`; see
+  [`docs/baseline_contracts.md`](../docs/baseline_contracts.md))
 - **Same case/test timeout**: `BaselineCaseContext.timeout_sec` remains the
   per-case pytest budget used by the harness and baseline-owned test checks
 - **Same API timeout default**: `--openai-timeout-sec` is the shared
@@ -434,8 +437,8 @@ Every adapter's `convert_case()` returns a **frozen dataclass** subclass of
 |---------|-------------|------------------------|
 | LDB | `LDBCaseInput` | `prompt`, `seed`, `given_tests`, `dataset_type` |
 | INTERVENOR | `IntervenorCaseInput` | `prompt`, `buggy_code` |
-| TraceCoder | `TraceCoderCaseInput` | `complete_prompt`, `buggy_code`, `repair_seeded`, `execution_mode`, `category`, `difficulty`, `snapshot_dependency` |
-| lambda-RLM | `LambdaRLMCaseInput` | `buggy_code`, `prompt_context`, `category`, `difficulty`, `snapshot_dependency` |
+| TraceCoder | `TraceCoderCaseInput` | `complete_prompt`, `buggy_code`, `repair_seeded`, `execution_mode` |
+| lambda-RLM | `LambdaRLMCaseInput` | `buggy_code`, `prompt_context` |
 | RLM | `RLMCaseInput` (alias for `LambdaRLMCaseInput`) | same as lambda-RLM |
 
 `BaseCaseInput.from_dict()` validates at construction time: missing required

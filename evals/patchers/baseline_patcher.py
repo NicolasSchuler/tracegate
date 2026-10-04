@@ -32,6 +32,7 @@ from baselines.adapter_base import (
     BaselineConfig,
     BaselineResult,
 )
+from baselines.case_information import CASE_INFO_POLICY, MODEL_HIDDEN_CASE_FIELDS
 from baselines.contracts import BASELINE_CONTRACT_VERSION
 from evals.adaptive_controller_packet import (
     HYBRID_GUIDANCE_MODE_FAIR_V1,
@@ -169,24 +170,16 @@ def _load_baseline_case_context(
         except (TypeError, ValueError):
             issues.append(f"timeout_sec_invalid_value:{raw_timeout_sec!r}")
 
-    def _optional_string(field_name: str) -> str | None:
-        raw_value = payload.get(field_name)
-        if raw_value is None:
-            return None
-        if isinstance(raw_value, str):
-            return raw_value
-        issues.append(f"{field_name}_invalid_type:{type(raw_value).__name__}")
-        return None
+    # Analysis-only case labels never reach an adapter, even from older context files.
+    dropped = [name for name in MODEL_HIDDEN_CASE_FIELDS if payload.get(name) is not None]
+    if dropped:
+        issues.append("hidden_case_fields_dropped:" + ",".join(dropped))
 
     case_context = BaselineCaseContext(
         case_id=case_id,
         python_args=python_args,
         timeout_sec=timeout_sec,
         schema_version=schema_version or BASELINE_CONTRACT_VERSION,
-        description=_optional_string("description"),
-        category=_optional_string("category"),
-        difficulty=_optional_string("difficulty"),
-        snapshot_dependency=_optional_string("snapshot_dependency"),
     )
     return _BaselineCaseContextLoadResult(
         case_context=case_context,
@@ -676,6 +669,7 @@ class BaselinePatcher(Patcher):
                 "strict" if self.config.extra.get("baseline_strict_extra_config", True) else "warn"
             ),
         }
+        meta["case_info_policy"] = CASE_INFO_POLICY
         contract = self.adapter.contract()
         meta.update(contract.to_dict())
         if not meta.get("contract_version"):
@@ -714,6 +708,9 @@ class BaselinePatcher(Patcher):
                 raise TypeError(
                     f"convert_case() must return a BaseCaseInput or dict, got {type(raw_case).__name__}"
                 )
+            case_information = case_input.get("case_information")
+            if isinstance(case_information, dict):
+                meta["case_information"] = dict(case_information)
         except BaselineCaseIncompatibleError as exc:
             meta["error"] = "case_incompatible"
             meta["baseline_supported"] = False

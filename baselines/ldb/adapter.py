@@ -486,9 +486,8 @@ class LDBAdapter(BaselineAdapter):
         case_context: BaselineCaseContext | None = None,
     ) -> LDBCaseInput:
         """Convert llmdebug case → LDB input format."""
-        description = case_context.description if case_context and case_context.description else ""
         case_id = case_context.case_id if case_context else case_dir.name
-        return convert_case(case_dir, case_id=case_id, description=description)
+        return convert_case(case_dir, case_id=case_id)
 
     def run_repair(
         self,

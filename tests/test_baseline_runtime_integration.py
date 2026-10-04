@@ -353,7 +353,9 @@ def test_real_tracecoder_cli_runs_mocked_llmdebug_cases(
     case_kind: str,
 ) -> None:
     case_dir = tmp_path / case_kind
-    repaired_code, instrumented_code, description = _write_tracecoder_case(case_dir, kind=case_kind)
+    repaired_code, instrumented_code, _description = _write_tracecoder_case(
+        case_dir, kind=case_kind
+    )
     dataset_path = tmp_path / f"{case_kind}.jsonl"
     output_csv = tmp_path / f"{case_kind}.csv"
     responses_path = tmp_path / f"{case_kind}_responses.json"
@@ -369,10 +371,6 @@ def test_real_tracecoder_cli_runs_mocked_llmdebug_cases(
             case_id=case_dir.name,
             python_args=("-m", "pytest", "-q", "test_buggy.py"),
             timeout_sec=10,
-            description=description,
-            category="logic_error",
-            difficulty="easy",
-            snapshot_dependency="none",
         ),
     )
     dataset_row = row.to_dict() if hasattr(row, "to_dict") else row

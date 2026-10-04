@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import cast
 
 from baselines.adapter_base import BaselineCaseContext, BaselineCaseIncompatibleError
+from baselines.case_information import (
+    TEST_SOURCE_FULL,
+    case_information_record,
+    render_reference_tests,
+)
 from baselines.case_schemas import TraceCoderCaseInput
 
 _SKIP_DIR_NAMES = {
@@ -39,7 +44,6 @@ def convert_case(
         )
 
     entry_point = _extract_entry_point(buggy_code, test_code)
-    description = case_context.description if case_context and case_context.description else ""
     timeout_sec = int(case_context.timeout_sec) if case_context and case_context.timeout_sec else 0
 
     return cast(
@@ -51,7 +55,6 @@ def convert_case(
                 "complete_prompt": _build_prompt(
                     buggy_code=buggy_code,
                     test_code=test_code,
-                    description=description,
                     entry_point=entry_point,
                 ),
                 "buggy_code": buggy_code,
@@ -61,10 +64,10 @@ def convert_case(
                 "timeout_sec": timeout_sec,
                 "repair_seeded": True,
                 "execution_mode": "llmdebug_native",
-                "description": description,
-                "category": case_context.category if case_context else None,
-                "difficulty": case_context.difficulty if case_context else None,
-                "snapshot_dependency": case_context.snapshot_dependency if case_context else None,
+                "case_information": case_information_record(
+                    test_source_exposure=TEST_SOURCE_FULL,
+                    prompt_files=("buggy.py", "test_buggy.py"),
+                ),
             }
         ),
     )
@@ -94,21 +97,17 @@ def _extract_entry_point(buggy_code: str, test_code: str) -> str:
     return "solution"
 
 
-def _build_prompt(*, buggy_code: str, test_code: str, description: str, entry_point: str) -> str:
+def _build_prompt(*, buggy_code: str, test_code: str, entry_point: str) -> str:
     """Build the task prompt passed into TraceCoder's planning/repair prompts."""
     parts = [
         "Repair the provided buggy.py implementation so all reference tests pass.",
         f"Primary symbol: {entry_point}",
     ]
-    if description:
-        parts.append(f"Description: {description}")
     summary_lines = _summarize_reference_tests(test_code=test_code, entry_point=entry_point)
     if summary_lines:
         parts.append("Reference test summary:")
         parts.extend(summary_lines)
-    parts.append(
-        "The full workspace still contains test_buggy.py for local evaluation; do not inline it into the prompt."
-    )
+    parts.append(render_reference_tests(test_code).rstrip())
 
     try:
         tree = ast.parse(buggy_code)

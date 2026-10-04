@@ -153,13 +153,17 @@ def _patch_monitored_run(monkeypatch: pytest.MonkeyPatch, fake_run) -> None:
 
 class TestCaseConverter:
     def test_convert_case_basic(self, simple_case: Path) -> None:
-        result = convert_case(simple_case, description="Adds two numbers together.")
+        result = convert_case(simple_case)
 
         assert result.task_id == "llmdebug/my_case"
         assert result.entry_point == "add"
         assert result.dataset_type == "llmdebug"
         assert result.seed == (simple_case / "buggy.py").read_text(encoding="utf-8")
-        assert result.description == "Adds two numbers together."
+        assert result.case_information == {
+            "case_info_policy": "neutral_v1",
+            "test_source_exposure": "asserts",
+            "prompt_files": ["buggy.py", "test_buggy.py"],
+        }
         assert result.test.startswith("def check(candidate):\n")
         assert result.given_tests == ["assert add(1, 2) == 3\n"]
 
@@ -172,7 +176,6 @@ class TestCaseConverter:
                 case_id="canonical_case_id",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=9,
-                description="Adds two numbers together.",
             ),
         )
 
@@ -196,19 +199,17 @@ class TestCaseConverter:
 
     def test_build_prompt_with_docstring(self) -> None:
         code = 'def add(a, b):\n    """Add two numbers."""\n    return a + b\n'
-        prompt = _build_prompt(code, "Add numbers", "add")
+        prompt = _build_prompt(code, "add")
         assert "def add(a, b):" in prompt
         assert '"""Add two numbers."""' in prompt
 
-    def test_build_prompt_description_fallback(self) -> None:
-        prompt = _build_prompt("x = 1\n", "Some description", "compute")
-        assert prompt == 'def compute():\n    """Some description"""\n'
+    def test_build_prompt_without_definition_is_bare_signature(self) -> None:
+        assert _build_prompt("x = 1\n", "compute") == "def compute():"
 
-    def test_build_prompt_syntax_error_description_fallback(self) -> None:
-        prompt = _build_prompt("def broken(:\n", "Broken implementation", "compute")
-        assert prompt == 'def compute():\n    """Broken implementation"""\n'
+    def test_build_prompt_syntax_error_is_bare_signature(self) -> None:
+        assert _build_prompt("def broken(:\n", "compute") == "def compute():"
 
-    def test_convert_case_uses_description_when_buggy_has_no_docstring(
+    def test_convert_case_without_docstring_adds_no_description(  # ATT-02 / D1
         self, tmp_path: Path
     ) -> None:
         case_dir = tmp_path / "no_docstring_case"
@@ -219,9 +220,9 @@ class TestCaseConverter:
             encoding="utf-8",
         )
 
-        result = convert_case(case_dir, description="Fix the extra increment.")
+        result = convert_case(case_dir)
 
-        assert result.prompt == 'def compute(x):\n    """Fix the extra increment."""'
+        assert result.prompt == "def compute(x):"
 
     def test_extract_assertions_returns_executable_snippet(self) -> None:
         test_code = "from buggy import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n"

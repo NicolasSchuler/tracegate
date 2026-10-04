@@ -35,7 +35,9 @@ def _required_input_fields(cls: type[BaseCaseInput]) -> set[str]:
     unknown_required = declared_required - {f.name for f in fields(cls)}
     if unknown_required:
         rendered = ", ".join(sorted(unknown_required))
-        raise TypeError(f"{cls.__name__}: REQUIRED_INPUT_FIELDS references unknown field(s): {rendered}")
+        raise TypeError(
+            f"{cls.__name__}: REQUIRED_INPUT_FIELDS references unknown field(s): {rendered}"
+        )
     return required | declared_required
 
 
@@ -51,11 +53,11 @@ class BaseCaseInput:
 
     task_id: str
     entry_point: str
-    description: str = ""
     test: str = ""
     python_args: list[str] | None = None
     timeout_sec: int = 0
     files: list[dict[str, str]] | None = None
+    case_information: dict[str, Any] | None = None
     REQUIRED_INPUT_FIELDS: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
@@ -122,9 +124,6 @@ class TraceCoderCaseInput(BaseCaseInput):
     buggy_code: str = ""
     repair_seeded: bool = True
     execution_mode: str = "llmdebug_native"
-    category: str | None = None
-    difficulty: str | None = None
-    snapshot_dependency: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,14 +134,9 @@ class LambdaRLMCaseInput(BaseCaseInput):
     conversion to lambda-RLM's converter).
     """
 
-    REQUIRED_INPUT_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"buggy_code", "prompt_context"}
-    )
+    REQUIRED_INPUT_FIELDS: ClassVar[frozenset[str]] = frozenset({"buggy_code", "prompt_context"})
     buggy_code: str = ""
     prompt_context: str = ""
-    category: str | None = None
-    difficulty: str | None = None
-    snapshot_dependency: str | None = None
 
 
 # RLM reuses exactly the same case schema as lambda-RLM.

@@ -572,6 +572,10 @@ def test_pyresbugs_import_dry_run_covers_filters_and_metadata(tmp_path: Path, mo
     assert imported[0]["metadata"]["expected_exception"] == "ImportError"
     assert imported[1]["metadata"]["expected_exception"] == "NameError"
     assert imported[2]["metadata"]["expected_exception"] == "NameError"
+    # ATT-02: the description carries no fault type or fault text; both stay analysis-only.
+    assert imported[0]["metadata"]["description"] == "PyResBugs #1 in demo"
+    assert imported[0]["metadata"]["source_fault_description"] == "missing import"
+    assert all("MIA" not in case["metadata"]["description"] for case in imported)
 
 
 def test_debugbench_helpers_cover_example_and_fallback_paths() -> None:

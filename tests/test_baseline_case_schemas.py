@@ -21,7 +21,6 @@ _VALID_SCHEMA_INPUTS: dict[type[BaseCaseInput], dict[str, object]] = {
         "test": "check(candidate)",
         "seed": "def solve(): pass",
         "given_tests": ["assert solve() == 42"],
-        "description": "",
         "dataset_type": "llmdebug",
     },
     IntervenorCaseInput: {
@@ -30,7 +29,6 @@ _VALID_SCHEMA_INPUTS: dict[type[BaseCaseInput], dict[str, object]] = {
         "prompt": "fix this",
         "buggy_code": "def func(): return 1",
         "test": "assert func() == 2",
-        "description": "",
         "python_args": ["-m", "pytest"],
         "timeout_sec": 30,
         "files": [{"path": "buggy.py", "encoding": "utf-8", "content": "..."}],
@@ -46,14 +44,12 @@ _VALID_SCHEMA_INPUTS: dict[type[BaseCaseInput], dict[str, object]] = {
         "timeout_sec": 30,
         "repair_seeded": True,
         "execution_mode": "llmdebug_native",
-        "description": "",
     },
     LambdaRLMCaseInput: {
         "task_id": "case1",
         "entry_point": "func",
         "buggy_code": "def func(): return 1",
         "test": "assert func() == 2",
-        "description": "",
         "python_args": [],
         "timeout_sec": 0,
         "files": [],
@@ -75,7 +71,7 @@ class TestBaseCaseInput:
         result = BaseCaseInput.from_dict(data)
         assert result.task_id == "case_001"
         assert result.entry_point == "solve"
-        assert result.description == ""
+        assert result.case_information is None
 
     def test_from_dict_missing_required_field(self) -> None:
         with pytest.raises(ValueError, match="BaseCaseInput"):
@@ -97,12 +93,16 @@ class TestBaseCaseInput:
         assert result.task_id == "x"
 
     def test_to_dict_roundtrip(self) -> None:
-        original = {"task_id": "a", "entry_point": "b", "description": "c"}
+        original = {"task_id": "a", "entry_point": "b", "test": "c"}
         result = BaseCaseInput.from_dict(original)
         roundtripped = result.to_dict()
         assert roundtripped["task_id"] == "a"
         assert roundtripped["entry_point"] == "b"
-        assert roundtripped["description"] == "c"
+        assert roundtripped["test"] == "c"
+
+    def test_description_is_not_a_case_input_field(self) -> None:  # ATT-02 / D1
+        with pytest.raises(ValueError, match=r"unexpected keys.*description"):
+            BaseCaseInput.from_dict({"task_id": "a", "entry_point": "b", "description": "c"})
 
     def test_frozen(self) -> None:
         case = BaseCaseInput(task_id="x", entry_point="y")
@@ -119,7 +119,6 @@ class TestLDBCaseInput:
             "test": "check(candidate)",
             "seed": "def solve(): pass",
             "given_tests": ["assert solve() == 42"],
-            "description": "test desc",
             "dataset_type": "llmdebug",
         }
         result = LDBCaseInput.from_dict(data)
@@ -151,7 +150,6 @@ class TestIntervenorCaseInput:
             "prompt": "fix this",
             "buggy_code": "def func(): return 1",
             "test": "assert func() == 2",
-            "description": "",
             "python_args": ["-m", "pytest"],
             "timeout_sec": 30,
             "files": [{"path": "buggy.py", "encoding": "utf-8", "content": "..."}],
@@ -181,7 +179,6 @@ class TestTraceCoderCaseInput:
             "timeout_sec": 30,
             "repair_seeded": True,
             "execution_mode": "llmdebug_native",
-            "description": "",
         }
         result = TraceCoderCaseInput.from_dict(data)
         assert result.complete_prompt == "Repair buggy.py"
@@ -203,7 +200,6 @@ class TestLambdaRLMCaseInput:
             "entry_point": "func",
             "buggy_code": "def func(): return 1",
             "test": "assert func() == 2",
-            "description": "",
             "python_args": [],
             "timeout_sec": 0,
             "files": [],

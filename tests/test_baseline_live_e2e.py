@@ -161,7 +161,6 @@ def _make_case_context(case_id: str) -> BaselineCaseContext:
         case_id=case_id,
         python_args=("-m", "pytest", "-x", "-q", "test_buggy.py"),
         timeout_sec=30,
-        description="E2E integration test case.",
     )
 
 

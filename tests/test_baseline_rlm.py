@@ -228,10 +228,6 @@ class TestRLMCaseConverter:
             case_id="rlm_case",
             python_args=("-m", "pytest", "-q"),
             timeout_sec=12,
-            description="Fix the arithmetic offset.",
-            category="logic_error",
-            difficulty="hard",
-            snapshot_dependency="helpful",
         )
 
         result = convert_case(rlm_case, case_context=context)
@@ -251,7 +247,6 @@ class TestRLMCaseConverter:
                 case_id="canonical_case_id",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=12,
-                description="Fix the arithmetic offset.",
             ),
         )
 
@@ -352,7 +347,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         test_outcomes = iter(
@@ -552,7 +546,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -767,7 +760,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -874,7 +866,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -1355,7 +1346,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         repaired = "from helper import offset\n\n\ndef compute(value):\n    return offset(value)"
@@ -1462,7 +1452,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         repaired = "from helper import offset\n\n\ndef compute(value):\n    return offset(value)"
@@ -1623,7 +1612,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         observed_prompts: list[str] = []
@@ -1718,7 +1706,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
 
@@ -1898,7 +1885,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
 
@@ -1982,7 +1968,6 @@ class TestRLMAdapter:
                 case_id="rlm_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
 

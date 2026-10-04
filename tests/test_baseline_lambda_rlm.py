@@ -191,10 +191,6 @@ class TestLambdaCaseConverter:
             case_id="lambda_case",
             python_args=("-m", "pytest", "-q"),
             timeout_sec=12,
-            description="Fix the arithmetic offset.",
-            category="logic_error",
-            difficulty="hard",
-            snapshot_dependency="helpful",
         )
 
         result = convert_case(lambda_case, case_context=context)
@@ -217,7 +213,6 @@ class TestLambdaCaseConverter:
                 case_id="canonical_case_id",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=12,
-                description="Fix the arithmetic offset.",
             ),
         )
 
@@ -306,7 +301,6 @@ class TestLambdaRLMAdapter:
                 case_id="lambda_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         test_outcomes = iter(
@@ -621,7 +615,6 @@ class TestLambdaRLMAdapter:
                 case_id="lambda_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
 
@@ -704,7 +697,6 @@ class TestLambdaRLMAdapter:
                 case_id="lambda_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -801,7 +793,6 @@ class TestLambdaRLMAdapter:
                 case_id="lambda_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Fix the arithmetic offset.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {

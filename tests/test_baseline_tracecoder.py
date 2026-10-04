@@ -161,10 +161,6 @@ class TestCaseConverter:
             case_id="my_case",
             python_args=("-m", "pytest", "-q"),
             timeout_sec=11,
-            description="Multiply two numbers.",
-            category="logic_error",
-            difficulty="easy",
-            snapshot_dependency="none",
         )
 
         result = convert_case(simple_case, case_context=context)
@@ -189,7 +185,6 @@ class TestCaseConverter:
                 case_id="canonical_case_id",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=11,
-                description="Multiply two numbers.",
             ),
         )
 
@@ -210,17 +205,19 @@ class TestCaseConverter:
     def test_extract_entry_point_falls_back_to_import(self) -> None:
         assert _extract_entry_point("x = 1\n", "from buggy import transform\n") == "transform"
 
-    def test_build_prompt_includes_description_and_tests(self) -> None:
+    def test_build_prompt_includes_full_tests_and_no_description(self) -> None:
+        test_code = (
+            "from buggy import multiply\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n"
+        )
         prompt = _build_prompt(
             buggy_code="def multiply(a, b):\n    return a + b\n",
-            test_code="from buggy import multiply\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n",
-            description="Multiply two numbers.",
+            test_code=test_code,
             entry_point="multiply",
         )
         assert "Repair the provided buggy.py implementation" in prompt
-        assert "Description: Multiply two numbers." in prompt
+        assert "Description:" not in prompt
         assert "Reference test summary:" in prompt
-        assert "multiply(3, 4) == 12" in prompt
+        assert "Reference tests (test_buggy.py):\n" + test_code.rstrip() in prompt
 
     def test_build_prompt_compacts_large_test_buggy_inputs(self) -> None:
         repeated_asserts = "\n".join(
@@ -228,17 +225,19 @@ class TestCaseConverter:
         )
         huge_test = f"from buggy import multiply\n\ndef test_many_cases():\n{repeated_asserts}\n"
 
-        prompt = _build_prompt(
-            buggy_code="def multiply(a, b):\n    return a + b\n",
-            test_code=huge_test,
-            description="Multiply two numbers.",
-            entry_point="multiply",
+        prompt = compact_problem_prompt(
+            _build_prompt(
+                buggy_code="def multiply(a, b):\n    return a + b\n",
+                test_code=huge_test,
+                entry_point="multiply",
+            ),
+            max_chars=4000,
         )
 
+        assert prompt.startswith("Repair the provided buggy.py implementation")
         assert "Reference test summary:" in prompt
-        assert "The full workspace still contains test_buggy.py" in prompt
         assert huge_test not in prompt
-        assert len(prompt) < len(huge_test)
+        assert len(prompt) <= 4000
 
     def test_compact_problem_prompt_respects_explicit_max_chars(self) -> None:
         prompt = "A" * 500
@@ -425,7 +424,6 @@ class TestTraceCoderAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=12,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -629,7 +627,6 @@ class TestTraceCoderAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=12,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -768,7 +765,6 @@ class TestTraceCoderAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=12,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
