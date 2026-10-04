@@ -225,7 +225,11 @@ def test_analyze_grouping_and_uplift(tmp_path) -> None:
     assert overall["cot_repair"]["successes"] == 2
     assert overall["cot_repair"]["success_rate"] == pytest.approx(2 / 3)
     assert overall["uplift_success_rate"] is None  # no layered_adaptive_llm data
-    assert overall["uplift_layered_gated_vs_base"] == pytest.approx(2 / 3)
+    # STA-03: matched on case_one, the only case gated ran. base_repair solved it in one
+    # of its two runs (0.5), gated in its one run (1.0). The unmatched rate difference
+    # (1.0 - 1/3) used to be reported.
+    assert overall["uplift_layered_gated_vs_base"] == pytest.approx(0.5)
+    assert overall["layered_adaptive_gated"]["cases_missing"] == 1
     assert "mean_attempts_budget" in overall["base_repair"]
     assert "mean_attempt_ratio_when_successful" in overall["base_repair"]
     assert "solve_on_attempt_distribution" in overall["base_repair"]
@@ -248,7 +252,7 @@ def test_analyze_grouping_and_uplift(tmp_path) -> None:
     assert "retry_gate_block_rate" in overall
     assert "pairwise_uplifts" in overall
     assert isinstance(overall["pairwise_uplifts"], list)
-    assert overall["uplift_layered_gated_vs_base"] == pytest.approx(2 / 3)
+    assert overall["uplift_layered_gated_vs_base"] == pytest.approx(0.5)
     assert overall["uplift_layered_llm_vs_base"] is None  # no layered_adaptive_llm data
 
     by_category = {"hidden_state": [], "parse_value": []}

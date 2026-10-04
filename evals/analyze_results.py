@@ -1289,6 +1289,15 @@ def _summarize_bucket(
     by_condition: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_condition[str(row["condition"])].append(row)
+    # STA-03: every condition is compared on the cases both ran; the bucket's expected
+    # case set is every case any condition ran.
+    cases_expected = {str(row.get("case_id") or "") for row in rows}
+    case_rates = {
+        condition: _case_success_rates(
+            [row for row in condition_rows if row.get("baseline_supported", True)]
+        )
+        for condition, condition_rows in by_condition.items()
+    }
 
     out: dict[str, Any] = {}
     for condition, all_condition_rows in sorted(by_condition.items()):
@@ -1299,6 +1308,7 @@ def _summarize_bucket(
         successes = sum(1 for row in condition_rows if bool(row["success"]))
         cases = len(condition_rows)
         success_rate = (successes / cases) if cases else 0.0
+        condition_case_ids = {str(row.get("case_id") or "") for row in all_condition_rows}
         successful_attempts = [
             int(row["attempts_to_success"])
             for row in condition_rows
@@ -1622,6 +1632,8 @@ def _summarize_bucket(
             "cases": cases,
             "successes": successes,
             "success_rate": success_rate,
+            "cases_expected": len(cases_expected),
+            "cases_missing": len(cases_expected - condition_case_ids),
             "baseline_unsupported_cases": baseline_unsupported_cases,
             "median_attempts_to_success": _median(successful_attempts),
             "mean_attempts_to_success": _mean(successful_attempt_values),
@@ -1805,9 +1817,9 @@ def _summarize_bucket(
             key=lambda item: item[0],
         )
     ]
-    out["pairwise_uplifts"] = _pairwise_uplifts(summary=out)
+    out["pairwise_uplifts"] = _pairwise_uplifts(case_rates)
 
-    out["uplift_success_rate"] = _uplift_success_rate(out)
+    out["uplift_success_rate"] = _matched_uplift(case_rates, "base_repair", "layered_adaptive_llm")
     stage_b_prompt_values = [
         float(row["stage_b_prompt_chars_mean"])
         for row in rows
@@ -1892,15 +1904,11 @@ def _summarize_bucket(
         out["uplift_staged_vs_monolithic"] = staged_rate - monolithic_rate
     else:
         out["uplift_staged_vs_monolithic"] = None
-    out["uplift_layered_gated_vs_base"] = _uplift_between_conditions(
-        summary=out,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_gated",
+    out["uplift_layered_gated_vs_base"] = _matched_uplift(
+        case_rates, "base_repair", "layered_adaptive_gated"
     )
-    out["uplift_layered_llm_vs_base"] = _uplift_between_conditions(
-        summary=out,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_llm",
+    out["uplift_layered_llm_vs_base"] = _matched_uplift(
+        case_rates, "base_repair", "layered_adaptive_llm"
     )
     return out
 
@@ -2999,26 +3007,48 @@ def _records_for_rows(
     return out
 
 
-def _pairwise_uplifts(*, summary: dict[str, Any]) -> list[dict[str, Any]]:
-    """Compute pairwise success-rate uplifts for all condition pairs."""
-    conditions = sorted(
-        condition
-        for condition, stats in summary.items()
-        if isinstance(stats, dict) and "cases" in stats and "success_rate" in stats
-    )
+def _case_success_rates(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Success rate per case_id over its runs (1.0/0.0 for a single run)."""
+    outcomes: dict[str, list[bool]] = defaultdict(list)
+    for row in rows:
+        outcomes[str(row.get("case_id") or "")].append(bool(row.get("success")))
+    return {case_id: sum(values) / len(values) for case_id, values in outcomes.items()}
+
+
+def _matched_uplift(
+    case_rates: dict[str, dict[str, float]], a_condition: str, b_condition: str
+) -> float | None:
+    """Success uplift (B - A) over the cases both conditions ran (STA-03).
+
+    Raw per-condition rates over different case sets used to be subtracted: A on 10
+    cases at 30% and B on the 5 easiest at 60% printed +30pp where the matched
+    uplift is 0.
+    """
+    a_rates = case_rates.get(a_condition)
+    b_rates = case_rates.get(b_condition)
+    if not a_rates or not b_rates:
+        return None
+    matched = sorted(set(a_rates) & set(b_rates))
+    if not matched:
+        return None
+    return sum(b_rates[case_id] - a_rates[case_id] for case_id in matched) / len(matched)
+
+
+def _pairwise_uplifts(case_rates: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
+    """Pairwise success-rate uplifts over each pair's matched cases (STA-03)."""
+    conditions = sorted(condition for condition, rates in case_rates.items() if rates)
     out: list[dict[str, Any]] = []
     for idx, condition_a in enumerate(conditions):
         for condition_b in conditions[idx + 1 :]:
-            uplift = _uplift_between_conditions(
-                summary=summary,
-                a_condition=condition_a,
-                b_condition=condition_b,
-            )
+            a_cases = set(case_rates[condition_a])
+            b_cases = set(case_rates[condition_b])
             out.append(
                 {
                     "condition_a": condition_a,
                     "condition_b": condition_b,
-                    "uplift_success_rate": uplift,
+                    "uplift_success_rate": _matched_uplift(case_rates, condition_a, condition_b),
+                    "n_matched_cases": len(a_cases & b_cases),
+                    "case_sets_match": a_cases == b_cases,
                 }
             )
     return out
@@ -5772,33 +5802,6 @@ def _condition_token_breakdown_mean(
     return {key: _mean(values) for key, values in accumulators.items()}
 
 
-def _uplift_success_rate(summary: dict[str, Any]) -> float | None:
-    """Uplift from base_repair to layered_adaptive_llm."""
-    return _uplift_between_conditions(
-        summary=summary,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_llm",
-    )
-
-
-def _uplift_between_conditions(
-    *,
-    summary: dict[str, Any],
-    a_condition: str,
-    b_condition: str,
-) -> float | None:
-    """Compute success-rate uplift (b - a) between two conditions."""
-    a = summary.get(a_condition)
-    b = summary.get(b_condition)
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return None
-    ar = a.get("success_rate")
-    br = b.get("success_rate")
-    if not isinstance(ar, (int, float)) or not isinstance(br, (int, float)):
-        return None
-    return float(br - ar)
-
-
 def _print_summary(summary: dict[str, Any]) -> None:
     """Print the human-readable evaluation summary to stdout."""
     print("Overall:")
@@ -5929,6 +5932,7 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
         )
         print(
             f"{prefix}- {condition}: {successes}/{cases} ({rate:.1%}), "
+            f"missing cases={int(stats.get('cases_missing') or 0)}, "
             f"median attempts={_fmt_num(med_attempts)}, "
             f"mean budget={_fmt_num(mean_attempt_budget)}, "
             f"mean success attempt ratio={_fmt_num(mean_attempt_ratio)}, "
@@ -6017,7 +6021,11 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
             condition_b = str(entry.get("condition_b") or "")
             uplift = entry.get("uplift_success_rate")
             if condition_a and condition_b:
-                print(f"{prefix}  {condition_a} -> {condition_b}: {_fmt_signed_percent(uplift)}")
+                print(
+                    f"{prefix}  {condition_a} -> {condition_b}: {_fmt_signed_percent(uplift)} "
+                    f"(n={entry.get('n_matched_cases', 'n/a')} matched cases"
+                    f"{'' if entry.get('case_sets_match', True) else ', case sets differ'})"
+                )
     uplift = bucket.get("uplift_success_rate")
     print(f"{prefix}- uplift_success_rate: {_fmt_signed_percent(uplift)}")
     print(
