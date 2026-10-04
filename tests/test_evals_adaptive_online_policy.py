@@ -121,7 +121,10 @@ def test_online_policy_on_updates_and_state_roundtrip(tmp_path) -> None:
     assert payload["reward_helper_materialization_bonus_scale"] == pytest.approx(0.6)
     assert state.decisions == 1
     assert state.updates == 1
-    assert state.action_counts[ACTION_INVOKE_HELPER] == 1
+    # Cold-start ties are broken at random since POL-24, so count whichever arm won.
+    assert state.action_counts[decision.selected_action] == 1
+    assert sum(state.action_counts.values()) == 1
+    assert state.applied_action_counts[decision.applied_action] == 1
     assert events_path.exists()
     assert len([line for line in events_path.read_text(encoding="utf-8").splitlines() if line]) == 1
 
@@ -131,6 +134,7 @@ def test_online_policy_on_updates_and_state_roundtrip(tmp_path) -> None:
     assert reloaded.load_error is None
     assert reloaded_state.decisions == 1
     assert reloaded_state.updates == 1
+    assert reloaded_state.applied_action_counts == state.applied_action_counts
 
 
 def test_online_policy_init_state_path_loads_from_separate_source(tmp_path) -> None:
@@ -685,9 +689,11 @@ def test_online_policy_masks_unavailable_actions_before_selection(tmp_path) -> N
     state_path = tmp_path / "policy_state_masked.json"
     state_path.write_text(
         json.dumps(
+            # invoke_helper is the best available arm; it used to win only by tie order (POL-24).
             _policy_state_payload(
                 preferred_action=ACTION_SNAPSHOT_LITE,
                 preferred_value=5.0,
+                b_by_action={ACTION_INVOKE_HELPER: 1.0},
             ),
             ensure_ascii=False,
         ),

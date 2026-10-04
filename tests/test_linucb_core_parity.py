@@ -4,7 +4,8 @@ The reference functions below are frozen copies of the pre-extraction code (iden
 in ``adaptive_online_policy``, ``adaptive_budget_online_policy`` and
 ``bootstrap_policy_state``). ``tests/golden/policy_online_parity.golden`` was first captured
 from a seeded online-controller run, plus a bootstrap replay of its events, before the
-extraction; it is regenerated only for intended behaviour changes (POL-01 per-arm decay).
+extraction; it is regenerated only for intended behaviour changes (POL-01 per-arm decay, POL-24
+random tie-breaking).
 """
 
 from __future__ import annotations

@@ -6,6 +6,7 @@ import math
 
 import pytest
 
+from evals import linucb_core
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -24,6 +25,17 @@ from evals.policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
 )
 from llmdebug import _json as json
+
+
+def _pin_greedy_ties_to(monkeypatch: pytest.MonkeyPatch, action: str) -> None:
+    """Resolve greedy ties to *action* for tests about something other than tie-breaking.
+
+    Ties are broken at random since POL-24; these tests used to rely on ties going to the
+    default action.
+    """
+    monkeypatch.setattr(
+        linucb_core, "pick_greedy", lambda tied, _rng: action if action in tied else tied[0]
+    )
 
 
 def _linucb_state_payload(
@@ -516,7 +528,10 @@ def test_budget_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
     )
 
 
-def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history(tmp_path) -> None:
+def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history(
+    tmp_path, monkeypatch
+) -> None:
+    _pin_greedy_ties_to(monkeypatch, ACTION_INCREASE_BUDGET)
     config = BudgetPolicyConfig.normalize(
         mode="on",
         algorithm="linucb",
@@ -1301,8 +1316,9 @@ def test_record_outcome_off_mode_returns_off_no_update(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_record_outcome_gate_updated_family_skipped(tmp_path) -> None:
+def test_record_outcome_gate_updated_family_skipped(tmp_path, monkeypatch) -> None:
     """Hierarchical: gate updates but family has no A/b → family returns False."""
+    _pin_greedy_ties_to(monkeypatch, ACTION_INCREASE_BUDGET)
     state_path = tmp_path / "s.json"
     state_path.write_text(
         json.dumps(

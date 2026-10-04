@@ -122,7 +122,8 @@ class LinUCBState:
     feature_names: list[str]           # Feature ordering (sorted)
     decisions: int                     # Total decisions made
     updates: int                       # Total model updates
-    action_counts: dict[str, int]      # Count per action
+    action_counts: dict[str, int]      # Count per selected action
+    applied_action_counts: dict[str, int]  # Count per applied action (differs in shadow mode)
     A: dict[str, np.ndarray]           # A matrices (d×d per action)
     b: dict[str, np.ndarray]           # b vectors (d× per action)
 ```

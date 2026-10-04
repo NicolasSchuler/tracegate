@@ -94,7 +94,9 @@ DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES = {
     ACTION_SEARCH_ONLY: -0.50,
     ACTION_FRAME_ONLY: -0.25,
 }
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
+# Schema 4 adds ``applied_action_counts`` (POL-24); schema 3 states still load.
+SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
 DEFAULT_ADAPTIVE_ONLINE_DECAY = 1.0
 """Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
 
@@ -262,6 +264,9 @@ class AdaptiveOnlinePolicyController:
                 decisions=int(self._state.decisions),
                 updates=int(self._state.updates),
                 action_counts={k: int(v) for k, v in self._state.action_counts.items()},
+                applied_action_counts={
+                    k: int(v) for k, v in self._state.applied_action_counts.items()
+                },
                 A={k: v.copy() for k, v in self._state.A.items()},
                 b={k: v.copy() for k, v in self._state.b.items()},
                 feature_scaling_history={
@@ -460,10 +465,7 @@ class AdaptiveOnlinePolicyController:
                 ranking = self._ranking_scores(
                     scores, advice, available_actions_norm, decision_model_effect
                 )
-                greedy = max(
-                    available_actions_norm,
-                    key=lambda action: (ranking[action], action == ACTION_INVOKE_HELPER),
-                )
+                tied = core.greedy_ties(ranking, available_actions_norm)
                 role_selection = self._role_selection(
                     advice, available_actions_norm, decision_index, baseline_action
                 )
@@ -482,14 +484,16 @@ class AdaptiveOnlinePolicyController:
                         selected = self._rng.choice(list(available_actions_norm))
                         strategy = "epsilon_uniform"
                     else:
-                        selected = greedy
+                        selected = core.pick_greedy(tied, self._rng)
                         strategy = f"{self.config.algorithm}_greedy"
-                    k_actions = float(len(available_actions_norm))
                     if decision_index <= self.config.warmup_decisions:
-                        propensity = 1.0 / k_actions
+                        propensity = 1.0 / float(len(available_actions_norm))
                     else:
-                        propensity = self.config.epsilon / k_actions + (
-                            (1.0 - self.config.epsilon) if selected == greedy else 0.0
+                        propensity = core.epsilon_greedy_propensity(
+                            selected,
+                            tied,
+                            epsilon=self.config.epsilon,
+                            n_available=len(available_actions_norm),
                         )
                 propensity = min(1.0, max(1e-9, propensity))
                 applied = selected if mode == "on" else baseline_action
@@ -497,6 +501,9 @@ class AdaptiveOnlinePolicyController:
             self._state.decisions = decision_index
             self._state.action_counts[selected] = (
                 int(self._state.action_counts.get(selected, 0)) + 1
+            )
+            self._state.applied_action_counts[applied] = (
+                int(self._state.applied_action_counts.get(applied, 0)) + 1
             )
             return PolicyDecision(
                 decision_id=uuid.uuid4().hex,
@@ -843,6 +850,10 @@ class AdaptiveOnlinePolicyController:
                 action: int(self._state.action_counts.get(action, 0))
                 for action in ONLINE_POLICY_ACTIONS
             },
+            "applied_action_counts": {
+                action: int(self._state.applied_action_counts.get(action, 0))
+                for action in ONLINE_POLICY_ACTIONS
+            },
             "A": {
                 action: self._state.A.get(action, np.empty((0, 0), dtype=float)).tolist()
                 for action in ONLINE_POLICY_ACTIONS
@@ -881,7 +892,7 @@ class AdaptiveOnlinePolicyController:
             raw = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("state payload is not an object")
-            if int(raw.get("schema_version", 0)) != STATE_SCHEMA_VERSION:
+            if int(raw.get("schema_version", 0)) not in SUPPORTED_STATE_SCHEMA_VERSIONS:
                 raise ValueError("unsupported schema version")
             algorithm = str(raw.get("algorithm") or "")
             if algorithm and algorithm != self.config.algorithm:
@@ -901,13 +912,13 @@ class AdaptiveOnlinePolicyController:
                 raise ValueError("missing or invalid feature_names")
             feature_names = [str(item) for item in feature_names_raw]
             dim = len(feature_names)
-            action_counts_raw = raw.get("action_counts")
-            action_counts = dict.fromkeys(ONLINE_POLICY_ACTIONS, 0)
-            if isinstance(action_counts_raw, dict):
-                for action in ONLINE_POLICY_ACTIONS:
-                    action_counts[action] = _coerce_nonnegative_int(
-                        action_counts_raw.get(action), default=0
-                    )
+            action_counts = core.parse_action_counts(
+                raw.get("action_counts"), ONLINE_POLICY_ACTIONS
+            )
+            # Schema 3 states predate applied counts (POL-24); they start at zero.
+            applied_action_counts = core.parse_action_counts(
+                raw.get("applied_action_counts"), ONLINE_POLICY_ACTIONS
+            )
             decisions = _coerce_nonnegative_int(raw.get("decisions"), default=0)
             updates = _coerce_nonnegative_int(raw.get("updates"), default=0)
             feature_scaling_history_raw = raw.get("feature_scaling_history")
@@ -933,6 +944,7 @@ class AdaptiveOnlinePolicyController:
                     decisions=decisions,
                     updates=updates,
                     action_counts=action_counts,
+                    applied_action_counts=applied_action_counts,
                     A={},
                     b={},
                     feature_scaling_history=feature_scaling_history,
@@ -962,6 +974,7 @@ class AdaptiveOnlinePolicyController:
                 decisions=decisions,
                 updates=updates,
                 action_counts=action_counts,
+                applied_action_counts=applied_action_counts,
                 A=A,
                 b=b,
                 feature_scaling_history=feature_scaling_history,

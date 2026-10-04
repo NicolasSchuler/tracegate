@@ -222,6 +222,15 @@ historical runs can be reproduced, and all are recorded in the run configuration
 - **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
   logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
   rows at read time.
+- **Greedy ties (POL-24).** When several feasible actions share the top score (always the case
+  at cold start), the greedy action is drawn uniformly among them with the policy RNG; ties used
+  to go to `invoke_helper` (helper policy) or the default action (budget gate, which made the
+  `time` family win budget-family ties). The logged propensity is
+  `ε/K + (1−ε)/|ties|` for a tied action and `ε/K` otherwise.
+- **Selected and applied counts (POL-24).** Persisted state keeps `action_counts` (the selected
+  action) and `applied_action_counts` (the action that ran) for every controller; they differ in
+  shadow mode. State schema 4 adds the applied counts; schema 3 states still load with applied
+  counts at zero.
 
 ## Decision-model advice (System-1)
 

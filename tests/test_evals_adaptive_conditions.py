@@ -151,7 +151,17 @@ def _online_policy_state_payload(
     *,
     mode: str,
     preferred_action: str,
+    fallback_action: str | None = None,
 ) -> dict[str, object]:
+    """State where *preferred_action* scores best and *fallback_action* second.
+
+    Masking tests name the fallback arm explicitly: greedy ties are broken at random
+    since POL-24, so the next arm no longer comes from the action order.
+    """
+    b_values = dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
+    if fallback_action is not None:
+        b_values[fallback_action] = 1.0
+    b_values[preferred_action] = 2.0
     return {
         "schema_version": ONLINE_STATE_SCHEMA_VERSION,
         "mode": mode,
@@ -166,9 +176,7 @@ def _online_policy_state_payload(
         "updates": 0,
         "action_counts": dict.fromkeys(ONLINE_POLICY_ACTIONS, 0),
         "A": {action: [[1.0]] for action in ONLINE_POLICY_ACTIONS},
-        "b": {
-            action: [2.0 if action == preferred_action else 0.0] for action in ONLINE_POLICY_ACTIONS
-        },
+        "b": {action: [b_values[action]] for action in ONLINE_POLICY_ACTIONS},
     }
 
 
@@ -229,13 +237,15 @@ def _invoke_biased_online_controller(
 
 
 def _preferred_action_online_controller(
-    tmp_path: Path, *, mode: str, preferred_action: str
+    tmp_path: Path, *, mode: str, preferred_action: str, fallback_action: str | None = None
 ) -> tuple[AdaptiveOnlinePolicyController, Path]:
     state_path = tmp_path / f"policy_state_{preferred_action}_{mode}.json"
     events_path = tmp_path / f"policy_events_{preferred_action}_{mode}.jsonl"
     state_path.write_text(
         json.dumps(
-            _online_policy_state_payload(mode=mode, preferred_action=preferred_action),
+            _online_policy_state_payload(
+                mode=mode, preferred_action=preferred_action, fallback_action=fallback_action
+            ),
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -1572,13 +1582,14 @@ def _run_adaptive_action_case(
     include_snapshot: bool = True,
     extra_run_kwargs: dict[str, object] | None = None,
     decision_model: DecisionModelBinding | None = None,
+    fallback_action: str | None = None,
 ) -> tuple[list[dict[str, object]], Path]:
     case = _make_case(tmp_path)
     workdir = tmp_path / f"{run_id}_workdir"
     context_dir = tmp_path / f"{run_id}_context"
     shutil.copytree(case.path, workdir)
     controller, events_path = _preferred_action_online_controller(
-        tmp_path, mode="on", preferred_action=preferred_action
+        tmp_path, mode="on", preferred_action=preferred_action, fallback_action=fallback_action
     )
     controller.decision_model = decision_model
 
@@ -2109,7 +2120,7 @@ def test_adaptive_reveal_traceback_first_uses_snapshot_index_without_full_snapsh
 def test_adaptive_llm_discretion_snapshot_lite_masks_unavailable_snapshot_action(
     tmp_path, monkeypatch
 ) -> None:
-    """Ensures that snapshot-lite is removed from available actions and the policy falls back to invoke-helper when no snapshot is present."""
+    """Ensures that snapshot-lite is removed from available actions and the policy falls back to the next-best arm (invoke-helper) when no snapshot is present."""
     patcher = _AdaptiveActionCapturePatcher()
 
     records, _events_path = _run_adaptive_action_case(
@@ -2118,6 +2129,7 @@ def test_adaptive_llm_discretion_snapshot_lite_masks_unavailable_snapshot_action
         patcher=patcher,
         preferred_action=ACTION_SNAPSHOT_LITE,
         run_id="run-snapshot-lite-fallback",
+        fallback_action=ACTION_INVOKE_HELPER,
         include_snapshot=False,
     )
 
@@ -2244,7 +2256,7 @@ def test_context_compaction_policy_action_respects_mode_off() -> None:
 def test_adaptive_llm_discretion_compact_then_patch_masks_disabled_compaction_action(
     tmp_path, monkeypatch
 ) -> None:
-    """Ensures that compact-then-patch is excluded from available actions and the policy falls back to invoke-helper when compaction mode is 'off'."""
+    """Ensures that compact-then-patch is excluded from available actions and the policy falls back to the next-best arm (invoke-helper) when compaction mode is 'off'."""
     patcher = _AdaptiveActionCapturePatcher(
         request_payload={
             "need_more_context": True,
@@ -2259,6 +2271,7 @@ def test_adaptive_llm_discretion_compact_then_patch_masks_disabled_compaction_ac
         patcher=patcher,
         preferred_action=ACTION_COMPACT_THEN_PATCH,
         run_id="run-compact-then-patch-mode-off",
+        fallback_action=ACTION_INVOKE_HELPER,
         extra_run_kwargs={"context_compaction_mode": "off"},
     )
 
@@ -2312,6 +2325,7 @@ def test_adaptive_llm_discretion_compact_then_patch_masks_unsupported_compaction
         patcher=patcher,
         preferred_action=ACTION_COMPACT_THEN_PATCH,
         run_id="run-compact-then-patch-fallback",
+        fallback_action=ACTION_INVOKE_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -2376,6 +2390,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_masks_until_prior_inva
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-retry-helper-strict-json",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2452,6 +2467,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_supports_non_openai_st
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-retry-helper-strict-json-non-openai",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2517,6 +2533,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_supports_legacy_patche
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-legacy-strict-json-retry",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2553,6 +2570,7 @@ def test_adaptive_llm_discretion_masks_stage_a_actions_when_request_context_unsu
         patcher=_NoRequestContextPatcher(),
         preferred_action=ACTION_FILE_ONLY,
         run_id="run-file-only-fallback",
+        fallback_action=ACTION_SKIP_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -2581,6 +2599,7 @@ def test_inherited_noop_request_context_is_treated_as_unsupported(tmp_path, monk
         patcher=_InheritedNoRequestContextPatcher(),
         preferred_action=ACTION_FILE_ONLY,
         run_id="run-inherited-request-context-noop",
+        fallback_action=ACTION_SKIP_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -6799,9 +6818,14 @@ def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
 
     original_factory = _preferred_action_online_controller
 
-    def _percentile_controller(tmp_path_arg, *, mode: str, preferred_action: str):
+    def _percentile_controller(
+        tmp_path_arg, *, mode: str, preferred_action: str, fallback_action: str | None = None
+    ):
         controller, events = original_factory(
-            tmp_path_arg, mode=mode, preferred_action=preferred_action
+            tmp_path_arg,
+            mode=mode,
+            preferred_action=preferred_action,
+            fallback_action=fallback_action,
         )
         controller.config = dc_replace(
             controller.config, mode="off", feature_scaling_profile="percentile_v1"

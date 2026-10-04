@@ -184,7 +184,7 @@ OnlinePolicyConfig(
 2. **On decision** with context x:
     - Compute θ̂_k = A_k^{-1} b_k for each action
     - Score each action: UCB_k = θ̂_k^T x + α √(x^T A_k^{-1} x)
-    - Select argmax_k UCB_k (greedy) or random (ε-greedy) from the feasible action set
+    - Select argmax_k UCB_k (greedy; ties drawn uniformly) or random (ε-greedy) from the feasible action set
 3. **On reward** r for action a with context x:
     - Optionally (decay < 1) decay A_a / b_a of the updated arm toward the L2 prior
     - A_a ← A_a + x x^T

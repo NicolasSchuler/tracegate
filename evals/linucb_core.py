@@ -5,16 +5,35 @@ The helper controller (``adaptive_online_policy``), the budget gate and family c
 each carried their own copy of the same state handling and linear algebra: feature-set
 expansion, the feature vector, LinUCB and Thompson scores, the rank-1 update and recency
 decay. They now share these functions, so each later fix lands once (X-04).
+
+The greedy helpers break ties uniformly at random and give the matching
+epsilon-greedy propensity (POL-24).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+import random
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
-from ._policy_utils import linucb_exploit_explore
+from ._policy_utils import coerce_nonnegative_int, linucb_exploit_explore
+
+# Relative tolerance under which two greedy scores count as tied (POL-24).
+GREEDY_TIE_TOLERANCE = 1e-12
+
+
+def _normalized_counts(actions: tuple[str, ...], raw: Mapping[str, Any]) -> dict[str, int]:
+    counts = dict.fromkeys(actions, 0)
+    for key, value in dict(raw).items():
+        if key in counts:
+            try:
+                counts[key] = int(value)
+            except (TypeError, ValueError):
+                counts[key] = 0
+    return counts
 
 
 @dataclass
@@ -26,6 +45,7 @@ class LinUCBState:
     decisions: int = 0
     updates: int = 0
     action_counts: dict[str, int] = field(default_factory=dict)
+    applied_action_counts: dict[str, int] = field(default_factory=dict)
     A: dict[str, np.ndarray] = field(default_factory=dict)
     b: dict[str, np.ndarray] = field(default_factory=dict)
     feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
@@ -34,14 +54,48 @@ class LinUCBState:
     def __post_init__(self) -> None:
         normalized_actions = tuple(str(action) for action in self.action_names) or ("default",)
         self.action_names = normalized_actions
-        counts = dict.fromkeys(normalized_actions, 0)
-        for key, value in dict(self.action_counts).items():
-            if key in counts:
-                try:
-                    counts[key] = int(value)
-                except (TypeError, ValueError):
-                    counts[key] = 0
-        self.action_counts = counts
+        # ``action_counts`` counts the selected action, ``applied_action_counts`` the one
+        # that ran; they differ in shadow mode (POL-24).
+        self.action_counts = _normalized_counts(normalized_actions, self.action_counts)
+        self.applied_action_counts = _normalized_counts(
+            normalized_actions, self.applied_action_counts
+        )
+
+
+def parse_action_counts(raw: object, actions: Iterable[str]) -> dict[str, int]:
+    """Per-action counts from a persisted state payload (missing or bad entries are 0)."""
+    source: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
+    return {
+        str(action): coerce_nonnegative_int(source.get(str(action)), default=0)
+        for action in actions
+    }
+
+
+def greedy_ties(scores: Mapping[str, float], available: Sequence[str]) -> list[str]:
+    """Available actions whose score ties the best one, in *available* order (POL-24)."""
+    values = {action: float(scores.get(action, 0.0)) for action in available}
+    best = max(values.values())
+    tolerance = GREEDY_TIE_TOLERANCE * max(1.0, abs(best))
+    return [action for action in available if values[action] >= best - tolerance]
+
+
+def pick_greedy(tied: Sequence[str], rng: random.Random) -> str:
+    """The greedy action: the only tied action, or a uniform draw among the ties.
+
+    The draw happens only when there is a tie, so untied decisions consume the same
+    random numbers as before.
+    """
+    return tied[0] if len(tied) == 1 else rng.choice(list(tied))
+
+
+def epsilon_greedy_propensity(
+    selected: str, tied: Sequence[str], *, epsilon: float, n_available: int
+) -> float:
+    """P(selected) under epsilon-greedy with uniform tie-breaking among *tied*."""
+    propensity = float(epsilon) / float(n_available)
+    if selected in tied:
+        propensity += (1.0 - float(epsilon)) / float(len(tied))
+    return propensity
 
 
 def ensure_feature_state(state: LinUCBState, feature_names: Iterable[str], *, l2: float) -> None:

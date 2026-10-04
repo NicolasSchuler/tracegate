@@ -230,6 +230,7 @@ def _bootstrap_online_state(
             )
         else:
             warnings.append("invalid_selected_action_skipped")
+        _count_applied(state, payload.get("applied_action"))
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
         if not keep_case_label_features:
             masked_features = drop_case_label_features(feature_values)
@@ -348,6 +349,7 @@ def _bootstrap_budget_state(
             )
         else:
             warnings.append("invalid_budget_selected_action_skipped")
+        _count_applied(gate_state, payload.get("applied_action"))
 
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
         _ensure_feature_state(state=gate_state, cleaned_features=feature_values, l2=l2)
@@ -369,6 +371,7 @@ def _bootstrap_budget_state(
                 )
             else:
                 warnings.append("invalid_budget_selected_family_skipped")
+            _count_applied(family_state, payload.get("applied_family"))
             _ensure_feature_state(
                 state=family_state,
                 cleaned_features=family_feature_values,
@@ -767,6 +770,13 @@ def _update_feature_scaling_caps(*, state: ReplayState, raw_caps: Any) -> None:
             state.feature_scaling_caps[str(key)] = float(numeric)
 
 
+def _count_applied(state: ReplayState, raw_action: object) -> None:
+    """Count the logged applied action (POL-24); events without one are skipped."""
+    action = str(raw_action or "")
+    if action in state.applied_action_counts:
+        state.applied_action_counts[action] += 1
+
+
 def _serialize_replay_state(state: ReplayState) -> dict[str, Any]:
     return {
         "feature_names": list(state.feature_names),
@@ -774,6 +784,9 @@ def _serialize_replay_state(state: ReplayState) -> dict[str, Any]:
         "updates": int(state.updates),
         "action_counts": {
             action: int(state.action_counts.get(action, 0)) for action in state.action_names
+        },
+        "applied_action_counts": {
+            action: int(state.applied_action_counts.get(action, 0)) for action in state.action_names
         },
         "A": {
             action: state.A.get(action, np.empty((0, 0), dtype=float)).tolist()

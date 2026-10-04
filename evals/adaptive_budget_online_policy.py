@@ -68,7 +68,9 @@ BUDGET_POLICY_ARCHITECTURES = {
 }
 BUDGET_POLICY_MODES = {"off", "shadow", "on"}
 BUDGET_POLICY_ALGOS = {"linucb", "thompson"}
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
+# Schema 4 adds ``applied_action_counts`` (POL-24); schema 2 and 3 states still load.
+SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 1.0
 """Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
 EVENT_SCHEMA_VERSION = 5
@@ -485,6 +487,7 @@ class AdaptiveBudgetPolicyController:
             decisions=int(state.decisions),
             updates=int(state.updates),
             action_counts={k: int(v) for k, v in state.action_counts.items()},
+            applied_action_counts={k: int(v) for k, v in state.applied_action_counts.items()},
             A={k: v.copy() for k, v in state.A.items()},
             b={k: v.copy() for k, v in state.b.items()},
             feature_scaling_history={
@@ -608,10 +611,7 @@ class AdaptiveBudgetPolicyController:
                 scores = self._thompson_scores(state=state, x=x)
             else:
                 scores = self._linucb_scores(state=state, x=x)
-            greedy = max(
-                available,
-                key=lambda action: (scores.get(action, 0.0), action == default_norm),
-            )
+            tied = core.greedy_ties(scores, available)
             if decision_index <= self.config.warmup_decisions:
                 selected = self._rng.choice(list(available))
                 strategy = "warmup_uniform"
@@ -620,15 +620,13 @@ class AdaptiveBudgetPolicyController:
                     selected = self._rng.choice(list(available))
                     strategy = "epsilon_uniform"
                 else:
-                    selected = greedy
+                    selected = core.pick_greedy(tied, self._rng)
                     strategy = "linucb_greedy"
-            k_actions = float(len(available))
-            base_prob = self.config.epsilon / k_actions
             if decision_index <= self.config.warmup_decisions:
-                propensity = 1.0 / k_actions
+                propensity = 1.0 / float(len(available))
             else:
-                propensity = base_prob + (
-                    (1.0 - self.config.epsilon) if selected == greedy else 0.0
+                propensity = core.epsilon_greedy_propensity(
+                    selected, tied, epsilon=self.config.epsilon, n_available=len(available)
                 )
             propensity = min(1.0, max(1e-9, propensity))
         state.decisions = decision_index
@@ -763,6 +761,13 @@ class AdaptiveBudgetPolicyController:
                 )
                 if mode == "on" and applied == ACTION_INCREASE_BUDGET:
                     applied_family = selected_family
+            self._state.applied_action_counts[applied] = (
+                int(self._state.applied_action_counts.get(applied, 0)) + 1
+            )
+            if applied_family:
+                self._family_state.applied_action_counts[applied_family] = (
+                    int(self._family_state.applied_action_counts.get(applied_family, 0)) + 1
+                )
             return BudgetPolicyDecision(
                 decision_id=uuid.uuid4().hex,
                 mode=mode,
@@ -1122,6 +1127,10 @@ class AdaptiveBudgetPolicyController:
             "action_counts": {
                 action: int(state.action_counts.get(action, 0)) for action in state.action_names
             },
+            "applied_action_counts": {
+                action: int(state.applied_action_counts.get(action, 0))
+                for action in state.action_names
+            },
             "A": {
                 action: state.A.get(action, np.empty((0, 0), dtype=float)).tolist()
                 for action in state.action_names
@@ -1171,13 +1180,11 @@ class AdaptiveBudgetPolicyController:
             for key, value in feature_scaling_caps_raw.items():
                 if isinstance(value, (int, float)) and np.isfinite(float(value)):
                     feature_scaling_caps[str(key)] = float(value)
-        action_counts_raw = raw_state.get("action_counts")
-        action_counts = dict.fromkeys(action_names, 0)
-        if isinstance(action_counts_raw, dict):
-            for action in action_names:
-                action_counts[action] = _coerce_nonnegative_int(
-                    action_counts_raw.get(action), default=0
-                )
+        action_counts = core.parse_action_counts(raw_state.get("action_counts"), action_names)
+        # Schema 3 states predate applied counts (POL-24); they start at zero.
+        applied_action_counts = core.parse_action_counts(
+            raw_state.get("applied_action_counts"), action_names
+        )
         if dim <= 0:
             return LinUCBState(
                 action_names=action_names,
@@ -1185,6 +1192,7 @@ class AdaptiveBudgetPolicyController:
                 decisions=decisions,
                 updates=updates,
                 action_counts=action_counts,
+                applied_action_counts=applied_action_counts,
                 A={},
                 b={},
                 feature_scaling_history=feature_scaling_history,
@@ -1211,6 +1219,7 @@ class AdaptiveBudgetPolicyController:
             decisions=decisions,
             updates=updates,
             action_counts=action_counts,
+            applied_action_counts=applied_action_counts,
             A=A_state,
             b=b_state,
             feature_scaling_history=feature_scaling_history,
@@ -1285,7 +1294,7 @@ class AdaptiveBudgetPolicyController:
                 self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
                 self.load_error = None
                 return
-            if schema_version != STATE_SCHEMA_VERSION:
+            if schema_version not in SUPPORTED_STATE_SCHEMA_VERSIONS:
                 raise ValueError("unsupported schema version")
             architecture = str(raw.get("architecture") or BUDGET_POLICY_ARCH_TIER_BINARY)
             if architecture != self.config.architecture:

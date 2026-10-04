@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Greedy ties in the adaptive policies are broken uniformly at random with the policy RNG, and the logged propensity accounts for the tie (`ε/K + (1−ε)/|ties|`); at cold start every tie went to `invoke_helper`, the budget gate's default action or the `time` family. Controller state keeps `applied_action_counts` next to `action_counts` (the selected action), so shadow-mode state no longer counts only actions that never ran; online and budget state schema 4, schema 3 still loads, and bootstrap replay restores the applied counts (POL-24).
 - The adaptive policies' NaN-feature counter, the only signal of NaN features, is updated under the controller lock; concurrent decisions lost increments (POL-16).
 - Scoring a bandit arm no longer changes it: when an arm's matrix is singular, the re-regularized matrix is used for that score only instead of being written back with an extra `l2·I` on every such call (POL-22).
 - The adaptive bandits can learn (POL-01, decision D6): LinUCB recency decay defaults to 1.0 for both the helper and budget policies (it was 0.95 and shrank all ten arms on every update, leaving about 20 observations of evidence), and decay below 1 now only discounts the arm being updated. Outcome events carry `effective_evidence` per arm (`trace(A_k) - d·λ`; online event schema 6, budget event schema 5), the shared LinUCB core serves all three controllers (`evals/linucb_core.py`), and run metadata records `policy_defaults_version: 2`.
