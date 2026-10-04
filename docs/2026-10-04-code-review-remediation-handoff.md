@@ -297,9 +297,9 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] **BAS-06, BAS-09:** `compare_results` run collapsing and the unreadable-file crash.
 
 ### 2.3. Off-policy evaluation
-- [ ] **STA-11:** cross-fitted doubly-robust estimate; record the selected alphas. **STA-12:** drop and count samples with a missing propensity.
-- [ ] Add bootstrap CIs over cases for the OPE estimates.
-- [ ] Flag shadow-mode logs written before the POL-03 fix (Phase 3) as having biased propensities.
+- [x] **STA-11:** cross-fitted doubly-robust estimate; record the selected alphas. **STA-12:** drop and count samples with a missing propensity.
+- [x] Add bootstrap CIs over cases for the OPE estimates.
+- [x] Flag shadow-mode logs written before the POL-03 fix (Phase 3) as having biased propensities. *(M1 corrects them to 1.0 at read time; `shadow_corrected_samples` is counted and printed with the estimates.)*
 
 ### 2.4. Re-analysis audit, for the user
 - [ ] Write a tool, for example `python -m evals.reanalysis_audit <jsonl…>`. For a set of result files it should:
