@@ -79,6 +79,7 @@ from baselines.openai_compat import (
     normalize_compat_profile,
     require_final_content,
     response_error_meta,
+    strip_think,
 )
 
 from .. import _json as json
@@ -707,99 +708,160 @@ def _plan_patch_system_prompt() -> str:
 
 
 def _extract_unified_diff(text: str) -> str | None:
-    s = _strip_think(text)
-    s = s.strip("\n")
+    """Extract every file diff from a model response as one git-style patch.
+
+    Review findings LLM-01/03/04/07/10: all fenced blocks and all file sections are
+    collected (a later diff for the same file replaces an earlier draft), hunks are read
+    with their declared counts so trailing prose isn't absorbed, blank context lines are
+    normalized to ``" "``, and ``/dev/null`` headers create or delete files.
+    """
+    s = _strip_think(text).strip("\n")
     if not s.strip():
         return None
-
-    # Prefer fenced blocks if present.
-    fence = re.search(r"```(?:diff|patch)?\n(.*?)\n```", s, re.DOTALL | re.IGNORECASE)
-    if fence:
-        candidate = fence.group(1).strip("\n")
-        extracted = _extract_unified_diff(candidate)
-        if extracted:
-            return extracted
-
-    lines = s.splitlines()
-
-    # If it already looks like a git diff, keep from the first header.
-    git = _extract_git_diff_blocks(lines)
-    if git is not None:
-        return git
-
-    # Otherwise try to normalize "unified diff" blocks into git-apply format.
-    normalized = _normalize_unified_blocks(lines)
-    return normalized
+    fences = [
+        match.group(1)
+        for match in re.finditer(
+            r"```(?:diff|patch)?[^\n]*\n(.*?)```", s, re.DOTALL | re.IGNORECASE
+        )
+    ]
+    sources = fences or [s]
+    by_path: dict[str, str] = {}
+    for source in sources:
+        for path, block in _iter_file_diffs(source.split("\n")):
+            by_path.pop(path, None)  # keep the last version, in the order it appeared
+            by_path[path] = block
+    if not by_path and fences:
+        for path, block in _iter_file_diffs(s.split("\n")):
+            by_path.pop(path, None)
+            by_path[path] = block
+    if not by_path:
+        return None
+    return "".join(by_path.values())
 
 
 def _strip_think(text: str) -> str:
-    # Some reasoning models emit <think>...</think>; strip it.
-    return re.sub(r"<think>.*?</think>\n?", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return strip_think(text)
 
 
-def _normalize_unified_blocks(lines: list[str]) -> str | None:
-    out_lines: list[str] = []
+_DIFF_META_PREFIXES = (
+    "index ",
+    "new file mode ",
+    "deleted file mode ",
+    "old mode ",
+    "new mode ",
+    "similarity index ",
+    "rename from ",
+    "rename to ",
+    "copy from ",
+    "copy to ",
+)
+_MARKDOWN_BULLET_RE = re.compile(r"^[-*+] +(?:[A-Z`*_\[(]|\d+\.)")
+
+
+def _is_file_header_pair(lines: list[str], index: int) -> bool:
+    return (
+        index + 1 < len(lines)
+        and lines[index].startswith("--- ")
+        and lines[index + 1].startswith("+++ ")
+    )
+
+
+def _iter_file_diffs(lines: list[str]) -> list[tuple[str, str]]:
+    """Return ``(path, git-style block)`` for every file section found in *lines*."""
+    out: list[tuple[str, str]] = []
     i = 0
     n = len(lines)
     while i < n:
         line = lines[i]
-        if not line.startswith("--- "):
+        git_header = line.startswith("diff --git ")
+        if not git_header and not _is_file_header_pair(lines, i):
             i += 1
             continue
-        if i + 1 >= n or not lines[i + 1].startswith("+++ "):
+        j = i + 1 if git_header else i
+        meta: list[str] = []
+        while j < n and lines[j].startswith(_DIFF_META_PREFIXES):
+            meta.append(lines[j])
+            j += 1
+        if not _is_file_header_pair(lines, j):
             i += 1
             continue
-
-        old_raw = lines[i][4:].strip()
-        new_raw = lines[i + 1][4:].strip()
-        old_path = _clean_path_token(old_raw)
-        new_path = _clean_path_token(new_raw)
+        old_path = _clean_path_token(lines[j][4:].strip())
+        new_path = _clean_path_token(lines[j + 1][4:].strip())
         if old_path is None or new_path is None:
-            i += 2
+            i = j + 2
             continue
+        hunks, j = _read_hunks(lines, j + 2)
+        if hunks:
+            out.append(_git_file_block(old_path, new_path, meta, hunks))
+        i = max(j, i + 1)
+    return out
 
+
+def _git_file_block(
+    old_path: str, new_path: str, meta: list[str], hunks: list[str]
+) -> tuple[str, str]:
+    if old_path == "/dev/null":  # new file (LLM-10)
+        path = new_path
+        header = [f"diff --git a/{path} b/{path}", *meta, "--- /dev/null", f"+++ b/{path}"]
+    elif new_path == "/dev/null":  # deleted file
+        path = old_path
+        header = [f"diff --git a/{path} b/{path}", *meta, f"--- a/{path}", "+++ /dev/null"]
+    else:
         # Avoid accidental renames in model output (common mistake).
-        if old_path != "/dev/null" and new_path != old_path:
-            new_path = old_path
+        path = old_path
+        header = [f"diff --git a/{path} b/{path}", *meta, f"--- a/{path}", f"+++ b/{path}"]
+    return path, "\n".join([*header, *hunks]) + "\n"
 
-        out_lines.append(f"diff --git a/{old_path} b/{new_path}")
-        out_lines.append(f"--- a/{old_path}")
-        out_lines.append(f"+++ b/{new_path}")
 
-        # Copy hunks until next file header, but stop on non-diff junk.
-        i += 2
-        seen_hunk = False
+def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
+    """Read the hunks of one file section; return them and the index after the section."""
+    hunks: list[str] = []
+    i = start
+    n = len(lines)
+    while i < n and lines[i].startswith("@@"):
+        match = _HUNK_RE.match(lines[i])
+        # An omitted count means 1; a header that doesn't parse gives no count to trust.
+        want_old = int(match.group(2) if match.group(2) is not None else 1) if match else None
+        want_new = int(match.group(4) if match.group(4) is not None else 1) if match else None
+        hunks.append(lines[i])
+        i += 1
+        old_seen = new_seen = 0
         while i < n:
-            nxt = lines[i]
-            if nxt.startswith("--- ") and (i + 1) < n and lines[i + 1].startswith("+++ "):
-                break
-            if nxt.startswith("@@"):
-                seen_hunk = True
-                out_lines.append(nxt)
-                i += 1
-                continue
-            if seen_hunk and (
-                nxt.startswith(" ")
-                or nxt.startswith("+")
-                or nxt.startswith("-")
-                or nxt.startswith("\\")
+            body = lines[i]
+            counts_met = (
+                want_old is not None
+                and want_new is not None
+                and old_seen >= want_old
+                and new_seen >= want_new
+            )
+            if (
+                body.startswith("@@")
+                or body.startswith("diff --git ")
+                or _is_file_header_pair(lines, i)
             ):
-                out_lines.append(nxt)
-                i += 1
-                continue
-            # End of diff content (model started explaining, etc).
-            break
-        # Ensure a blank line between file diffs for readability.
-        if out_lines and out_lines[-1] != "":
-            out_lines.append("")
-
-    if not out_lines:
-        return None
-
-    text = "\n".join(out_lines).rstrip("\n") + "\n"
-    if "diff --git " not in text:
-        return None
-    return text
+                break
+            if body == "":
+                # A blank line inside a hunk is a context line whose space was lost (LLM-03).
+                following = lines[i + 1] if i + 1 < n else ""
+                if counts_met or not following.startswith((" ", "+", "-", "\\")):
+                    break
+                body = " "
+            elif body.startswith(("+", "-")) and counts_met and _MARKDOWN_BULLET_RE.match(body):
+                break  # trailing markdown bullets after a complete hunk (LLM-07)
+            elif not body.startswith((" ", "+", "-", "\\")):
+                break
+            if body.startswith(" "):
+                old_seen += 1
+                new_seen += 1
+            elif body.startswith("-"):
+                old_seen += 1
+            elif body.startswith("+"):
+                new_seen += 1
+            hunks.append(body)
+            i += 1
+        while i < n and lines[i] == "" and i + 1 < n and lines[i + 1].startswith("@@"):
+            i += 1
+    return hunks, i
 
 
 def _clean_path_token(raw: str) -> str | None:
@@ -826,62 +888,6 @@ def _clean_path_token(raw: str) -> str | None:
     if token == "/dev/null":
         return token
     return token
-
-
-def _extract_git_diff_blocks(lines: list[str]) -> str | None:
-    starts = [i for i, line in enumerate(lines) if line.startswith("diff --git ")]
-    if not starts:
-        return None
-
-    captured: list[str] = []
-    i = starts[0]
-    n = len(lines)
-
-    # Capture only "diff-like" lines; stop when model starts narrating.
-    while i < n:
-        line = lines[i]
-
-        if line.startswith("diff --git "):
-            captured.append(line)
-            i += 1
-            continue
-
-        allowed = (
-            line.startswith("index ")
-            or line.startswith("new file mode ")
-            or line.startswith("deleted file mode ")
-            or line.startswith("old mode ")
-            or line.startswith("new mode ")
-            or line.startswith("similarity index ")
-            or line.startswith("rename from ")
-            or line.startswith("rename to ")
-            or line.startswith("copy from ")
-            or line.startswith("copy to ")
-            or line.startswith("--- a/")
-            or line == "--- /dev/null"
-            or line.startswith("+++ b/")
-            or line == "+++ /dev/null"
-            or line.startswith("@@")
-            or line.startswith(" ")
-            or line.startswith("+")
-            or line.startswith("-")
-            or line.startswith("\\")
-            or line == ""
-        )
-        if not allowed:
-            break
-
-        captured.append(line)
-        i += 1
-
-    text = "\n".join(captured).strip("\n") + "\n"
-    if "diff --git " not in text:
-        return None
-    if "--- a/" not in text and "--- /dev/null" not in text:
-        return None
-    if "+++ b/" not in text and "+++ /dev/null" not in text:
-        return None
-    return text
 
 
 @dataclass(frozen=True)
@@ -6044,8 +6050,8 @@ def _fix_hunk_counts(diff: str) -> str:
             i += 1
             continue
 
-        old_start = max(1, int(m.group(1)))
-        new_start = max(1, int(m.group(3)))
+        old_start = int(m.group(1))
+        new_start = int(m.group(3))
         suffix = m.group(5) or ""
 
         # Collect hunk body.
@@ -6059,12 +6065,16 @@ def _fix_hunk_counts(diff: str) -> str:
                 break
             body.append(nxt)
             i += 1
+        # LLM-03: trailing blank lines separate sections; interior ones are context lines
+        # whose leading space was lost and must be counted.
+        trailing_blank: list[str] = []
+        while body and body[-1] == "":
+            trailing_blank.append(body.pop())
+        body = [" " if b == "" else b for b in body]
 
         old_count = 0
         new_count = 0
         for b in body:
-            if not b:
-                continue
             c = b[0]
             if c == " ":
                 old_count += 1
@@ -6077,7 +6087,12 @@ def _fix_hunk_counts(diff: str) -> str:
                 # "\ No newline..." or other metadata does not affect counts.
                 pass
 
+        # A side with no lines starts at 0 (file creation or deletion, LLM-10); otherwise
+        # line numbers are 1-based.
+        old_start = old_start if old_count == 0 else max(1, old_start)
+        new_start = new_start if new_count == 0 else max(1, new_start)
         out.append(f"@@ -{old_start},{old_count} +{new_start},{new_count} @@{suffix}")
         out.extend(body)
+        out.extend(trailing_blank)
 
     return "\n".join(out).rstrip("\n") + "\n"

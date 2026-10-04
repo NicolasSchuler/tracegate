@@ -12,6 +12,7 @@ from baselines.openai_compat import (
     normalize_chat_completion_response,
     request_validation_compat_error_from_exception,
     require_final_content,
+    strip_think,
 )
 
 
@@ -477,3 +478,18 @@ class TestEnableThinkingOption:
         )
 
         assert request_meta.enable_thinking is True
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<think>draft</think>\nanswer", "answer"),
+        ("draft without opening tag</think>\nanswer", "answer"),  # LLM-04: orphan close
+        ("<think>a</think>x<think>b</think>\nanswer", "answer"),
+        ("answer\n<think>second thoughts, never closed", "answer\n"),  # LLM-04: unclosed
+        ("<THINK>draft</THINK>answer", "answer"),
+        ("plain answer", "plain answer"),
+    ],
+)
+def test_strip_think_keeps_only_the_final_answer(text: str, expected: str) -> None:
+    assert strip_think(text) == expected

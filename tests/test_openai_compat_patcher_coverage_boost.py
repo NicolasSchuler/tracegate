@@ -833,11 +833,21 @@ class TestFixHunkCounts:
         fixed = mod._fix_hunk_counts(diff)
         assert "def foo():" in fixed
 
-    def test_empty_body_lines_skipped(self) -> None:
-        # Empty lines in body should not affect count
+    def test_interior_empty_body_line_is_context(self) -> None:
+        # LLM-03: an interior empty line is a context line that lost its leading space.
         diff = "@@ -1,99 +1,99 @@\n-old\n\n+new\n"
         fixed = mod._fix_hunk_counts(diff)
-        assert "@@ -1,1 +1,1 @@" in fixed
+        assert fixed == "@@ -1,2 +1,2 @@\n-old\n \n+new\n"
+
+    def test_trailing_empty_body_lines_are_not_counted(self) -> None:
+        diff = "@@ -1,99 +1,99 @@\n-old\n+new\n\n\n"
+        fixed = mod._fix_hunk_counts(diff)
+        assert fixed == "@@ -1,1 +1,1 @@\n-old\n+new\n"
+
+    def test_empty_side_keeps_zero_start(self) -> None:
+        # LLM-10: file creation is "-0,0"; a 1-based start would break `patch`.
+        fixed = mod._fix_hunk_counts("@@ -0,0 +1,9 @@\n+a\n+b\n")
+        assert fixed.startswith("@@ -0,0 +1,2 @@\n")
 
 
 # ---------------------------------------------------------------------------

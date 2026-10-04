@@ -1126,7 +1126,7 @@ def test_probe_server_ready_reports_failure(monkeypatch) -> None:
     assert "health:request_failed" in str(meta["server_ready_probe_error"])
 
 
-def test_normalize_unified_blocks_preserves_paths_with_spaces() -> None:
+def test_iter_file_diffs_preserves_paths_with_spaces() -> None:
     """Verifies that tab-delimited timestamp suffixes on --- / +++ headers are stripped and a correct git-style diff --git header is produced, even when file paths contain spaces."""
     lines = [
         "--- a/buggy file.py\t2026-02-23 20:00:00 +0000",
@@ -1136,9 +1136,9 @@ def test_normalize_unified_blocks_preserves_paths_with_spaces() -> None:
         "+return 2",
     ]
 
-    normalized = openai_mod._normalize_unified_blocks(lines)
+    [(path, normalized)] = openai_mod._iter_file_diffs(lines)
 
-    assert normalized is not None
+    assert path == "buggy file.py"
     assert "diff --git a/buggy file.py b/buggy file.py" in normalized
     assert "--- a/buggy file.py" in normalized
     assert "+++ b/buggy file.py" in normalized

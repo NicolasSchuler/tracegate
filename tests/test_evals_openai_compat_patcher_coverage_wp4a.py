@@ -2,7 +2,7 @@
 
 Targets specific uncovered lines and branches identified in coverage-evals.json.
 Groups:
-  - Lines 724-802: _normalize_unified_blocks / _clean_path_token / _extract_git_diff_blocks
+  - _iter_file_diffs / _clean_path_token
   - Lines 2318-2778: Context-window probing, server readiness, request context async fallback
   - Lines 2981-3577: Response parsing, edits pipeline, full-file proposal
   - Lines 3673-4161: Async edits/full-file pipeline error paths
@@ -64,16 +64,14 @@ def _err_chat(
 
 
 # ============================================================================
-# 1. _normalize_unified_blocks / _clean_path_token / _extract_git_diff_blocks
-#    (lines 724, 748, 802)
+# 1. _iter_file_diffs / _clean_path_token
 # ============================================================================
 
 
 class TestNormalizeUnifiedBlocks:
-    """Cover line 724: diff text missing 'diff --git'."""
+    """Plain unified headers gain a git header."""
 
-    def test_unified_blocks_without_git_header_returns_none(self) -> None:
-        # _normalize_unified_blocks builds text lacking "diff --git" → returns None
+    def test_unified_blocks_without_git_header_gain_one(self) -> None:
         lines = [
             "--- a/foo.py",
             "+++ b/foo.py",
@@ -81,15 +79,13 @@ class TestNormalizeUnifiedBlocks:
             "-old",
             "+new",
         ]
-        result = mod._normalize_unified_blocks(lines)
-        # The assembled text must contain "diff --git" to return non-None
-        if result is not None:
-            assert "diff --git" in result
-        # If the function inserts one, that's fine too. Just covers branch.
+        [(path, block)] = mod._iter_file_diffs(lines)
+        assert path == "foo.py"
+        assert block.startswith("diff --git a/foo.py b/foo.py\n")
 
 
 class TestCleanPathToken:
-    """Cover lines 748 (empty after prefix strip) and other edge cases."""
+    """Empty-after-prefix-strip and other edge cases."""
 
     def test_empty_string_returns_none(self) -> None:
         assert mod._clean_path_token("") is None
@@ -121,22 +117,21 @@ class TestCleanPathToken:
 
 
 class TestExtractGitDiffBlocks:
-    """Cover line 802: text assembled but missing required ---/+++ headers."""
+    """Git headers without ``---``/``+++`` lines yield no file diff."""
 
     def test_no_diff_headers(self) -> None:
         lines = ["hello", "world"]
-        assert mod._extract_git_diff_blocks(lines) is None
+        assert mod._iter_file_diffs(lines) == []
 
     def test_diff_header_but_no_minus_plus(self) -> None:
-        # Has "diff --git" but no "--- a/" or "+++ b/" → returns None (line 802+)
+        # Has "diff --git" but no "--- a/" or "+++ b/" → nothing to apply
         lines = [
             "diff --git a/foo.py b/foo.py",
             "index abc..def",
             "@@ -1,1 +1,1 @@",
             " context",
         ]
-        result = mod._extract_git_diff_blocks(lines)
-        assert result is None
+        assert mod._iter_file_diffs(lines) == []
 
     def test_diff_stops_at_non_diff_narration(self) -> None:
         lines = [
@@ -148,8 +143,7 @@ class TestExtractGitDiffBlocks:
             "+new",
             "This is the explanation",  # non-diff line stops capture
         ]
-        result = mod._extract_git_diff_blocks(lines)
-        assert result is not None
+        [(_, result)] = mod._iter_file_diffs(lines)
         assert "explanation" not in result
 
 

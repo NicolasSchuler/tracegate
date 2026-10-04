@@ -66,11 +66,26 @@ def _remove_new_patch_leftovers(cwd: Path, before: set[Path]) -> None:
         path.unlink(missing_ok=True)
 
 
+def _crlf_diff_targets(cwd: Path, diff: str) -> list[Path]:
+    """Existing diff targets whose every line ends in CRLF (LLM-09)."""
+    targets: list[Path] = []
+    for rel in _extract_diff_paths(diff):
+        target = cwd / rel
+        if target.is_symlink() or not target.is_file():
+            continue
+        data = target.read_bytes()
+        if b"\r\n" in data and data.count(b"\r\n") == data.count(b"\n"):
+            targets.append(target)
+    return targets
+
+
 def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     """Apply a unified diff to *cwd* via ``patch`` or ``git apply``.
 
     Falls back to relaxed line-by-line replacement when strict patch
-    application fails.
+    application fails. Files that use CRLF line endings are patched as LF and
+    converted back afterwards, so a model diff (always LF) matches them and the
+    file keeps its endings (LLM-09).
 
     Returns:
         Tuple of (success, error_or_info_message).
@@ -82,6 +97,20 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     if not structure_ok:
         return False, structure_error
 
+    crlf_targets = _crlf_diff_targets(cwd, diff)
+    if not crlf_targets:
+        return _apply_validated_diff(cwd, diff)
+    for target in crlf_targets:
+        target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+    try:
+        return _apply_validated_diff(cwd, diff.replace("\r\n", "\n"))
+    finally:
+        for target in crlf_targets:
+            if target.is_file() and not target.is_symlink():
+                target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
+
+
+def _apply_validated_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     # Prefer POSIX patch so paths are resolved relative to `cwd` (not git toplevel).
     patch = shutil.which("patch")
     if patch:

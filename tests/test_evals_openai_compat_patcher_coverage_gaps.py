@@ -300,15 +300,14 @@ class TestShouldUseProxy:
 
 
 # ---------------------------------------------------------------------------
-# 4. _extract_git_diff_blocks edge cases
+# 4. _iter_file_diffs edge cases: git headers
 # ---------------------------------------------------------------------------
 
 
 class TestExtractGitDiffBlocks:
     def test_diff_header_only_no_files(self) -> None:
         lines = ["diff --git a/foo.py b/foo.py", "some random text"]
-        result = mod._extract_git_diff_blocks(lines)
-        assert result is None
+        assert mod._iter_file_diffs(lines) == []
 
     def test_diff_header_only_no_plus(self) -> None:
         lines = [
@@ -316,23 +315,22 @@ class TestExtractGitDiffBlocks:
             "--- a/foo.py",
             "some random text",
         ]
-        result = mod._extract_git_diff_blocks(lines)
-        assert result is None
+        assert mod._iter_file_diffs(lines) == []
 
 
 # ---------------------------------------------------------------------------
-# 5. _normalize_unified_blocks edge cases
+# 5. _iter_file_diffs edge cases: plain unified headers
 # ---------------------------------------------------------------------------
 
 
 class TestNormalizeUnifiedBlocksEdges:
     def test_no_plus_plus_plus_after_minus(self) -> None:
         lines = ["--- a/foo.py", "some other line"]
-        assert mod._normalize_unified_blocks(lines) is None
+        assert mod._iter_file_diffs(lines) == []
 
     def test_null_path_skipped(self) -> None:
         lines = ["--- a/", "+++ b/"]
-        assert mod._normalize_unified_blocks(lines) is None
+        assert mod._iter_file_diffs(lines) == []
 
     def test_break_on_next_header(self) -> None:
         lines = [
@@ -347,10 +345,7 @@ class TestNormalizeUnifiedBlocksEdges:
             "-x",
             "+y",
         ]
-        result = mod._normalize_unified_blocks(lines)
-        assert result is not None
-        assert "foo.py" in result
-        assert "bar.py" in result
+        assert [path for path, _ in mod._iter_file_diffs(lines)] == ["foo.py", "bar.py"]
 
 
 class TestCleanPathToken:

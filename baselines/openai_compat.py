@@ -32,7 +32,6 @@ _REASONING_PART_TYPES = {
     "thought_text",
 }
 _DIRECT_TEXT_PART_TYPES = {"", "input_text", "message", "output_text", "text"}
-_THINK_RE = re.compile(r"<think>.*?</think>\n?", flags=re.DOTALL | re.IGNORECASE)
 _THINK_CAPTURE_RE = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
 _REQUEST_PREFILL_THINKING_CONFLICT_RE = re.compile(
     r"assistant response prefill is incompatible with enable_thinking"
@@ -533,8 +532,25 @@ def _extract_part_text(part: Any) -> str:
     return ""
 
 
-def _strip_think(text: str) -> str:
-    return _THINK_RE.sub("", text)
+def strip_think(text: str) -> str:
+    """Remove reasoning so only the final answer remains (LLM-04).
+
+    Everything up to the last ``</think>`` is reasoning (this also covers an orphan
+    closing tag whose opening tag the server dropped), and an unclosed ``<think>`` runs
+    to the end of the text. Matching ``<think>...</think>`` pairs alone left drafts in.
+    """
+    lowered = text.lower()
+    close = lowered.rfind("</think>")
+    if close != -1:
+        text = text[close + len("</think>") :]
+        lowered = text.lower()
+    open_index = lowered.find("<think>")
+    if open_index != -1:
+        text = text[:open_index]
+    return text.lstrip("\n")
+
+
+_strip_think = strip_think
 
 
 def _extract_think_reasoning(text: str) -> str:
