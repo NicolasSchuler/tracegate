@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from . import linucb_core as core
 from .adaptive_budget_online_policy import (
     ACTION_INCREASE_BUDGET,
     BUDGET_POLICY_ACTIONS,
@@ -44,17 +45,24 @@ def _adaptive_budget_behavior_fields(
     selected_action = str(decision.selected_action)
     applied_action = str(decision.applied_action)
     behavior_action = applied_action if applied_action in BUDGET_POLICY_ACTIONS else "none"
-    behavior_propensity = 1.0
-    # Shadow mode applies the deterministic baseline, so only "on" decisions carry propensities.
-    if str(decision.mode) == "on" and selected_action == behavior_action:
-        behavior_propensity = float(decision.propensity)
-        if str(decision.applied_family) and str(decision.selected_family) == str(
-            decision.applied_family
-        ):
-            behavior_propensity = min(
-                1.0,
-                max(1e-9, behavior_propensity * float(decision.family_propensity)),
-            )
+    # Shadow mode applies the deterministic baseline, so only "on" decisions carry propensities
+    # (POL-03).
+    behavior_propensity = core.behavior_propensity(
+        mode=decision.mode,
+        selected=selected_action,
+        behavior=behavior_action,
+        propensity=decision.propensity,
+    )
+    sampled = str(decision.mode) == "on" and selected_action == behavior_action
+    if (
+        sampled
+        and str(decision.applied_family)
+        and str(decision.selected_family) == str(decision.applied_family)
+    ):
+        behavior_propensity = min(
+            1.0,
+            max(1e-9, behavior_propensity * float(decision.family_propensity)),
+        )
     return behavior_action, behavior_propensity
 
 

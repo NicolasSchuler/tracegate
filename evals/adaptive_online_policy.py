@@ -683,9 +683,12 @@ class AdaptiveOnlinePolicyController:
             if behavior_propensity is None:
                 # Only an applied ("on") selection was sampled by the policy; in shadow mode the
                 # executed baseline action is deterministic, so its probability is 1.
-                behavior_propensity_norm = 1.0
-                if str(decision.mode) == "on" and selected_action == behavior_action_norm:
-                    behavior_propensity_norm = min(1.0, max(1e-9, float(decision.propensity)))
+                behavior_propensity_norm = core.behavior_propensity(
+                    mode=decision.mode,
+                    selected=selected_action,
+                    behavior=behavior_action_norm,
+                    propensity=decision.propensity,
+                )
             else:
                 behavior_propensity_norm = min(1.0, max(1e-9, float(behavior_propensity)))
             model_updated = False

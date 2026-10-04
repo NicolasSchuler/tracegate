@@ -999,14 +999,26 @@ class AdaptiveBudgetPolicyController:
             applied_action = str(decision.applied_action)
             behavior_action = applied_action
             behavior_family = str(decision.applied_family)
-            behavior_propensity = 1.0
-            if selected_action == applied_action:
-                behavior_propensity = min(1.0, max(1e-9, float(decision.propensity)))
-                if decision.selected_family and decision.selected_family == behavior_family:
-                    behavior_propensity = min(
-                        1.0,
-                        max(1e-9, behavior_propensity * float(decision.family_propensity)),
-                    )
+            behavior_propensity = core.behavior_propensity(
+                mode=decision.mode,
+                selected=selected_action,
+                behavior=applied_action,
+                propensity=decision.propensity,
+            )
+            if decision.selected_family and decision.selected_family == behavior_family:
+                behavior_propensity = min(
+                    1.0,
+                    max(
+                        1e-9,
+                        behavior_propensity
+                        * core.behavior_propensity(
+                            mode=decision.mode,
+                            selected=decision.selected_family,
+                            behavior=behavior_family,
+                            propensity=decision.family_propensity,
+                        ),
+                    ),
+                )
             model_updated = bool(gate_model_updated or family_model_updated)
             event = BudgetPolicyEvent(
                 run_id=str(run_id),

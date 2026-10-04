@@ -6,6 +6,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import linucb_core as core
 from .adaptive_online_policy import (
     ACTION_SKIP_HELPER,
     ONLINE_POLICY_ACTIONS,
@@ -109,11 +110,14 @@ def _adaptive_online_behavior_fields(
     )
     if behavior_action_norm == "none":
         return "none", 1.0
-    behavior_propensity = 1.0
     # In shadow mode the executed baseline action is deterministic (probability 1); only an
-    # applied ("on") selection carries the policy's propensity.
-    if str(decision.mode) == "on" and decision.selected_action == behavior_action_norm:
-        behavior_propensity = float(decision.propensity)
+    # applied ("on") selection carries the policy's propensity (POL-03).
+    behavior_propensity = core.behavior_propensity(
+        mode=decision.mode,
+        selected=decision.selected_action,
+        behavior=behavior_action_norm,
+        propensity=decision.propensity,
+    )
     return behavior_action_norm, behavior_propensity
 
 

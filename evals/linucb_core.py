@@ -98,6 +98,19 @@ def pick_greedy(tied: Sequence[str], rng: random.Random) -> str:
     return tied[0] if len(tied) == 1 else rng.choice(list(tied))
 
 
+def behavior_propensity(*, mode: str, selected: str, behavior: str, propensity: float) -> float:
+    """Probability that the logging policy executed *behavior* (POL-03).
+
+    Only an applied (``on``) selection was sampled by the policy. In ``shadow`` and ``off``
+    mode, or when an override replaced the selection, the executed action was
+    deterministic, so its probability is 1. Using the selection's propensity there gave
+    shadow events weights up to 10x during warm-up.
+    """
+    if str(mode) == "on" and str(selected) == str(behavior):
+        return min(1.0, max(1e-9, float(propensity)))
+    return 1.0
+
+
 def epsilon_greedy_propensity(
     selected: str, tied: Sequence[str], *, epsilon: float, n_available: int
 ) -> float:
