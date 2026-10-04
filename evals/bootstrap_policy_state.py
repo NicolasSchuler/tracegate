@@ -42,21 +42,13 @@ from .adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
 from .eval_policy_features import CASE_LABEL_FEATURE_NAMES, drop_case_label_features
+from .policy_event_log import LoadedPolicyEvent, event_key, load_policy_events
 from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     normalize_feature_scaling_profile,
 )
 
 PolicyKind = Literal["online", "budget"]
-
-
-@dataclass(frozen=True)
-class LoadedPolicyEvent:
-    """One parsed policy event plus its source location."""
-
-    payload: dict[str, Any]
-    src: str
-    line_no: int
 
 
 @dataclass
@@ -508,67 +500,12 @@ def _expand_paths(items: list[str]) -> list[str]:
 def _load_policy_events(
     paths: list[str], *, strict_input: bool
 ) -> tuple[list[LoadedPolicyEvent], dict[str, int]]:
-    input_errors = {
-        "files_unreadable": 0,
-        "json_lines_invalid": 0,
-        "records_skipped": 0,
-        "duplicate_events_seen": 0,
-        "duplicate_events_resolved": 0,
-    }
-    deduped: dict[tuple[str, str, str, int, str], LoadedPolicyEvent] = {}
-    for src in paths:
-        src_path = Path(str(src))
-        try:
-            lines = src_path.read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
-            input_errors["files_unreadable"] += 1
-            if strict_input:
-                raise ValueError(f"{src}: unable to read ({exc})") from exc
-            continue
-        for line_no, raw_line in enumerate(lines, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                input_errors["json_lines_invalid"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: invalid JSON ({exc})") from exc
-                continue
-            if not isinstance(payload, dict):
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: JSON root is not an object")
-                continue
-            key = _event_key(payload)
-            if key is None:
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: missing run/case/condition/attempt")
-                continue
-            loaded = LoadedPolicyEvent(payload=payload, src=str(src), line_no=line_no)
-            if key in deduped:
-                input_errors["duplicate_events_seen"] += 1
-                deduped.pop(key, None)
-            deduped[key] = loaded
-    input_errors["duplicate_events_resolved"] = input_errors["duplicate_events_seen"]
-    return list(deduped.values()), input_errors
+    """Chronologically ordered, deduplicated events (the shared loader, POL-18)."""
+    return load_policy_events(paths, strict_input=strict_input)
 
 
 def _event_key(payload: dict[str, Any]) -> tuple[str, str, str, int, str] | None:
-    run_id = str(payload.get("run_id") or "").strip()
-    case_id = str(payload.get("case_id") or "").strip()
-    condition = str(payload.get("condition") or "").strip()
-    attempt = _safe_int(payload.get("attempt"), default=-1)
-    if not run_id or not case_id or not condition or attempt < 0:
-        return None
-    decision_id = str(payload.get("decision_id") or "").strip()
-    if not decision_id:
-        decision_id = str(payload.get("created_at_utc") or "").strip()
-    if not decision_id:
-        decision_id = "unknown"
-    return run_id, case_id, condition, attempt, decision_id
+    return event_key(payload)
 
 
 def _detect_policy_kind(events: list[LoadedPolicyEvent], *, requested_kind: str) -> PolicyKind:

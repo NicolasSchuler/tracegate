@@ -179,16 +179,18 @@ def test_export_policy_dataset_writes_flat_csv_and_dedupes(tmp_path) -> None:
 
     assert len(rows) == 2
     by_decision = {row["decision_id"]: row for row in rows}
-    assert by_decision["d1"]["reward"] == "0.9"
+    # POL-18: the chronologically first duplicate wins (this used to keep the last one).
+    assert [row["decision_id"] for row in rows] == ["d1", "d2"]
+    assert by_decision["d1"]["reward"] == "0.2"
     assert by_decision["d1"]["reward_scope"] == "helper_local_v1"
     assert by_decision["d1"]["feature_bias"] == "1.0"
     assert by_decision["d1"]["feature_attempt_frac"] == "0.5"
     assert by_decision["d1"]["importance_weight"] == "1.25"
     assert by_decision["d1"]["behavior_importance_weight"] == "1.25"
     assert by_decision["d1"]["feature_scaling_profile"] == "v1"
-    assert by_decision["d1"]["reward_success_hint"] == "0.25"
-    assert by_decision["d1"]["local_tokens_total"] == "100"
-    assert by_decision["d1"]["local_wall_sec"] == "1.0"
+    assert by_decision["d1"]["reward_success_hint"] == "0.0"
+    assert by_decision["d1"]["local_tokens_total"] == "321"
+    assert by_decision["d1"]["local_wall_sec"] == "4.2"
     assert "tokens_total" not in by_decision["d1"]
     assert "attempt_wall_sec" not in by_decision["d1"]
     assert by_decision["d2"]["propensity_clipped"] == "0.1"
@@ -520,8 +522,9 @@ def test_event_key_falls_back_to_unknown() -> None:
 # Coverage gap: lines 153, 156, 158 — to_typed_dict conditional fields
 # (covered via dedup: duplicate events resolve to last-writer-wins)
 # ---------------------------------------------------------------------------
-def test_duplicate_events_resolved_to_last(tmp_path) -> None:
-    """Duplicate events (same key) are deduplicated; last writer wins."""
+def test_duplicate_events_resolved_to_first(tmp_path) -> None:
+    """Duplicate events (same key) are deduplicated; the first occurrence in chronological
+    order wins (POL-18; this used to keep the last one)."""
     base = {
         "schema_version": POLICY_EVENT_SCHEMA_VERSION,
         "run_id": "r",
@@ -541,7 +544,7 @@ def test_duplicate_events_resolved_to_last(tmp_path) -> None:
     events, errors = _load_events([str(events_file)], strict_input=False)
 
     assert len(events) == 1
-    assert events[0]["reward"] == 0.9
+    assert events[0]["reward"] == 0.1
     assert errors["duplicate_events_seen"] == 1
     assert errors["duplicate_events_resolved"] == 1
 

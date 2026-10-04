@@ -1402,7 +1402,8 @@ def test_load_policy_events_skips_records_missing_required_keys(tmp_path: Path) 
 
 
 def test_load_policy_events_deduplicates_events(tmp_path: Path) -> None:
-    """Two events with the same dedup key → duplicate_events_seen == 1, last wins."""
+    """Two events with the same dedup key → duplicate_events_seen == 1, first wins (POL-18;
+    this used to keep the last one)."""
     events_path = tmp_path / "dupe.jsonl"
     e1 = _minimal_online_event(reward=0.1)
     e2 = _minimal_online_event(reward=0.9)  # same key (run/case/condition/attempt/decision_id)
@@ -1412,7 +1413,7 @@ def test_load_policy_events_deduplicates_events(tmp_path: Path) -> None:
 
     assert errors["duplicate_events_seen"] == 1
     assert len(events) == 1
-    assert float(events[0].payload["reward"]) == pytest.approx(0.9)
+    assert float(events[0].payload["reward"]) == pytest.approx(0.1)
 
 
 # --- _detect_policy_kind mismatch ---

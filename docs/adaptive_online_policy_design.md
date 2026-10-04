@@ -179,9 +179,10 @@ The budget policy uses the same runtime modes as helper policy:
   - helper policy: `evals/results/<run_id>.adaptive_policy.jsonl`
   - budget policy: `evals/results/<run_id>.adaptive_budget_policy.jsonl`
 - Event schema versions:
-  - helper policy events: `5` (v5 adds the nested `decision_model` block; the record classes live
-    in `evals/adaptive_policy_records.py`)
-  - budget policy events: `4`
+  - helper policy events: `7` (v5 adds the nested `decision_model` block, v6 `effective_evidence`,
+    v7 `state_resets`; the record classes live in `evals/adaptive_policy_records.py`)
+  - budget policy events: `7` (v5 `effective_evidence`, v6 `state_resets`, v7 the `bwk_v1`
+    pacing fields)
 - Every decision/outcome emits one event with:
   - action selected/applied
   - propensity
@@ -307,8 +308,15 @@ before the first unit runs; an unhealthy sidecar stops the run with a clear erro
   - local accounting columns (`local_*`)
   - feature columns (`feature_*`)
   - importance weights (`1 / propensity_clipped`)
-- The export path accepts helper-policy event schema versions 4 and 5 and budget-policy
-  version 4 (explicit sets, `SUPPORTED_*_EVENT_SCHEMA_VERSIONS`).
+- The export path accepts helper-policy and budget-policy event schema versions 4 to 7
+  (explicit sets, `SUPPORTED_*_EVENT_SCHEMA_VERSIONS`); fields added after v4 are optional.
+  Earlier versions predate the published repository and are counted as
+  `records_unsupported_schema`.
+- Export and bootstrap replay share one loader (`evals/policy_event_log.py`, POL-18): events
+  are ordered by `(created_at_utc, run_id, log, line)`, the first occurrence of a duplicate
+  wins, and events with a non-finite reward, propensity, score or feature value are rejected
+  and counted as `records_non_finite` (POL-13). Export used to sort by case id and keep the
+  last duplicate; replay followed glob order, and `inf` values reached the CSV.
 - Decision-model columns (v5 events): `dm_role`, `dm_status`, `dm_profile`, `dm_model`,
   `dm_top_action`, `dm_top_prob`, `dm_margin`, `dm_entropy`, `dm_atomic_action`,
   `dm_traceback_sufficient`, `dm_fix_confidence`, `dm_latency_ms`, `dm_input_tokens`,
