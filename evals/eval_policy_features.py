@@ -319,7 +319,10 @@ def _adaptive_budget_discrete_widening_delta(
     if span == 1:
         return 1
     scaled_position = (2.0 * float(normalized_level - normalized_base_level)) / float(span)
-    return min(2, max(0, math.floor(scaled_position)))
+    # Any step above base widens by at least 1 (POL-10): on the default five-rung ladder with
+    # max_ups_per_case=1 the first step used to floor to 0, so the context family changed
+    # nothing.
+    return min(2, max(1, math.floor(scaled_position)))
 
 
 def _adaptive_budget_next_tier_index(

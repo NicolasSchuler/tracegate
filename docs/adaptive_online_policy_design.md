@@ -85,6 +85,11 @@ Current `hierarchical_v1` family definitions:
   - `retry_history_max_chars`
   - `context_compaction_max_calls` via the same capped discrete-widening envelope
 
+The discrete limits (`helper_max_calls`, `stage_a_max_requests`, `context_compaction_max_calls`)
+widen by `floor(2 · steps_above_base / ladder_span)`, at least 1 and at most 2 for any level
+above base (POL-10). The first step on the default five-rung ladder used to floor to 0, so with
+`max_ups_per_case = 1` the `context` family changed only the char budgets.
+
 Budget-policy reward is local to the patch-proposal family for the attempt:
 
 `reward = success_hint + progress_hint - token_penalty - latency_penalty - stagnation_penalty - rho_budget_exceeded*I(request_budget_exceeded)`

@@ -1217,7 +1217,8 @@ class TestBuildControlProfile:
         )
         assert profile.openai_max_tokens == 0
 
-    def test_dense_ladder_defers_discrete_widening_at_first_coarse_jump(self) -> None:
+    def test_dense_ladder_widens_discrete_limits_by_one_at_first_coarse_jump(self) -> None:
+        """POL-10: any step above base widens by at least 1 (this used to defer to 0)."""
         profile = _build_adaptive_budget_control_profile(
             tier_index=2,
             base_tier_index=0,
@@ -1234,9 +1235,9 @@ class TestBuildControlProfile:
             is_openai_patcher=True,
         )
         assert profile.propose_budget_multiplier == pytest.approx(1.2)
-        assert profile.helper_max_calls == 5
-        assert profile.stage_a_max_requests == 2
-        assert profile.context_compaction_max_calls == 1
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
+        assert profile.context_compaction_max_calls == 2
 
     def test_dense_ladder_caps_discrete_widening_at_plus_two(self) -> None:
         profile = _build_adaptive_budget_control_profile(
@@ -1309,7 +1310,9 @@ class TestBuildFamilyProfile:
         # context_level=1 → delta=1
         assert profile.helper_max_calls == 6
 
-    def test_dense_context_family_keeps_discrete_limits_flat_until_later_levels(self) -> None:
+    def test_dense_context_family_widens_discrete_limits_from_the_first_step(self) -> None:
+        """POL-10: the context family used to keep its discrete limits flat until later
+        levels, so with max_ups_per_case=1 it changed nothing."""
         profile = _build_adaptive_budget_family_profile(
             time_level=0,
             tokens_level=0,
@@ -1327,10 +1330,33 @@ class TestBuildFamilyProfile:
             base_response_mode="",
             is_openai_patcher=True,
         )
-        assert profile.helper_max_calls == 5
-        assert profile.stage_a_max_requests == 2
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
         assert profile.stage_a_max_chars == 12000
-        assert profile.context_compaction_max_calls == 1
+        assert profile.context_compaction_max_calls == 2
+
+    def test_default_ladder_context_family_first_step_changes_discrete_limits(self) -> None:
+        """POL-10 regression: default ladder, one step up (max_ups_per_case=1)."""
+        profile = _build_adaptive_budget_family_profile(
+            time_level=0,
+            tokens_level=0,
+            context_level=1,
+            base_tier_index=0,
+            tier_multipliers=[1.0, 1.1, 1.2, 1.35, 1.5],
+            base_propose_budget_sec=100.0,
+            base_openai_max_tokens=4096,
+            base_helper_max_calls=5,
+            base_stage_a_max_requests=2,
+            base_stage_a_max_chars=10000,
+            base_retry_history_max_chars=5000,
+            base_context_compaction_max_calls=1,
+            context_compaction_enabled=True,
+            base_response_mode="",
+            is_openai_patcher=True,
+        )
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
+        assert profile.context_compaction_max_calls == 2
 
     def test_two_rung_context_family_only_widens_discrete_limits_by_one(self) -> None:
         profile = _build_adaptive_budget_family_profile(
@@ -1405,7 +1431,10 @@ class TestBudgetTierHelpers:
 
     def test_discrete_widening_delta_caps_at_plus_two(self) -> None:
         assert _adaptive_budget_discrete_widening_delta(level=1, base_level=0, max_level=1) == 1
-        assert _adaptive_budget_discrete_widening_delta(level=2, base_level=0, max_level=6) == 0
+        # POL-10: at least 1 above base (level 2 of 6 used to give 0).
+        assert _adaptive_budget_discrete_widening_delta(level=2, base_level=0, max_level=6) == 1
+        assert _adaptive_budget_discrete_widening_delta(level=1, base_level=0, max_level=4) == 1
+        assert _adaptive_budget_discrete_widening_delta(level=0, base_level=0, max_level=4) == 0
         assert _adaptive_budget_discrete_widening_delta(level=4, base_level=0, max_level=6) == 1
         assert _adaptive_budget_discrete_widening_delta(level=6, base_level=0, max_level=6) == 2
 
