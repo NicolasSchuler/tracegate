@@ -420,3 +420,29 @@ def test_llm06_run_aborts_before_any_case_when_max_tokens_fills_the_window(
                 "local",
             ]
         )
+
+
+# --- LLM-08: the heuristic smoke-test patcher produces a diff that applies --------------
+
+
+def test_llm08_heuristic_patcher_diff_applies(tmp_path: Path) -> None:
+    from evals import _json as eval_json
+    from evals.patchers.heuristic_patcher import HeuristicSnapshotPatcher
+
+    work = tmp_path / "work"
+    work.mkdir()
+    source = "def get(xs, i):\n    return xs[i]\n\n\nprint(get([1, 2], 2))\n"
+    (work / "buggy.py").write_text(source, encoding="utf-8")
+    context = tmp_path / "ctx"
+    context.mkdir()
+    snapshot = {"frames": [{"file_rel": "buggy.py", "locals": {"i": 2, "xs": [1, 2]}}]}
+    (context / "snapshot.json").write_text(eval_json.dumps(snapshot), encoding="utf-8")
+
+    result = HeuristicSnapshotPatcher().propose_patch(prompt="", context_dir=context, cwd=work)
+
+    assert result.diff is not None
+    assert result.meta == {"reason": "patched"}
+    ok, message = apply_diff(work, result.diff)
+    assert ok, message
+    assert message == ""  # strict apply
+    assert (work / "buggy.py").read_text(encoding="utf-8") == source.replace("xs[i]", "xs[i - 1]")
