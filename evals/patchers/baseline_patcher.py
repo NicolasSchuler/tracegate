@@ -744,6 +744,9 @@ class BaselinePatcher(Patcher):
             ),
         }
         meta["case_info_policy"] = CASE_INFO_POLICY
+        repo_state = getattr(self.adapter, "repo_state", None)
+        if isinstance(repo_state, dict):
+            meta["baseline_repo_state"] = dict(repo_state)
         meta["baseline_generation"] = self.config.generation.record(
             enforced=bool(getattr(self.adapter, "honours_generation_contract", False))
         )

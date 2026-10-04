@@ -19,6 +19,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
 )
 from baselines.case_schemas import LambdaRLMCaseInput
 from baselines.contracts import BaselineContract
@@ -158,6 +159,7 @@ class LambdaRLMAdapter(BaselineAdapter):
                 f"lambda-RLM python executable not found: {config.python_executable}"
             )
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
         expected_compatibility = get_expected_env_client_compatibility(self.name)
         declared_compatibility = str(
             getattr(lambda_env_client, "_COMPATIBLE_WITH", "") or ""

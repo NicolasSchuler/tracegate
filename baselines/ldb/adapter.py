@@ -26,6 +26,8 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
+    require_pinned_commit,
 )
 from baselines.case_schemas import LDBCaseInput
 from baselines.contracts import BaselineContract
@@ -469,6 +471,12 @@ class LDBAdapter(BaselineAdapter):
             )
             raise RuntimeError(msg)
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
+        require_pinned_commit(
+            name=self.name,
+            observed_commit=self.repo_commit,
+            pinned_commit=get_pinned_repo_commit(self.name),
+        )
 
     def validate_extra_config(self, config: BaselineConfig) -> None:
         from baselines.extra_configs import LDBExtraConfig

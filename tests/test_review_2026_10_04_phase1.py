@@ -416,3 +416,31 @@ def test_bas12_tracecoder_test_timeout_falls_back_to_process_timeout() -> None:
     assert _case_test_timeout_sec({"timeout_sec": 12}, config) == 12
     assert _case_test_timeout_sec({}, config) == 600
     assert _case_test_timeout_sec({"timeout_sec": 0}, config) == 600
+
+
+def test_bas05_bas14_observed_repo_state_and_pin_check(tmp_path: Path) -> None:
+    import subprocess
+
+    from baselines.adapter_base import observed_repo_state, require_pinned_commit
+
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.email=t@e", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "main.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "main.py"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+
+    clean = observed_repo_state(repo)
+    assert len(clean["observed_commit"]) == 40
+    assert clean["dirty"] is False
+    (repo / "main.py").write_text("x = 2\n", encoding="utf-8")
+    patched = observed_repo_state(repo)
+    assert patched["dirty"] is True
+    assert patched["tree_patch_sha256"] != clean["tree_patch_sha256"]
+    assert observed_repo_state(tmp_path)["observed_commit"] == ""
+
+    require_pinned_commit(name="x", observed_commit="", pinned_commit="abc")  # no git: skip
+    require_pinned_commit(name="x", observed_commit="abc", pinned_commit="abc")
+    with pytest.raises(RuntimeError, match="not the pinned commit"):
+        require_pinned_commit(name="x", observed_commit="def", pinned_commit="abc")
