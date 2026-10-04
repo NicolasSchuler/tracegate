@@ -5504,7 +5504,6 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
     feature_vector_1 = records[0]["attempt_metadata"]["adaptive_online_feature_vector"]
     feature_vector_2 = records[1]["attempt_metadata"]["adaptive_online_feature_vector"]
     expected_keys = {
-        "attempts_remaining_frac",
         "helper_budget_remaining_frac",
         "helper_topup_used_frac",
         "helper_topup_remaining_frac",
@@ -5531,8 +5530,10 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
     assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_1.keys())
     assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_2.keys())
     assert _CASE_LABEL_FEATURES.isdisjoint(raw_feature_vector_1.keys())
-    assert feature_vector_1["attempts_remaining_frac"] == 0.5
-    assert feature_vector_2["attempts_remaining_frac"] == 0.0
+    # attempts_remaining_frac was dropped as 1 - attempt_frac (POL-06).
+    assert "attempts_remaining_frac" not in feature_vector_1
+    assert feature_vector_1["attempt_frac"] == 0.5
+    assert feature_vector_2["attempt_frac"] == 1.0
     assert feature_vector_1["pregate_exception_is_assertion"] == 1.0
     assert feature_vector_1["last_helper_invalid_response"] == 0.0
     assert feature_vector_2["last_helper_invalid_response"] == 1.0
@@ -6086,7 +6087,7 @@ def test_adaptive_budget_feature_vector_excludes_case_metadata(tmp_path, monkeyp
     assert len(records) == 2
     feature_vector = records[0]["attempt_metadata"]["adaptive_budget_feature_vector"]
     expected_keys = {
-        "attempts_remaining_frac",
+        "attempt_frac",
         "helper_low_yield_ratio",
         "adaptive_no_progress_token_sum_k",
         "context_compaction_enabled",

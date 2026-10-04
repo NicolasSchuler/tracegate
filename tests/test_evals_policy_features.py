@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from evals.adaptive_budget_online_policy import (
@@ -191,14 +192,13 @@ class TestOnlineFeatureVector:
             **_online_feature_kwargs(attempt=5, max_attempts=5)
         )
         assert features["attempt_frac"] == pytest.approx(1.0)
-        assert features["attempts_remaining_frac"] == pytest.approx(0.0)
+        assert "attempts_remaining_frac" not in features  # always 1 - attempt_frac (POL-06)
 
     def test_attempt_frac_first_attempt(self) -> None:
         features = _adaptive_online_feature_vector(
             **_online_feature_kwargs(attempt=1, max_attempts=4)
         )
         assert features["attempt_frac"] == pytest.approx(0.25)
-        assert features["attempts_remaining_frac"] == pytest.approx(0.75)
 
     def test_timed_out_flag(self) -> None:
         feat_on = _adaptive_online_feature_vector(**_online_feature_kwargs(timed_out=True))
@@ -290,13 +290,39 @@ class TestOnlineFeatureVector:
             assert features["pregate_exception_is_syntax"] == 1.0, exc_type
 
     def test_last_helper_action_one_hot(self) -> None:
+        # skip_helper is the reference level since POL-06 (no feature of its own); this
+        # test used to expect all ten levels.
+        assert "last_helper_action_skip_helper" not in _adaptive_online_feature_vector(
+            **_online_feature_kwargs()
+        )
         for action in ONLINE_POLICY_ACTIONS:
             features = _adaptive_online_feature_vector(
                 **_online_feature_kwargs(last_helper_action_executed=action)
             )
             for a in ONLINE_POLICY_ACTIONS:
+                if a == "skip_helper":
+                    continue
                 expected = 1.0 if a == action else 0.0
                 assert features[f"last_helper_action_{a}"] == expected
+
+    def test_bias_is_not_a_linear_combination_of_varying_features(self) -> None:
+        """POL-06: ``bias`` equalled the sum of the ten one-hot levels, and
+        ``attempts_remaining_frac`` was ``1 - attempt_frac``."""
+        rows = [
+            _adaptive_online_feature_vector(
+                **_online_feature_kwargs(
+                    last_helper_action_executed=action, attempt=attempt, max_attempts=4
+                )
+            )
+            for action in ONLINE_POLICY_ACTIONS
+            for attempt in (1, 2, 3, 4)
+        ]
+        varying = [
+            name for name in rows[0] if name != "bias" and len({row[name] for row in rows}) > 1
+        ]
+        columns = ["bias", *varying]
+        design = np.array([[row[name] for name in columns] for row in rows])
+        assert np.linalg.matrix_rank(design) == len(columns)
 
     def test_interaction_profile_adds_curated_online_features(self) -> None:
         features = _adaptive_online_feature_vector(
@@ -398,6 +424,17 @@ class TestBudgetFeatureVector:
     def test_bias_is_one(self) -> None:
         features = _adaptive_budget_feature_vector(**_budget_feature_kwargs())
         assert features["bias"] == 1.0
+
+    def test_attempt_progress_is_one_feature(self) -> None:
+        """POL-06: ``attempts_remaining_frac`` was always ``1 - attempt_frac``."""
+        rows = [
+            _adaptive_budget_feature_vector(
+                **_budget_feature_kwargs(attempt=attempt, max_attempts=4)
+            )
+            for attempt in (1, 2, 3, 4)
+        ]
+        assert "attempts_remaining_frac" not in rows[0]
+        assert [row["attempt_frac"] for row in rows] == [0.25, 0.5, 0.75, 1.0]
 
     def test_tier_frac_at_max(self) -> None:
         features = _adaptive_budget_feature_vector(

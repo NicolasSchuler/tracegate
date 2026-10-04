@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- The helper policy's features no longer contain an exactly redundant direction (POL-06): the ten `last_helper_action_*` one-hot flags summed to `bias` on every decision, so `skip_helper` is now the reference level and has no flag, and `attempts_remaining_frac` (always `1 - attempt_frac`) is dropped from the helper and budget features. Saved policy states and bootstrapped states from earlier runs carry the old feature names.
 - Greedy ties in the adaptive policies are broken uniformly at random with the policy RNG, and the logged propensity accounts for the tie (`ε/K + (1−ε)/|ties|`); at cold start every tie went to `invoke_helper`, the budget gate's default action or the `time` family. Controller state keeps `applied_action_counts` next to `action_counts` (the selected action), so shadow-mode state no longer counts only actions that never ran; online and budget state schema 4, schema 3 still loads, and bootstrap replay restores the applied counts (POL-24).
 - The adaptive policies' NaN-feature counter, the only signal of NaN features, is updated under the controller lock; concurrent decisions lost increments (POL-16).
 - Scoring a bandit arm no longer changes it: when an arm's matrix is singular, the re-regularized matrix is used for that score only instead of being written back with an extra `l2·I` on every such call (POL-22).

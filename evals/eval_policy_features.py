@@ -17,6 +17,7 @@ from .adaptive_budget_online_policy import (
 )
 from .adaptive_online_policy import (
     ACTION_FRAME_LOCALS_LITE,
+    ACTION_SKIP_HELPER,
     ACTION_SNAPSHOT_FULL_LITE,
     ACTION_SNAPSHOT_LITE,
     ONLINE_POLICY_ACTIONS,
@@ -186,9 +187,6 @@ def _adaptive_online_feature_vector(
     features = {
         "bias": 1.0,
         "attempt_frac": float(attempt_safe / float(max_attempts_safe)),
-        "attempts_remaining_frac": float(
-            max(0.0, (max_attempts_safe - attempt_safe) / float(max_attempts_safe))
-        ),
         "timed_out": 1.0 if timed_out else 0.0,
         "failure_signature_repeat": 1.0 if failure_signature_repeat else 0.0,
         "stagnation_streak": float(max(0, int(stagnation_streak))),
@@ -248,8 +246,13 @@ def _adaptive_online_feature_vector(
         if pregate_exception_type_normalized in {"syntaxerror", "indentationerror", "taberror"}
         else 0.0,
     }
+    # skip_helper (also the value before any helper call) is the reference level: with all
+    # ten levels the one-hot features summed to ``bias`` (POL-06).
     for action in ONLINE_POLICY_ACTIONS:
-        features[f"last_helper_action_{action}"] = 1.0 if last_helper_action_norm == action else 0.0
+        if action != ACTION_SKIP_HELPER:
+            features[f"last_helper_action_{action}"] = (
+                1.0 if last_helper_action_norm == action else 0.0
+            )
     if (
         normalize_feature_scaling_profile(feature_scaling_profile)
         == INTERACTION_POLICY_FEATURE_SCALING_PROFILE
@@ -902,9 +905,6 @@ def _adaptive_budget_feature_vector(
     return {
         "bias": 1.0,
         "attempt_frac": float(attempt_safe / float(max_attempts_safe)),
-        "attempts_remaining_frac": float(
-            max(0.0, (max_attempts_safe - attempt_safe) / float(max_attempts_safe))
-        ),
         "timed_out": 1.0 if timed_out else 0.0,
         "failure_signature_repeat": 1.0 if failure_signature_repeat else 0.0,
         "stagnation_streak": float(max(0, int(stagnation_streak))),

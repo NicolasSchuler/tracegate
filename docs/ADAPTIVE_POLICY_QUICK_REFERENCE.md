@@ -81,8 +81,8 @@ score_k = θ_k^T · x  +  α × √(x^T · A_k^{-1} · x)
 ## 📈 50+ Input Features
 
 ### Attempt Progress (4)
-- `attempt_frac`: current / max attempts
-- `attempts_remaining_frac`: (max - current) / max
+- `attempt_frac`: current / max attempts (`attempts_remaining_frac = 1 - attempt_frac` was
+  dropped as redundant with `bias`, POL-06)
 - `timed_out`: 1 if timeout exceeded
 - (others)
 
@@ -105,7 +105,7 @@ score_k = θ_k^T · x  +  α × √(x^T · A_k^{-1} · x)
 - `last_helper_invalid_response`: binary
 - `last_helper_declined`: binary
 - `supports_context_request`: patcher capability
-- `last_helper_action_executed`: encoded flags
+- `last_helper_action_*`: one flag per action except `skip_helper`, the reference level (POL-06)
 - (others)
 
 ### Context Compaction (8)
@@ -545,7 +545,7 @@ Which feature categories tend to drive action selection the most:
 | Category | Key Features | Why They Matter |
 |----------|-------------|-----------------|
 | **Budget signals** | `helper_budget_remaining_frac`, `helper_budget_exhausted` | Policy learns to skip helper when budget is nearly spent |
-| **Attempt progress** | `attempt_frac`, `attempts_remaining_frac` | Late attempts get more conservative; early attempts explore |
+| **Attempt progress** | `attempt_frac` | Late attempts get more conservative; early attempts explore |
 | **Failure history** | `stagnation_streak`, `adaptive_no_progress_streak`, `failure_signature_repeat` | Repeated failures signal that current strategy isn't working |
 | **Pre-gate signals** | `pregate_score`, `pregate_fired`, `pregate_type_specificity` | High informativeness score → traceback is self-explanatory → skip helper |
 | **Context state** | `last_helper_need_more_context`, `last_helper_declined` | If helper asked for more context, `compact_then_patch` or `file_only` may help next |

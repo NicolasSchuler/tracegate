@@ -160,7 +160,9 @@ RETRY_GATE_MAX_CONSECUTIVE_BLOCKS = 1
 EVAL_RECORD_SCHEMA_VERSION = 7
 POLICY_DEFAULTS_VERSION = 2
 """Adaptive-policy defaults generation, recorded in run metadata (Phase 3). Version 2
-(2026-10-04 review): decay 1.0, decayed per arm (POL-01); earlier runs are version 1."""
+(2026-10-04 review): decay 1.0, decayed per arm (POL-01); random greedy tie-breaking
+(POL-24); no feature equal to a combination of ``bias`` and others (POL-06). Earlier runs
+are version 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}

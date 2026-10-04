@@ -154,8 +154,8 @@ The second term is the prediction confidence interval width.
 **50+ features grouped by category**:
 
 **Attempt Progress**:
-- `attempt_frac`: current attempt / max attempts
-- `attempts_remaining_frac`: fraction of attempts left
+- `attempt_frac`: current attempt / max attempts (`attempts_remaining_frac`, always
+  `1 - attempt_frac`, was dropped: POL-06)
 - `timed_out`: 1 if attempt timeout exceeded
 
 **Helper Budget**:
@@ -175,7 +175,7 @@ The second term is the prediction confidence interval width.
 - `last_helper_invalid_response`: binary
 - `last_helper_declined`: binary
 - `supports_context_request`: patcher capability
-- `last_helper_action_executed`: one of 10 actions (encoded as binary flags)
+- `last_helper_action_executed`: one of 10 actions, encoded as nine binary flags with `skip_helper` (also the value before any helper call) as the reference level, so the flags don't sum to `bias` (POL-06)
 
 **Context Compaction**:
 - `context_compaction_enabled`: binary
