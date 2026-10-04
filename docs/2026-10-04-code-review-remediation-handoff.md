@@ -357,13 +357,13 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] **ATT-17:** surface save failures.
 
 ### 3.6. Docs
-- [ ] **POL-25, X-08:** generate the policy defaults tables via `evals.doc_sync`, and fix the probe-template comment.
+- [x] **POL-25, X-08:** generate the policy defaults tables via `evals.doc_sync`, and fix the probe-template comment. *(The probe comment was already fixed with POL-01.)*
 
 **Acceptance:**
-- A seeded synthetic test (linear rewards, about 53 features, 10 arms) shows that the default config's best-arm selection rate clearly beats uniform.
-- Propensity tests cover shadow mode, on mode and warm-up.
-- Identical seeds produce identical event streams with `--jobs 1`.
-- Event and state schema versions are bumped if their fields change.
+- [x] A seeded synthetic test (linear rewards, about 53 features, 10 arms) shows that the default config's best-arm selection rate clearly beats uniform. *(58–69% vs 10%; `tests/test_evals_policy_acceptance.py`.)*
+- [x] Propensity tests cover shadow mode, on mode and warm-up. *(`tests/test_evals_policy_propensities.py`.)*
+- [x] Identical seeds produce identical event streams with `--jobs 1`. *(Controller-level, apart from decision id and timestamp.)*
+- [x] Event and state schema versions are bumped if their fields change. *(Helper events 7, budget events 7, both states 4.)*
 
 ---
 
