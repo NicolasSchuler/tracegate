@@ -7,6 +7,7 @@ output parsing, pass/fail computation, and error handling in isolation.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -159,10 +160,15 @@ class TestBuildEntryScript:
         assert "git reset --hard abc123" in script
         assert "git checkout abc123" in script
         assert "if [[ -s /workspace/patch.diff ]]; then" in script
-        assert "git apply -v /workspace/patch.diff" in script
+        # DAT-19: the official apply sequence with fallbacks.
+        assert "git apply --verbose /workspace/patch.diff" in script
+        assert "git apply --verbose --reject /workspace/patch.diff" in script
+        assert "patch --batch --fuzz=5 -p1 -i /workspace/patch.diff" in script
+        assert "exit 3" in script
         assert 'echo "Patch is empty after cleanup; evaluating base commit."' in script
         assert "pip install -e ." in script
         assert "bash /workspace/run_script.sh tests/test_a.py" in script
+        assert "echo $? > /workspace/run_status" in script
         assert "python /workspace/parser.py" in script
 
     def test_empty_env_commands(self) -> None:
@@ -416,6 +422,11 @@ class TestEvaluateInstanceDockerErrors:
         import json
 
         (uid_dir / "baseline_output.json").write_text(json.dumps(cached), encoding="utf-8")
+        # DAT-13: the cache is only reused for the identical (cleaned) patch.
+        import hashlib
+
+        digest = hashlib.sha256(strip_binary_hunks(ctx.patch).encode("utf-8")).hexdigest()
+        (uid_dir / "baseline_output.patch_sha256").write_text(digest, encoding="utf-8")
 
         mock_docker = MagicMock()
         with patch.dict("sys.modules", {"docker": mock_docker}):
@@ -430,6 +441,31 @@ class TestEvaluateInstanceDockerErrors:
             )
         assert result.passed is True
         assert result.fail_to_pass_met is True
+
+    def test_cached_output_for_a_different_patch_is_not_reused(self, tmp_path: Path) -> None:
+        """DAT-13: a regenerated prediction must not reuse the old outcome."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        uid_dir = tmp_path / "output" / ctx.instance_id
+        uid_dir.mkdir(parents=True)
+        import json
+
+        cached = {"tests": [{"name": "test_a", "status": "PASSED"}]}
+        (uid_dir / "baseline_output.json").write_text(json.dumps(cached), encoding="utf-8")
+        (uid_dir / "baseline_output.patch_sha256").write_text("0" * 64, encoding="utf-8")
+
+        mock_docker = MagicMock()
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=tmp_path / "output",
+                prefix="baseline",
+                redo=False,
+            )
+        assert result.passed is False
+        assert "Missing run scripts" in (result.error or "")
 
     def test_redo_ignores_cached_output(self, tmp_path: Path) -> None:
         """When redo=True, cached output.json is ignored and scripts are required."""
@@ -491,7 +527,8 @@ class TestEvaluateInstanceDockerErrors:
         assert result.passed is False
         assert result.error is not None
         assert "exited with code 1" in result.error
-        assert result.infrastructure_error is False
+        # DAT-09: an unexplained container failure is infrastructure, not a wrong patch.
+        assert result.infrastructure_error is True
 
     def test_output_json_missing_after_success(self, tmp_path: Path) -> None:
         """Container exits 0 but output.json missing → error result."""
@@ -524,7 +561,7 @@ class TestEvaluateInstanceDockerErrors:
         assert result.passed is False
         assert result.error is not None
         assert "output.json not found" in result.error
-        assert result.infrastructure_error is False
+        assert result.infrastructure_error is True  # DAT-09
 
     def test_empty_patch_is_scored_at_base_commit(self, tmp_path: Path) -> None:
         """Empty prediction diffs should not be treated as container failures."""
@@ -582,7 +619,7 @@ class TestEvaluateInstanceDockerErrors:
 
     def test_image_pull_failure_falls_back_to_local(self, tmp_path: Path) -> None:
         """When pull fails but image exists locally, proceed with evaluation."""
-        ctx = _make_ctx(fail_to_pass=set(), pass_to_pass=set())
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
         scripts_dir = tmp_path / "scripts"
         instance_dir = scripts_dir / ctx.instance_id
         instance_dir.mkdir(parents=True)
@@ -609,7 +646,9 @@ class TestEvaluateInstanceDockerErrors:
             workspace_dir.mkdir(parents=True, exist_ok=True)
             import json
 
-            (workspace_dir / "output.json").write_text(json.dumps({"tests": []}), encoding="utf-8")
+            (workspace_dir / "output.json").write_text(
+                json.dumps({"tests": [{"name": "test_a", "status": "PASSED"}]}), encoding="utf-8"
+            )
             return mock_container
 
         mock_client.containers.run.side_effect = _fake_run
@@ -686,8 +725,9 @@ class TestEvaluateInstanceDockerErrors:
             )
 
         assert result.passed is False
-        assert result.error == "TimeoutError: timed out waiting for container"
-        assert result.infrastructure_error is False
+        assert result.error is not None
+        assert "timed out waiting for container" in result.error
+        assert result.infrastructure_error is True  # DAT-09
         mock_container.stop.assert_called_once_with(timeout=0)
         mock_container.remove.assert_called_once_with(force=True)
         mock_client.close.assert_called_once_with()
@@ -725,14 +765,15 @@ class TestEvaluateInstanceDockerErrors:
             )
 
         assert result.passed is False
-        assert result.error == "RuntimeError: post-launch failure"
+        assert result.error is not None
+        assert "post-launch failure" in result.error
         mock_container.stop.assert_called_once_with(timeout=0)
         mock_container.remove.assert_called_once_with(force=True)
         mock_client.close.assert_called_once_with()
 
     def test_client_closed_after_successful_evaluation(self, tmp_path: Path) -> None:
         """Successful evaluations explicitly close the Docker client."""
-        ctx = _make_ctx(fail_to_pass=set(), pass_to_pass=set())
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
         scripts_dir = tmp_path / "scripts"
         instance_dir = scripts_dir / ctx.instance_id
         instance_dir.mkdir(parents=True)
@@ -745,7 +786,9 @@ class TestEvaluateInstanceDockerErrors:
 
         import json
 
-        (workspace_dir / "output.json").write_text(json.dumps({"tests": []}), encoding="utf-8")
+        (workspace_dir / "output.json").write_text(
+            json.dumps({"tests": [{"name": "test_a", "status": "PASSED"}]}), encoding="utf-8"
+        )
 
         mock_container = MagicMock()
         mock_container.wait.return_value = {"StatusCode": 0}
@@ -893,7 +936,15 @@ class TestRunDockerScoring:
                 scripts_dir=tmp_path / "scripts",
             )
 
-        assert not (run_dir / "docker_eval" / "baseline" / "eval_results.json").exists()
+        # DAT-09: results and their reasons are persisted before failing loudly.
+        detail_path = run_dir / "docker_eval" / "baseline" / "eval_results_detail.json"
+        assert json.loads(detail_path.read_text(encoding="utf-8"))["inst-1"] == {
+            "passed": False,
+            "fail_to_pass_met": False,
+            "pass_to_pass_met": False,
+            "error": "docker SDK not installed",
+            "infrastructure_error": True,
+        }
 
     def test_returns_summary_when_no_instance_errors(
         self,
@@ -957,3 +1008,58 @@ class TestRunDockerScoring:
         assert item.error_count == 0
         assert item.accuracy == 1.0
         assert (run_dir / "docker_eval" / "baseline" / "eval_results.json").exists()
+
+
+class TestReviewScoringIntegrity:
+    """2026-10-04 review: DAT-04, DAT-09, DAT-11."""
+
+    def test_empty_fail_to_pass_is_an_infrastructure_error(self, tmp_path: Path) -> None:
+        ctx = _make_ctx(fail_to_pass=set(), pass_to_pass=set())
+        with patch.dict("sys.modules", {"docker": MagicMock()}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=tmp_path / "output",
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is True
+        assert result.error == "empty fail_to_pass test list"
+
+    def test_patch_that_does_not_apply_is_a_model_failure(self, tmp_path: Path) -> None:
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        instance_dir = tmp_path / "scripts" / ctx.instance_id
+        instance_dir.mkdir(parents=True)
+        (instance_dir / "run_script.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+        (instance_dir / "parser.py").write_text("import sys\n", encoding="utf-8")
+        mock_container = MagicMock()
+        mock_container.wait.return_value = {"StatusCode": score_docker_mod.APPLY_FAILED_EXIT_CODE}
+        mock_client = MagicMock()
+        mock_client.containers.run.return_value = mock_container
+        mock_docker = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=tmp_path / "output",
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is False
+        assert result.error == "patch_apply_failed"
+
+    def test_dataset_values_are_shell_quoted(self) -> None:
+        script = build_entry_script(
+            instance_id="repo__1",
+            base_commit="abc; rm -rf /",
+            before_repo_set_cmd="",
+            selected_test_files="tests/test a.py,tests/test_b.py",
+            env_commands=[],
+        )
+        assert "git reset --hard 'abc; rm -rf /'" in script
+        assert "bash /workspace/run_script.sh 'tests/test a.py,tests/test_b.py'" in script

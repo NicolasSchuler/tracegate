@@ -209,7 +209,15 @@ Available subcommands:
 - `generate-pro` — Produce paired predictions for each condition
 - `prepare-handoff` — Validate predictions and write handoff metadata
 - `score-docker` — Score predictions using pre-built DockerHub images and fail
-  the command when Docker/scorer infrastructure errors occur
+  the command when Docker/scorer infrastructure errors occur. A container that exits
+  non-zero for any reason other than a patch that doesn't apply, a missing `output.json`,
+  a wait timeout and an empty `fail_to_pass` list are infrastructure errors (DAT-04,
+  DAT-09); a patch that doesn't apply under the official sequence (`git apply --verbose`,
+  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure.
+  `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
+  `infrastructure_error` per instance and is written before the command fails. Cached
+  outputs are reused only for the identical patch (`*_output.patch_sha256`, DAT-13), and
+  dataset values are shell-quoted in the container entry script (DAT-11).
 - `prepare-scoring-smoke` — Build a tiny paired subset for quick scoring checks
 - `fetch-run-scripts` — Retrieve run/test scripts for a specific instance
 
