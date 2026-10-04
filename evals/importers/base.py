@@ -7,7 +7,6 @@ generated cases, and shared filter helpers used across importers.
 from __future__ import annotations
 
 import ast
-import difflib
 import re
 import subprocess
 import sys
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import _json as json
+from ..eval_patches import _build_diff_from_changes, _diff_lines
 from .determinism import is_deterministic as is_deterministic
 from .determinism import nondeterminism_reasons as nondeterminism_reasons
 
@@ -26,26 +26,11 @@ def generate_oracle_patch(
 ) -> str:
     """Generate a unified diff (oracle.patch) from buggy to fixed code.
 
-    Returns a git-apply-compatible unified diff string.
+    Returns a git-apply-compatible unified diff string. A source without a trailing
+    newline gets the ``\\ No newline at end of file`` marker; the old builder merged the
+    last removed and added lines into one (DAT-10).
     """
-    buggy_lines = buggy.splitlines(keepends=True)
-    fixed_lines = fixed.splitlines(keepends=True)
-
-    diff_lines = list(
-        difflib.unified_diff(
-            buggy_lines,
-            fixed_lines,
-            fromfile=f"a/{filename}",
-            tofile=f"b/{filename}",
-        )
-    )
-
-    if not diff_lines:
-        return ""
-
-    # Prepend git-style header for patch/git apply compatibility.
-    header = f"diff --git a/{filename} b/{filename}\n"
-    return header + "".join(diff_lines)
+    return _build_diff_from_changes([(filename, buggy, fixed)])
 
 
 def write_case_files(
@@ -135,7 +120,7 @@ def count_patch_lines(patch: str) -> int:
     """Count the number of changed lines (additions + deletions) in a patch."""
     added = 0
     removed = 0
-    for line in patch.splitlines():
+    for line in _diff_lines(patch):
         if line.startswith("+") and not line.startswith("+++"):
             added += 1
         elif line.startswith("-") and not line.startswith("---"):

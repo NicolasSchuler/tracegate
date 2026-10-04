@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `generate_oracle_patch` emits a correct diff when the source lacks a trailing newline (it used to merge the last removed and added lines) and shares the runner's diff builder; `count_patch_lines` splits on `\n` only (DAT-10). The 1,828 committed patches were unaffected because ruff had added the newline; the native and HumanEvalPack importers don't run ruff.
 - The importer determinism filter is an AST check (`evals/importers/determinism.py`): wall-clock calls, `datetime.now()`, unseeded `random`/`numpy.random` use, `uuid`, `os.urandom`, `secrets`, network imports and iteration over sets now reject a case; six substrings used to let all of these through (DAT-14). `python -m evals.importers.determinism` scans an existing corpus and flags 14 of the 1,828 committed cases.
 - SWE-Bench Lite and Pro generation record each proposal's `finish_reason`, truncation, patcher error and request error in `<condition>/generation_meta.jsonl` (the official predictions file keeps its three keys), and `--openai-max-tokens` defaults to 4096 instead of 2048, which cut multi-file patches off without a trace (DAT-18).
 - The `heuristic` smoke-test patcher's diffs now apply: its private diff builder put a blank line after every body line, so the patch was always rejected as malformed while the patcher reported `reason: patched` (LLM-08). It now uses the shared diff builder.

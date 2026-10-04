@@ -1492,3 +1492,32 @@ def test_dat14_scan_cases_reports_flagged_files(tmp_path: Path, capsys) -> None:
     assert determinism.scan_cases(tmp_path) == {"flaky": ["buggy.py:clock"]}
     assert determinism.main([str(tmp_path)]) == 1
     assert "flaky: buggy.py:clock" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("buggy", "fixed"),
+    [
+        ("def f():\n    return 1", "def f():\n    return 2"),  # neither ends in a newline
+        ("x = 1\n", "x = 2"),
+        ("x = 1", "x = 1\ny = 2\n"),
+    ],
+    ids=["no-final-newline", "newline-removed", "newline-added"],
+)
+def test_dat10_oracle_patch_without_trailing_newline_applies(
+    tmp_path: Path, buggy: str, fixed: str
+) -> None:
+    """DAT-10: the last removed and added lines used to merge into one line."""
+    from evals.eval_patches import apply_diff
+
+    (tmp_path / "buggy.py").write_bytes(buggy.encode())
+    patch = generate_oracle_patch(buggy, fixed)
+
+    ok, message = apply_diff(tmp_path, patch)
+    assert ok, message
+    assert message == ""
+    assert (tmp_path / "buggy.py").read_bytes() == fixed.encode()
+
+
+def test_dat10_count_patch_lines_counts_the_no_newline_case() -> None:
+    patch = generate_oracle_patch("def f():\n    return 1", "def f():\n    return 2")
+    assert count_patch_lines(patch) == 2
