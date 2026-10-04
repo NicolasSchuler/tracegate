@@ -2445,7 +2445,7 @@ def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path)
     setup = _FakeSetup(
         cases=[case],
         conditions=[cond],
-        execution_config=ExecutionConfig(executor="testcontainers"),
+        execution_config=ExecutionConfig(executor="testcontainers", container_pool=True),
     )
     monkeypatch.setattr("evals.eval_main_flow.prepare_main_setup", lambda **kw: setup)
 
@@ -2511,4 +2511,38 @@ def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path)
     assert env["PYTHONHASHSEED"] == "1234"  # ORC-01
     assert seen["pool"].acquired == 1  # ORC-02: the pool is used, not a one-shot container
     assert seen["shutdown"] is True
+    assert run_eval_mod._ACTIVE_CONTAINER_POOL is None
+
+
+def test_run_main_flow_starts_no_pool_without_opt_in(monkeypatch) -> None:
+    """ORC-02: pooling is opt-in; one-shot containers stay the default."""
+    from evals.eval_types import ExecutionConfig, UnitExecutionOutcome
+
+    case = _FakeCaseSpec(case_id="c1")
+    cond = _FakeCondition(value="base_repair")
+    _mock_display, flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
+    setup = _FakeSetup(
+        cases=[case], conditions=[cond], execution_config=ExecutionConfig(executor="testcontainers")
+    )
+    monkeypatch.setattr("evals.eval_main_flow.prepare_main_setup", lambda **kw: setup)
+
+    def _no_pool(**kwargs):
+        raise AssertionError("container pool must not start without --container-pool")
+
+    monkeypatch.setattr("evals.eval_main_flow._EvalContainerPool", _no_pool)
+    outcome = MagicMock(spec=UnitExecutionOutcome)
+    outcome.case = case
+    outcome.condition = cond
+    outcome.case_records = []
+    outcome.records_streamed = True
+    outcome.unit_duration_sec = 0.1
+    outcome.runtime_error = None
+    monkeypatch.setattr("evals.eval_main_flow._execute_eval_unit", lambda **kw: outcome)
+    monkeypatch.setattr(
+        "evals.eval_main_flow.classify_failure_reason", lambda case_records: ("none", "none")
+    )
+    with _run_with_cleanup(flow_mod):
+        from evals.eval_main_flow import run_main_flow
+
+        run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[])
     assert run_eval_mod._ACTIVE_CONTAINER_POOL is None

@@ -852,7 +852,11 @@ def run_main_flow(
     _sync_display_summary(elapsed_sec=0.0, eta_sec=None)
     display.start_runtime()
 
-    if execution_config.executor == "testcontainers" and pending_units:
+    if (
+        execution_config.executor == "testcontainers"
+        and execution_config.container_pool
+        and pending_units
+    ):
         pool_size = max(1, jobs)
         display.add_event(
             message=f"Container pool: starting {pool_size} container(s)...",

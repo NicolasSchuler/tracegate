@@ -531,6 +531,11 @@ Important execution flags:
 - `--container-user <uid:gid>` (default: host `uid:gid` when available; fallback `0:0`)
 - `--container-tmpfs-size-mb <int>` (default: `128`)
 - `--container-env KEY=VALUE` (repeatable, explicit allowlist)
+- `--container-pool`: reuse one long-lived container per job instead of a fresh container per
+  pytest call. Off by default: pooled containers share the read-write workdirs mount and
+  outlive units. Before the 2026-10-04 fix (ORC-02) the pool was started but never used, so
+  every earlier result ran in one-shot containers. Recorded as
+  `run_metadata.patcher_config.execution.container_pool`.
 - stale eval containers are pruned automatically at run start (best-effort, 5-minute grace)
 
 Use `--executor local` if you want the legacy host-side pytest execution.
