@@ -40,6 +40,32 @@ class _ParsedDiffEntry:
         return out
 
 
+RELAXED_APPLY_MESSAGE = "applied via relaxed replacement fallback"
+_PATCH_LEFTOVER_SUFFIXES = (".rej", ".orig")
+
+
+def patch_apply_mode(*, apply_ok: bool, apply_msg: str) -> str | None:
+    """``strict`` or ``relaxed_fallback`` for an applied diff, ``None`` otherwise (ATT-10)."""
+    if not apply_ok:
+        return None
+    return "relaxed_fallback" if apply_msg == RELAXED_APPLY_MESSAGE else "strict"
+
+
+def _patch_leftovers(cwd: Path) -> set[Path]:
+    return {
+        path
+        for suffix in _PATCH_LEFTOVER_SUFFIXES
+        for path in cwd.rglob(f"*{suffix}")
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def _remove_new_patch_leftovers(cwd: Path, before: set[Path]) -> None:
+    """Delete ``.rej``/``.orig`` files that ``patch`` created (ATT-16)."""
+    for path in _patch_leftovers(cwd) - before:
+        path.unlink(missing_ok=True)
+
+
 def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     """Apply a unified diff to *cwd* via ``patch`` or ``git apply``.
 
@@ -60,6 +86,7 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     patch = shutil.which("patch")
     if patch:
         strict_backups = _backup_diff_target_files(cwd=cwd, diff=diff)
+        leftovers_before = _patch_leftovers(cwd)
         try:
             proc = subprocess.run(
                 [patch, "-p1", "--batch", "--forward"],
@@ -70,7 +97,9 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
                 timeout=PATCH_APPLY_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
+            _remove_new_patch_leftovers(cwd, leftovers_before)
             return False, f"patch timed out after {PATCH_APPLY_TIMEOUT_SEC}s"
+        _remove_new_patch_leftovers(cwd, leftovers_before)
         if proc.returncode == 0:
             _remove_deleted_diff_targets(cwd=cwd, diff=diff)
             return True, ""
@@ -78,7 +107,7 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
         _restore_diff_target_files(cwd=cwd, backups=strict_backups)
         relaxed_ok, relaxed_msg = _apply_relaxed_replacements(cwd, diff)
         if relaxed_ok:
-            return True, "applied via relaxed replacement fallback"
+            return True, RELAXED_APPLY_MESSAGE
         return False, f"patch failed: {msg}; relaxed fallback failed: {relaxed_msg}"
 
     # Fallback to git apply when patch utility is unavailable.

@@ -175,6 +175,7 @@ from evals.eval_patches import (
     _is_forced_noop_marker_diff,
     _render_patch_verifier_recovery_feedback,
     _restore_diff_target_files,
+    patch_apply_mode,
 )
 from evals.eval_policy_budget import (
     AdaptiveBudgetMetadataUpdate,
@@ -7436,6 +7437,11 @@ def run_one_condition_impl(
             apply_ok = patch_application.apply_ok
             apply_msg = patch_application.apply_msg
             runner_forced_recovery_applied = bool(apply_ok and patch_application.recovery_applied)
+            patch_meta["patch_apply_mode"] = (
+                "runner_marker"
+                if runner_forced_recovery_applied
+                else patch_apply_mode(apply_ok=apply_ok, apply_msg=apply_msg)
+            )
             if runner_forced_recovery_applied:
                 # ATT-07 / D8: describe the diff that was applied; keep the model's diff hash.
                 runner_forced_recovery_backups = dict(file_backups)

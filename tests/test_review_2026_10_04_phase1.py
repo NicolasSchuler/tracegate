@@ -75,7 +75,7 @@ def _run(
             output_format="json_compact",
             run_id="phase1",
             include_files_context=True,
-            **inputs,
+            **{"force_patch_attempt": False, **inputs},
         )
     finally:
         run_eval.set_active_execution_config(previous)
@@ -152,3 +152,61 @@ def test_llm13_patcher_forced_marker_diff_is_recognized_as_noop() -> None:
     assert _is_forced_noop_marker_diff(patcher_style)
     assert _is_forced_noop_marker_diff(runner_style)
     assert not _is_forced_noop_marker_diff(_FIX)
+
+
+def test_att16_failed_strict_patch_leaves_no_rej_or_orig_files(tmp_path: Path) -> None:
+    from evals.eval_patches import apply_diff
+
+    (tmp_path / "buggy.py").write_text("def f() -> int:\n    return 1\n", encoding="utf-8")
+    (tmp_path / "keep.orig").write_text("pre-existing\n", encoding="utf-8")
+    ok, _msg = apply_diff(tmp_path, _UNAPPLIABLE)
+    assert ok is False
+    leftovers = sorted(p.name for p in tmp_path.iterdir() if p.suffix in {".rej", ".orig"})
+    assert leftovers == ["keep.orig"]
+
+
+def test_att10_relaxed_application_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evals.eval_patches import RELAXED_APPLY_MESSAGE
+
+    def _relaxed_apply(cwd: Path, diff: str) -> tuple[bool, str]:
+        del diff
+        (cwd / "buggy.py").write_text("def f() -> int:\n    return 2\n", encoding="utf-8")
+        return True, RELAXED_APPLY_MESSAGE
+
+    monkeypatch.setattr(run_eval, "apply_diff", _relaxed_apply)
+    records = _run(tmp_path, _DiffPatcher([_FIX]), patch_verifier_scope="disabled")
+    record = _attempts(records)[0]
+    assert record["patch_meta"]["patch_apply_mode"] == "relaxed_fallback"
+    assert record["success"] is True
+
+
+def test_att10_strict_application_is_recorded(tmp_path: Path) -> None:
+    records = _run(tmp_path, _DiffPatcher([_FIX]), patch_verifier_scope="disabled")
+    assert _attempts(records)[0]["patch_meta"]["patch_apply_mode"] == "strict"
+
+
+def test_att10_analysis_counts_relaxed_and_test_surface_attempts() -> None:
+    from evals.analyze_results import _derive_case_condition_rows
+
+    def _record(attempt: int, **patch_meta: Any) -> dict[str, Any]:
+        return {
+            "run_id": "r",
+            "case_id": "c",
+            "condition": "base_repair",
+            "attempt": attempt,
+            "success": False,
+            "patch_meta": patch_meta,
+        }
+
+    rows = _derive_case_condition_rows(
+        {
+            ("r", "c", "base_repair"): [
+                _record(1, patch_apply_mode="relaxed_fallback", test_surface_modified=True),
+                _record(2, patch_apply_mode="strict", test_surface_modified=False),
+            ]
+        }
+    )
+    assert rows[0]["relaxed_apply_attempts"] == 1
+    assert rows[0]["test_surface_modified_attempts"] == 1

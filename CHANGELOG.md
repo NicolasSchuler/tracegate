@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- Record `patch_meta.patch_apply_mode` (`strict`, `relaxed_fallback`, `runner_marker`) and report `relaxed_apply_attempts` and `test_surface_modified_attempts` per case and condition (ATT-10). Failed or fuzzy `patch` runs no longer leave `.rej`/`.orig` files in the workdir (ATT-16).
 - `--force-patch-attempt` now defaults to off. When enabled, a runner marker patch applied after the model's diff failed keeps the attempt `patch_apply_failed` (with `runner_forced_patch_recovery*` modifiers), the patch metadata describes the applied marker diff (`model_patch_*` keeps the model's), and the marker is reverted so it can't leak into later prompts (ATT-07, D8). Runner and patcher forced-patch markers share one constant, so patcher-generated marker-only patches are recognized as no-ops (LLM-13).
 - `--patch-verifier-scope` now defaults to `all`, so the verifier (rejections, recovery calls, test-edit penalties) applies to every condition; `adaptive_only` remains available as an ablation (ATT-14, D7).
 - Eval success can no longer be produced by editing the test oracle: the harness restores the pristine test surface before each verification run and requires a JUnit report with at least one executed test and no failures or errors. Records carry `test_surface_modified` and `pytest_verdict_*` (ATT-01, D10).

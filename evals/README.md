@@ -1345,7 +1345,8 @@ unsupported and should be regenerated with the current harness before analysis.
   the pristine test surface and pytest's JUnit counts, so patches that edit tests or add
   `conftest.py` hooks no longer count (ATT-01); the patch verifier runs for every condition by
   default (ATT-14); `--force-patch-attempt` defaults to off and a forced marker recovery stays
-  `patch_apply_failed` (ATT-07). Later review fixes extend this list.
+  `patch_apply_failed` (ATT-07); `patch_apply_mode` distinguishes strict from relaxed patch
+  application (ATT-10). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
