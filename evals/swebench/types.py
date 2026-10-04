@@ -11,6 +11,9 @@ VALID_CONDITIONS = (CONDITION_BASELINE, CONDITION_LLMDEBUG)
 
 SWEBENCH_LITE_DATASET_NAME = "princeton-nlp/SWE-bench_Lite"
 SWEBENCH_LITE_DEFAULT_SPLIT = "test"
+SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT = 4096
+"""Default completion cap for SWE-Bench generation; was 2,048, which cut multi-file
+patches off (DAT-18)."""
 
 
 @dataclass(frozen=True)

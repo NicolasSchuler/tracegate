@@ -133,7 +133,7 @@ def test_generate_pro_cli_default_flags(monkeypatch, capsys, tmp_path) -> None:
     assert captured["openai_async"] is False
     assert captured["jobs"] == 1
     assert captured["openai_temperature"] == 0.0
-    assert captured["openai_max_tokens"] == 2048
+    assert captured["openai_max_tokens"] == 4096  # DAT-18: was 2048
     assert captured["max_instances"] == 0
 
 

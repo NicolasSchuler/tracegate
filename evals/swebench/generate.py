@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 from evals.patchers import OpenAICompatPatcher
 
 from .. import _json as json
+from .generation_meta import append_generation_meta, generation_meta_from_patch_meta
 from .io import (
     ensure_run_layout,
     instance_ids_path,
@@ -36,6 +38,7 @@ from .types import (
     CONDITION_LLMDEBUG,
     SWEBENCH_LITE_DATASET_NAME,
     SWEBENCH_LITE_DEFAULT_SPLIT,
+    SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT,
     ConditionGenerationSummary,
     GenerationRunSummary,
     PredictionRecord,
@@ -56,7 +59,7 @@ def generate_lite_predictions(
     openai_http2: bool = True,
     openai_async: bool = False,
     openai_timeout_sec: float = 180.0,
-    openai_max_tokens: int = 2048,
+    openai_max_tokens: int = SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT,
     openai_temperature: float = 0.0,
     openai_response_mode: str = "diff",
     prompt_inputs: PromptInputs | None = None,
@@ -324,6 +327,9 @@ def _generate_for_condition(
                     model_label=model_label,
                     workspace_root=tmp_root,
                 )
+                append_generation_meta(
+                    path, instance_id=instance_id, generation_meta=outcome.generation_meta
+                )
                 if outcome.request_error is not None:
                     # DAT-08: a failed request is not a prediction; --resume retries it.
                     request_error_count += 1
@@ -367,6 +373,9 @@ def _generate_for_condition(
                 for future in as_completed(future_map):
                     instance_id = future_map[future]
                     outcome = future.result()
+                    append_generation_meta(
+                        path, instance_id=instance_id, generation_meta=outcome.generation_meta
+                    )
                     if outcome.request_error is not None:
                         # DAT-08: a failed request is not a prediction; --resume retries it.
                         request_error_count += 1
@@ -412,6 +421,7 @@ class ProposalOutcome:
     record: PredictionRecord
     is_empty: bool
     request_error: str | None = None
+    generation_meta: dict[str, Any] = field(default_factory=dict)
 
 
 def _propose_prediction(
@@ -431,6 +441,7 @@ def _propose_prediction(
     )
     patch = ""
     request_error: str | None = None
+    patch_meta: Mapping[str, Any] | None = None
     with tempfile.TemporaryDirectory(
         prefix=f"instance-{instance_id[:24]}-",
         dir=str(workspace_root),
@@ -445,6 +456,7 @@ def _propose_prediction(
                 cwd=workspace_path,
             )
             patch = str(result.diff or "")
+            patch_meta = result.meta
         except Exception as exc:
             patch = ""
             request_error = f"{type(exc).__name__}: {exc}"
@@ -461,6 +473,7 @@ def _propose_prediction(
         ),
         is_empty=is_empty,
         request_error=request_error,
+        generation_meta=generation_meta_from_patch_meta(patch_meta, request_error=request_error),
     )
 
 
@@ -481,6 +494,7 @@ async def _propose_prediction_async(
     )
     patch = ""
     request_error: str | None = None
+    patch_meta: Mapping[str, Any] | None = None
     with tempfile.TemporaryDirectory(
         prefix=f"instance-{instance_id[:24]}-",
         dir=str(workspace_root),
@@ -495,6 +509,7 @@ async def _propose_prediction_async(
                 cwd=workspace_path,
             )
             patch = str(result.diff or "")
+            patch_meta = result.meta
         except Exception as exc:
             patch = ""
             request_error = f"{type(exc).__name__}: {exc}"
@@ -511,6 +526,7 @@ async def _propose_prediction_async(
         ),
         is_empty=is_empty,
         request_error=request_error,
+        generation_meta=generation_meta_from_patch_meta(patch_meta, request_error=request_error),
     )
 
 
@@ -554,6 +570,11 @@ async def _generate_for_condition_async(
     try:
         for task in asyncio.as_completed(tasks):
             instance_id, outcome = await task
+            append_generation_meta(
+                prediction_path_value,
+                instance_id=instance_id,
+                generation_meta=outcome.generation_meta,
+            )
             if outcome.request_error is not None:
                 # DAT-08: a failed request is not a prediction; --resume retries it.
                 request_error_count += 1

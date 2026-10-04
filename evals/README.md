@@ -121,6 +121,9 @@ Run directory contract:
 
 - `baseline/predictions.jsonl`
 - `llmdebug/predictions.jsonl`
+- `<condition>/generation_meta.jsonl`: one line per proposal with `finish_reason`,
+  `truncated`, `patcher_error` and `request_error`; on resume the last line for an instance
+  describes its prediction (DAT-18)
 - `instance_ids.txt`
 - `run_metadata.json`
 - `run_index.json` (written by `prepare-handoff`)
@@ -141,6 +144,10 @@ Each prediction row in `predictions.jsonl`:
 - `instance_id` (string)
 - `model_patch` (string, unified diff)
 - `model_name_or_path` (string)
+
+Lite and Pro generation default to `--openai-max-tokens 4096` (it was 2048, which cut off
+multi-file patches; DAT-18). A truncated answer yields an empty patch and
+`truncated: true` in `generation_meta.jsonl`.
 
 Detailed operational guide:
 - `docs/local_docker_eval_runbook.md`
@@ -862,7 +869,8 @@ marker applied after the model's diff failed keeps the attempt `patch_apply_fail
 `runner_forced_patch_recovery*` modifiers, then is reverted (ATT-07, D8).
 `no_patch_proposed`, `truncated_response` and `forced_noop_patch` are runner-level notes, not
 baseline-native root causes. `truncated_response` means the model's answer stopped at
-`--openai-max-tokens` (`finish_reason="length"`); it is never parsed into a patch (LLM-02). For external baselines, the underlying cause may instead live in
+`--openai-max-tokens` (`finish_reason="length"`); it is never parsed into a patch (LLM-02).
+For external baselines, the underlying cause may instead live in
 `patch_meta.baseline_meta.error` (for example `timeout`, `learner_empty_response`)
 or `patch_meta.compatibility_reason` (for example `subprocess_task_unsupported`).
 For TraceCoder specifically, `patch_meta.baseline_meta.candidate_status=unchanged_original_code`

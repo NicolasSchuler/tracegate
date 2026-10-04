@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from evals.swebench.prompt_policy import PromptInputs
+from evals.swebench.types import SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT
 
 from .generate import generate_pro_predictions
 from .io import (
@@ -52,7 +53,7 @@ def _add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--openai-async", action="store_true")
     parser.add_argument("--openai-timeout-sec", type=float, default=180.0)
-    parser.add_argument("--openai-max-tokens", type=int, default=2048)
+    parser.add_argument("--openai-max-tokens", type=int, default=SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT)
     parser.add_argument("--openai-temperature", type=float, default=0.0)
     parser.add_argument("--openai-response-mode", choices=["diff", "edits"], default="diff")
     parser.add_argument(
