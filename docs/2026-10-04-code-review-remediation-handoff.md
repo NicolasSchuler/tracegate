@@ -347,14 +347,14 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] **POL-10:** the context family widens by at least 1.
 
 ### 3.4. Logging and off-policy data
-- [ ] **POL-03:** correct propensities for shadow mode and warm-up.
-- [ ] **POL-13:** export accepts the supported schema versions and rejects non-finite values.
-- [ ] **POL-18:** one chronological event loader.
-- [ ] **POL-14, POL-15:** bootstrap refuses `percentile_v1` state, adds `--exclude-case-ids` and `--exclude-run-ids`, and warns on overlap with the target cases.
+- [x] **POL-03:** correct propensities for shadow mode and warm-up. *(The helper paths were fixed in M1; the budget controller's events still used the selection's propensity in shadow mode. One shared rule now.)*
+- [x] **POL-13:** export accepts the supported schema versions and rejects non-finite values. *(v3 predates the published repo and is counted as `records_unsupported_schema`.)*
+- [x] **POL-18:** one chronological event loader. *(`evals/policy_event_log.py`; ties within a second keep log order.)*
+- [x] **POL-14, POL-15:** bootstrap refuses `percentile_v1` state, adds `--exclude-case-ids` and `--exclude-run-ids`, and warns on overlap with the target cases. *(Overlap needs `--target-case-ids`.)*
 
 ### 3.5. TEP
-- [ ] **POL-17:** critic-parse flag, averaged or paired acceptance, robust score parsing.
-- [ ] **ATT-17:** surface save failures.
+- [x] **POL-17:** critic-parse flag, averaged or paired acceptance, robust score parsing. *(Paired: the critic scores the current and the candidate surface.)*
+- [x] **ATT-17:** surface save failures.
 
 ### 3.6. Docs
 - [ ] **POL-25, X-08:** generate the policy defaults tables via `evals.doc_sync`, and fix the probe-template comment.
