@@ -1903,3 +1903,27 @@ def test_thompson_respects_warmup(tmp_path) -> None:
     # During warmup, strategy should be uniform random.
     assert "warmup" in decision.decision_strategy
     ctrl.close()
+
+
+def test_pol16_nan_counter_survives_concurrent_decisions(tmp_path) -> None:
+    """POL-16: NaN replacements were counted outside the lock and could be lost."""
+    import threading
+
+    controller = AdaptiveOnlinePolicyController(
+        OnlinePolicyConfig.normalize(mode="on", events_path=tmp_path / "e.jsonl")
+    )
+    barrier = threading.Barrier(8)
+
+    def _decide() -> None:
+        barrier.wait()
+        for _ in range(50):
+            controller.decide(feature_values={"bias": 1.0, "broken": float("nan")})
+
+    threads = [threading.Thread(target=_decide) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert controller.get_nan_stats()["broken"] == 400
+    controller.close()

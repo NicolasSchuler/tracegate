@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- The adaptive policies' NaN-feature counter, the only signal of NaN features, is updated under the controller lock; concurrent decisions lost increments (POL-16).
 - Scoring a bandit arm no longer changes it: when an arm's matrix is singular, the re-regularized matrix is used for that score only instead of being written back with an extra `l2·I` on every such call (POL-22).
 - The adaptive bandits can learn (POL-01, decision D6): LinUCB recency decay defaults to 1.0 for both the helper and budget policies (it was 0.95 and shrank all ten arms on every update, leaving about 20 observations of evidence), and decay below 1 now only discounts the arm being updated. Outcome events carry `effective_evidence` per arm (`trace(A_k) - d·λ`; online event schema 6, budget event schema 5), the shared LinUCB core serves all three controllers (`evals/linucb_core.py`), and run metadata records `policy_defaults_version: 2`.
 - Doubly robust off-policy estimates are cross-fitted (5 folds per stratum) instead of fitting the reward model on the samples it corrects, and the OPE summary reports the ridge alphas actually used per action (`ridge_alphas_selected`, `ridge_alpha_fallback`, `dr_crossfit_folds`) instead of the configured fallback value. Very small strata now report DR as unsupported (`insufficient_crossfit_support`) (STA-11).

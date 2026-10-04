@@ -279,10 +279,15 @@ class AdaptiveOnlinePolicyController:
             return dict(self._nan_counts)
 
     def _tracked_safe_float(self, value: Any, *, feature_name: str, default: float = 0.0) -> float:
-        """Convert *value* via :func:`safe_float`, tracking NaN replacements."""
+        """Convert *value* via :func:`safe_float`, tracking NaN replacements.
+
+        The counter is updated under the (re-entrant) lock: ``decide()`` cleans features
+        before taking it, and concurrent increments were lost (POL-16).
+        """
         result, replaced = _safe_float_tracked(value, default=default)
         if replaced:
-            self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
+            with self._lock:
+                self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
         return result
 
     def _record_feature_scaling_history(self, *, cleaned_features: Mapping[str, float]) -> None:
