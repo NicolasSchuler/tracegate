@@ -95,6 +95,8 @@ DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES = {
     ACTION_FRAME_ONLY: -0.25,
 }
 STATE_SCHEMA_VERSION = 3
+DEFAULT_ADAPTIVE_ONLINE_DECAY = 1.0
+"""Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
 
 
 def default_online_action_score_biases() -> dict[str, float]:
@@ -136,7 +138,7 @@ class OnlinePolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 50
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = DEFAULT_ADAPTIVE_ONLINE_DECAY
     feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     init_state_path: Path | None = None
     state_path: Path | None = None
@@ -157,7 +159,7 @@ class OnlinePolicyConfig:
         l2: float = 1.0,
         warmup_decisions: int = 50,
         save_every: int = 50,
-        decay: float = 0.95,
+        decay: float = DEFAULT_ADAPTIVE_ONLINE_DECAY,
         feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
         init_state_path: Path | None = None,
         state_path: Path | None = None,
@@ -177,7 +179,9 @@ class OnlinePolicyConfig:
         l2_norm = max(1e-9, _coerce_float(l2, default=1.0))
         warmup_norm = _coerce_nonnegative_int(warmup_decisions, default=50)
         save_every_norm = max(1, _coerce_nonnegative_int(save_every, default=50))
-        decay_norm = min(1.0, max(1e-9, _coerce_float(decay, default=0.95)))
+        decay_norm = min(
+            1.0, max(1e-9, _coerce_float(decay, default=DEFAULT_ADAPTIVE_ONLINE_DECAY))
+        )
         feature_scaling_profile_norm = normalize_feature_scaling_profile(feature_scaling_profile)
         if feature_scaling_profile_norm not in POLICY_FEATURE_SCALING_PROFILES:
             feature_scaling_profile_norm = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
@@ -725,6 +729,7 @@ class AdaptiveOnlinePolicyController:
                 local_wall_sec=max(0.0, float(local_wall_sec)),
                 override_reason=str(override_reason),
                 model_updated=bool(model_updated),
+                effective_evidence=core.effective_evidence(self._state, l2=float(self.config.l2)),
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
                 created_at_utc=_utc_now(),
@@ -800,13 +805,13 @@ class AdaptiveOnlinePolicyController:
         if not self._state.feature_names:
             return False
         x = self._feature_vector(cleaned_features=feature_values)
-        self._apply_recency_decay()
+        self._apply_recency_decay(action=action)
         return core.rank_one_update(self._state, action=action, reward=reward, x=x)
 
-    def _apply_recency_decay(self) -> None:
-        """Exponentially discount prior LinUCB evidence when configured."""
+    def _apply_recency_decay(self, *, action: str) -> None:
+        """Discount the updated arm's prior evidence when decay < 1 is configured."""
         core.apply_recency_decay(
-            self._state, decay=float(self.config.decay), l2=float(self.config.l2)
+            self._state, action=action, decay=float(self.config.decay), l2=float(self.config.l2)
         )
 
     def _state_payload(self) -> dict[str, Any]:

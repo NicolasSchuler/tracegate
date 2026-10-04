@@ -162,7 +162,7 @@ OnlinePolicyConfig(
     l2: 1.0                              # Regularization for the LinUCB solve
     warmup_decisions: 50                 # Uniform sampling for first N
     save_every: 50                       # Save state after N updates
-    decay: 0.95                          # Lower values discount stale data
+    decay: 1.0                           # < 1 discounts the updated arm's older data (opt-in)
     feature_scaling_profile: "v1"        # "v1", "percentile_v1", or "none"
     state_path: Path | None              # Default: evals/artifacts/policies/<run_id>.json
     events_path: Path | None             # Log all decisions+outcomes as JSONL
@@ -186,7 +186,7 @@ OnlinePolicyConfig(
     - Score each action: UCB_k = θ̂_k^T x + α √(x^T A_k^{-1} x)
     - Select argmax_k UCB_k (greedy) or random (ε-greedy) from the feasible action set
 3. **On reward** r for action a with context x:
-    - Optionally decay all A_k / b_k toward the L2 prior
+    - Optionally (decay < 1) decay A_a / b_a of the updated arm toward the L2 prior
     - A_a ← A_a + x x^T
     - b_a ← b_a + r·x
 4. **Save state** every 50 updates to enable resuming
@@ -275,7 +275,7 @@ BudgetPolicyConfig(
     alpha: 0.4        # Lower than the helper policy (0.6)
     epsilon: 0.05     # Lower exploration for the 2-action controller
     warmup: 20        # Short uniform warm-up before budget learning
-    decay: 0.95       # Optional recency decay, same semantics as helper policy
+    decay: 1.0        # Optional per-arm recency decay, same semantics as helper policy
     max_ups_per_case: 1
     feature_scaling_profile: "v1" | "percentile_v1" | "none"
 )
@@ -405,7 +405,7 @@ Which parameters matter most and suggested sweep ranges:
 | `kappa_stagnation` | `--adaptive-reward-kappa-stagnation` | 0.10 | 0.05–0.20 | Higher = larger penalty for no-progress streaks |
 | `pregate_threshold` | `--adaptive-informativeness-pregate-threshold` | 0.7 | 0.3–0.9 | Higher = skip helper more often |
 | `warmup_decisions` | `--adaptive-online-warmup-decisions` | 50 | 25–500 | Uniform random sampling before LinUCB kicks in |
-| `decay` | `--adaptive-online-decay` | 0.95 | 0.90–1.0 | Lower = forget older data faster (recency bias) |
+| `decay` | `--adaptive-online-decay` | 1.0 | 0.90–1.0 | Below 1, the updated arm forgets older data faster (opt-in, for non-stationary runs; POL-01) |
 
 **Budget policy** has its own parameter set with different defaults (lower `alpha=0.4`, lower `epsilon=0.05`, shorter `warmup=20`). Use the `--adaptive-budget-*` family of flags to tune those independently.
 

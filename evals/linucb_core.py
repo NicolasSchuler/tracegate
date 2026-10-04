@@ -144,19 +144,34 @@ def thompson_scores(state: LinUCBState, x: np.ndarray, *, seed: int | None) -> d
     return scores
 
 
-def apply_recency_decay(state: LinUCBState, *, decay: float, l2: float) -> None:
-    """Shrink every arm toward the ``l2`` prior by *decay* (no-op at decay >= 1)."""
+def apply_recency_decay(state: LinUCBState, *, action: str, decay: float, l2: float) -> None:
+    """Shrink *action*'s arm toward the ``l2`` prior by *decay* before its update.
+
+    POL-01: decaying every arm on every update left about 20 observations of evidence in
+    total, two per arm against 53 features, so the bandit barely learned. Decay is now
+    opt-in (the default is 1.0, decision D6) and only touches the arm that gets new
+    evidence, for non-stationary settings.
+    """
     if float(decay) >= 1.0 or not state.feature_names:
         return
     dim = len(state.feature_names)
+    A = state.A.get(action)
+    b = state.b.get(action)
+    if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
+        return
     prior = np.eye(dim, dtype=float) * float(l2)
-    for action in state.action_names:
-        A = state.A.get(action)
-        b = state.b.get(action)
-        if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
-            continue
-        state.A[action] = (float(decay) * A) + ((1.0 - float(decay)) * prior)
-        state.b[action] = float(decay) * b
+    state.A[action] = (float(decay) * A) + ((1.0 - float(decay)) * prior)
+    state.b[action] = float(decay) * b
+
+
+def effective_evidence(state: LinUCBState, *, l2: float) -> dict[str, float]:
+    """Evidence each arm holds beyond its prior: ``trace(A_k) - d * l2`` (POL-01 telemetry)."""
+    dim = len(state.feature_names)
+    return {
+        action: float(np.trace(A)) - dim * float(l2)
+        for action in state.action_names
+        if (A := state.A.get(action)) is not None and A.shape == (dim, dim)
+    }
 
 
 def rank_one_update(state: LinUCBState, *, action: str, reward: float, x: np.ndarray) -> bool:

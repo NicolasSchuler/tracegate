@@ -2,9 +2,9 @@
 
 The reference functions below are frozen copies of the pre-extraction code (identical
 in ``adaptive_online_policy``, ``adaptive_budget_online_policy`` and
-``bootstrap_policy_state``). ``tests/golden/policy_online_parity.golden`` was captured from a
-seeded online-controller run, plus a bootstrap replay of its events, before the
-extraction.
+``bootstrap_policy_state``). ``tests/golden/policy_online_parity.golden`` was first captured
+from a seeded online-controller run, plus a bootstrap replay of its events, before the
+extraction; it is regenerated only for intended behaviour changes (POL-01 per-arm decay).
 """
 
 from __future__ import annotations
@@ -94,8 +94,9 @@ def _ref_scores(state: _RefState, x: np.ndarray, alpha: float) -> dict[str, floa
 # --- parity ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("decay", [1.0, 0.95])
-def test_core_matches_frozen_reference_over_random_sequences(decay: float) -> None:
+def test_core_matches_frozen_reference_over_random_sequences() -> None:
+    """Without decay the core's math is the old math (POL-01 changed decay semantics)."""
+    decay = 1.0
     actions = ("a", "b", "c")
     rng = np.random.default_rng(11)
     ref = _RefState(actions)
@@ -119,7 +120,7 @@ def test_core_matches_frozen_reference_over_random_sequences(decay: float) -> No
         action = actions[step % 3]
         reward = float(rng.normal())
         _ref_decay(ref, decay, 1.0)
-        core.apply_recency_decay(state, decay=decay, l2=1.0)
+        core.apply_recency_decay(state, action=action, decay=decay, l2=1.0)
         _ref_update(ref, action, reward, x)
         assert core.rank_one_update(state, action=action, reward=reward, x=x)
     for action in actions:
@@ -128,7 +129,35 @@ def test_core_matches_frozen_reference_over_random_sequences(decay: float) -> No
     assert state.updates == ref.updates
 
 
-def test_online_controller_and_replay_match_the_pre_extraction_golden() -> None:
+def test_pol01_decay_shrinks_only_the_updated_arm() -> None:
+    """POL-01: decay used to shrink all arms on every update."""
+    state = core.LinUCBState(action_names=("a", "b"))
+    core.ensure_feature_state(state, {"x": 1.0}, l2=1.0)
+    x = np.array([1.0])
+    for action in ("a", "b"):
+        core.rank_one_update(state, action=action, reward=1.0, x=x)
+    before_b = (state.A["b"].copy(), state.b["b"].copy())
+
+    core.apply_recency_decay(state, action="a", decay=0.5, l2=1.0)
+
+    assert state.A["a"][0, 0] == pytest.approx(0.5 * 2.0 + 0.5 * 1.0)
+    assert state.b["a"][0] == pytest.approx(0.5)
+    np.testing.assert_array_equal(state.A["b"], before_b[0])
+    np.testing.assert_array_equal(state.b["b"], before_b[1])
+    assert core.effective_evidence(state, l2=1.0) == {"a": pytest.approx(0.5), "b": 1.0}
+
+
+def test_pol01_default_decay_is_one() -> None:
+    from evals.adaptive_budget_online_policy import BudgetPolicyConfig
+    from evals.adaptive_online_policy import OnlinePolicyConfig
+
+    assert OnlinePolicyConfig().decay == 1.0
+    assert OnlinePolicyConfig.normalize().decay == 1.0
+    assert BudgetPolicyConfig().decay == 1.0
+    assert BudgetPolicyConfig.normalize().decay == 1.0
+
+
+def test_online_controller_and_replay_match_the_golden_scenario() -> None:
     from tests._policy_parity_scenario import run_online_scenario
 
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))

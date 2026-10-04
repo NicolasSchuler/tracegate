@@ -1670,7 +1670,7 @@ def test_apply_recency_decay_skips_action_with_missing_matrix() -> None:
     state = ReplayState(action_names=("a",))
     state.feature_names = ["x"]
     # Leave A and b empty (None for action "a")
-    _apply_recency_decay(state=state, decay=0.9, l2=1.0)
+    _apply_recency_decay(state=state, action="a", decay=0.9, l2=1.0)
     # Should not raise; A and b remain empty
     assert state.A.get("a") is None
 

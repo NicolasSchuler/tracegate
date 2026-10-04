@@ -83,7 +83,7 @@ class OnlinePolicyConfig:
     l2: float = 1.0                # L2 regularization for matrix inversion
     warmup_decisions: int = 50     # Uniform sampling phase
     save_every: int = 50           # Save state after N updates
-    decay: float = 0.95            # Recency weighting for non-stationary runs
+    decay: float = 1.0             # < 1: per-arm recency weighting for non-stationary runs
     feature_scaling_profile: str = "v1"  # Feature normalization
     state_path: Path | None = None # Persist model to disk
     events_path: Path | None = None # Log decisions/outcomes as JSONL
@@ -375,7 +375,7 @@ class BudgetPolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 20    # Short warm-up before budget learning
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = 1.0
     feature_scaling_profile: str = "v1"
     state_path: Path | None = None
     events_path: Path | None = None

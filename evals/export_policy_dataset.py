@@ -34,8 +34,8 @@ POLICY_EVENT_SCHEMA_VERSION = ONLINE_EVENT_SCHEMA_VERSION
 # are read at v4 (pre decision model) and v5 (with the ``decision_model`` block), budget events at
 # v4.  ``tests/test_evals_export_policy_dataset.py`` pins the live controller versions against
 # these sets, so a controller bump fails loudly here instead of silently dropping v4 logs.
-SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS = frozenset({4, 5})
-SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS = frozenset({4})
+SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS = frozenset({4, 5, 6})
+SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS = frozenset({4, 5})
 SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS = (
     SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS | SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS
 )

@@ -591,7 +591,7 @@ def test_supported_schema_versions_cover_live_controller_versions() -> None:
     assert LIVE_BUDGET_EVENT_SCHEMA_VERSION in SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS
     # Helper logs from before the decision model (v4) stay readable.
     assert 4 in SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS
-    assert sorted(SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS) == [4, 5]
+    assert sorted(SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS) == [4, 5, 6]  # POL-01 bumped both
 
 
 def _decision_model_block() -> dict[str, object]:

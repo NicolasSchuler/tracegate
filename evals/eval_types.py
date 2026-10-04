@@ -20,6 +20,9 @@ from evals.adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCH_TIER_BINARY,
     BUDGET_POLICY_MODES,
 )
+from evals.adaptive_budget_online_policy import (
+    DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY as DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
+)
 from evals.adaptive_online_policy import (
     ACTION_COMPACT_THEN_PATCH,
     ACTION_FILE_ONLY,
@@ -35,6 +38,9 @@ from evals.adaptive_online_policy import (
     ONLINE_POLICY_ALGOS,
     ONLINE_POLICY_MODES,
     PolicyDecision,
+)
+from evals.adaptive_online_policy import (
+    DEFAULT_ADAPTIVE_ONLINE_DECAY as DEFAULT_ADAPTIVE_ONLINE_DECAY,
 )
 from evals.lambda_rlm_backend import (
     DEFAULT_LAMBDA_RLM_CONTEXT_WINDOW_CHARS,
@@ -152,6 +158,9 @@ PYTEST_TIMEOUT_RETURNCODE = 124
 RETRY_GATE_MAX_CONSECUTIVE_BLOCKS = 1
 """ATT-05 / D9: the no-new-evidence retry gate may block at most once in a row."""
 EVAL_RECORD_SCHEMA_VERSION = 7
+POLICY_DEFAULTS_VERSION = 2
+"""Adaptive-policy defaults generation, recorded in run metadata (Phase 3). Version 2
+(2026-10-04 review): decay 1.0, decayed per arm (POL-01); earlier runs are version 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}
@@ -190,12 +199,10 @@ ADAPTIVE_REWARD_MATERIALIZATION_SCALE_DEFAULT = 0.5
 DEFAULT_ADAPTIVE_ONLINE_ALPHA = 0.6
 DEFAULT_ADAPTIVE_ONLINE_EPSILON = 0.10
 DEFAULT_ADAPTIVE_ONLINE_WARMUP_DECISIONS = 50
-DEFAULT_ADAPTIVE_ONLINE_DECAY = 0.95
 DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES = "search_only=-1.00,frame_only=-0.50"
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_ALPHA = 0.4
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_EPSILON = 0.05
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS = 20
-DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 0.95
 DEFAULT_ADAPTIVE_BUDGET_POLICY_TIERS = "1.0,1.1,1.2,1.35,1.5"
 DEFAULT_ADAPTIVE_BUDGET_POLICY_MAX_UPS_PER_CASE = 1
 # Auxiliary reward signal weights (enabled by default; disable with --no-adaptive-aux-reward).

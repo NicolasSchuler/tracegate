@@ -12,7 +12,7 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +69,9 @@ BUDGET_POLICY_ARCHITECTURES = {
 BUDGET_POLICY_MODES = {"off", "shadow", "on"}
 BUDGET_POLICY_ALGOS = {"linucb", "thompson"}
 STATE_SCHEMA_VERSION = 3
-EVENT_SCHEMA_VERSION = 4
+DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 1.0
+"""Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
+EVENT_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,7 @@ class BudgetPolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 20
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY
     feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     init_state_path: Path | None = None
     state_path: Path | None = None
@@ -104,7 +106,7 @@ class BudgetPolicyConfig:
         l2: float = 1.0,
         warmup_decisions: int = 20,
         save_every: int = 50,
-        decay: float = 0.95,
+        decay: float = DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
         feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
         init_state_path: Path | None = None,
         state_path: Path | None = None,
@@ -127,7 +129,9 @@ class BudgetPolicyConfig:
         l2_norm = max(1e-9, _coerce_float(l2, default=1.0))
         warmup_norm = _coerce_nonnegative_int(warmup_decisions, default=20)
         save_every_norm = max(1, _coerce_nonnegative_int(save_every, default=50))
-        decay_norm = min(1.0, max(1e-9, _coerce_float(decay, default=0.95)))
+        decay_norm = min(
+            1.0, max(1e-9, _coerce_float(decay, default=DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY))
+        )
         feature_scaling_profile_norm = normalize_feature_scaling_profile(feature_scaling_profile)
         if feature_scaling_profile_norm not in POLICY_FEATURE_SCALING_PROFILES:
             feature_scaling_profile_norm = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
@@ -295,6 +299,7 @@ class BudgetPolicyEvent:
     bwk_dual_variable_before: float = 0.0
     bwk_dual_variable_after: float = 0.0
     bwk_budget_exhausted: bool = False
+    effective_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dict."""
@@ -398,6 +403,10 @@ class BudgetPolicyEvent:
             "bwk_dual_variable_before": self.bwk_dual_variable_before,
             "bwk_dual_variable_after": self.bwk_dual_variable_after,
             "bwk_budget_exhausted": bool(self.bwk_budget_exhausted),
+            "effective_evidence": {
+                model: {action: float(value) for action, value in evidence.items()}
+                for model, evidence in self.effective_evidence.items()
+            },
         }
 
 
@@ -1018,6 +1027,10 @@ class AdaptiveBudgetPolicyController:
                 bwk_dual_variable_before=bwk_dual_variable_before,
                 bwk_dual_variable_after=bwk_dual_variable_after,
                 bwk_budget_exhausted=bool(bwk_remaining_token_budget_after <= 0),
+                effective_evidence={
+                    "gate": core.effective_evidence(self._state, l2=float(self.config.l2)),
+                    "family": core.effective_evidence(self._family_state, l2=float(self.config.l2)),
+                },
             )
             self._append_event(event=event)
             if model_updated or self.config.architecture == BUDGET_POLICY_ARCH_BWK_V1:
@@ -1086,12 +1099,14 @@ class AdaptiveBudgetPolicyController:
         if action not in state.action_names or not state.feature_names:
             return False
         x = self._feature_vector(state=state, cleaned_features=feature_values)
-        self._apply_recency_decay(state=state)
+        self._apply_recency_decay(state=state, action=action)
         return core.rank_one_update(state, action=action, reward=reward, x=x)
 
-    def _apply_recency_decay(self, *, state: LinUCBState) -> None:
-        """Exponentially discount prior LinUCB evidence when configured."""
-        core.apply_recency_decay(state, decay=float(self.config.decay), l2=float(self.config.l2))
+    def _apply_recency_decay(self, *, state: LinUCBState, action: str) -> None:
+        """Discount the updated arm's prior evidence when decay < 1 is configured."""
+        core.apply_recency_decay(
+            state, action=action, decay=float(self.config.decay), l2=float(self.config.l2)
+        )
 
     def _serialize_state(self, state: LinUCBState) -> dict[str, Any]:
         return {

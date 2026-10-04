@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # v5 adds the nested ``decision_model`` block (role, answers, applied effect).
-EVENT_SCHEMA_VERSION = 5
+EVENT_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -106,6 +106,7 @@ class PolicyEvent:
     nan_replacement_counts: dict[str, int]
     created_at_utc: str
     decision_model: dict[str, Any] = field(default_factory=dict)
+    effective_evidence: dict[str, float] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dict."""
@@ -173,5 +174,6 @@ class PolicyEvent:
             "update_reason": self.update_reason,
             "nan_replacement_counts": dict(self.nan_replacement_counts),
             "decision_model": dict(self.decision_model),
+            "effective_evidence": {k: float(v) for k, v in self.effective_evidence.items()},
             "created_at_utc": self.created_at_utc,
         }

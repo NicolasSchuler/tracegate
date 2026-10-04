@@ -218,7 +218,6 @@ def test_bas01_unsupported_baseline_rows_are_excluded_from_pairs() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="POL-01")
 def test_pol01_default_decay_is_one_and_decay_is_per_arm() -> None:
     import numpy as np
 

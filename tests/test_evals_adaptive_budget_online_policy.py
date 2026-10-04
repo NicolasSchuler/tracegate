@@ -1625,8 +1625,9 @@ def test_apply_recency_decay_skips_bad_shapes(tmp_path) -> None:
             ACTION_INCREASE_BUDGET: np.zeros(5, dtype=float),  # wrong shape
         },
     )
-    # Should not raise — both actions are skipped via continue
-    ctrl._apply_recency_decay(state=state)
+    # Should not raise — both actions are skipped
+    ctrl._apply_recency_decay(state=state, action=ACTION_KEEP_BUDGET)
+    ctrl._apply_recency_decay(state=state, action=ACTION_INCREASE_BUDGET)
     # Matrices remain unchanged
     assert state.A[ACTION_KEEP_BUDGET] is None
     assert state.A[ACTION_INCREASE_BUDGET].shape == (5, 5)

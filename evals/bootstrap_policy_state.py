@@ -247,7 +247,7 @@ def _bootstrap_online_state(
         if behavior_action not in ONLINE_POLICY_ACTIONS:
             warnings.append("invalid_behavior_action_skipped")
             continue
-        _apply_recency_decay(state=state, decay=decay, l2=l2)
+        _apply_recency_decay(state=state, action=behavior_action, decay=decay, l2=l2)
         _apply_reward_update(
             state=state,
             action=behavior_action,
@@ -383,7 +383,7 @@ def _bootstrap_budget_state(
         if bool(payload.get("gate_model_updated")):
             behavior_action = str(payload.get("behavior_action") or "")
             if behavior_action in BUDGET_POLICY_ACTIONS:
-                _apply_recency_decay(state=gate_state, decay=decay, l2=l2)
+                _apply_recency_decay(state=gate_state, action=behavior_action, decay=decay, l2=l2)
                 _apply_reward_update(
                     state=gate_state,
                     action=behavior_action,
@@ -396,7 +396,7 @@ def _bootstrap_budget_state(
         if bool(payload.get("family_model_updated")):
             behavior_family = str(payload.get("behavior_family") or "")
             if behavior_family in BUDGET_POLICY_FAMILIES:
-                _apply_recency_decay(state=family_state, decay=decay, l2=l2)
+                _apply_recency_decay(state=family_state, action=behavior_family, decay=decay, l2=l2)
                 _apply_reward_update(
                     state=family_state,
                     action=behavior_family,
@@ -735,8 +735,8 @@ def _ensure_feature_state(
     core.ensure_feature_state(state, cleaned_features, l2=float(l2))
 
 
-def _apply_recency_decay(*, state: ReplayState, decay: float, l2: float) -> None:
-    core.apply_recency_decay(state, decay=float(decay), l2=float(l2))
+def _apply_recency_decay(*, state: ReplayState, action: str, decay: float, l2: float) -> None:
+    core.apply_recency_decay(state, action=action, decay=float(decay), l2=float(l2))
 
 
 def _feature_vector(*, state: ReplayState, feature_values: dict[str, float]) -> np.ndarray:

@@ -2262,8 +2262,8 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=DEFAULT_ADAPTIVE_ONLINE_DECAY,
         help=(
-            "Optional LinUCB recency decay in (0,1]; 1.0 disables forgetting "
-            f"(default: {DEFAULT_ADAPTIVE_ONLINE_DECAY:g})."
+            "Optional LinUCB recency decay in (0,1], applied to the updated arm only; "
+            f"1.0 disables forgetting (default: {DEFAULT_ADAPTIVE_ONLINE_DECAY:g})."
         ),
     )
     parser.add_argument(
@@ -2381,8 +2381,9 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
         help=(
-            "Optional LinUCB recency decay in (0,1] for budget policy; "
-            f"{DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY:g} enables forgetting."
+            "Optional LinUCB recency decay in (0,1] for the budget policy, applied to the "
+            "updated arm only; 1.0 disables forgetting "
+            f"(default: {DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY:g})."
         ),
     )
     parser.add_argument(
