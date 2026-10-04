@@ -9,6 +9,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -623,13 +624,11 @@ class TestFullTepHeuristics:
                 self.payload = payload
 
         class _FakePatcher:
-            def __init__(self) -> None:
-                self.calls = 0
-
+            # POL-17: calls are critique(current) -> update -> critique(candidate); this
+            # fake used to rely on a free/nudged/update call order.
             def generate_json(self, **kwargs) -> _FakeJsonResult:  # type: ignore[no-untyped-def]
-                del kwargs
-                self.calls += 1
-                if self.calls % 3 == 1:
+                operation = str(kwargs["operation_name"])
+                if operation.endswith("_critic_current"):
                     return _FakeJsonResult(
                         {
                             "overall_score_10": 6.0,
@@ -637,7 +636,8 @@ class TestFullTepHeuristics:
                             "actionable_feedback": ["tighten diagnosis"],
                         }
                     )
-                if self.calls % 3 == 2:
+                if operation.endswith("_critic_candidate"):
+                    assert "Use the accepted updated instructions." in kwargs["prompt"]
                     return _FakeJsonResult(
                         {
                             "overall_score_10": 7.0,
@@ -716,11 +716,37 @@ class TestTepCriticResultFromPayload:
         )
         assert result.improvement_kind == "stable"
 
-    def test_none_payload_gives_defaults(self) -> None:
+    def test_none_payload_is_unparsed(self) -> None:
+        """POL-17: a missing payload used to read as a 'stable' critique, i.e. convergence."""
         result = TepCriticResult.from_payload(None)
         assert result.overall_score_10 == pytest.approx(0.0)
-        assert result.improvement_kind == "stable"
+        assert result.critic_parsed is False
+        assert result.improvement_kind == "unparsed"
         assert result.actionable_feedback == []
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (7, 7.0),
+            ("7.5", 7.5),
+            ("8/10", 8.0),
+            ("seven", None),
+            (float("nan"), None),
+            (True, None),
+        ],
+    )
+    def test_scores_are_parsed_defensively(self, raw: object, expected: float | None) -> None:
+        result = TepCriticResult.from_payload(
+            {
+                "overall_score_10": raw,
+                "improvement_kind": "substantive",
+                "task_dependent_scores": {"a": "x", "b": "6"},
+            }
+        )
+        assert result.critic_parsed is (expected is not None)
+        if expected is not None:
+            assert result.overall_score_10 == pytest.approx(expected)
+        assert result.task_dependent_scores == {"b": 6.0}
 
     def test_known_improvement_kind_preserved(self) -> None:
         for kind in ("substantive", "stylistic", "stable", "degrading"):
@@ -1099,3 +1125,88 @@ class TestRunPostAttemptLearningSkipsEmptyNodeId:
         # Should succeed (not raise) even though one packet had empty node_id
         assert isinstance(result, dict)
         assert result.get("enabled") is True
+
+
+# ---------------------------------------------------------------------------
+# POL-17: paired critic comparison, ties rejected, unparsed critics skip the update
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedJsonResult:
+    def __init__(self, payload: dict[str, Any] | None) -> None:
+        self.payload = payload
+
+
+class _ScriptedPatcher:
+    def __init__(self, current: dict[str, Any] | None, candidate: dict[str, Any] | None) -> None:
+        self.current = current
+        self.candidate = candidate
+        self.operations: list[str] = []
+
+    def generate_json(self, **kwargs: Any) -> _ScriptedJsonResult:
+        operation = str(kwargs["operation_name"])
+        self.operations.append(operation)
+        if operation.endswith("_critic_current"):
+            return _ScriptedJsonResult(self.current)
+        if operation.endswith("_critic_candidate"):
+            return _ScriptedJsonResult(self.candidate)
+        return _ScriptedJsonResult({"blocks": {"instructions": "New instructions."}})
+
+
+def _learn(
+    tmp_path: Path, patcher: _ScriptedPatcher
+) -> tuple[dict[str, Any], AdaptiveTepController]:
+    controller = AdaptiveTepController(state_path=str(tmp_path / "tep_state.json"))
+    controller.node("patch_proposer").actor_blocks["instructions"] = "Old instructions."
+    meta = run_post_attempt_learning(
+        controller=controller,
+        patcher=patcher,
+        context_dir=tmp_path,
+        cwd=tmp_path,
+        case_id="case-1",
+        node_packets=[{"node_id": "patch_proposer", "note": "tests_still_failing"}],
+    )
+    return meta["node_updates"]["patch_proposer"], controller
+
+
+def _critique(score: float) -> dict[str, Any]:
+    return {"overall_score_10": score, "improvement_kind": "substantive", "actionable_feedback": []}
+
+
+def test_tep_rejects_a_candidate_that_only_ties(tmp_path: Path) -> None:
+    update, controller = _learn(tmp_path, _ScriptedPatcher(_critique(6.0), _critique(6.0)))
+    assert update["accepted"] is False
+    assert controller.node("patch_proposer").actor_blocks["instructions"] == "Old instructions."
+
+
+def test_tep_skips_the_update_when_the_current_critique_is_unparsed(tmp_path: Path) -> None:
+    patcher = _ScriptedPatcher(None, _critique(9.0))
+    update, controller = _learn(tmp_path, patcher)
+    assert update == {"accepted": False, "reason": "critic_unparsed", "critic_parsed": False}
+    assert patcher.operations == ["tep_patch_proposer_critic_current"]
+    assert controller.node("patch_proposer").update_count == 0
+
+
+def test_tep_rejects_when_the_candidate_critique_is_unparsed(tmp_path: Path) -> None:
+    update, controller = _learn(tmp_path, _ScriptedPatcher(_critique(6.0), {"summary": "x"}))
+    assert update["accepted"] is False
+    assert update["reason"] == "critic_unparsed"
+    assert controller.node("patch_proposer").actor_blocks["instructions"] == "Old instructions."
+
+
+# ---------------------------------------------------------------------------
+# ATT-17: TEP state-save failures are reported, not swallowed
+# ---------------------------------------------------------------------------
+
+
+def test_tep_save_returns_the_error_instead_of_raising(tmp_path: Path) -> None:
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("file", encoding="utf-8")
+    controller = AdaptiveTepController(state_path=str(blocker / "tep_state.json"))
+    error = controller.save()
+    assert error.startswith(("FileExistsError", "NotADirectoryError"))
+
+    ok = AdaptiveTepController(state_path=str(tmp_path / "state" / "tep.json"))
+    assert ok.save() == ""
+    assert (tmp_path / "state" / "tep.json").exists()
+    assert AdaptiveTepController(state_path="").save() == ""

@@ -181,6 +181,17 @@ the native repair graph. It persists stage-local prompt state, makes the
 Stage-B instruction blocks explicit optimization targets, and records per-node
 state/metadata separately from the legacy retry nudges.
 
+After each attempt, every invoked node runs a paired comparison (POL-17): the critic
+scores the current prompt surface, the updater proposes a change from that critique,
+and the same critic prompt scores the candidate surface. The update is accepted only
+if both critiques parsed and the candidate scores strictly higher (and not below the
+node's validation floor). The two critiques used to score the same surface under a
+"free"/"nudged" label, so about half of all updates were accepted on noise; a missing
+critic payload also read as `stable`, i.e. convergence, and string scores raised.
+Unparsed critiques now skip the update (`reason: critic_unparsed`). The state is saved
+after every learning pass; a failed save is recorded as `adaptive_tep_save_error` on
+the attempt instead of being swallowed (ATT-17).
+
 ### Optimization Layers: Bandits vs TEP
 
 The adaptive stack now has two distinct learning layers:

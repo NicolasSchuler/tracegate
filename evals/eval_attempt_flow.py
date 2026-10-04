@@ -8192,6 +8192,10 @@ def _run_one_condition_attempts(
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
+            # ATT-17: persist after every learning pass and record a failed save.
+            tep_save_error = adaptive_tep_controller.save()
+            attempt_metadata["adaptive_tep_save_error"] = tep_save_error
+            patch_meta["adaptive_tep_save_error"] = tep_save_error
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=success,
@@ -8252,8 +8256,10 @@ def _run_one_condition_attempts(
 
     _resolve_remaining_pending_online_credits()
     if adaptive_tep_controller is not None:
-        try:
-            adaptive_tep_controller.save()
-        except Exception:
-            pass
+        tep_save_error = adaptive_tep_controller.save()
+        if tep_save_error and records:
+            # ATT-17: the failure used to be swallowed; attach it to the case's last record.
+            last_metadata = records[-1].get("attempt_metadata")
+            if isinstance(last_metadata, dict):
+                last_metadata["adaptive_tep_save_error"] = tep_save_error
     return records
