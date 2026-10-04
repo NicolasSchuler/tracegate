@@ -35,6 +35,7 @@ from typing import Any
 from evals.category_mapping import infer_snapshot_dependency
 from evals.importers.base import (
     count_patch_lines,
+    existing_source_ids,
     generate_oracle_patch,
     has_external_deps,
     is_deterministic,
@@ -321,6 +322,7 @@ def import_condefects(
 
         imported: list[dict[str, Any]] = []
         skipped = 0
+        seen_source_ids = existing_source_ids(output_dir)
         tasks_processed = 0
         no_python = 0
         no_tests = 0
@@ -426,12 +428,14 @@ def import_condefects(
                 )
 
                 case_id = f"cd_{task_name}_{submission_id}_{difficulty}"
+                source_id = f"condefects_{task_name}_{submission_id}"
 
-                # Skip if case already exists (idempotent re-runs)
+                # Skip if the bug was already imported, under any difficulty (DAT-16).
                 case_dir = output_dir / case_id
-                if case_dir.exists():
+                if case_dir.exists() or source_id in seen_source_ids:
                     skipped += 1
                     continue
+                seen_source_ids.add(source_id)
 
                 test_code = _generate_test(test_pairs)
 
@@ -447,7 +451,7 @@ def import_condefects(
                     "bug_source": "condefects",
                     "contamination_risk": "low",
                     "expected_fix_lines": fix_lines,
-                    "source_id": f"condefects_{task_name}_{submission_id}",
+                    "source_id": source_id,
                 }
 
                 case_info = {"case_id": case_id, "metadata": metadata, "fix_lines": fix_lines}

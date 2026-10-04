@@ -56,6 +56,26 @@ def write_case_files(
     )
 
 
+def existing_source_ids(output_dir: Path) -> set[str]:
+    """Return the ``source_id`` of every case already under *output_dir* (DAT-16).
+
+    ConDefects, DebugBench and PyResBugs case IDs end in the difficulty, so a changed
+    difficulty estimate gave the same bug a second ID and a second import. Importers skip
+    a candidate whose ``source_id`` is present; existing case IDs are left unchanged.
+    """
+    found: set[str] = set()
+    if not output_dir.is_dir():
+        return found
+    for case_json in output_dir.rglob("case.json"):
+        try:
+            meta = json.loads(case_json.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        if isinstance(meta, dict) and isinstance(meta.get("source_id"), str):
+            found.add(meta["source_id"])
+    return found
+
+
 NATIVE_REPRO_MODE = "native_dataset_test"
 
 

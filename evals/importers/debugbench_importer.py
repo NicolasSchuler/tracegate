@@ -21,6 +21,7 @@ from evals import _json as json
 from evals.category_mapping import infer_snapshot_dependency, map_debugbench_type
 from evals.importers.base import (
     count_patch_lines,
+    existing_source_ids,
     generate_oracle_patch,
     has_external_deps,
     is_deterministic,
@@ -255,6 +256,7 @@ def import_debugbench(
 
     imported: list[dict[str, Any]] = []
     skipped = 0
+    seen_source_ids = existing_source_ids(output_dir)
 
     for idx, row in enumerate(ds):
         if max_cases > 0 and len(imported) >= max_cases:
@@ -289,10 +291,11 @@ def import_debugbench(
         category = map_debugbench_type(bug_type)
         mapped_difficulty = difficulty if difficulty in _VALID_DIFFICULTIES else "medium"
         case_id = f"db_{idx:04d}_{mapped_difficulty}"
+        source_id = f"debugbench_{idx}"
 
-        # Skip if case already exists (don't overwrite).
+        # Skip if the bug was already imported, under any difficulty (DAT-16).
         case_dir = output_dir / case_id
-        if not dry_run and case_dir.exists():
+        if not dry_run and (case_dir.exists() or source_id in seen_source_ids):
             skipped += 1
             continue
 
@@ -361,7 +364,7 @@ def import_debugbench(
             "bug_source": "debugbench",
             "contamination_risk": "low",
             "expected_fix_lines": fix_lines,
-            "source_id": f"debugbench_{idx}",
+            "source_id": source_id,
         }
 
         case_info = {"case_id": case_id, "metadata": metadata, "fix_lines": fix_lines}
