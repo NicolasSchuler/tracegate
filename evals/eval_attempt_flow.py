@@ -1934,7 +1934,7 @@ def run_one_condition_impl(
             PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
             PATCH_VERIFIER_SCOPE_ALL,
         }
-        else PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+        else PATCH_VERIFIER_SCOPE_ALL
     )
     normalized_patch_verifier_min_score = max(0, int(patch_verifier_min_score))
     normalized_patch_verifier_infer_test_source_scope = bool(patch_verifier_infer_test_source_scope)

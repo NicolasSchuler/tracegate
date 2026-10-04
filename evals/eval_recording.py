@@ -62,7 +62,7 @@ from .eval_types import (
     EVAL_RECORD_SCHEMA_VERSION,
     PATCH_VERIFIER_MIN_SCORE,
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
-    PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
+    PATCH_VERIFIER_SCOPE_ALL,
     PATCH_VERIFIER_SCOPE_DISABLED,
     CaseSpec,
     Condition,
@@ -501,7 +501,7 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         "syntax_preflight_fallthrough": bool(getattr(args, "syntax_preflight_fallthrough", True)),
         "patch_sanitize_enabled": bool(getattr(args, "patch_sanitize_enabled", True)),
         "patch_verifier_scope": str(
-            getattr(args, "patch_verifier_scope", PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY)
+            getattr(args, "patch_verifier_scope", PATCH_VERIFIER_SCOPE_ALL)
         ),
         "patch_verifier_min_score": int(
             getattr(args, "patch_verifier_min_score", PATCH_VERIFIER_MIN_SCORE)

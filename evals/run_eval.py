@@ -2618,9 +2618,10 @@ def main(argv: list[str] | None = None) -> int:
             PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
             PATCH_VERIFIER_SCOPE_ALL,
         ],
-        default=PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
+        default=PATCH_VERIFIER_SCOPE_ALL,
         help=(
-            "Patch verifier execution scope: disabled|adaptive_only|all (default: adaptive_only)."
+            "Patch verifier execution scope: disabled|adaptive_only|all (default: all, so every "
+            "condition faces the same verifier; adaptive_only is an ablation)."
         ),
     )
     parser.add_argument(

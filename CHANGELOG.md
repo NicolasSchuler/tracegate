@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `--patch-verifier-scope` now defaults to `all`, so the verifier (rejections, recovery calls, test-edit penalties) applies to every condition; `adaptive_only` remains available as an ablation (ATT-14, D7).
 - Eval success can no longer be produced by editing the test oracle: the harness restores the pristine test surface before each verification run and requires a JUnit report with at least one executed test and no failures or errors. Records carry `test_surface_modified` and `pytest_verdict_*` (ATT-01, D10).
 - SWE-Bench Lite/Pro generation: the `llmdebug` condition now fails fast without `--snapshot-dir` (it previously equaled `baseline`), and `run_metadata.json` records `prompt_policy` and per-run `snapshot_coverage` (DAT-03). Prompts no longer include `hints_text` or the FAIL_TO_PASS/PASS_TO_PASS test IDs by default; `--include-hints` / `--include-test-ids` restore them (DAT-01, DAT-02, D2).
 - Stop sending dataset case descriptions and labels (`description`, `category`, `difficulty`, `snapshot_dependency`) to the external baselines; only the native conditions were blind to them (ATT-02, D1). Every baseline now also sees the test source, and each record carries `case_info_policy` and `case_information` (BAS-07). Importers no longer embed bug-type or fault text in `description`.

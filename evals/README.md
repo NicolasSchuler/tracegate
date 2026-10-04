@@ -1209,7 +1209,7 @@ Key flags:
 - `--syntax-preflight-max-cycles <int>`: max internal syntax-repair cycles per logical attempt (default `2`); these cycles do not consume extra retry attempts.
 - `--syntax-preflight-fallthrough` / `--no-syntax-preflight-fallthrough`: when enabled (default), preflight exhaustion falls through to test execution instead of terminating the attempt. Normalizes comparison with baselines that self-validate internally.
 - `--patch-sanitize-enabled` / `--no-patch-sanitize`: enable/disable malformed patch-text sanitation guard before patch apply/syntax preflight (default enabled).
-- `--patch-verifier-scope disabled|adaptive_only|all`: patch-verifier execution scope (default `adaptive_only`).
+- `--patch-verifier-scope disabled|adaptive_only|all`: patch-verifier execution scope (default `all`; `adaptive_only` is an ablation, ATT-14/D7).
 - `--patch-verifier-min-score <int>`: minimum relevance score required to pass patch verifier (default `2`).
 - `--patch-verifier-infer-test-source-scope` / `--no-patch-verifier-infer-test-source-scope`: enable/disable patch-verifier source-scope inference from failing/crash test imports (default enabled).
 
@@ -1336,7 +1336,8 @@ unsupported and should be regenerated with the current harness before analysis.
   in record meaning versus v6: baselines no longer receive case descriptions or labels
   (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07); success is judged against
   the pristine test surface and pytest's JUnit counts, so patches that edit tests or add
-  `conftest.py` hooks no longer count (ATT-01). Later review fixes extend this list.
+  `conftest.py` hooks no longer count (ATT-01); the patch verifier runs for every condition by
+  default (ATT-14). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
@@ -1470,8 +1471,10 @@ uv run python -m evals.decision_model.probe --executor local --dry-run --limit 2
   report (AUROC against `snapshot_dependency`, Spearman of `fix_confidence` vs difficulty,
   action mix per category, calibration bins, latency).
 
-By default (`--patch-verifier-scope adaptive_only`), adaptive conditions run a pre-apply patch
-verifier. Low-relevance adaptive patches are rejected before apply with note
+By default (`--patch-verifier-scope all`), every condition runs the same pre-apply patch
+verifier, so it can't favour one condition family (ATT-14, D7); `adaptive_only` restricts it to
+the adaptive conditions and is reported as an ablation. Low-relevance patches are rejected
+before apply with note
 `patch_verifier_rejected` and corresponding
 `patch_verifier_*` telemetry in `attempt_metadata` / `patch_meta`. When the rejected patch is
 still substantive, adaptive runs now make one cheap same-attempt verifier-repair proposal before

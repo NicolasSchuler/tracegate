@@ -706,7 +706,7 @@ class VerificationConfig:
     syntax_preflight_max_cycles: int = DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES
     syntax_preflight_fallthrough: bool = True
     patch_sanitize_enabled: bool = True
-    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ALL
     patch_verifier_min_score: int = PATCH_VERIFIER_MIN_SCORE
     patch_verifier_infer_test_source_scope: bool = True
 
@@ -802,7 +802,7 @@ class RunConditionInputs:
     syntax_preflight_max_cycles: int = DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES
     syntax_preflight_fallthrough: bool = True
     patch_sanitize_enabled: bool = True
-    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ALL
     patch_verifier_min_score: int = PATCH_VERIFIER_MIN_SCORE
     patch_verifier_infer_test_source_scope: bool = True
     adaptive_online_policy_controller: Any | None = None

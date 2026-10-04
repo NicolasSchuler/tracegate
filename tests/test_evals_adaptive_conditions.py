@@ -3531,7 +3531,9 @@ def test_adaptive_patch_verifier_rejects_test_only_patch_before_apply(
     assert apply_calls["count"] == 0
     assert records[0]["note"] == "patch_verifier_rejected"
     assert records[0]["patch_meta"]["patch_verifier_enabled"] is True
-    assert records[0]["patch_meta"]["patch_verifier_scope"] == "adaptive_only"
+    assert (
+        records[0]["patch_meta"]["patch_verifier_scope"] == "all"
+    )  # ATT-14 / D7: uniform default scope
     assert records[0]["patch_meta"]["patch_verifier_passed"] is False
     assert records[0]["attempt_metadata"]["patch_verifier_passed"] is False
 
