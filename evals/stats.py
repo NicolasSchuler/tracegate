@@ -394,6 +394,19 @@ def any_success_aggregation(
 # ---------------------------------------------------------------------------
 
 
+def pass_at_k(n: int, c: int, k: int) -> float:
+    """Unbiased pass@k estimate from *n* samples with *c* successes (Chen et al., 2021).
+
+    ``1 - C(n - c, k) / C(n, k)``: the probability that at least one of *k* samples
+    drawn without replacement from the *n* succeeds. Requires ``1 <= k <= n`` (STA-13).
+    """
+    if not 1 <= k <= n or not 0 <= c <= n:
+        raise ValueError(f"pass_at_k needs 1 <= k <= n and 0 <= c <= n, got n={n} c={c} k={k}")
+    if n - c < k:
+        return 1.0
+    return 1.0 - math.comb(n - c, k) / math.comb(n, k)
+
+
 RUN_AGGREGATIONS = ("majority_vote", "any_success", "per_run")
 
 

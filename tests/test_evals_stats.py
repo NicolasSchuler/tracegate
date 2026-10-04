@@ -739,3 +739,22 @@ def test_sta24_holm_rejection_follows_the_adjusted_p() -> None:
     for entry in result.values():
         assert entry["rejected"] == (entry["adjusted_p"] <= 0.05)
     assert [result[key]["rejected"] for key in "abcd"] == [True, False, False, False]
+
+
+@pytest.mark.parametrize(("n", "c", "k"), [(5, 2, 1), (5, 2, 3), (6, 0, 2), (6, 6, 2), (10, 3, 4)])
+def test_sta13_pass_at_k_matches_brute_force(n: int, c: int, k: int) -> None:
+    from itertools import combinations
+
+    from evals.stats import pass_at_k
+
+    samples = [True] * c + [False] * (n - c)
+    subsets = list(combinations(range(n), k))
+    expected = sum(any(samples[i] for i in subset) for subset in subsets) / len(subsets)
+    assert pass_at_k(n, c, k) == pytest.approx(expected)
+
+
+def test_sta13_pass_at_k_rejects_k_above_n() -> None:
+    from evals.stats import pass_at_k
+
+    with pytest.raises(ValueError):
+        pass_at_k(2, 1, 3)

@@ -506,3 +506,27 @@ def test_sta16_bucket_adaptive_rates_ignore_non_adaptive_conditions() -> None:
     # 2 of the 4 adaptive cases invoked the helper; the 4 base_repair rows made it 2/8.
     assert bucket["layered_adaptive_llm"]["helper_invocation_case_rate"] == pytest.approx(0.5)
     assert bucket["helper_invocation_case_rate"] == pytest.approx(0.5)
+
+
+def test_sta13_conditions_are_compared_within_a_common_attempt_budget() -> None:
+    """STA-13: a 3-attempt condition was compared with a 1-attempt one head to head."""
+    grouped = {}
+    for idx in range(2):
+        grouped[("run", f"c{idx}", "base_repair")] = [
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=1, success=False),
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=2, success=False),
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=3, success=idx == 0),
+        ]
+        grouped[("run", f"c{idx}", "cot_repair")] = [
+            _record(
+                case_id=f"c{idx}",
+                condition="cot_repair",
+                success=idx == 0,
+                attempt_metadata_extra={"max_attempts": 1},
+            )
+        ]
+    summary = ar._summarize_bucket(ar._derive_case_condition_rows(grouped))
+    assert summary["base_repair"]["common_attempt_k"] == 1
+    assert summary["base_repair"]["success_rate"] == 0.5  # solved at attempt 3
+    assert summary["base_repair"]["success_within_common_k"] == 0.0
+    assert summary["cot_repair"]["success_within_common_k"] == 0.5

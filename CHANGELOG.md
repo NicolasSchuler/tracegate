@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- Conditions with different attempt budgets are compared at a common k (STA-13, D12): each condition reports `success_within_common_k`, the share of cases solved within the smallest attempt budget in the bucket (`common_attempt_k`), next to its own-budget `success_rate`; `evals.stats.pass_at_k` adds the unbiased pass@k estimator.
 - `baselines/compare_results` pairs cases through the shared case-level analysis: repeated runs are aggregated by majority vote with `runs_per_case_max` reported, instead of the last run in glob order overwriting the others, and per-category N matches the paired N (BAS-06). An unreadable input file prints a warning instead of raising `TypeError` (BAS-09).
 - `analyze_results --strict-input` now also governs schema validation: without it a schema-invalid record is skipped and counted as `records_schema_invalid` instead of aborting the whole analysis (STA-25).
 - `eval_two_pass_summary` labels its result as the cumulative outcome of two passes, not an "absolute uplift vs baseline": the rescue pass runs only on first-pass failures, so it is about twice the compute and cannot show a regression. It now prints each pass's own token and runtime cost (STA-22).

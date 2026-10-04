@@ -1304,6 +1304,12 @@ def _summarize_bucket(
     # STA-03: every condition is compared on the cases both ran; the bucket's expected
     # case set is every case any condition ran.
     cases_expected = {str(row.get("case_id") or "") for row in rows}
+    # STA-13 / D12: conditions with different attempt budgets are compared at the
+    # smallest budget among them, as success within the first K attempts.
+    attempt_budgets = [
+        int(row.get("attempts_budget") or 0) for row in rows if int(row.get("attempts_budget") or 0)
+    ]
+    common_attempt_k = min(attempt_budgets) if attempt_budgets else None
     case_rates = {
         condition: _case_success_rates(
             [row for row in condition_rows if row.get("baseline_supported", True)]
@@ -1644,6 +1650,8 @@ def _summarize_bucket(
             "cases": cases,
             "successes": successes,
             "success_rate": success_rate,
+            "common_attempt_k": common_attempt_k,
+            "success_within_common_k": _success_within_attempts(condition_rows, common_attempt_k),
             "cases_expected": len(cases_expected),
             "cases_missing": len(cases_expected - condition_case_ids),
             "baseline_unsupported_cases": baseline_unsupported_cases,
@@ -3029,6 +3037,18 @@ def _records_for_rows(
         )
         out.extend(records_by_case_condition.get(key, []))
     return out
+
+
+def _success_within_attempts(rows: list[dict[str, Any]], k: int | None) -> float | None:
+    """Share of rows solved within the first *k* attempts (STA-13, D12)."""
+    if k is None or not rows:
+        return None
+    solved = sum(
+        1
+        for row in rows
+        if row.get("attempts_to_success") is not None and int(row["attempts_to_success"]) <= k
+    )
+    return solved / len(rows)
 
 
 def _case_success_rates(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -5956,6 +5976,8 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
         )
         print(
             f"{prefix}- {condition}: {successes}/{cases} ({rate:.1%}), "
+            f"within common k={stats.get('common_attempt_k')} attempts="
+            f"{_fmt_percent(stats.get('success_within_common_k'))}, "
             f"missing cases={int(stats.get('cases_missing') or 0)}, "
             f"median attempts={_fmt_num(med_attempts)}, "
             f"mean budget={_fmt_num(mean_attempt_budget)}, "
