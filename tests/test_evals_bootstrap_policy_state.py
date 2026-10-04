@@ -1851,3 +1851,62 @@ def test_bootstrap_online_without_case_labels_emits_no_mask_warning(tmp_path: Pa
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["feature_names"] == ["bias"]
     assert payload["bootstrap_warning_codes"] == []
+
+
+# --- POL-14 / POL-15: percentile refusal, exclusions and target overlap ---
+
+
+def _bootstrap(tmp_path: Path, events: list, *extra: str) -> tuple[int, Path]:  # type: ignore[type-arg]
+    events_path = tmp_path / "events.jsonl"
+    output = tmp_path / "state.json"
+    _write_jsonl(events_path, events)
+    code = bootstrap_policy_state_main(
+        ["--events", str(events_path), "--output-state", str(output), *extra]
+    )
+    return code, output
+
+
+def test_bootstrap_refuses_percentile_profile(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    code, output = _bootstrap(
+        tmp_path, [_minimal_online_event(feature_scaling_profile="percentile_v1")]
+    )
+    assert code == 2
+    assert not output.exists()
+    assert "refusing to bootstrap percentile_v1" in capsys.readouterr().out
+
+
+def test_bootstrap_excludes_cases_and_runs(tmp_path: Path) -> None:
+    ids_file = tmp_path / "exclude.txt"
+    ids_file.write_text("case-2\ncase-3\n", encoding="utf-8")
+    events = [
+        _minimal_online_event(case_id="case-1", decision_id="d1"),
+        _minimal_online_event(case_id="case-2", decision_id="d2"),
+        _minimal_online_event(case_id="case-3", decision_id="d3"),
+        _minimal_online_event(run_id="run-old", case_id="case-4", decision_id="d4"),
+    ]
+    code, output = _bootstrap(
+        tmp_path,
+        events,
+        "--exclude-case-ids",
+        f"@{ids_file}",
+        "--exclude-run-ids",
+        "run-old",
+    )
+    payload = _load_json(output)
+    assert code == 0
+    assert payload["bootstrap_events_replayed"] == 1
+    assert payload["bootstrap_excluded_events"] == 3
+    assert payload["bootstrap_target_case_overlap"] == 0
+
+
+def test_bootstrap_warns_when_replayed_cases_overlap_targets(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    events = [
+        _minimal_online_event(case_id="case-1", decision_id="d1"),
+        _minimal_online_event(case_id="case-2", decision_id="d2"),
+    ]
+    code, output = _bootstrap(tmp_path, events, "--target-case-ids", "case-2,case-9")
+    payload = _load_json(output)
+    assert code == 0
+    assert payload["bootstrap_target_case_overlap"] == 1
+    assert "target_case_overlap" in payload["bootstrap_warning_codes"]
+    assert "WARNING: 1 replayed case(s) are also target cases" in capsys.readouterr().out

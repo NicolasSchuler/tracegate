@@ -1244,7 +1244,7 @@ Key flags:
 - `--adaptive-online-init-state-path <path>`: warm-start online controller weights from an existing compatible state JSON while still saving to the run-scoped `--adaptive-online-state-path`. This is for warm starts, not exact run continuation. A state trained on a feature the run no longer produces is discarded at the first decision (`FeatureSetMismatch` load error, `state_resets` in the policy events; POL-21); the budget controller applies the same rule to its gate and family states.
 - `--adaptive-online-state-path <path>`: policy state JSON path (default `evals/artifacts/policies/<run_id>.json`).
 - `--adaptive-online-events-path <path>`: policy event log JSONL path (default `evals/results/<run_id>.adaptive_policy.jsonl`).
-- `python -m evals.bootstrap_policy_state --events <jsonl> --output-state <json>`: reconstruct a warm-start compatible controller state from historical event logs when a saved state JSON is unavailable. Case-label features are dropped from replayed logs unless `--keep-case-label-features` is given.
+- `python -m evals.bootstrap_policy_state --events <jsonl> --output-state <json>`: reconstruct a warm-start compatible controller state from historical event logs when a saved state JSON is unavailable. Case-label features are dropped from replayed logs unless `--keep-case-label-features` is given. Exclude the cases (or runs) the warm-started run will be evaluated on with `--exclude-case-ids` / `--exclude-run-ids` (comma-separated or `@file`); `--target-case-ids` warns when replayed cases overlap them (POL-15). `percentile_v1` state is refused because its scaling caps can't be rebuilt from events (POL-14).
 - `--adaptive-online-include-case-labels` / `--no-adaptive-online-include-case-labels`: feed the `case.json` difficulty/snapshot-dependency/bug-source labels to the helper policy as features. Off by default since 2026-10: the labels are not observable at deployment time.
 - `--adaptive-lite-snapshot-mode replace|supplement`: with `--adaptive-reveal-mode full`, `replace` (default) makes `snapshot_lite`, `frame_locals_lite` and `snapshot_full_lite` replace the full snapshot section in the patch prompt; `supplement` restores the old behavior of adding them on top. Rows record `adaptive_lite_replaced_snapshot`.
 - `--adaptive-decision-model-role off|shadow|policy|features|prior`: consult a SystemOne-compatible System-1 decision model (for example Cloudflare clef-flash served by llama.cpp through llama-swap, or the `evals/docker/decision_model/` PyTorch sidecar) for `layered_adaptive_llm` helper decisions. `shadow` logs only; `policy` lets it select; `features` adds six diagnostic LinUCB features; `prior` guides warm-up and adds a fading score prior. `policy`/`features`/`prior` require `--adaptive-online-policy-mode on`. See `docs/adaptive_online_policy_design.md`.
@@ -1324,6 +1324,7 @@ Warm-start bootstrap example:
 ```bash
 uv run python -m evals.bootstrap_policy_state \
   --events evals/results/<prior_run>.adaptive_policy.jsonl \
+  --exclude-case-ids @<target_case_list>.txt \
   --output-state evals/artifacts/policies/<prior_run>.bootstrapped-online.json
 
 uv run python -m evals.bootstrap_policy_state \

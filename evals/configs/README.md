@@ -423,11 +423,15 @@ uv run python -m evals.bootstrap_policy_state \
 
 Bootstrap notes:
 
-- replay order follows the expanded `--events` argument order and file line order
-- duplicate decision keys resolve last-writer-wins
-- percentile-style feature-scaling histories are not reconstructable from event
-  logs, so the bootstrap utility preserves the latest cap metadata but starts
-  history buffers empty
+- events are replayed in chronological order (`created_at_utc`, run, then log
+  position) whatever the `--events` order, and the first occurrence of a duplicate
+  decision key wins (POL-18)
+- `percentile_v1` state is refused: its caps are fitted from raw-value history that
+  event logs don't contain, so a replayed state would resume in a different feature
+  space; warm-start such runs from their saved state file (POL-14)
+- `--exclude-case-ids` / `--exclude-run-ids` (comma-separated or `@file`) drop events,
+  and `--target-case-ids` warns (`target_case_overlap`) when replayed cases are also the
+  cases the warm-started run will be evaluated on (POL-15)
 - `*_init_state_path` warm-starts learned controller state only; exact run
   continuation should keep using the run-scoped `*_state_path`
 - for `bwk_v1`, warm-starting from `budget_init_state_path` resets the new run's

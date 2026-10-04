@@ -45,6 +45,7 @@ from .eval_policy_features import CASE_LABEL_FEATURE_NAMES, drop_case_label_feat
 from .policy_event_log import LoadedPolicyEvent, event_key, load_policy_events
 from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
+    is_percentile_feature_scaling_profile,
     normalize_feature_scaling_profile,
 )
 
@@ -68,7 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help=(
             "Path or glob to adaptive helper-policy / budget-policy JSONL event files. "
-            "Repeatable; replay order follows expanded argument order and file line order."
+            "Repeatable; events are replayed in chronological order (created_at_utc, run, "
+            "then log position) whatever the argument order."
         ),
     )
     parser.add_argument(
@@ -121,6 +123,27 @@ def main(argv: list[str] | None = None) -> int:
             "only to reproduce historical runs that learned from them."
         ),
     )
+    parser.add_argument(
+        "--exclude-case-ids",
+        default="",
+        help=(
+            "Case IDs whose events are not replayed: comma-separated, or @file with one ID per "
+            "line. Exclude the cases the warm-started run will be evaluated on (POL-15)."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-run-ids",
+        default="",
+        help="Run IDs whose events are not replayed: comma-separated, or @file (POL-15).",
+    )
+    parser.add_argument(
+        "--target-case-ids",
+        default="",
+        help=(
+            "Case IDs of the run this state will warm-start: comma-separated, or @file. "
+            "Replayed events on these cases trigger a target_case_overlap warning."
+        ),
+    )
     args = parser.parse_args(argv)
 
     expanded = _expand_paths(args.events)
@@ -134,10 +157,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Input error: {exc}")
         return 2
 
+    try:
+        excluded_cases = _id_set(args.exclude_case_ids)
+        excluded_runs = _id_set(args.exclude_run_ids)
+        target_cases = _id_set(args.target_case_ids)
+    except OSError as exc:
+        print(f"Input error: {exc}")
+        return 2
+    kept = [
+        event
+        for event in events
+        if str(event.payload.get("case_id") or "") not in excluded_cases
+        and str(event.payload.get("run_id") or "") not in excluded_runs
+    ]
+    excluded_events = len(events) - len(kept)
+    events = kept
+
     if not events:
         print("No valid policy events found.")
         _print_input_errors(input_errors)
         return 1
+
+    overlap = sorted(target_cases & {str(event.payload.get("case_id") or "") for event in events})
+    if overlap:
+        print(
+            f"WARNING: {len(overlap)} replayed case(s) are also target cases "
+            f"(e.g. {', '.join(overlap[:3])}); the warm-started policy will have seen the cases "
+            "it is evaluated on. Pass --exclude-case-ids to drop them."
+        )
 
     try:
         requested_kind = str(args.policy_kind or "auto").strip().lower()
@@ -164,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_input_errors(input_errors)
         return 2
 
+    payload["bootstrap_excluded_events"] = excluded_events
+    payload["bootstrap_target_case_overlap"] = len(overlap)
+    if overlap:
+        payload["bootstrap_warning_codes"] = sorted(
+            {*payload.get("bootstrap_warning_codes", []), "target_case_overlap"}
+        )
+        summary["warnings"] = sorted({*summary.get("warnings", []), "target_case_overlap"})
     output_path = Path(str(args.output_state)).expanduser()
     _write_json_atomic(output_path, payload)
 
@@ -177,6 +231,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {warning}")
     _print_input_errors(input_errors)
     return 0
+
+
+def _id_set(raw: str) -> set[str]:
+    """IDs from a comma-separated string, or from ``@path`` with one ID per line."""
+    text = str(raw or "").strip()
+    if text.startswith("@"):
+        text = Path(text[1:]).expanduser().read_text(encoding="utf-8").replace("\n", ",")
+    return {item.strip() for item in text.split(",") if item.strip()}
 
 
 def _bootstrap_online_state(
@@ -196,7 +258,7 @@ def _bootstrap_online_state(
     )
     if algorithm not in ONLINE_POLICY_ALGOS:
         raise ValueError(f"unsupported online algorithm for bootstrap: {algorithm!r}")
-    profile = _infer_uniform_profile(events, field="feature_scaling_profile")
+    profile = _replayable_profile(events, field="feature_scaling_profile")
     decay = _infer_uniform_float(
         events,
         field="configured_decay",
@@ -302,7 +364,7 @@ def _bootstrap_budget_state(
     )
     if architecture not in BUDGET_POLICY_ARCHITECTURES:
         raise ValueError(f"unsupported budget architecture for bootstrap: {architecture!r}")
-    profile = _infer_uniform_profile(events, field="feature_scaling_profile")
+    profile = _replayable_profile(events, field="feature_scaling_profile")
     decay = _infer_uniform_float(
         events,
         field="configured_decay",
@@ -597,6 +659,22 @@ def _infer_uniform_string(
     if len(observed) > 1:
         raise ValueError(f"mixed {field} values in event logs: {sorted(observed)!r}")
     return next(iter(observed))
+
+
+def _replayable_profile(events: list[LoadedPolicyEvent], *, field: str) -> str:
+    """The scaling profile to bootstrap; ``percentile_v1`` is refused (POL-14).
+
+    Percentile caps are fitted from raw-value history that event logs don't contain, so a
+    replayed state would resume in a different feature space from the one its ``A`` and
+    ``b`` were built in. Warm-start such runs from their saved state file instead.
+    """
+    profile = _infer_uniform_profile(events, field=field)
+    if is_percentile_feature_scaling_profile(profile):
+        raise ValueError(
+            f"refusing to bootstrap {profile} state: its scaling caps can't be rebuilt from "
+            "event logs; warm-start from the run's saved state file instead"
+        )
+    return profile
 
 
 def _infer_uniform_profile(events: list[LoadedPolicyEvent], *, field: str) -> str:
