@@ -327,18 +327,18 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 **Goal:** the bandit can learn, its logs support valid off-policy evaluation, and the two adaptive conditions are independent. Changing defaults affects comparability with earlier runs, so record a `policy_defaults_version` in run metadata.
 
 ### 3.1. One bandit core first
-- [ ] Extract a `LinUCBBandit` core covering state, feature scaling, decay, feature expansion, persistence and Sherman–Morrison updates. Use it from the helper controller, the budget gate and family controllers, and the bootstrap replay (part of X-04).
+- [x] Extract a `LinUCBBandit` core covering state, feature scaling, decay, feature expansion, persistence and Sherman–Morrison updates. *(Done as `evals/linucb_core.py`: state, feature expansion, scores, decay, rank-1 and Sherman–Morrison updates, tie-breaking and count parsing; percentile scaling is shared through `policy_feature_scaling.percentile_scale`. The state loaders stay per controller because their payload layouts differ.)* Use it from the helper controller, the budget gate and family controllers, and the bootstrap replay (part of X-04).
   - Land the behaviour-preserving extraction as its own commit, with parity tests against the old implementations.
   - Then make the fixes below, so each fix lands once.
 
 ### 3.2. Learning dynamics
-- [ ] **POL-01:** decay per D6, applied only to the updated arm.
-- [ ] **POL-06:** drop one one-hot level.
-- [ ] **POL-07:** one source for the score biases, scaled per D6.
-- [ ] **POL-24:** random tie-breaking; record selected and applied counts.
-- [ ] **POL-22:** scoring never mutates the model. **POL-16:** NaN counter updated under the lock. **POL-21:** fail on a feature-set mismatch.
-- [ ] **POL-09, POL-19:** freeze scaling caps after warm-up; compute interactions from scaled features and rename them.
-- [ ] **POL-20:** cache inverse matrices and maintain caps incrementally.
+- [x] **POL-01:** decay per D6, applied only to the updated arm.
+- [x] **POL-06:** drop one one-hot level. *(Also dropped `attempts_remaining_frac`, always `1 − attempt_frac`.)*
+- [x] **POL-07:** one source for the score biases, scaled per D6. *(Default `search_only=-0.10`, `frame_only=-0.05`; the CLI rejects |bias| > 0.1.)*
+- [x] **POL-24:** random tie-breaking; record selected and applied counts.
+- [x] **POL-22:** scoring never mutates the model. **POL-16:** NaN counter updated under the lock. **POL-21:** fail on a feature-set mismatch.
+- [x] **POL-09, POL-19:** freeze scaling caps after warm-up; compute interactions from scaled features and rename them. *(Caps freeze per feature after `min_samples` = 30 observations.)*
+- [x] **POL-20:** cache inverse matrices and maintain caps incrementally.
 
 ### 3.3. Rewards and budget
 - [ ] **POL-08:** charge only the incremental cost of escalation.
