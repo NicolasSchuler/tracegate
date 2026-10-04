@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `evals/README.md` documents the case-suite limits the review found: ConDefects cases (69%) are graded by at most five visible sample tests, `snapshot_dependency` is derived from the heuristic category rather than labelled, and 14 committed cases are flagged by the determinism scan; changes are left to decision D12 (DAT-17, DAT-21).
 - ConDefects, DebugBench and PyResBugs imports skip a bug whose `source_id` is already present in the output directory, so a changed difficulty estimate (part of the case ID) no longer imports the same bug twice; PyResBugs' old existence check looked for an ID without the difficulty suffix and never matched. Existing case IDs are unchanged (DAT-16).
 - DebugBench test generation parses example values as JSON or Python literals and emits them with `repr`, rejecting anything that doesn't round-trip, instead of pasting dataset text into `test_buggy.py` as code that runs under the default local executor; LeetCode `true`/`false`/`null` now become `True`/`False`/`None` (DAT-20). ConDefects already embedded its inputs with `repr`.
 - Importer `--validate` now runs every generated case (the baseline must fail, the oracle patch must fix it) in all nine importers; seven of them only checked the schema. The schema check always runs, the importer functions default to `validate=False` like the CLI, and native-repro cases (BugsInPy, PyBugHive, TrickyBugs) are checked for the files their oracle patch changes instead of a `buggy.py` they never have, which made `--validate` reject all of them (DAT-05).
