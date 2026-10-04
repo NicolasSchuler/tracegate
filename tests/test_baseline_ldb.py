@@ -1052,3 +1052,41 @@ class TestLDBAdapter:
         assert result.success is False
         assert result.meta["error"] == "ldb_not_found"
         assert str(missing_python) in str(result.meta["exc"])
+
+
+def test_bas15_unrepaired_row_still_reports_metrics_and_usage(tmp_path: Path) -> None:
+    log_dir = tmp_path / "output"
+    log_dir.mkdir()
+    (log_dir / "results.jsonl").write_text(
+        json.dumps(
+            {
+                "task_id": "llmdebug/my_case",
+                "solution": "",
+                "is_passing": False,
+                "is_solved": False,
+                "debug_iter": 2,
+                "test_feedback": [["test_add"], ["test_add"]],
+                "llm_call_count": 3,
+                "llm_duration_sec": 1.5,
+                "eval_duration_sec": 0.4,
+                "processing_time_seconds": 2.5,
+                "usage_available": True,
+                "tokens_prompt": 40,
+                "tokens_completion": 12,
+                "tokens_total": 52,
+                "prompt_chars_total": 300,
+                "completion_chars_total": 90,
+                "chars_total": 390,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = LDBAdapter()._parse_output(log_dir=log_dir, stdout="", stderr="", returncode=0)
+
+    assert result.repaired_code is None
+    assert result.meta["error"] == "no_solution_in_output"
+    assert result.meta["metrics"]["llm_call_count"] == 3
+    assert result.meta["metrics"]["prompt_chars_total"] == 300
+    assert result.token_usage

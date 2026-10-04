@@ -97,6 +97,13 @@ def _char_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
     return total_calls, input_chars, output_chars, total_chars
 
 
+_TERMINAL_ENV_ERRORS = frozenset({"openai_compat_reasoning_only", "timeout", "env_client_failed"})
+
+
+def _env_failure_error(exc: BaseException) -> str:
+    return "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "env_client_failed"
+
+
 class LambdaRLMAdapter(BaselineAdapter):
     """Adapter for a raw lambda-RLM repair baseline."""
 
@@ -357,13 +364,17 @@ class LambdaRLMAdapter(BaselineAdapter):
                     failure_feedback_max_chars=extra_config.baseline_lambda_failure_feedback_max_chars,
                 )
                 prompt_chars_total += len(prompt)
-                env_result = self._invoke_lambda(
-                    prompt=prompt,
-                    config=config,
-                    timeout_sec=generation_timeout_sec,
-                )
+                try:
+                    env_result = self._invoke_lambda(
+                        prompt=prompt,
+                        config=config,
+                        timeout_sec=generation_timeout_sec,
+                    )
+                except (subprocess.TimeoutExpired, RuntimeError) as exc:
+                    # BAS-10: keep earlier attempts' candidate, usage and metrics.
+                    env_result = {"error": _env_failure_error(exc), "compat_message": str(exc)}
                 env_error = str(env_result.get("error") or "").strip()
-                if env_error == "openai_compat_reasoning_only":
+                if env_error in _TERMINAL_ENV_ERRORS:
                     metrics = self._build_metrics(
                         prompt_chars_total=prompt_chars_total,
                         completion_chars_total=completion_chars_total,

@@ -746,6 +746,8 @@ class LDBAdapter(BaselineAdapter):
             )
 
         # Read the last line of the first output file.
+        last_row_metrics: dict[str, Any] | None = None
+        last_row_usage: dict[str, int] = {}
         for jsonl_file in jsonl_files:
             try:
                 lines = jsonl_file.read_text(encoding="utf-8").strip().splitlines()
@@ -833,53 +835,52 @@ class LDBAdapter(BaselineAdapter):
                     - normalized_eval_duration_sec,
                 )
 
+                # BAS-15: metrics describe the attempt whether or not it found a repair.
+                metrics = {
+                    "llm_call_count": normalized_llm_call_count,
+                    "llm_duration_sec": normalized_llm_duration_sec,
+                    "eval_duration_sec": normalized_eval_duration_sec,
+                    "internal_total_duration_sec": normalized_processing_time_seconds,
+                    "orchestration_duration_sec": orchestration_duration_sec,
+                    "usage_available": bool(usage_available and usage),
+                    "is_passing": is_passing,
+                    **test_feedback_summary,
+                    **({"usage_source": "provider_reported"} if usage_available and usage else {}),
+                }
+                if isinstance(prompt_chars_total, int):
+                    metrics["prompt_chars_total"] = max(0, prompt_chars_total)
+                    metrics["chars_input"] = max(0, prompt_chars_total)
+                if isinstance(completion_chars_total, int):
+                    metrics["completion_chars_total"] = max(0, completion_chars_total)
+                    metrics["chars_output"] = max(0, completion_chars_total)
+                if isinstance(chars_total, int):
+                    metrics["chars_total"] = max(0, chars_total)
+                elif isinstance(prompt_chars_total, int) and isinstance(
+                    completion_chars_total, int
+                ):
+                    metrics["chars_total"] = max(0, prompt_chars_total) + max(
+                        0, completion_chars_total
+                    )
+                if isinstance(reported_prompt_chars, int):
+                    metrics["reported_chars_prompt"] = max(0, reported_prompt_chars)
+                if isinstance(reported_completion_chars, int):
+                    metrics["reported_chars_completion"] = max(0, reported_completion_chars)
+                if isinstance(reported_chars_total, int):
+                    metrics["reported_chars_total"] = max(0, reported_chars_total)
+                elif isinstance(reported_prompt_chars, int) and isinstance(
+                    reported_completion_chars, int
+                ):
+                    metrics["reported_chars_total"] = max(0, reported_prompt_chars) + max(
+                        0, reported_completion_chars
+                    )
+                if sidecar_metrics:
+                    merged_metrics = dict(metrics)
+                    merged_metrics.update(sidecar_metrics)
+                    metrics = merged_metrics
+                last_row_metrics = metrics
+                last_row_usage = sidecar_usage if sidecar_usage else usage
                 if repaired:
                     meta["ldb_output_file"] = str(jsonl_file)
-                    metrics = {
-                        "llm_call_count": normalized_llm_call_count,
-                        "llm_duration_sec": normalized_llm_duration_sec,
-                        "eval_duration_sec": normalized_eval_duration_sec,
-                        "internal_total_duration_sec": normalized_processing_time_seconds,
-                        "orchestration_duration_sec": orchestration_duration_sec,
-                        "usage_available": bool(usage_available and usage),
-                        "is_passing": is_passing,
-                        **test_feedback_summary,
-                        **(
-                            {"usage_source": "provider_reported"}
-                            if usage_available and usage
-                            else {}
-                        ),
-                    }
-                    if isinstance(prompt_chars_total, int):
-                        metrics["prompt_chars_total"] = max(0, prompt_chars_total)
-                        metrics["chars_input"] = max(0, prompt_chars_total)
-                    if isinstance(completion_chars_total, int):
-                        metrics["completion_chars_total"] = max(0, completion_chars_total)
-                        metrics["chars_output"] = max(0, completion_chars_total)
-                    if isinstance(chars_total, int):
-                        metrics["chars_total"] = max(0, chars_total)
-                    elif isinstance(prompt_chars_total, int) and isinstance(
-                        completion_chars_total, int
-                    ):
-                        metrics["chars_total"] = max(0, prompt_chars_total) + max(
-                            0, completion_chars_total
-                        )
-                    if isinstance(reported_prompt_chars, int):
-                        metrics["reported_chars_prompt"] = max(0, reported_prompt_chars)
-                    if isinstance(reported_completion_chars, int):
-                        metrics["reported_chars_completion"] = max(0, reported_completion_chars)
-                    if isinstance(reported_chars_total, int):
-                        metrics["reported_chars_total"] = max(0, reported_chars_total)
-                    elif isinstance(reported_prompt_chars, int) and isinstance(
-                        reported_completion_chars, int
-                    ):
-                        metrics["reported_chars_total"] = max(0, reported_prompt_chars) + max(
-                            0, reported_completion_chars
-                        )
-                    if sidecar_metrics:
-                        merged_metrics = dict(metrics)
-                        merged_metrics.update(sidecar_metrics)
-                        metrics = merged_metrics
                     meta["metrics"] = metrics
                     if (
                         str(meta.get("compat_message") or "").strip()
@@ -904,13 +905,15 @@ class LDBAdapter(BaselineAdapter):
                 continue
 
         meta["error"] = "no_solution_in_output"
-        if sidecar_metrics:
+        if last_row_metrics is not None:
+            meta["metrics"] = last_row_metrics
+        elif sidecar_metrics:
             meta["metrics"] = sidecar_metrics
         return BaselineResult(
             repaired_code=None,
             success=False,
             iterations_used=int(sidecar_iterations or 0),
-            token_usage=sidecar_usage if sidecar_usage else {},
+            token_usage=last_row_usage or (sidecar_usage if sidecar_usage else {}),
             meta=meta,
         )
 

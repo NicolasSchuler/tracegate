@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -319,6 +319,29 @@ def _reported_char_metrics(
         "reported_chars_completion": normalized_completion,
         "reported_chars_total": normalized_total,
     }
+
+
+def _keep_progress_on_generation_failure(
+    *,
+    exc: BaseException,
+    current_code: str,
+    original_code: str,
+    failure: BaselineResult,
+) -> BaselineResult:
+    """BAS-10: a failed model call keeps earlier attempts' candidate and usage.
+
+    Compatibility errors keep their ``openai_compat_reasoning_only`` label; anything else
+    (timeouts, transport errors) is recorded as ``generation_failed`` with the exception.
+    """
+    candidate = current_code if current_code != original_code else None
+    if isinstance(exc, OpenAICompatResponseError):
+        return replace(failure, repaired_code=candidate)
+    meta = dict(failure.meta)
+    meta.pop("compat_message", None)
+    meta.pop("compat_meta", None)
+    meta["error"] = "generation_failed"
+    meta["generation_exc"] = f"{type(exc).__name__}: {exc}"
+    return replace(failure, repaired_code=candidate, meta=meta)
 
 
 def _generation_temperature(config: BaselineConfig | None) -> float:
@@ -637,22 +660,27 @@ class IntervenorAdapter(BaselineAdapter):
                             )
                         )
                     )
-                except OpenAICompatResponseError as exc:
-                    return self._compatibility_failure_result(
-                        error_meta=exc.meta,
-                        error_message=str(exc),
-                        attempts=attempt_summaries,
-                        iterations_used=attempt_idx - 1,
-                        llm_call_count=llm_call_count,
-                        llm_duration_sec=llm_duration_sec,
-                        eval_duration_sec=eval_duration_sec,
-                        usage_available=usage_available,
-                        accumulated_usage=accumulated_usage,
-                        usage_reported_call_count=usage_reported_call_count,
-                        usage_missing_call_count=usage_missing_call_count,
-                        prompt_chars_total=prompt_chars_total,
-                        completion_chars_total=completion_chars_total,
-                        started_at=started_at,
+                except Exception as exc:  # BAS-10: keep the last candidate and usage
+                    return _keep_progress_on_generation_failure(
+                        exc=exc,
+                        current_code=current_code,
+                        original_code=original_code,
+                        failure=self._compatibility_failure_result(
+                            error_meta=getattr(exc, "meta", {}),
+                            error_message=str(exc),
+                            attempts=attempt_summaries,
+                            iterations_used=attempt_idx - 1,
+                            llm_call_count=llm_call_count,
+                            llm_duration_sec=llm_duration_sec,
+                            eval_duration_sec=eval_duration_sec,
+                            usage_available=usage_available,
+                            accumulated_usage=accumulated_usage,
+                            usage_reported_call_count=usage_reported_call_count,
+                            usage_missing_call_count=usage_missing_call_count,
+                            prompt_chars_total=prompt_chars_total,
+                            completion_chars_total=completion_chars_total,
+                            started_at=started_at,
+                        ),
                     )
                 llm_call_count += 1
                 llm_duration_sec += teacher_duration_sec
@@ -692,22 +720,27 @@ class IntervenorAdapter(BaselineAdapter):
                             )
                         )
                     )
-                except OpenAICompatResponseError as exc:
-                    return self._compatibility_failure_result(
-                        error_meta=exc.meta,
-                        error_message=str(exc),
-                        attempts=attempt_summaries,
-                        iterations_used=attempt_idx - 1,
-                        llm_call_count=llm_call_count,
-                        llm_duration_sec=llm_duration_sec,
-                        eval_duration_sec=eval_duration_sec,
-                        usage_available=usage_available,
-                        accumulated_usage=accumulated_usage,
-                        usage_reported_call_count=usage_reported_call_count,
-                        usage_missing_call_count=usage_missing_call_count,
-                        prompt_chars_total=prompt_chars_total,
-                        completion_chars_total=completion_chars_total,
-                        started_at=started_at,
+                except Exception as exc:  # BAS-10: keep the last candidate and usage
+                    return _keep_progress_on_generation_failure(
+                        exc=exc,
+                        current_code=current_code,
+                        original_code=original_code,
+                        failure=self._compatibility_failure_result(
+                            error_meta=getattr(exc, "meta", {}),
+                            error_message=str(exc),
+                            attempts=attempt_summaries,
+                            iterations_used=attempt_idx - 1,
+                            llm_call_count=llm_call_count,
+                            llm_duration_sec=llm_duration_sec,
+                            eval_duration_sec=eval_duration_sec,
+                            usage_available=usage_available,
+                            accumulated_usage=accumulated_usage,
+                            usage_reported_call_count=usage_reported_call_count,
+                            usage_missing_call_count=usage_missing_call_count,
+                            prompt_chars_total=prompt_chars_total,
+                            completion_chars_total=completion_chars_total,
+                            started_at=started_at,
+                        ),
                     )
                 llm_call_count += 1
                 llm_duration_sec += learner_duration_sec

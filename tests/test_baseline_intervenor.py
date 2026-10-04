@@ -1299,3 +1299,27 @@ class TestIntervenorAdapter:
         diff = IntervenorAdapter().extract_diff(simple_case, result)
         assert diff is not None
         assert "+    return a * b" in diff
+
+
+def test_bas10_generation_failure_keeps_candidate_and_usage() -> None:
+    from baselines.adapter_base import BaselineResult
+    from baselines.intervenor.adapter import _keep_progress_on_generation_failure
+
+    failure = BaselineResult(
+        repaired_code=None,
+        success=False,
+        iterations_used=1,
+        token_usage={"prompt_tokens": 30, "completion_tokens": 5, "total_tokens": 35},
+        meta={"error": "openai_compat_reasoning_only", "compat_message": "x", "metrics": {}},
+    )
+    kept = _keep_progress_on_generation_failure(
+        exc=TimeoutError("read timed out"),
+        current_code="def f():\n    return 2\n",
+        original_code="def f():\n    return 1\n",
+        failure=failure,
+    )
+    assert kept.repaired_code == "def f():\n    return 2\n"
+    assert kept.token_usage["total_tokens"] == 35
+    assert kept.meta["error"] == "generation_failed"
+    assert "TimeoutError" in kept.meta["generation_exc"]
+    assert "compat_message" not in kept.meta

@@ -123,6 +123,13 @@ def _is_guard_stop_reason(stop_reason: str) -> bool:
     return str(stop_reason or "").strip() in _GUARD_STOP_REASONS
 
 
+_TERMINAL_ENV_ERRORS = frozenset({"openai_compat_reasoning_only", "timeout", "env_client_failed"})
+
+
+def _env_failure_error(exc: BaseException) -> str:
+    return "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "env_client_failed"
+
+
 class RLMAdapter(BaselineAdapter):
     """Adapter for the standalone upstream RLM baseline."""
 
@@ -396,17 +403,21 @@ class RLMAdapter(BaselineAdapter):
                     failure_feedback_max_chars=extra_config.baseline_rlm_failure_feedback_max_chars,
                 )
                 prompt_chars_total += len(prompt_context) + len(root_prompt)
-                env_result = self._invoke_rlm(
-                    prompt_context=prompt_context,
-                    root_prompt=root_prompt,
-                    work_dir=work_dir,
-                    python_args=python_args,
-                    test_timeout_sec=test_timeout_sec,
-                    config=config,
-                    timeout_sec=generation_timeout_sec,
-                )
+                try:
+                    env_result = self._invoke_rlm(
+                        prompt_context=prompt_context,
+                        root_prompt=root_prompt,
+                        work_dir=work_dir,
+                        python_args=python_args,
+                        test_timeout_sec=test_timeout_sec,
+                        config=config,
+                        timeout_sec=generation_timeout_sec,
+                    )
+                except (subprocess.TimeoutExpired, RuntimeError) as exc:
+                    # BAS-10: keep earlier attempts' candidate, usage and metrics.
+                    env_result = {"error": _env_failure_error(exc), "compat_message": str(exc)}
                 env_error = str(env_result.get("error") or "").strip()
-                if env_error == "openai_compat_reasoning_only":
+                if env_error in _TERMINAL_ENV_ERRORS:
                     metrics = self._build_metrics(
                         prompt_chars_total=prompt_chars_total,
                         completion_chars_total=completion_chars_total,
