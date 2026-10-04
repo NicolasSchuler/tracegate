@@ -770,7 +770,7 @@ class TestTokenUsageBreakdown:
         assert total is None
 
     def test_attempt_metadata_with_unavailable_tokens(self) -> None:
-        """token_usage_available=False is counted but tokens not added."""
+        """token_usage_available=False means unmeasured, not 0 tokens (STA-01)."""
         records = [
             {
                 "attempt_metadata": {
@@ -782,9 +782,7 @@ class TestTokenUsageBreakdown:
             }
         ]
         prompt, completion, total = ar._token_usage_breakdown(records)
-        assert prompt == 0.0
-        assert completion == 0.0
-        assert total == 0.0
+        assert (prompt, completion, total) == (None, None, None)
 
     def test_attempt_metadata_non_numeric_tokens(self) -> None:
         """Non-numeric prompt/completion/total fields are skipped."""

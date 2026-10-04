@@ -418,9 +418,9 @@ def test_token_usage_breakdown_treats_explicitly_unavailable_usage_as_authoritat
         ]
     )
 
-    assert prompt_total == 0.0
-    assert completion_total == 0.0
-    assert total_total == 0.0
+    # The explicit flag still wins over legacy patch_meta usage, but unmeasured
+    # attempts are None rather than 0 tokens (STA-01).
+    assert (prompt_total, completion_total, total_total) == (None, None, None)
 
 
 # ── Aggregation functions (analyze_results) ─────────────────────────────

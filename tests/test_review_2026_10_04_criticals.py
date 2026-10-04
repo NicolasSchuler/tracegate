@@ -253,7 +253,6 @@ def test_pol01_default_decay_is_one_and_decay_is_per_arm() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="STA-01")
 def test_sta01_missing_token_usage_is_none_not_zero() -> None:
     from evals.analyze_results import _token_usage_breakdown
 

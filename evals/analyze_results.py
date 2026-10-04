@@ -646,14 +646,20 @@ def _derive_case_condition_rows(
             if attempts_to_success is not None and attempts_budget > 0
             else None
         )
-        token_prompt, token_completion, token_total = _token_usage_breakdown(ordered)
+        token_usage = _token_usage(ordered)
+        token_prompt, token_completion, token_total = (
+            token_usage.prompt,
+            token_usage.completion,
+            token_usage.total,
+        )
         token_reasoning, reasoning_token_usage_available, reasoning_token_usage_per_attempt_mean = (
             _reasoning_token_usage_breakdown(ordered)
         )
         tokens = token_total
+        # STA-09: divide by the attempts that reported tokens, not all executed attempts.
         token_usage_per_attempt_mean = (
-            (token_total / float(attempts_executed))
-            if token_total is not None and attempts_executed > 0
+            (token_total / float(token_usage.covered_attempts))
+            if token_total is not None and token_usage.covered_attempts > 0
             else None
         )
         runtime = _runtime_used(ordered)
@@ -844,6 +850,8 @@ def _derive_case_condition_rows(
                 "token_usage_reasoning": token_reasoning,
                 "reasoning_token_usage_available": reasoning_token_usage_available,
                 "token_usage_per_attempt_mean": token_usage_per_attempt_mean,
+                "token_covered_attempts": token_usage.covered_attempts,
+                "token_covered_fraction": _ratio(token_usage.covered_attempts, attempts_executed),
                 "reasoning_token_usage_per_attempt_mean": (reasoning_token_usage_per_attempt_mean),
                 "runtime_sec": runtime,
                 "llm_calls_total": llm_calls_total,
@@ -1626,6 +1634,16 @@ def _summarize_bucket(
             "mean_tokens_per_attempt": _mean(token_per_attempt_values),
             "mean_reasoning_tokens_per_attempt": _mean(reasoning_token_per_attempt_values),
             "mean_llm_calls_per_case": _mean(llm_call_values),
+            "token_covered_cases": sum(
+                1 for row in condition_rows if row["token_usage"] is not None
+            ),
+            "token_covered_attempts": sum(
+                int(row.get("token_covered_attempts") or 0) for row in condition_rows
+            ),
+            "token_covered_fraction": _ratio(
+                sum(int(row.get("token_covered_attempts") or 0) for row in condition_rows),
+                sum(int(row.get("attempts_executed") or 0) for row in condition_rows),
+            ),
             "reasoning_token_covered_cases": sum(
                 1 for row in condition_rows if bool(row.get("reasoning_token_usage_available"))
             ),
@@ -5299,28 +5317,34 @@ def _llm_calls_total(records: list[dict[str, Any]]) -> int:
     return total
 
 
-def _token_usage_breakdown(
-    records: list[dict[str, Any]],
-) -> tuple[float | None, float | None, float | None]:
-    """Sum prompt, completion, and total token counts across records.
+@dataclass(frozen=True)
+class TokenUsage:
+    """Token counts summed over the attempts that reported them (STA-01, STA-09)."""
 
-    Falls back to legacy ``patch_meta.usage.total_tokens`` when the
-    structured ``attempt_metadata`` fields are unavailable.
+    prompt: float | None
+    completion: float | None
+    total: float | None
+    covered_attempts: int
 
-    Returns:
-        Tuple of (prompt_total, completion_total, grand_total); any
-        component may be None if data is missing.
+
+def _token_usage(records: list[dict[str, Any]]) -> TokenUsage:
+    """Sum prompt, completion and total tokens over the attempts that reported them.
+
+    An attempt with ``token_usage_available is False`` is not covered. When no attempt
+    is covered the totals are ``None``; they used to be 0, so a baseline that timed out
+    without usage looked cheapest and token coverage read 100% (STA-01). Falls back to
+    legacy ``patch_meta.usage.total_tokens`` for records without structured counts.
     """
     prompt_total = 0.0
     completion_total = 0.0
     total_total = 0.0
+    covered = 0
     found_attempt_meta = False
     for record in records:
         attempt_meta = record.get("attempt_metadata")
         if not isinstance(attempt_meta, dict):
             continue
-        token_usage_available = attempt_meta.get("token_usage_available")
-        if token_usage_available is False:
+        if attempt_meta.get("token_usage_available") is False:
             found_attempt_meta = True
             continue
         prompt_tokens = attempt_meta.get("tokens_prompt")
@@ -5333,15 +5357,17 @@ def _token_usage_breakdown(
         if not isinstance(total_tokens, (int, float)):
             continue
         found_attempt_meta = True
+        covered += 1
         prompt_total += float(prompt_tokens)
         completion_total += float(completion_tokens)
         total_total += float(total_tokens)
+    if covered:
+        return TokenUsage(prompt_total, completion_total, total_total, covered)
     if found_attempt_meta:
-        return prompt_total, completion_total, total_total
+        return TokenUsage(None, None, None, 0)
 
     # Backward-compatible fallback for older records.
     fallback_total = 0.0
-    found = False
     for record in records:
         patch_meta = record.get("patch_meta")
         if not isinstance(patch_meta, dict):
@@ -5351,11 +5377,19 @@ def _token_usage_breakdown(
             continue
         value = usage.get("total_tokens")
         if isinstance(value, (int, float)):
-            found = True
+            covered += 1
             fallback_total += float(value)
-    if not found:
-        return None, None, None
-    return None, None, fallback_total
+    if not covered:
+        return TokenUsage(None, None, None, 0)
+    return TokenUsage(None, None, fallback_total, covered)
+
+
+def _token_usage_breakdown(
+    records: list[dict[str, Any]],
+) -> tuple[float | None, float | None, float | None]:
+    """Return (prompt, completion, total) from :func:`_token_usage`."""
+    usage = _token_usage(records)
+    return usage.prompt, usage.completion, usage.total
 
 
 def _legacy_patch_meta_has_usage(patch_meta: dict[str, Any] | None) -> bool:
@@ -5898,6 +5932,7 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
             f"mean tokens(total/prompt/completion)={_fmt_num(mean_tokens)}/"
             f"{_fmt_num(mean_prompt_tokens)}/{_fmt_num(mean_completion_tokens)}, "
             f"mean tokens/attempt={_fmt_num(mean_tokens_per_attempt)}, "
+            f"token coverage={_fmt_percent(stats.get('token_covered_fraction'))} of attempts, "
             f"mean llm calls={_fmt_num(mean_llm_calls)}, "
             f"mean runtime={_fmt_num(mean_runtime)}s, "
             f"test-touch patches={test_touch_attempts}/{patch_attempts} "

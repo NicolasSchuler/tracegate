@@ -1043,3 +1043,46 @@ def test_reasoning_token_usage_breakdown_requires_full_case_coverage() -> None:
         ),
     ]
     assert ar._reasoning_token_usage_breakdown(partial_records) == (None, False, None)
+
+
+def _tokens(total: int) -> dict[str, object]:
+    return {
+        "tokens_prompt": total // 2,
+        "tokens_completion": total - total // 2,
+        "tokens_total": total,
+    }
+
+
+def test_sta09_partial_token_coverage_divides_by_covered_attempts() -> None:
+    """STA-09: covered attempts were summed but divided by all executed attempts."""
+    records = [
+        _record(attempt=1, attempt_metadata_extra=_tokens(100)),
+        _record(attempt=2, attempt_metadata_extra={"token_usage_available": False}),
+    ]
+    [row] = ar._derive_case_condition_rows({("run", "case", "tracecoder"): records})
+
+    assert row["token_usage"] == 100.0
+    assert row["token_usage_per_attempt_mean"] == 100.0  # was 50.0
+    assert row["token_covered_attempts"] == 1
+    assert row["token_covered_fraction"] == 0.5
+
+
+def test_sta01_uncovered_case_has_no_tokens_and_is_excluded_from_means() -> None:
+    covered = [_record(attempt=1, success=True, attempt_metadata_extra=_tokens(10))]
+    missing = [
+        _record(
+            attempt=1,
+            success=True,
+            case_id="c2",
+            attempt_metadata_extra={"token_usage_available": False},
+        )
+    ]
+    rows = ar._derive_case_condition_rows(
+        {("run", "case", "tracecoder"): covered, ("run", "c2", "tracecoder"): missing}
+    )
+    assert [row["token_usage"] for row in rows] == [None, 10.0]  # rows are sorted by case
+
+    stats = ar._summarize_bucket(rows)["tracecoder"]
+    assert stats["mean_token_usage"] == 10.0  # the uncovered case used to count as 0
+    assert stats["token_covered_cases"] == 1
+    assert stats["token_covered_fraction"] == 0.5
