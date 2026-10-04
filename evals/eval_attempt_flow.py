@@ -168,6 +168,7 @@ from evals.eval_evidence import (
     _render_evidence_index,
     _render_evidence_items,
     _strip_eval_only_case_artifacts,
+    _xxh3_128_text,
     build_fallback_context_bundle,
     deny_fallback_for_restricted_action,
     evidence_chars_by_type,
@@ -1192,6 +1193,44 @@ def execute_eval_unit_impl(
         runtime_error=runtime_error,
         records_streamed=persisted_records_count > 0,
     )
+
+
+def _remove_entries_created_since(root: Path, *, keep: set[Path]) -> None:
+    """Delete files and directories under *root* that are not in *keep* (deepest first)."""
+    if not root.exists():
+        return
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path in keep:
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+
+
+def _note_propose_prompt(
+    *,
+    prompt_text: str,
+    attempt_metadata: dict[str, Any],
+    attempt_dir: Path,
+    record_prompt: str,
+) -> None:
+    """Record a prompt that was actually sent for a patch (ATT-11).
+
+    ``prompt.txt`` / ``prompt_xxh3_128`` describe the prompt before the syntax-retry and
+    recovery cycles; the deciding call can differ. Every sent prompt's hash is kept, the
+    last one is the final prompt, and with ``--record-prompt full`` it is written too.
+    """
+    digest = _xxh3_128_text(prompt_text)
+    hashes = [str(item) for item in attempt_metadata.get("propose_prompt_xxh3_128s") or []]
+    hashes.append(digest)
+    attempt_metadata["propose_prompt_xxh3_128s"] = hashes
+    attempt_metadata["final_prompt_xxh3_128"] = digest
+    attempt_metadata["final_prompt_chars"] = len(prompt_text)
+    if str(record_prompt) == "full":
+        final_path = attempt_dir / "prompt_final.txt"
+        final_path.write_text(prompt_text, encoding="utf-8")
+        attempt_metadata["final_prompt_path"] = str(final_path)
 
 
 def _fold_tep_learning_usage(
@@ -6257,14 +6296,23 @@ def _run_one_condition_attempts(
                     ),
                 )
             cycle_prompt = prompt + syntax_retry_feedback
+            _note_propose_prompt(
+                prompt_text=cycle_prompt,
+                attempt_metadata=attempt_metadata,
+                attempt_dir=attempt_dir,
+                record_prompt=record_prompt,
+            )
             propose_invoke_count = 0
+            # ATT-12: a transport replay removes only what the failed call created.
+            pre_propose_entries = set(attempt_dir.rglob("*"))
 
             def _rebuild_attempt_dir_for_transport_replay(
                 *,
                 replay_attempt_dir=attempt_dir,
                 replay_current=current,
+                replay_keep=pre_propose_entries,
             ) -> None:
-                shutil.rmtree(replay_attempt_dir, ignore_errors=True)
+                _remove_entries_created_since(replay_attempt_dir, keep=replay_keep)
                 replay_attempt_dir.mkdir(parents=True, exist_ok=True)
                 if is_baseline_patcher:
                     remove_adaptive_controller_sidecars(context_dir=replay_attempt_dir)
@@ -6603,6 +6651,12 @@ def _run_one_condition_attempts(
                     is_delta_retry=is_delta_retry,
                 )
                 recovery_prompt = recovery_budget_result.prompt + syntax_retry_feedback
+                _note_propose_prompt(
+                    prompt_text=recovery_prompt,
+                    attempt_metadata=attempt_metadata,
+                    attempt_dir=attempt_dir,
+                    record_prompt=record_prompt,
+                )
                 recovery_patch_start = time.perf_counter()
                 recovery_patch = _run_openai_operation_with_transport_recovery(
                     patcher_for_attempt=patcher_for_attempt,
@@ -6786,6 +6840,12 @@ def _run_one_condition_attempts(
                 )
                 no_diff_recovery_prompt = (
                     no_diff_recovery_budget_result.prompt + syntax_retry_feedback
+                )
+                _note_propose_prompt(
+                    prompt_text=no_diff_recovery_prompt,
+                    attempt_metadata=attempt_metadata,
+                    attempt_dir=attempt_dir,
+                    record_prompt=record_prompt,
                 )
                 no_diff_recovery_start = time.perf_counter()
                 no_diff_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7211,6 +7271,12 @@ def _run_one_condition_attempts(
                         )
                         verifier_recovery_prompt = (
                             verifier_recovery_budget_result.prompt + syntax_retry_feedback
+                        )
+                        _note_propose_prompt(
+                            prompt_text=verifier_recovery_prompt,
+                            attempt_metadata=attempt_metadata,
+                            attempt_dir=attempt_dir,
+                            record_prompt=record_prompt,
                         )
                         verifier_recovery_start = time.perf_counter()
                         verifier_recovery_patch = _run_openai_operation_with_transport_recovery(

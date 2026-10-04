@@ -528,3 +528,31 @@ def test_att09_equilibrium_replans_accumulate_usage() -> None:
     merged = merge_llm_call_usage(first, second)
     assert merged["llm_call_count"] == 2
     assert merged["usage"] == {"prompt_tokens": 90, "completion_tokens": 15, "total_tokens": 105}
+
+
+def test_att11_final_prompt_is_the_one_the_patcher_saw(tmp_path: Path) -> None:
+    from evals.eval_evidence import _xxh3_128_text
+
+    patcher = _DiffPatcher([_FIX])
+    records = _run(tmp_path, patcher, patch_verifier_scope="disabled", record_prompt="full")
+    meta = _attempts(records)[0]["attempt_metadata"]
+    assert meta["final_prompt_xxh3_128"] == _xxh3_128_text(patcher.prompts[-1])
+    assert meta["propose_prompt_xxh3_128s"] == [_xxh3_128_text(p) for p in patcher.prompts]
+    assert Path(meta["final_prompt_path"]).read_text(encoding="utf-8") == patcher.prompts[-1]
+
+
+def test_att12_replay_cleanup_keeps_harness_artifacts(tmp_path: Path) -> None:
+    from evals.eval_attempt_flow import _remove_entries_created_since
+
+    attempt_dir = tmp_path / "attempt_01"
+    attempt_dir.mkdir()
+    (attempt_dir / "prompt.txt").write_text("p", encoding="utf-8")
+    (attempt_dir / "patch_cycle_1.diff").write_text("d", encoding="utf-8")
+    keep = set(attempt_dir.rglob("*"))
+    (attempt_dir / "openai_raw_response.json").write_text("{}", encoding="utf-8")
+    (attempt_dir / "sidecars").mkdir()
+    (attempt_dir / "sidecars" / "x.json").write_text("{}", encoding="utf-8")
+
+    _remove_entries_created_since(attempt_dir, keep=keep)
+
+    assert sorted(p.name for p in attempt_dir.iterdir()) == ["patch_cycle_1.diff", "prompt.txt"]
