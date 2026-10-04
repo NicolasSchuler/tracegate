@@ -174,6 +174,7 @@ from evals.eval_evidence import (
     evidence_chars_by_type,
     execute_context_requests,
 )
+from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR, patcher_meta_truncated
 from evals.eval_patches import (
     _build_runner_forced_attempt_diff,
     _is_forced_noop_marker_diff,
@@ -3727,6 +3728,7 @@ def _run_one_condition_attempts(
             )
             previous_stagnation_signal = previous_note_for_override in {
                 "no_patch_proposed",
+                TRUNCATED_RESPONSE_ERROR,
                 "patcher_request_failed",
                 "forced_noop_patch",
                 "patch_verifier_rejected",
@@ -7035,11 +7037,14 @@ def _run_one_condition_attempts(
                 diff_to_apply = None
                 no_diff_note_override = "forced_noop_patch"
             if diff_to_apply is None:
-                no_diff_note = (
-                    no_diff_note_override
-                    if no_diff_note_override
-                    else ("patcher_request_failed" if request_failed else "no_patch_proposed")
-                )
+                if no_diff_note_override:
+                    no_diff_note = no_diff_note_override
+                elif request_failed:
+                    no_diff_note = "patcher_request_failed"
+                elif patcher_meta_truncated(patch_meta):
+                    no_diff_note = TRUNCATED_RESPONSE_ERROR  # LLM-02
+                else:
+                    no_diff_note = "no_patch_proposed"
                 fail_fast_on_budget_exceeded = bool(
                     normalized_case_fail_fast_on_request_budget_exceeded
                     and request_failed

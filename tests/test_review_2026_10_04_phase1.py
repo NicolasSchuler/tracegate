@@ -556,3 +556,33 @@ def test_att12_replay_cleanup_keeps_harness_artifacts(tmp_path: Path) -> None:
     _remove_entries_created_since(attempt_dir, keep=keep)
 
     assert sorted(p.name for p in attempt_dir.iterdir()) == ["patch_cycle_1.diff", "prompt.txt"]
+
+
+@dataclass
+class _MetaPatcher:
+    meta: dict[str, Any]
+    name: str = "scripted"
+
+    def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path) -> PatchResult:
+        del prompt, context_dir, cwd
+        return PatchResult(diff=None, meta=dict(self.meta))
+
+
+@pytest.mark.parametrize(
+    ("meta", "note"),
+    [
+        ({"error": "truncated_response", "finish_reason": "length"}, "truncated_response"),
+        (  # edits mode fell back to diff mode, and that answer was truncated
+            {"error": "no_json_payload", "fallback_meta": {"error": "truncated_response"}},
+            "truncated_response",
+        ),
+        ({"error": "no_diff_found"}, "no_patch_proposed"),
+    ],
+)
+def test_llm02_truncated_answer_has_its_own_attempt_note(
+    tmp_path: Path, meta: dict[str, Any], note: str
+) -> None:
+    records = _attempts(_run(tmp_path, _MetaPatcher(meta)))  # type: ignore[arg-type]
+
+    assert [r["note"] for r in records] == [note]
+    assert records[0]["success"] is False

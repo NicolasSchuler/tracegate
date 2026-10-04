@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from evals.eval_patches import _crlf_diff_targets, apply_diff
+from evals.patchers import openai_compat_patcher as openai_mod
 from evals.patchers.openai_compat_patcher import _extract_unified_diff, _fix_hunk_counts
 
 A = "def f():\n    return 1\n"
@@ -137,3 +138,35 @@ def test_only_pure_crlf_files_are_normalized(tmp_path: Path) -> None:  # LLM-09
     (tmp_path / "a.py").write_bytes(b"def f():\r\n    return 1\n")  # mixed: left to `patch`
     (tmp_path / "b.py").write_bytes(B.replace("\n", "\r\n").encode())
     assert _crlf_diff_targets(tmp_path, DIFF_A + DIFF_B) == [tmp_path / "b.py"]
+
+
+def test_truncated_response_is_not_applied(  # LLM-02
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    truncated = DIFF_A.rsplit("+", 1)[0]  # cut off before the replacement line
+    root = _workdir(tmp_path)
+    # Without the finish_reason check, the pipeline turns this into a valid deletion.
+    ok, _ = _pipeline(root, truncated)
+    assert ok
+    assert _read(root / "a.py") == "def f():\n"
+
+    response = {"choices": [{"message": {"content": truncated}, "finish_reason": "length"}]}
+    monkeypatch.setattr(
+        openai_mod,
+        "_chat_completion",
+        lambda **_: (response, {"finish_reason": "length", "llm_call_count": 1}),
+    )
+    result = openai_mod._propose_patch_via_diff(
+        url="http://127.0.0.1:1/v1/chat/completions",
+        api_key="dummy",
+        model="dummy",
+        prompt="fix it",
+        temperature=0.0,
+        max_tokens=16,
+        timeout_sec=5.0,
+        seed=None,
+        http2=False,
+    )
+    assert result.diff is None
+    assert result.meta is not None
+    assert result.meta["error"] == "truncated_response"

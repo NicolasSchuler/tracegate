@@ -62,7 +62,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,7 +83,7 @@ from baselines.openai_compat import (
 )
 
 from .. import _json as json
-from ..eval_patch_constants import FORCED_PATCH_MARKER
+from ..eval_patch_constants import FORCED_PATCH_MARKER, TRUNCATED_RESPONSE_ERROR
 from ..eval_patches import _is_test_file_path
 from ..stage_a_contract import (
     STAGE_A_REQUEST_SCHEMA_COMPACT,
@@ -1436,6 +1436,12 @@ class OpenAICompatPatcher(Patcher):
             result_meta.setdefault("error", "no_choice_content")
             return JsonGenerationResult(
                 payload=None, raw_response=_safe_trunc(raw), meta=result_meta
+            )
+        if _is_truncated_response(raw):
+            return JsonGenerationResult(
+                payload=None,
+                raw_response=content[:2000],
+                meta=_error_meta(result_meta, TRUNCATED_RESPONSE_ERROR),
             )
         payload = _extract_json_object(content)
         if payload is None:
@@ -3353,6 +3359,8 @@ def _normalize_context_compaction_payload(
     content = _get_first_choice_content(response)
     if content is None:
         return None, _safe_trunc(response)
+    if _is_truncated_response(response):
+        return None, content
     payload = _extract_json_object(content)
     if payload is None:
         return None, content
@@ -3378,6 +3386,8 @@ def _normalize_context_request_payload(
     content = _get_first_choice_content(response)
     if content is None:
         return None, _safe_trunc(response)
+    if _is_truncated_response(response):
+        return None, content
     raw_payload = _extract_json_object(content)
     if raw_payload is None:
         return None, content
@@ -3471,6 +3481,11 @@ def _propose_patch_via_diff(
             last_meta["error"] = "no_choice_content"
             last_meta["response"] = _safe_trunc(raw)
             continue
+        if _is_truncated_response(raw):
+            last_meta = _error_meta(
+                last_meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000]
+            )
+            break
 
         diff = _extract_unified_diff(content)
         if diff is None:
@@ -3558,7 +3573,7 @@ def _propose_patch_via_edits(
     ) -> PatchResult:
         nonlocal totals
         if not allow_diff_fallback:
-            error_meta: PatcherMeta = {"error": reason, **meta}
+            error_meta = _error_meta(meta, reason)
             if extra_error_meta:
                 error_meta.update(extra_error_meta)
             return PatchResult(diff=None, meta=_with_totals(error_meta))
@@ -3595,11 +3610,7 @@ def _propose_patch_via_edits(
 
         fallback_meta = dict(diff_fallback.meta or {})
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
-        error_meta: PatcherMeta = {
-            "error": reason,
-            "fallback_meta": fallback_meta,
-            **meta,
-        }
+        error_meta = _error_meta(meta, reason, fallback_meta=fallback_meta)
         if extra_error_meta:
             error_meta.update(extra_error_meta)
         return PatchResult(diff=None, meta=_with_totals(error_meta))
@@ -3660,6 +3671,17 @@ def _propose_patch_via_edits(
             fallback_reason = "no_json_payload"
             fallback_raw_response = _safe_trunc(raw)
             continue
+        if _is_truncated_response(raw):
+            attempt["parse_error"] = TRUNCATED_RESPONSE_ERROR
+            attempt["terminal"] = True
+            stage_attempts.append(attempt)
+            meta["structured_output_attempts"] = stage_attempts
+            return PatchResult(
+                diff=None,
+                meta=_with_totals(
+                    _error_meta(meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000])
+                ),
+            )
 
         payload_candidate = _extract_json_object(content)
         if payload_candidate is None:
@@ -3715,7 +3737,7 @@ def _propose_patch_via_edits(
         if not isinstance(entry, dict):
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "bad_edit_entry", "entry": _safe_trunc(entry), **meta}),
+                meta=_with_totals(_error_meta(meta, "bad_edit_entry", entry=_safe_trunc(entry))),
             )
 
         path = entry.get("path")
@@ -3727,14 +3749,12 @@ def _propose_patch_via_edits(
         if not isinstance(path, str) or not path.strip():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "bad_path", "entry": _safe_trunc(entry), **meta}),
+                meta=_with_totals(_error_meta(meta, "bad_path", entry=_safe_trunc(entry))),
             )
         if not isinstance(find, str) or not isinstance(replace, str):
             return PatchResult(
                 diff=None,
-                meta=_with_totals(
-                    {"error": "bad_find_replace", "entry": _safe_trunc(entry), **meta}
-                ),
+                meta=_with_totals(_error_meta(meta, "bad_find_replace", entry=_safe_trunc(entry))),
             )
         if count < 0:
             count = 0
@@ -3745,17 +3765,17 @@ def _propose_patch_via_edits(
         except Exception:
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "path_outside_case", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "path_outside_case", path=path)),
             )
         if not file_path.exists():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "file_not_found", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "file_not_found", path=path)),
             )
         if not file_path.is_file():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "path_not_file", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "path_not_file", path=path)),
             )
 
         try:
@@ -3764,12 +3784,12 @@ def _propose_patch_via_edits(
             return PatchResult(
                 diff=None,
                 meta=_with_totals(
-                    {
-                        "error": "file_read_error",
-                        "path": path,
-                        "exc": f"{type(exc).__name__}: {exc}",
-                        **meta,
-                    }
+                    _error_meta(
+                        meta,
+                        "file_read_error",
+                        path=path,
+                        exc=f"{type(exc).__name__}: {exc}",
+                    )
                 ),
             )
         after, match_mode = _apply_find_replace_with_recovery(
@@ -4098,6 +4118,11 @@ async def _propose_patch_via_diff_async(
             last_meta["error"] = "no_choice_content"
             last_meta["response"] = _safe_trunc(raw)
             continue
+        if _is_truncated_response(raw):
+            last_meta = _error_meta(
+                last_meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000]
+            )
+            break
 
         diff = _extract_unified_diff(content)
         if diff is None:
@@ -4183,7 +4208,7 @@ async def _propose_patch_via_edits_async(
     ) -> PatchResult:
         nonlocal totals
         if not allow_diff_fallback:
-            error_meta: PatcherMeta = {"error": reason, **meta}
+            error_meta = _error_meta(meta, reason)
             if extra_error_meta:
                 error_meta.update(extra_error_meta)
             return PatchResult(diff=None, meta=_with_totals(error_meta))
@@ -4219,11 +4244,7 @@ async def _propose_patch_via_edits_async(
 
         fallback_meta = dict(diff_fallback.meta or {})
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
-        error_meta: PatcherMeta = {
-            "error": reason,
-            "fallback_meta": fallback_meta,
-            **meta,
-        }
+        error_meta = _error_meta(meta, reason, fallback_meta=fallback_meta)
         if extra_error_meta:
             error_meta.update(extra_error_meta)
         return PatchResult(diff=None, meta=_with_totals(error_meta))
@@ -4283,6 +4304,17 @@ async def _propose_patch_via_edits_async(
             fallback_reason = "no_json_payload"
             fallback_raw_response = _safe_trunc(raw)
             continue
+        if _is_truncated_response(raw):
+            attempt["parse_error"] = TRUNCATED_RESPONSE_ERROR
+            attempt["terminal"] = True
+            stage_attempts.append(attempt)
+            meta["structured_output_attempts"] = stage_attempts
+            return PatchResult(
+                diff=None,
+                meta=_with_totals(
+                    _error_meta(meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000])
+                ),
+            )
 
         payload_candidate = _extract_json_object(content)
         if payload_candidate is None:
@@ -4336,7 +4368,7 @@ async def _propose_patch_via_edits_async(
         if not isinstance(entry, dict):
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "bad_edit_entry", "entry": _safe_trunc(entry), **meta}),
+                meta=_with_totals(_error_meta(meta, "bad_edit_entry", entry=_safe_trunc(entry))),
             )
 
         path = entry.get("path")
@@ -4348,14 +4380,12 @@ async def _propose_patch_via_edits_async(
         if not isinstance(path, str) or not path.strip():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "bad_path", "entry": _safe_trunc(entry), **meta}),
+                meta=_with_totals(_error_meta(meta, "bad_path", entry=_safe_trunc(entry))),
             )
         if not isinstance(find, str) or not isinstance(replace, str):
             return PatchResult(
                 diff=None,
-                meta=_with_totals(
-                    {"error": "bad_find_replace", "entry": _safe_trunc(entry), **meta}
-                ),
+                meta=_with_totals(_error_meta(meta, "bad_find_replace", entry=_safe_trunc(entry))),
             )
         if count < 0:
             count = 0
@@ -4366,17 +4396,17 @@ async def _propose_patch_via_edits_async(
         except Exception:
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "path_outside_case", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "path_outside_case", path=path)),
             )
         if not file_path.exists():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "file_not_found", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "file_not_found", path=path)),
             )
         if not file_path.is_file():
             return PatchResult(
                 diff=None,
-                meta=_with_totals({"error": "path_not_file", "path": path, **meta}),
+                meta=_with_totals(_error_meta(meta, "path_not_file", path=path)),
             )
 
         try:
@@ -4385,12 +4415,12 @@ async def _propose_patch_via_edits_async(
             return PatchResult(
                 diff=None,
                 meta=_with_totals(
-                    {
-                        "error": "file_read_error",
-                        "path": path,
-                        "exc": f"{type(exc).__name__}: {exc}",
-                        **meta,
-                    }
+                    _error_meta(
+                        meta,
+                        "file_read_error",
+                        path=path,
+                        exc=f"{type(exc).__name__}: {exc}",
+                    )
                 ),
             )
         after, match_mode = _apply_find_replace_with_recovery(
@@ -5403,6 +5433,30 @@ def _get_first_choice_finish_reason(resp: dict[str, Any]) -> str:
         return ""
     finish_reason = c0.get("finish_reason")
     return finish_reason if isinstance(finish_reason, str) else ""
+
+
+def _is_truncated_response(resp: dict[str, Any]) -> bool:
+    """Whether the completion stopped at ``max_tokens`` (LLM-02).
+
+    A cut-off diff or JSON payload can still parse, and ``_fix_hunk_counts`` would
+    turn a truncated hunk into a valid patch that drops lines, so every parse path
+    treats truncation as a terminal ``truncated_response`` instead.
+    """
+    return _get_first_choice_finish_reason(resp) == "length"
+
+
+def _error_meta(meta: Mapping[str, Any], reason: str, **extra: Any) -> PatcherMeta:
+    """*meta* with ``error=reason``; an earlier call error is kept as ``transport_error``.
+
+    Spreading *meta* after the reason let a stale transport error from an earlier
+    stage replace the specific parse failure (LLM-14).
+    """
+    out: PatcherMeta = {**meta, **extra}
+    stale = str(out.get("error") or "")
+    if stale and stale != reason:
+        out["transport_error"] = stale
+    out["error"] = reason
+    return out
 
 
 def _get_first_choice_reasoning_content(resp: dict[str, Any]) -> str | None:

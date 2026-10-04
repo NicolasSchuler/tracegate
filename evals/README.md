@@ -860,8 +860,9 @@ Runner-level forced patch attempts are off by default (`--force-patch-attempt` e
 They never change an outcome: a marker-only patch is recorded as `forced_noop_patch`, and a
 marker applied after the model's diff failed keeps the attempt `patch_apply_failed` with
 `runner_forced_patch_recovery*` modifiers, then is reverted (ATT-07, D8).
-`no_patch_proposed` and `forced_noop_patch` are runner-level notes, not baseline-native
-root causes. For external baselines, the underlying cause may instead live in
+`no_patch_proposed`, `truncated_response` and `forced_noop_patch` are runner-level notes, not
+baseline-native root causes. `truncated_response` means the model's answer stopped at
+`--openai-max-tokens` (`finish_reason="length"`); it is never parsed into a patch (LLM-02). For external baselines, the underlying cause may instead live in
 `patch_meta.baseline_meta.error` (for example `timeout`, `learner_empty_response`)
 or `patch_meta.compatibility_reason` (for example `subprocess_task_unsupported`).
 For TraceCoder specifically, `patch_meta.baseline_meta.candidate_status=unchanged_original_code`
@@ -1375,7 +1376,11 @@ unsupported and should be regenerated with the current harness before analysis.
   controllers with derived seeds (POL-05, POL-23); baseline rows with
   `baseline_supported=False` are excluded from that baseline's rates and paired tests (BAS-01).
   A unit that raises writes a terminal `unit_runtime_error` failure record (ATT-08); a retry-gate
-  block is a non-scored `infra_event` and the attempt is retried once (ATT-05).
+  block is a non-scored `infra_event` and the attempt is retried once (ATT-05). A completion
+  cut off at `max_tokens` is recorded as `note="truncated_response"` (patcher error
+  `truncated_response`) instead of being repaired into a patch or recorded as
+  `no_patch_proposed` (LLM-02), and model diffs are taken from every fenced block with
+  reasoning stripped, the last diff per file winning (LLM-01, LLM-04).
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
