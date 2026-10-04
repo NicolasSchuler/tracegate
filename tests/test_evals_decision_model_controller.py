@@ -202,13 +202,14 @@ def test_prior_role_breaks_ties_after_warmup_but_logs_raw_scores(tmp_path: Path)
     assert effect["prior_adjustment"]["frame_only"] > 0.0
 
 
-def test_events_carry_the_decision_model_block_at_schema_v5(tmp_path: Path) -> None:
+def test_events_carry_the_decision_model_block_since_schema_v5(tmp_path: Path) -> None:
     controller = _controller(tmp_path, role="shadow")
     event = _record(controller, _decide(controller, _advice()))
     payload = event.to_json()
 
-    assert EVENT_SCHEMA_VERSION == 5
-    assert payload["schema_version"] == 5
+    # Schema 5 added the block; schema 6 added ``effective_evidence`` (POL-01).
+    assert EVENT_SCHEMA_VERSION == 6
+    assert payload["schema_version"] == 6
     assert payload["decision_model"]["role"] == "shadow"
     logged = json.loads(
         (tmp_path / "events_shadow_on.jsonl").read_text(encoding="utf-8").splitlines()[0]
