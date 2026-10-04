@@ -4,6 +4,7 @@
 
 ### Features
 
+- `python -m evals.reanalysis_audit <jsonl…>` audits existing results against the 2026-10-04 review: headline metrics with the corrected analysis next to the pre-review semantics, plus data audits for test/config edits in successes, evidence fallbacks, policy decay, OPE propensities, deterministic runs, repeated runs, unmatched case sets, missing usage, LDB counts, retry-gate and forced-patch records, schema versions and SWE-Bench prompt policy. Golden-file tests now pin `eval_summary` and `report_run_metrics` output on a fixture with unequal case sets, missing usage and repeated runs, and `eval_summary` prints token coverage.
 - Off-policy estimates (IPS, SNIPS, DR) carry 95% case-bootstrap intervals (`ope_ci`, 1,000 seeded resamples, cross-fitted models held fixed), printed next to each estimate; they had no uncertainty at all.
 - Add an offline `llmdebug quickstart` command that creates and displays a real synthetic snapshot.
 - Add a System-1 decision-model advisor for the adaptive helper policy (`evals/decision_model/`): a SystemOne-compatible endpoint (e.g. Cloudflare clef-flash served by llama.cpp through llama-swap, or the bundled PyTorch sidecar) can run in `shadow`, `policy`, `features` or `prior` role via `--adaptive-decision-model-role`, with versioned question profiles, a redacted bounded decision state, policy-event schema v5, decision-model off-policy targets, and an `--adaptive-decision-model-api-key` (default `$TRACEGATE_DECISION_MODEL_API_KEY`) that `run_eval_docker.sh` passes as a flag and lockfiles redact.

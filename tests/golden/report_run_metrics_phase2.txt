@@ -1,0 +1,116 @@
+Run Metadata
+- Run IDs: golden-run, golden-run-b
+- Patcher(s): openai
+- Model(s): dummy
+- Case-condition rows: 20
+- Adaptive OPE settings: min_action_support=2, propensity_floor=0.005
+
+Primary Endpoint (pre-registered via --primary-slice; confirmatory)
+- Primary snapshot slice: helpful, required
+- Primary: layered_adaptive_llm is 12.50 pp better than base_repair (37.50% -> 50.00%), n=4, McNemar p=1 (n_01=1, n_10=0), 95% CI[-37.50%, +75.00%], Cohen h=0.2527, Cohen kappa=0.4000
+
+Secondary Slices (exploratory; Holm-adjusted across these three tests)
+- All cases: layered_adaptive_llm is 12.50 pp better than base_repair (37.50% -> 50.00%), n=4, McNemar p=1 (n_01=1, n_10=0), 95% CI[-37.50%, +75.00%], Cohen h=0.2527, Cohen kappa=0.4000, Holm adj p=1
+- Required only: layered_adaptive_llm is 16.67 pp better than base_repair (50.00% -> 66.67%), n=3, McNemar p=1 (n_01=1, n_10=0), 95% CI[-50.00%, +100.00%], Cohen h=0.3398, Cohen kappa=0.0000, Holm adj p=1
+- Controls (snapshot_dependency=none): unavailable (No matched A/B pairs found.)
+
+Secondary Efficiency (paired deltas, B - A)
+- Tokens total (lower is better): mean delta=75.0000, median delta=75.0000, mean A=400.0000, mean B=475.0000, pct vs A=+18.75%, sign-test p=0.25 (+=3, -=0), Wilcoxon p=0.25, bootstrap 95% CI mean delta=[75.0000, 75.0000]
+- Runtime sec (lower is better): unavailable (No matched numeric pairs.)
+- LLM calls total (lower is better): mean delta=0.0000, median delta=0.0000, mean A=1.5000, mean B=1.5000, pct vs A=+0.00%, sign-test p=1 (+=0, -=0), Wilcoxon p=1, bootstrap 95% CI mean delta=[0.0000, 0.0000]
+
+Dual Objective
+- Success delta: +12.50 pp (37.50% -> 50.00%), 95% CI[-37.50%, +62.50%]
+- Token coverage for paired cost metrics: 3/4 (75.00%)
+- Cost per success (tokens): base_repair=1200.0000 (successes=1.0), layered_adaptive_llm=712.5000 (successes=2.0)
+- Paired token delta (B - A): mean=75.0000, mean A=400.0000, mean B=475.0000, pct vs A=+18.75%, 95% CI[75.0000, 75.0000]
+- Fixed-budget success <= 10000 tokens: base_repair=33.33%, layered_adaptive_llm=66.67%, delta=+33.33 pp, coverage=3 pairs
+- Fixed-budget success <= 25000 tokens: base_repair=33.33%, layered_adaptive_llm=66.67%, delta=+33.33 pp, coverage=3 pairs
+- Fixed-budget success <= 50000 tokens: base_repair=33.33%, layered_adaptive_llm=66.67%, delta=+33.33 pp, coverage=3 pairs
+
+Baseline Diagnostics
+- none
+
+Failure Diagnostics
+- base_repair: context-overflow attempts=0/18 (0.00%), context-overflow cases=0/12 (0.00%), http_error attempts=0, terminal timeouts=0/12 (0.00%), test-touch patch attempts=0/0 (n/a)
+  prompt-token estimate coverage (attempts): provider=18/18, estimate=0/18, paired=0/18 (0.00%)
+  prompt-token estimate correlation: unavailable (insufficient_paired_coverage)
+  top terminal failure reasons: unknown:6
+- layered_adaptive_llm: context-overflow attempts=0/12 (0.00%), context-overflow cases=0/8 (0.00%), http_error attempts=0, terminal timeouts=0/8 (0.00%), test-touch patch attempts=0/0 (n/a)
+  prompt-token estimate coverage (attempts): provider=9/12, estimate=0/12, paired=0/12 (0.00%)
+  prompt-token estimate correlation: unavailable (insufficient_paired_coverage)
+  top terminal failure reasons: unknown:4
+
+Category Highlights (primary slice)
+- hidden_state: uplift=+50.00 pp, n=2, McNemar p=1, Holm adj p=1, Holm sig=no
+- logic_error: uplift=-25.00 pp, n=2, McNemar p=1, Holm adj p=1, Holm sig=no
+
+Framework Overhead Analysis
+
+  [base_repair] (n=12 cases)
+  Timing breakdown (mean sec per case):
+    Stage-A LLM: 0.0000
+    Stage-A context fulfillment: 0.0000
+    Snapshot read (llmdebug): 0.0000
+    Adaptive controller prepare: 0.0000
+    Adaptive controller summarizer: 0.0000
+    Adaptive controller sidecar build: 0.0000
+    Adaptive controller sidecar write: 0.0000
+    Baseline case conversion: 0.0000
+    Baseline sidecar load: 0.0000
+    Context compaction LLM: 0.0000
+    Prompt assembly: 0.0000
+    Stage-B LLM (patch gen): 0.0000
+    Baseline internal total: 0.0000
+    Baseline internal eval: 0.0000
+    Baseline orchestration: 0.0000
+    Test before (pytest): 0.0000
+    Test after (pytest): 0.0000
+    Recovery LLM: 0.0000
+    llmdebug total: 0.0000
+    LLM total (all phases): 0.0000
+    Framework overhead: 0.0000
+  Token breakdown (mean per case):
+    Stage-A tokens: 0.0000
+    Stage-B tokens: 0.0000
+    Compaction tokens: 0.0000
+    Recovery tokens: 0.0000
+    Tool response chars: 0.0000
+    Snapshot chars: 0.0000
+
+  [layered_adaptive_llm] (n=8 cases)
+  Timing breakdown (mean sec per case):
+    Stage-A LLM: 0.0000
+    Stage-A context fulfillment: 0.0000
+    Snapshot read (llmdebug): 0.0000
+    Adaptive controller prepare: 0.0000
+    Adaptive controller summarizer: 0.0000
+    Adaptive controller sidecar build: 0.0000
+    Adaptive controller sidecar write: 0.0000
+    Baseline case conversion: 0.0000
+    Baseline sidecar load: 0.0000
+    Context compaction LLM: 0.0000
+    Prompt assembly: 0.0000
+    Stage-B LLM (patch gen): 0.0000
+    Baseline internal total: 0.0000
+    Baseline internal eval: 0.0000
+    Baseline orchestration: 0.0000
+    Test before (pytest): 0.0000
+    Test after (pytest): 0.0000
+    Recovery LLM: 0.0000
+    llmdebug total: 0.0000
+    LLM total (all phases): 0.0000
+    Framework overhead: 0.0000
+  Token breakdown (mean per case):
+    Stage-A tokens: 0.0000
+    Stage-B tokens: 0.0000
+    Compaction tokens: 0.0000
+    Recovery tokens: 0.0000
+    Tool response chars: 0.0000
+    Snapshot chars: 0.0000
+
+Run-Level System Context
+- unavailable (no --eval-log or parseable job feedback block)
+
+One-Line Conclusion
+On snapshot-relevant cases, layered_adaptive_llm is 12.50 pp better than base_repair (McNemar p=1).

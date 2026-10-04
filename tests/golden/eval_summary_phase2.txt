@@ -1,0 +1,33 @@
+Run Summary
+- requested run_id: golden-run
+- results file: <tmp>/golden-run.jsonl
+- run IDs present: golden-run, golden-run-b
+- conditions: base_repair, layered_adaptive_llm
+- case-condition rows: 20
+
+Condition Effectiveness & Efficiency
+- base_repair: 6/12 (50.0%), median_attempts=1, mean_tokens_total=525 (token coverage 100.0% of attempts), mean_llm_calls=1.50, mean_runtime_sec=n/a
+- layered_adaptive_llm: 4/8 (50.0%), median_attempts=1, mean_tokens_total=475 (token coverage 75.0% of attempts), mean_llm_calls=1.50, mean_runtime_sec=n/a, missing 2/6 cases
+
+Pairwise Uplift Matrix
+- base_repair -> layered_adaptive_llm: +12.5% (n=4 matched cases, case sets differ)
+
+Reliability & Input Quality
+- test-touch patches: 0/0 (n/a)
+- stage-a request success rate: n/a
+- retry gate block rate: n/a
+- retry history truncation rate: 0.0%
+- input diagnostics: files_unreadable=0, json_lines_invalid=0, records_skipped=0, infra_event_rows_seen=0, infra_event_rows_skipped=0, duplicate_attempt_rows_seen=0, duplicate_attempt_rows_resolved=0
+
+Adaptive Signals (layered_adaptive_llm)
+- helper: invocation_case_rate=0.0%, invocation_attempt_rate=0.0%, success_when_invoked=n/a, rescue_rate=n/a
+- online policy: decisions=0, selected_invoke_rate=n/a, applied_invoke_rate=n/a, update_rate=n/a, mean_reward=n/a, mean_propensity=n/a
+- budget policy: decisions=0, selected_increase_rate=n/a, applied_increase_rate=n/a, update_rate=n/a, mean_reward=n/a, mean_multiplier=n/a
+- online OPE: always_skip: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]; always_frame_only: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]; always_file_only: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]; always_invoke_helper: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]
+- budget OPE: always_keep_budget: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]; always_increase_budget: ips=n/a, snips=n/a, dr=n/a, ess=n/a [support=no_samples, agreement=insufficient_estimators]
+
+Controls & Guardrails
+- budget top-up: case_rate=0.0%, attempt_rate=0.0%
+- syntax preflight: failed_attempt_rate=0.0%, failures=0
+- patch verifier source-scope match rate: n/a
+- helper guardrails: budget_exhausted_rate=0.0%, saturation_guard_rate=0.0%

@@ -236,7 +236,8 @@ def _print_condition_row(stats: dict[str, Any]) -> None:
     row = (
         f"- {condition}: {successes}/{cases} ({_fmt_percent(stats.get('success_rate'))}), "
         f"median_attempts={_fmt_num(stats.get('median_attempts_to_success'))}, "
-        f"mean_tokens_total={_fmt_num(stats.get('mean_tokens_total'))}, "
+        f"mean_tokens_total={_fmt_num(stats.get('mean_tokens_total'))} "
+        f"(token coverage {_fmt_percent(stats.get('token_covered_fraction'))} of attempts), "
         f"mean_llm_calls={_fmt_num(stats.get('mean_llm_calls_per_case'))}, "
         f"mean_runtime_sec={_fmt_num(stats.get('mean_runtime_sec'))}"
     )

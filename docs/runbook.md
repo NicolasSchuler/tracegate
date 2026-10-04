@@ -742,6 +742,12 @@ uv run python -m evals.eval_two_pass_summary <base_run_id> <rescue_run_id> \
   --rescue-condition layered_adaptive_llm
 ```
 
+### Re-analysis audit (results written before the 2026-10-04 fixes)
+
+```bash
+uv run python -m evals.reanalysis_audit "evals/results/${RUN_TAG}-*.jsonl" --json audit.json
+```
+
 ### Aggregate analysis across multiple runs
 
 ```bash
