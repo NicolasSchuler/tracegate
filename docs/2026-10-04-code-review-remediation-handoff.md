@@ -281,10 +281,10 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 **Goal:** reported numbers and tests are correct and reproducible, and existing results can be re-analysed with the fixed code.
 
 ### 2.1. Single sources of truth
-- [ ] **STA-19, DAT-24:** one `case_outcome(records)` helper used by `analyze_results`, `report_run_metrics`, `select_cases` and `extract_failed_cases`.
-- [ ] One canonical condition-name normalizer and condition-family registry.
-- [ ] **STA-05, STA-07:** one seeded bootstrap with one interval method (choose percentile or BCa and document it). Add `--bootstrap-seed`, recorded in `analysis_config`.
-- [ ] **STA-23:** use `scipy.stats.binomtest` for an exact McNemar, with α as a parameter. **STA-24:** Holm with `<=`. **STA-15:** a p-value formatter.
+- [x] **STA-19, DAT-24:** one `case_outcome(records)` helper used by `analyze_results`, `report_run_metrics`, `select_cases` and `extract_failed_cases`.
+- [x] One canonical condition-name normalizer and condition-family registry.
+- [x] **STA-05, STA-07:** one seeded bootstrap with one interval method (choose percentile or BCa and document it). Add `--bootstrap-seed`, recorded in `analysis_config`.
+- [x] **STA-23:** use `scipy.stats.binomtest` for an exact McNemar, with α as a parameter. **STA-24:** Holm with `<=`. **STA-15:** a p-value formatter.
 
 ### 2.2. Correctness
 - [ ] **STA-01, STA-09:** missing tokens become `None`; add `token_covered_attempts` and `token_covered_fraction`.
