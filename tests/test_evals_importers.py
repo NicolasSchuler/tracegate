@@ -1435,3 +1435,60 @@ class TestWriteCaseFilesEdgeCases:
         assert (case_dir / "buggy.py").read_text() == "new"
         meta = json.loads((case_dir / "case.json").read_text())
         assert meta["v"] == 2
+
+
+@pytest.mark.parametrize(
+    ("code", "reasons"),
+    [
+        ("import time\nprint(time.time())\n", ["clock"]),
+        ("from datetime import datetime\nprint(datetime.now())\n", ["clock"]),
+        ("import random\nprint(random.randint(1, 3))\n", ["unseeded_random"]),
+        ("from random import choice, shuffle, sample\nshuffle([1])\n", ["unseeded_random"]),
+        ("import random\nrandom.seed(0)\nprint(random.choice([1, 2]))\n", []),
+        ("import uuid\nprint(uuid.uuid4())\n", ["entropy"]),
+        ("import os\nprint(os.urandom(4))\n", ["entropy"]),
+        ("import secrets\nprint(secrets.token_hex())\n", ["entropy"]),
+        ("for x in set('ab'):\n    print(x)\n", ["set_iteration"]),
+        ("print([x for x in {'a', 'b'}])\n", ["set_iteration"]),
+        ("print(sorted(set('ab')))\n", []),
+        ("import numpy as np\nprint(np.random.rand(3))\n", ["unseeded_random"]),
+        ("import numpy as np\nrng = np.random.default_rng(0)\nprint(rng.random())\n", []),
+        ("import numpy as np\nrng = np.random.default_rng()\n", ["unseeded_random"]),
+    ],
+    ids=[
+        "time-time",
+        "datetime-now",
+        "randint",
+        "shuffle-from-import",
+        "seeded-random",
+        "uuid4",
+        "urandom",
+        "secrets",
+        "set-loop",
+        "set-comprehension",
+        "sorted-set",
+        "numpy-random",
+        "numpy-seeded-generator",
+        "numpy-unseeded-generator",
+    ],
+)
+def test_dat14_nondeterminism_reasons(code: str, reasons: list[str]) -> None:
+    """DAT-14: the substring filter let all of these through."""
+    from evals.importers.base import nondeterminism_reasons
+
+    assert nondeterminism_reasons(code) == reasons
+
+
+def test_dat14_scan_cases_reports_flagged_files(tmp_path: Path, capsys) -> None:
+    from evals.importers import determinism
+
+    for case_id, buggy in (("clean", "x = 1\n"), ("flaky", "import time\nt = time.time()\n")):
+        case_dir = tmp_path / case_id
+        case_dir.mkdir()
+        (case_dir / "case.json").write_text("{}", encoding="utf-8")
+        (case_dir / "buggy.py").write_text(buggy, encoding="utf-8")
+        (case_dir / "test_buggy.py").write_text("def test():\n    pass\n", encoding="utf-8")
+
+    assert determinism.scan_cases(tmp_path) == {"flaky": ["buggy.py:clock"]}
+    assert determinism.main([str(tmp_path)]) == 1
+    assert "flaky: buggy.py:clock" in capsys.readouterr().out

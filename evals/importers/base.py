@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import _json as json
+from .determinism import is_deterministic as is_deterministic
+from .determinism import nondeterminism_reasons as nondeterminism_reasons
 
 
 def generate_oracle_patch(
@@ -216,13 +218,6 @@ def has_external_deps(code: str, *, allowed_externals: set[str] | None = None) -
         roots = _extract_import_roots_fallback(code)
 
     return any(root not in allowed for root in roots)
-
-
-def is_deterministic(code: str) -> bool:
-    """Heuristic: no network, no real randomness, no timing."""
-    risky = ["requests.", "urllib.", "http.", "socket.", "time.sleep", "random.random"]
-    lower = code.lower()
-    return not any(r in lower for r in risky)
 
 
 def ruff_format(code: str) -> str:
