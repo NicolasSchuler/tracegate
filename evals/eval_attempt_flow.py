@@ -254,6 +254,8 @@ from evals.eval_types import (
     CONTEXT_PROTOCOLS,
     CONTEXT_RECOVERY_FAILURE_KINDS,
     CONTEXT_RECOVERY_PROMPT_BUDGET,
+    EVAL_RECORD_TYPE_ATTEMPT,
+    EVAL_RECORD_TYPE_INFRA_EVENT,
     HELPER_FULL_SNAPSHOT_ACTIONS,
     HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
@@ -780,6 +782,8 @@ def execute_eval_unit_impl(
 
     runtime_error: str | None = None
     case_records: list[dict[str, Any]] | None = None
+    emitted_records: list[dict[str, Any]] = []
+    unit_patcher: Any = patcher_override
     observed_records_count = 0
     persisted_records_count = 0
     progress_state_lock = threading.Lock()
@@ -992,6 +996,7 @@ def execute_eval_unit_impl(
     def _on_record(record: dict[str, Any]) -> None:
         nonlocal observed_records_count
         nonlocal persisted_records_count
+        emitted_records.append(record)
         with progress_state_lock:
             observed_records_count += 1
             progress_state["observed_records_count"] = int(observed_records_count)
@@ -1126,6 +1131,7 @@ def execute_eval_unit_impl(
         )
 
         patcher = patcher_override if patcher_override is not None else make_patcher(patcher_args)
+        unit_patcher = patcher
         _update_progress_state("run_one_condition")
         if hasattr(patcher, "set_progress_callback"):
             patcher.set_progress_callback(_on_progress_update)
@@ -1162,6 +1168,21 @@ def execute_eval_unit_impl(
         if not keep_workdirs:
             shutil.rmtree(workdir, ignore_errors=True)
 
+    if runtime_error is not None:
+        # ATT-08 / ORC-17: a unit that dies still leaves a terminal record, so it stays in
+        # its condition's denominator, and the outcome carries what it already streamed.
+        _on_record(
+            _unit_runtime_error_record(
+                case=case,
+                condition=condition,
+                run_inputs=run_inputs,
+                patcher=unit_patcher,
+                emitted_records=emitted_records,
+                runtime_error=runtime_error,
+            )
+        )
+        case_records = list(emitted_records)
+
     return UnitExecutionOutcome(
         case=case,
         condition=condition,
@@ -1170,6 +1191,50 @@ def execute_eval_unit_impl(
         runtime_error=runtime_error,
         records_streamed=persisted_records_count > 0,
     )
+
+
+def _unit_runtime_error_record(
+    *,
+    case: CaseSpec,
+    condition: Condition,
+    run_inputs: RunConditionInputs,
+    patcher: Any,
+    emitted_records: list[dict[str, Any]],
+    runtime_error: str,
+) -> dict[str, Any]:
+    """Terminal record for a unit that raised (ATT-08).
+
+    It is a failed scored attempt numbered after the last emitted one, unless the unit had
+    already used all ``k`` attempts; then it is an ``infra_event`` that doesn't count.
+    """
+    k = max(1, int(run_inputs.k))
+    last_attempt = max((int(r.get("attempt") or 0) for r in emitted_records), default=0)
+    attempt = last_attempt + 1
+    metadata = {
+        **_empty_attempt_metadata(attempt=attempt),
+        "max_attempts": k,
+        "attempt_ordinal_label": f"{attempt}/{k}",
+        "token_usage_available": False,
+    }
+    record = _build_base_record(
+        case=case,
+        condition=condition,
+        run_id=str(run_inputs.run_id),
+        attempt=attempt,
+        patcher_name=str(getattr(patcher, "name", "") or ""),
+        run_metadata=dict(run_inputs.run_metadata or {}),
+        attempt_metadata=metadata,
+        model_metadata=_build_model_metadata(patcher=patcher, patch_meta=None),
+    )
+    record["success"] = False
+    record["note"] = "unit_runtime_error"
+    # Resume still retries the unit: the record doesn't mark it complete.
+    record["patch_meta"] = {"unit_runtime_error": runtime_error, "infra_resume_eligible": True}
+    if attempt > k:
+        record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
+    else:
+        record["record_type"] = EVAL_RECORD_TYPE_ATTEMPT
+    return record
 
 
 def _write_baseline_case_context(attempt_dir: Path, case: CaseSpec) -> None:
@@ -1198,6 +1263,33 @@ def run_one_condition_impl(
     and adaptive policy updates.  Returns a list of JSONL-ready records.
     """
     resolved_inputs = _resolve_run_condition_inputs(inputs=inputs, legacy_kwargs=legacy_kwargs)
+    deferred_records: list[dict[str, Any]] = []
+    try:
+        return _run_one_condition_attempts(
+            case=case,
+            condition=condition,
+            workdir=workdir,
+            context_dir_base=context_dir_base,
+            resolved_inputs=resolved_inputs,
+            deferred_records=deferred_records,
+        )
+    except BaseException:
+        # ORC-10: records held back for credit resolution must not vanish with the unit.
+        if resolved_inputs.record_sink is not None:
+            for record in deferred_records:
+                resolved_inputs.record_sink(record)
+        raise
+
+
+def _run_one_condition_attempts(
+    *,
+    case: CaseSpec,
+    condition: Condition,
+    workdir: Path,
+    context_dir_base: Path,
+    resolved_inputs: RunConditionInputs,
+    deferred_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     patcher = resolved_inputs.patcher
     k = int(resolved_inputs.k)
     output_format = resolved_inputs.output_format
@@ -1355,7 +1447,7 @@ def run_one_condition_impl(
     progress_update = resolved_inputs.progress_update
 
     records: list[dict[str, Any]] = []
-    deferred_record_sink_queue: list[dict[str, Any]] = []
+    deferred_record_sink_queue = deferred_records
     deferred_record_sink_pending_ids: set[int] = set()
     scored_attempts_consumed = 0
 

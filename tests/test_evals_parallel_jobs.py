@@ -409,7 +409,11 @@ def test_run_eval_parallel_best_effort_continues_after_runtime_error(
     results_path = repo_root / "evals" / "results" / "parallel-best-effort.jsonl"
     rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
     assert any(row["case_id"] == "case_ok" for row in rows)
-    assert all(row["case_id"] != "case_err" for row in rows)
+    # ATT-08: the failed unit leaves one terminal record, so it stays in the denominator.
+    err_rows = [row for row in rows if row["case_id"] == "case_err"]
+    assert [row["note"] for row in err_rows] == ["unit_runtime_error"]
+    assert err_rows[0]["success"] is False
+    assert err_rows[0]["patch_meta"]["infra_resume_eligible"] is True
 
 
 def test_run_eval_transport_fail_fast_stops_serial_after_default_threshold(
@@ -705,7 +709,11 @@ def test_run_eval_jobs1_handles_unit_setup_error_as_runtime_error(
     results_path = repo_root / "evals" / "results" / "jobs1-setup-error.jsonl"
     rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
     assert any(row["case_id"] == "case_ok" for row in rows)
-    assert all(row["case_id"] != "case_err" for row in rows)
+    # ATT-08: the failed unit leaves one terminal record, so it stays in the denominator.
+    err_rows = [row for row in rows if row["case_id"] == "case_err"]
+    assert [row["note"] for row in err_rows] == ["unit_runtime_error"]
+    assert err_rows[0]["success"] is False
+    assert err_rows[0]["patch_meta"]["infra_resume_eligible"] is True
 
 
 def test_validate_cases_jobs_argument_validation() -> None:

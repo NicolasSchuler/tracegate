@@ -701,6 +701,30 @@ def run_main_flow(
         progress_pct = 100.0 * (completed_units / total_units) if total_units else 100.0
         case_id = outcome.case.case_id
         condition_value = outcome.condition.value
+        case_records = outcome.case_records or []
+        if not outcome.records_streamed:
+            _append_records_safely(case_records)
+        # ORC-17: usage a unit streamed before it failed still counts toward the run.
+        (
+            attempts_used,
+            max_attempts,
+            total_llm_sec,
+            total_test_sec,
+            total_prompt_chars,
+            total_completion_chars,
+            total_prompt_tokens,
+            total_completion_tokens,
+            total_tokens,
+            token_usage_available_records,
+            token_usage_unavailable_records,
+        ) = _extract_progress_metrics(case_records)
+        run_prompt_chars_total += total_prompt_chars
+        run_completion_chars_total += total_completion_chars
+        run_tokens_prompt_total += total_prompt_tokens
+        run_tokens_completion_total += total_completion_tokens
+        run_tokens_total += total_tokens
+        run_token_usage_available_records += token_usage_available_records
+        run_token_usage_unavailable_records += token_usage_unavailable_records
         if outcome.runtime_error is not None:
             reason = _single_line_error(outcome.runtime_error)
             runtime_errors.append((case_id, condition_value, reason))
@@ -745,35 +769,12 @@ def run_main_flow(
                     )
                     return True
             return False
-        case_records = outcome.case_records or []
-        if not outcome.records_streamed:
-            _append_records_safely(case_records)
         scored_case_records = _filter_attempt_records(case_records)
         terminal_case_records = scored_case_records or case_records
         run_progress_summary.record_case_records(terminal_case_records)
         unit_success = any(bool(rec.get("success")) for rec in scored_case_records)
         unit_interrupted = _is_infra_interrupted_records(terminal_case_records)
         status = "success" if unit_success else ("interrupted" if unit_interrupted else "failed")
-        (
-            attempts_used,
-            max_attempts,
-            total_llm_sec,
-            total_test_sec,
-            total_prompt_chars,
-            total_completion_chars,
-            total_prompt_tokens,
-            total_completion_tokens,
-            total_tokens,
-            token_usage_available_records,
-            token_usage_unavailable_records,
-        ) = _extract_progress_metrics(case_records)
-        run_prompt_chars_total += total_prompt_chars
-        run_completion_chars_total += total_completion_chars
-        run_tokens_prompt_total += total_prompt_tokens
-        run_tokens_completion_total += total_completion_tokens
-        run_tokens_total += total_tokens
-        run_token_usage_available_records += token_usage_available_records
-        run_token_usage_unavailable_records += token_usage_unavailable_records
         first_note = str(scored_case_records[0].get("note") or "") if scored_case_records else ""
         k_str = "k=0" if first_note == "no_patch_needed" else f"k={attempts_used}/{max_attempts}"
         token_usage_text = _format_progress_token_usage(

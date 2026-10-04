@@ -444,3 +444,58 @@ def test_bas05_bas14_observed_repo_state_and_pin_check(tmp_path: Path) -> None:
     require_pinned_commit(name="x", observed_commit="abc", pinned_commit="abc")
     with pytest.raises(RuntimeError, match="not the pinned commit"):
         require_pinned_commit(name="x", observed_commit="def", pinned_commit="abc")
+
+
+def test_orc10_deferred_records_are_flushed_when_the_unit_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evals import eval_attempt_flow
+
+    sunk: list[dict[str, Any]] = []
+
+    def _raising_attempts(*, deferred_records: list[dict[str, Any]], **_kwargs: Any) -> list[Any]:
+        deferred_records.append({"attempt": 1, "note": "tests_still_failing"})
+        raise RuntimeError("boom after streaming")
+
+    monkeypatch.setattr(eval_attempt_flow, "_run_one_condition_attempts", _raising_attempts)
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(tmp_path, _DiffPatcher([_FIX]), record_sink=sunk.append)
+    assert sunk == [{"attempt": 1, "note": "tests_still_failing"}]
+
+
+def test_att08_unit_runtime_error_record_is_schema_valid_and_scored(tmp_path: Path) -> None:
+    from evals.analyze_results import _derive_case_condition_rows, _validate_eval_record_schema
+    from evals.eval_attempt_flow import _unit_runtime_error_record
+    from evals.eval_types import RunConditionInputs
+
+    case = _case(tmp_path)
+    run_metadata = {
+        "run_id": "r",
+        "started_at_utc": "2026-10-04T00:00:00Z",
+        "deterministic": False,
+        "seed": None,
+        "python_version": "3.13",
+        "platform": "test",
+        "llmdebug_version": "test",
+        "patcher_name": "scripted",
+        "patcher_config": {},
+        "patcher_config_fingerprint": "x",
+        "run_settings_fingerprint": "y",
+        "record_policy": {"prompt": "hash", "evidence": "hash"},
+    }
+    inputs = RunConditionInputs.__new__(RunConditionInputs)
+    object.__setattr__(inputs, "k", 2)
+    object.__setattr__(inputs, "run_id", "r")
+    object.__setattr__(inputs, "run_metadata", run_metadata)
+    record = _unit_runtime_error_record(
+        case=case,
+        condition=Condition.BASE_REPAIR,
+        run_inputs=inputs,
+        patcher=_DiffPatcher([]),
+        emitted_records=[],
+        runtime_error="RuntimeError: boom",
+    )
+    _validate_eval_record_schema(record, src="test", line_no=1)
+    rows = _derive_case_condition_rows({("r", case.case_id, "base_repair"): [record]})
+    assert rows[0]["success"] is False
+    assert record["attempt"] == 1 and record["record_type"] == "attempt"
