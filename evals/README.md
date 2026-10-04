@@ -272,10 +272,15 @@ condition, native or baseline, sees them (`case_info_policy = neutral_v1`, see
 `docs/baseline_contracts.md`).
 
 **Oracle integrity (ATT-01).** Before every post-patch verification run the harness restores
-the case's pristine test surface (`test_*.py`, `*_test.py`, `conftest.py`, `pytest.ini`,
-`pyproject.toml`, `setup.cfg`, `tox.ini`): edited files are reverted, added ones deleted.
-Success then requires exit code 0 **and** a JUnit report with at least one executed test
-and no failures or errors. Records carry `patch_meta.test_surface_modified`,
+the case's pristine test surface: `test_*.py`, `*_test.py`, pytest config and hook files
+(`conftest.py`, `pytest.ini`, `.pytest.ini`, `pytest.toml`, `pyproject.toml`, `setup.cfg`,
+`tox.ini`), modules that would shadow pytest or run at interpreter start (`pytest.py`,
+`pytest/`, `_pytest/`, `py.py`, `sitecustomize.py`, `usercustomize.py`, `*.pth`) and any
+symlink. Edited files are reverted, added ones deleted, links removed without being followed.
+Success then requires exit code 0 **and** a fresh per-run JUnit report (stale or planted
+reports are deleted first) with at least one executed test and no failures or errors. The
+patched code still runs inside the pytest process, so a deliberately adversarial patch could
+forge a verdict; the guard targets reward hacking, not a hostile model. Records carry `patch_meta.test_surface_modified`,
 `test_surface_restored_paths`, `pytest_verdict_source` (`junit`) and
 `pytest_verdict_counts`; `attempt_metadata.test_surface_modified` mirrors the flag.
 

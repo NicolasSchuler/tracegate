@@ -5,84 +5,152 @@ that sets ``session.exitstatus = 0``) and turn a failing run into a "success". B
 every verification run the harness therefore restores the pristine test surface from
 the case directory, and it decides success from pytest's JUnit counts instead of the
 process exit code alone.
+
+Threat model: this closes the realistic reward-hacking routes (edited tests, pytest
+config and hook files, modules that shadow ``pytest``, symlinks, stale reports). The
+patched code still runs inside the pytest process, so a deliberately adversarial patch
+could forge a verdict; that would need a separate trusted reporting process.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 TEST_SURFACE_FILENAMES = frozenset(
-    {"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"}
+    {
+        # pytest configuration and hooks
+        "conftest.py",
+        "pytest.ini",
+        ".pytest.ini",
+        "pytest.toml",
+        ".pytest.toml",
+        "pyproject.toml",
+        "setup.cfg",
+        "tox.ini",
+        # modules that shadow pytest on ``python -m pytest`` or run at interpreter start
+        "pytest.py",
+        "py.py",
+        "sitecustomize.py",
+        "usercustomize.py",
+    }
 )
-"""Files that configure or hook pytest collection and reporting."""
+"""Files that configure, hook or replace pytest collection and reporting."""
 
-JUNIT_REPORT_NAME = ".tracegate_pytest_verdict.xml"
-"""Relative to the workdir, so it resolves the same way under every executor."""
+_TEST_SURFACE_DIR_NAMES = frozenset({"pytest", "_pytest"})
+"""Packages that would shadow pytest itself; everything below them is test surface."""
+
+JUNIT_REPORT_PREFIX = ".tracegate_pytest_verdict"
+"""Reports live in the workdir so the path resolves the same way under every executor."""
 
 _IGNORED_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 
 
 def is_test_surface_path(relative: Path) -> bool:
     """Return whether a workdir-relative path belongs to the test oracle."""
+    if any(part in _TEST_SURFACE_DIR_NAMES for part in relative.parts[:-1]):
+        return True
     name = relative.name
-    if name in TEST_SURFACE_FILENAMES:
+    if name in TEST_SURFACE_FILENAMES or name.endswith(".pth"):
         return True
     return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
 
 
-def _test_surface_files(root: Path) -> dict[Path, Path]:
+def _test_surface_entries(root: Path) -> dict[Path, Path]:
+    """Map relative test-surface paths to files or symlinks under *root*, never following links."""
     found: dict[Path, Path] = {}
     if not root.is_dir():
         return found
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
-        if any(part in _IGNORED_DIR_NAMES for part in relative.parts):
-            continue
-        if path.is_file() and is_test_surface_path(relative):
-            found[relative] = path
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        base = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if name not in _IGNORED_DIR_NAMES]
+        # Symlinked directories are entries too: they are removed, never traversed.
+        for name in [*filenames, *(d for d in dirnames if (base / d).is_symlink())]:
+            path = base / name
+            relative = path.relative_to(root)
+            if path.is_symlink() or (path.is_file() and is_test_surface_path(relative)):
+                found[relative] = path
     return found
+
+
+def _remove_entry(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+
+
+def _write_inside(workdir: Path, relative: Path, source: Path) -> None:
+    target = workdir / relative
+    for parent in reversed(target.relative_to(workdir).parents):
+        candidate = workdir / parent
+        if candidate.is_symlink():
+            candidate.unlink()
+    _remove_entry(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.parent.resolve().is_relative_to(workdir.resolve()):
+        raise ValueError(f"refusing to restore outside the workdir: {relative}")
+    shutil.copyfile(source, target)
 
 
 def restore_test_surface(*, workdir: Path, pristine_dir: Path) -> tuple[str, ...]:
     """Make the workdir's test surface identical to the pristine case directory.
 
-    Modified files are restored, files the patch added are deleted and deleted files are
-    recreated. Returns the sorted workdir-relative paths that had been changed.
+    Modified files are restored, files the patch added are deleted, deleted files are
+    recreated and symlinks are removed rather than followed. Returns the sorted
+    workdir-relative paths that had been changed.
     """
-    current = _test_surface_files(workdir)
-    pristine = _test_surface_files(pristine_dir)
+    current = _test_surface_entries(workdir)
+    pristine = {
+        relative: path
+        for relative, path in _test_surface_entries(pristine_dir).items()
+        if not path.is_symlink()
+    }
     changed: list[str] = []
     for relative, path in current.items():
         source = pristine.get(relative)
         if source is None:
-            path.unlink()
+            _remove_entry(path)
             changed.append(relative.as_posix())
-        elif path.read_bytes() != source.read_bytes():
-            shutil.copyfile(source, path)
+        elif path.is_symlink() or path.read_bytes() != source.read_bytes():
+            _write_inside(workdir, relative, source)
             changed.append(relative.as_posix())
     for relative, source in pristine.items():
         if relative not in current:
-            target = workdir / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
+            _write_inside(workdir, relative, source)
             changed.append(relative.as_posix())
     return tuple(sorted(changed))
 
 
-_JUNIT_FLAG = f"--junitxml={JUNIT_REPORT_NAME}"
+_JUNIT_FLAG_PREFIX = f"--junitxml={JUNIT_REPORT_PREFIX}"
 
 
 def with_junit_report(python_args: Sequence[str]) -> list[str]:
-    """Append the harness JUnit report flag to a ``python -m pytest`` argument list."""
-    return [*python_args, _JUNIT_FLAG]
+    """Append a JUnit report flag with a fresh per-run report name."""
+    return [*python_args, f"{_JUNIT_FLAG_PREFIX}_{uuid.uuid4().hex}.xml"]
 
 
-def wants_junit_report(python_args: Sequence[str]) -> bool:
-    return _JUNIT_FLAG in python_args
+def junit_report_name(python_args: Sequence[str]) -> str | None:
+    """Return the harness report name requested in *python_args*, if any."""
+    for arg in python_args:
+        if arg.startswith(_JUNIT_FLAG_PREFIX):
+            name = arg.split("=", 1)[1]
+            return name if "/" not in name and name.endswith(".xml") else None
+    return None
+
+
+def clear_junit_reports(workdir: Path) -> None:
+    """Remove harness reports (and anything planted under their names) before a run."""
+    if not workdir.is_dir():
+        return
+    for path in workdir.glob(f"{JUNIT_REPORT_PREFIX}*"):
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
 
 
 @dataclass(frozen=True)
@@ -125,11 +193,11 @@ def read_junit_counts(path: Path) -> PytestCounts | None:
     return PytestCounts(**totals)
 
 
-def consume_junit_counts(workdir: Path) -> PytestCounts | None:
-    """Read and delete the workdir's JUnit report, so later prompts never see it."""
-    path = workdir / JUNIT_REPORT_NAME
-    counts = read_junit_counts(path)
-    path.unlink(missing_ok=True)
+def consume_junit_counts(workdir: Path, report_name: str) -> PytestCounts | None:
+    """Read and delete a run's JUnit report, so later prompts never see it."""
+    path = workdir / report_name
+    counts = None if path.is_symlink() else read_junit_counts(path)
+    clear_junit_reports(workdir)
     return counts
 
 

@@ -92,6 +92,8 @@ def test_att01_conftest_exit_status_hack_is_not_a_success(tmp_path: Path) -> Non
             run_id="att01",
             include_files_context=True,
             force_patch_attempt=False,
+            # Exercise the oracle itself; the verifier would reject this patch earlier.
+            patch_verifier_scope="disabled",
         )
     finally:
         run_eval.set_active_execution_config(previous_execution)

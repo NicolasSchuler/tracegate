@@ -7,12 +7,15 @@ from pathlib import Path
 import pytest
 
 from evals.oracle_integrity import (
-    JUNIT_REPORT_NAME,
+    JUNIT_REPORT_PREFIX,
     PytestCounts,
+    clear_junit_reports,
     consume_junit_counts,
     is_test_surface_path,
+    junit_report_name,
     read_junit_counts,
     restore_test_surface,
+    run_succeeded,
     verified_success,
     with_junit_report,
 )
@@ -30,6 +33,13 @@ from evals.oracle_integrity import (
         ("pyproject.toml", True),
         ("setup.cfg", True),
         ("tox.ini", True),
+        (".pytest.ini", True),
+        ("pytest.toml", True),
+        ("pytest.py", True),
+        ("_pytest/runner.py", True),
+        ("pytest/__init__.py", True),
+        ("sitecustomize.py", True),
+        ("hook.pth", True),
         ("buggy.py", False),
         ("testing_utils.py", False),
         ("test_data.json", False),
@@ -105,12 +115,60 @@ def test_read_junit_counts_missing_file(tmp_path: Path) -> None:
 
 
 def test_consume_junit_counts_deletes_report(tmp_path: Path) -> None:
-    (tmp_path / JUNIT_REPORT_NAME).write_text(
+    name = f"{JUNIT_REPORT_PREFIX}_abc.xml"
+    (tmp_path / name).write_text(
         _JUNIT.format(tests=1, failures=0, errors=0, skipped=0), encoding="utf-8"
     )
-    assert consume_junit_counts(tmp_path) == PytestCounts(1, 0, 0, 0)
-    assert not (tmp_path / JUNIT_REPORT_NAME).exists()
-    assert consume_junit_counts(tmp_path) is None
+    assert consume_junit_counts(tmp_path, name) == PytestCounts(1, 0, 0, 0)
+    assert not (tmp_path / name).exists()
+    assert consume_junit_counts(tmp_path, name) is None
+
+
+def test_consume_junit_counts_ignores_symlinked_report(tmp_path: Path) -> None:
+    outside = tmp_path / "forged.xml"
+    outside.write_text(_JUNIT.format(tests=1, failures=0, errors=0, skipped=0), encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    name = f"{JUNIT_REPORT_PREFIX}_abc.xml"
+    (work / name).symlink_to(outside)
+    assert consume_junit_counts(work, name) is None
+    assert outside.exists()
+
+
+def test_clear_junit_reports_removes_planted_reports(tmp_path: Path) -> None:
+    (tmp_path / f"{JUNIT_REPORT_PREFIX}_planted.xml").write_text("x", encoding="utf-8")
+    (tmp_path / f"{JUNIT_REPORT_PREFIX}_dir").mkdir()
+    (tmp_path / "buggy.py").write_text("x = 1\n", encoding="utf-8")
+    clear_junit_reports(tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["buggy.py"]
+
+
+def test_restore_test_surface_removes_symlinks_without_following(tmp_path: Path) -> None:
+    pristine = tmp_path / "case"
+    work = tmp_path / "work"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "victim.txt"
+    victim.write_text("keep me\n", encoding="utf-8")
+    _write(pristine / "test_buggy.py", "def test_x():\n    assert False\n")
+    work.mkdir()
+    (work / "test_buggy.py").symlink_to(victim)
+    (work / "linked_dir").symlink_to(outside, target_is_directory=True)
+
+    changed = restore_test_surface(workdir=work, pristine_dir=pristine)
+
+    assert changed == ("linked_dir", "test_buggy.py")
+    assert victim.read_text(encoding="utf-8") == "keep me\n"
+    assert not (work / "test_buggy.py").is_symlink()
+    assert (work / "test_buggy.py").read_text(encoding="utf-8").startswith("def test_x")
+    assert not (work / "linked_dir").exists()
+
+
+def test_run_succeeded_requires_report_only_when_requested() -> None:
+    counts = PytestCounts(1, 0, 0, 0)
+    assert run_succeeded(returncode=0, junit_requested=True, counts=counts) is True
+    assert run_succeeded(returncode=0, junit_requested=True, counts=None) is False
+    assert run_succeeded(returncode=0, junit_requested=False, counts=None) is True
 
 
 @pytest.mark.parametrize(
@@ -129,13 +187,15 @@ def test_verified_success(returncode: int, counts: PytestCounts | None, expected
     assert verified_success(returncode=returncode, counts=counts) is expected
 
 
-def test_with_junit_report_appends_flag() -> None:
-    assert with_junit_report(["-m", "pytest", "-q"]) == [
-        "-m",
-        "pytest",
-        "-q",
-        f"--junitxml={JUNIT_REPORT_NAME}",
-    ]
+def test_with_junit_report_appends_unique_flag() -> None:
+    first = with_junit_report(["-m", "pytest", "-q"])
+    second = with_junit_report(["-m", "pytest", "-q"])
+    assert first[:3] == ["-m", "pytest", "-q"]
+    assert first[3].startswith(f"--junitxml={JUNIT_REPORT_PREFIX}_")
+    assert first != second
+    name = junit_report_name(first)
+    assert name is not None and name.endswith(".xml")
+    assert junit_report_name(["-m", "pytest", "--junitxml=../elsewhere.xml"]) is None
 
 
 def test_genuine_fix_is_success_via_junit_end_to_end(tmp_path: Path) -> None:
@@ -208,4 +268,4 @@ def test_genuine_fix_is_success_via_junit_end_to_end(tmp_path: Path) -> None:
         "errors": 0,
         "skipped": 0,
     }
-    assert not (workdir / JUNIT_REPORT_NAME).exists()
+    assert not list(workdir.glob(f"{JUNIT_REPORT_PREFIX}*"))

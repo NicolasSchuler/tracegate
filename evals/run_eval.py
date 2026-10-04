@@ -237,7 +237,11 @@ from evals.eval_types import (  # noqa: E402
     baseline_condition_for_name,
     is_baseline_condition,
 )
-from evals.oracle_integrity import consume_junit_counts, wants_junit_report  # noqa: E402
+from evals.oracle_integrity import (  # noqa: E402
+    clear_junit_reports,
+    consume_junit_counts,
+    junit_report_name,
+)
 from llmdebug._hashing import xxh64_hexdigest_text  # noqa: E402
 
 _ACTIVE_RUN_SETTINGS = _ActiveRunSettings()
@@ -5619,6 +5623,10 @@ def run_pytest(
     Delegates to ``_run_pytest_local`` or ``_run_pytest_testcontainers``
     depending on the ``ExecutionConfig.executor`` setting.
     """
+    report_name = junit_report_name(python_args)
+    if report_name is not None:
+        # ATT-01: nothing planted under a report name may survive into the verdict.
+        clear_junit_reports(cwd)
     result = _dispatch_run_pytest(
         cwd=cwd,
         python_args=python_args,
@@ -5629,10 +5637,12 @@ def run_pytest(
         progress_update=progress_update,
         progress_phase_label=progress_phase_label,
     )
-    if not wants_junit_report(python_args):
+    if report_name is None:
         return result
-    # ATT-01: the verdict comes from the report, read on the host after any executor.
-    return replace(result, junit_requested=True, junit_counts=consume_junit_counts(cwd))
+    # The verdict comes from the report, read on the host after any executor.
+    return replace(
+        result, junit_requested=True, junit_counts=consume_junit_counts(cwd, report_name)
+    )
 
 
 def _dispatch_run_pytest(
