@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -294,6 +294,7 @@ from evals.native_stage_b_flow import (
 from evals.native_stage_b_flow import (
     _tep_jaccard_similarity as _tep_jaccard_similarity,
 )
+from evals.oracle_integrity import restore_test_surface, run_succeeded, with_junit_report
 from evals.patchers.base import Patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import normalize_feature_scaling_profile, scale_feature_mapping
@@ -7701,8 +7702,12 @@ def run_one_condition_impl(
         if not patch_applied_and_ready:
             continue
 
-        # Re-run after patch.
+        # Re-run after patch, against the pristine test surface (ATT-01, D10).
         shutil.rmtree(llmdebug_dir, ignore_errors=True)
+        test_surface_restored = restore_test_surface(workdir=workdir, pristine_dir=case.path)
+        patch_meta["test_surface_modified"] = bool(test_surface_restored)
+        patch_meta["test_surface_restored_paths"] = list(test_surface_restored)
+        attempt_metadata["test_surface_modified"] = bool(test_surface_restored)
         _emit_progress(
             "attempt_pytest_after",
             _progress_payload(
@@ -7715,7 +7720,7 @@ def run_one_condition_impl(
         )
         after = _call_run_pytest_compat(
             workdir,
-            case.python_args,
+            with_junit_report(case.python_args),
             condition,
             case.timeout_sec,
             output_format,
@@ -7728,7 +7733,17 @@ def run_one_condition_impl(
             prefix="pytest_after",
             tail_lines=normalized_pytest_output_tail_lines,
         )
-        success = after.returncode == 0
+        after_junit_requested = bool(getattr(after, "junit_requested", False))
+        after_junit_counts = getattr(after, "junit_counts", None)
+        success = run_succeeded(
+            returncode=after.returncode,
+            junit_requested=after_junit_requested,
+            counts=after_junit_counts,
+        )
+        patch_meta["pytest_verdict_source"] = "junit" if after_junit_requested else "exit_code"
+        patch_meta["pytest_verdict_counts"] = (
+            asdict(after_junit_counts) if after_junit_counts is not None else None
+        )
         note = "success" if success else "tests_still_failing"
         adaptive_progress_stop_candidate_for_note = adaptive_progress_stop_candidate
         adaptive_progress_stop_reason_for_note = adaptive_progress_stop_reason

@@ -68,7 +68,6 @@ def _make_failing_case(tmp_path: Path) -> Any:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="ATT-01")
 def test_att01_conftest_exit_status_hack_is_not_a_success(tmp_path: Path) -> None:
     from evals import run_eval
     from evals.eval_types import Condition
@@ -101,6 +100,13 @@ def test_att01_conftest_exit_status_hack_is_not_a_success(tmp_path: Path) -> Non
     assert patcher.calls, "patcher was never asked for a patch"
     assert attempts
     assert not any(bool(r.get("success")) for r in attempts)
+    first = attempts[0]
+    assert first["note"] == "tests_still_failing"
+    assert first["patch_meta"]["test_surface_modified"] is True
+    assert first["patch_meta"]["test_surface_restored_paths"] == ["conftest.py"]
+    assert first["patch_meta"]["pytest_verdict_source"] == "junit"
+    assert first["patch_meta"]["pytest_verdict_counts"]["failures"] == 1
+    assert not (workdir / "conftest.py").exists()
 
 
 # ---------------------------------------------------------------------------

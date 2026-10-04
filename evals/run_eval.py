@@ -237,6 +237,7 @@ from evals.eval_types import (  # noqa: E402
     baseline_condition_for_name,
     is_baseline_condition,
 )
+from evals.oracle_integrity import consume_junit_counts, wants_junit_report  # noqa: E402
 from llmdebug._hashing import xxh64_hexdigest_text  # noqa: E402
 
 _ACTIVE_RUN_SETTINGS = _ActiveRunSettings()
@@ -5617,7 +5618,34 @@ def run_pytest(
     Delegates to ``_run_pytest_local`` or ``_run_pytest_testcontainers``
     depending on the ``ExecutionConfig.executor`` setting.
     """
-    active_execution = execution if execution is not None else get_active_execution_config()
+    result = _dispatch_run_pytest(
+        cwd=cwd,
+        python_args=python_args,
+        condition=condition,
+        timeout_sec=timeout_sec,
+        output_format=output_format,
+        execution=execution if execution is not None else get_active_execution_config(),
+        progress_update=progress_update,
+        progress_phase_label=progress_phase_label,
+    )
+    if not wants_junit_report(python_args):
+        return result
+    # ATT-01: the verdict comes from the report, read on the host after any executor.
+    return replace(result, junit_requested=True, junit_counts=consume_junit_counts(cwd))
+
+
+def _dispatch_run_pytest(
+    *,
+    cwd: Path,
+    python_args: list[str],
+    condition: Condition,
+    timeout_sec: int,
+    output_format: str,
+    execution: ExecutionConfig,
+    progress_update: Callable[[str, dict[str, Any] | None], None] | None,
+    progress_phase_label: str,
+) -> RunResult:
+    active_execution = execution
     if active_execution.executor == "local":
         return _run_pytest_local(
             cwd=cwd,

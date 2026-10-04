@@ -267,6 +267,18 @@ At execution time, eval-only artifacts such as `case.json`/`meta.json` metadata 
 `oracle.patch` are stripped from the copied workdir before prompting, so patchers do
 not receive benchmark metadata or oracle diffs through the filesystem or prompt context.
 
+`description`, `category`, `difficulty` and `snapshot_dependency` are analysis-only: no
+condition, native or baseline, sees them (`case_info_policy = neutral_v1`, see
+`docs/baseline_contracts.md`).
+
+**Oracle integrity (ATT-01).** Before every post-patch verification run the harness restores
+the case's pristine test surface (`test_*.py`, `*_test.py`, `conftest.py`, `pytest.ini`,
+`pyproject.toml`, `setup.cfg`, `tox.ini`): edited files are reverted, added ones deleted.
+Success then requires exit code 0 **and** a JUnit report with at least one executed test
+and no failures or errors. Records carry `patch_meta.test_surface_modified`,
+`test_surface_restored_paths`, `pytest_verdict_source` (`junit`) and
+`pytest_verdict_counts`; `attempt_metadata.test_surface_modified` mirrors the flag.
+
 ### Categories
 
 | Category | Description |
@@ -1322,8 +1334,9 @@ unsupported and should be regenerated with the current harness before analysis.
 - **7** (2026-10-04 code review remediation; see
   `docs/2026-10-04-code-review-findings.md`). Records written after the review fixes. Changes
   in record meaning versus v6: baselines no longer receive case descriptions or labels
-  (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07). Later review fixes extend
-  this list.
+  (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07); success is judged against
+  the pristine test surface and pytest's JUnit counts, so patches that edit tests or add
+  `conftest.py` hooks no longer count (ATT-01). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
