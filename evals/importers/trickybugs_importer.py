@@ -184,7 +184,7 @@ def import_trickybugs(
     trickybugs_root: Path,
     data_root: Path,
     max_cases: int = 0,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
     jobs: int = 1,
 ) -> ImportRunSummary:
@@ -302,12 +302,13 @@ def import_trickybugs(
             shutil.rmtree(case_dir, ignore_errors=True)
             continue
 
-        if validate:
-            ok_case, _ = validate_generated_case(case_dir, schema_only=True)
-            if not ok_case:
-                skip_reasons["schema_validation_failed"] += 1
-                shutil.rmtree(case_dir, ignore_errors=True)
-                continue
+        # DAT-05: the schema is always checked; --validate also runs the case
+        # (the baseline must fail and the oracle must fix it).
+        ok_case, _ = validate_generated_case(case_dir, schema_only=not validate)
+        if not ok_case:
+            skip_reasons["schema_validation_failed"] += 1
+            shutil.rmtree(case_dir, ignore_errors=True)
+            continue
 
         imported_case_ids.append(case_id)
 

@@ -413,6 +413,12 @@ uv run python -m evals.importers.cli debugbench --validate
 uv run python -m evals.importers.cli debugbench --max-cases 5 --dry-run
 ```
 
+Every importer checks each generated case's schema. `--validate` additionally runs the case:
+the baseline must fail with the expected exception and `oracle.patch` must fix it. Before
+DAT-05, seven importers only checked the schema under `--validate`, and the schema check
+rejected every native-repro case (BugsInPy, PyBugHive, TrickyBugs), which keep the source at
+its repository path instead of `buggy.py`; native cases now need the files the oracle patch
+changes.
 When using `--validate`, importers honor the same execution flags as `run_eval`
 and `validate_cases` (`--executor`, container resource/network flags, and `--container-env`).
 

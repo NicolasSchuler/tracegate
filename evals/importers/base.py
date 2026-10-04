@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import _json as json
-from ..eval_patches import _build_diff_from_changes, _diff_lines
+from ..eval_patches import _build_diff_from_changes, _diff_lines, _extract_diff_paths
 from .determinism import is_deterministic as is_deterministic
 from .determinism import nondeterminism_reasons as nondeterminism_reasons
 
@@ -56,6 +56,9 @@ def write_case_files(
     )
 
 
+NATIVE_REPRO_MODE = "native_dataset_test"
+
+
 def validate_generated_case(
     case_dir: Path,
     *,
@@ -65,9 +68,12 @@ def validate_generated_case(
 
     When schema_only=True, checks file existence and case.json structure only.
     When schema_only=False, also runs baseline + oracle validation (requires pytest).
+
+    Native-repro cases (``repro_mode = native_dataset_test``: BugsInPy, PyBugHive,
+    TrickyBugs) keep the source at its repository path, so instead of ``buggy.py`` and
+    ``test_buggy.py`` they must contain every file the oracle patch changes (DAT-05).
     """
-    required_files = ("buggy.py", "test_buggy.py", "case.json", "oracle.patch")
-    for fname in required_files:
+    for fname in ("case.json", "oracle.patch"):
         if not (case_dir / fname).exists():
             return False, f"missing required file: {fname}"
 
@@ -79,6 +85,15 @@ def validate_generated_case(
 
     if not isinstance(meta, dict):
         return False, "case.json is not a JSON object"
+
+    if meta.get("repro_mode") == NATIVE_REPRO_MODE:
+        oracle_text = (case_dir / "oracle.patch").read_text(encoding="utf-8")
+        required_files = tuple(_extract_diff_paths(oracle_text))
+    else:
+        required_files = ("buggy.py", "test_buggy.py")
+    for fname in required_files:
+        if not (case_dir / fname).exists():
+            return False, f"missing required file: {fname}"
 
     from evals.run_eval import VALID_CATEGORIES, VALID_DIFFICULTIES, VALID_SNAPSHOT_DEPENDENCIES
 

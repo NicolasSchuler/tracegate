@@ -1846,16 +1846,11 @@ class TestTrickyBugsImport:
             fromlist=["normalize_relative_path"],
         ).normalize_relative_path
 
-        call_counter = [0]
-
         def _normalize_unsafe_for_test(raw: str) -> str | None:
             result = original_normalize(raw)
-            # Let initial calls through (for candidate parsing), then fail
-            # for the test-path normalization in the import loop
+            # Source paths stay valid; only the native test path is unsafe.
             if result and "test_it" in result:
-                call_counter[0] += 1
-                if call_counter[0] > 2:
-                    return None
+                return None
             return result
 
         monkeypatch.setattr(
@@ -1868,7 +1863,9 @@ class TestTrickyBugsImport:
             trickybugs_root=root,
             data_root=tmp_path / "work",
         )
+        # This used to pass only because the schema check rejected every native case.
         assert summary.imported == 0
+        assert summary.skip_reasons == {"unsafe_dataset_path": 1}
 
     def test_test_file_not_found(self, tmp_path: Path) -> None:
         """Test file missing on disk (covers L243-245)."""

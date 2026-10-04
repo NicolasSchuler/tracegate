@@ -454,7 +454,7 @@ class TestQuixBugsImportIntegration:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         assert len(results) == 1
 
         case_dir = output / "qb_gcd_easy"
@@ -529,7 +529,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         assert len(results) == 1
         assert results[0]["case_id"] == "qb_reverse_linked_list_easy"
         assert "graph_algorithm" in results[0]["metadata"]["tags"]
@@ -541,7 +541,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         buggy_code = (output / "qb_reverse_linked_list_easy" / "buggy.py").read_text()
         assert "class Node:" in buggy_code
@@ -554,7 +554,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         test_code = (output / "qb_reverse_linked_list_easy" / "test_buggy.py").read_text()
         assert "from buggy import" in test_code
@@ -569,7 +569,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         diff_patch = (output / "qb_reverse_linked_list_easy" / "oracle.patch").read_text()
         assert "--- a/buggy.py" in diff_patch
@@ -650,7 +650,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         case_ids = sorted(r["case_id"] for r in results)
         assert "qb_bitcount_easy" in case_ids
         assert "qb_detect_cycle_easy" in case_ids
@@ -664,7 +664,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         gcd_buggy = (output / "qb_gcd_easy" / "buggy.py").read_text()
         detect_buggy = (output / "qb_detect_cycle_easy" / "buggy.py").read_text()
@@ -678,7 +678,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, max_cases=2, validate=True)
+        results = import_quixbugs(output, repo_path=repo, max_cases=2, validate=False)
         assert len(results) == 2
 
     def test_dry_run_writes_no_files(self, tmp_path) -> None:
@@ -700,7 +700,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         required_keys = {
             "description",
             "category",
@@ -856,7 +856,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_json = json.loads((output / "qb_gcd_easy" / "case.json").read_text())
         assert case_json["category"] == "logic_error"
@@ -876,7 +876,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_dir = output / "qb_gcd_easy"
         oracle_patch = (case_dir / "oracle.patch").read_text()
@@ -923,7 +923,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_dir = output / "qb_gcd_easy"
 
@@ -1542,3 +1542,95 @@ def test_dat10_oracle_patch_without_trailing_newline_applies(
 def test_dat10_count_patch_lines_counts_the_no_newline_case() -> None:
     patch = generate_oracle_patch("def f():\n    return 1", "def f():\n    return 2")
     assert count_patch_lines(patch) == 2
+
+
+_IMPORTERS = (
+    "bugsinpy_importer",
+    "condefects_importer",
+    "debugbench_importer",
+    "humanevalpack_importer",
+    "mutmut_generator",
+    "pybughive_importer",
+    "pyresbugs_importer",
+    "quixbugs_importer",
+    "trickybugs_importer",
+)
+
+
+@pytest.mark.parametrize("module_name", _IMPORTERS)
+def test_dat05_importers_validate_by_execution_when_asked(module_name: str) -> None:
+    """DAT-05: seven importers hardcoded schema_only=True, so --validate never ran a case."""
+    import ast
+
+    source = (Path("evals/importers") / f"{module_name}.py").read_text(encoding="utf-8")
+    calls = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "validate_generated_case"
+    ]
+    assert calls, module_name
+    for call in calls:
+        schema_only = next(kw.value for kw in call.keywords if kw.arg == "schema_only")
+        assert ast.unparse(schema_only) == "not validate", module_name
+
+
+@pytest.mark.parametrize(("validate", "schema_only"), [(False, True), (True, False)])
+def test_dat05_quixbugs_schema_always_checked_execution_on_validate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validate: bool, schema_only: bool
+) -> None:
+    from evals.importers import quixbugs_importer
+
+    seen: list[bool] = []
+
+    def _spy(case_dir: Path, *, schema_only: bool = True) -> tuple[bool, str]:
+        del case_dir
+        seen.append(schema_only)
+        return True, "ok"
+
+    monkeypatch.setattr(quixbugs_importer, "validate_generated_case", _spy)
+    repo = TestQuixBugsImportIntegration()._build_fake_repo(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+
+    quixbugs_importer.import_quixbugs(output, repo_path=repo, validate=validate)
+
+    assert seen == [schema_only]
+
+
+def _native_case(tmp_path: Path, *, with_source: bool) -> Path:
+    case_dir = tmp_path / "native_case"
+    (case_dir / "src").mkdir(parents=True)
+    if with_source:
+        (case_dir / "src" / "demo.py").write_text("x = 1\n", encoding="utf-8")
+    (case_dir / "oracle.patch").write_text(
+        generate_oracle_patch("x = 1\n", "x = 2\n", filename="src/demo.py"), encoding="utf-8"
+    )
+    (case_dir / "case.json").write_text(
+        json.dumps(
+            {
+                "category": "logic_error",
+                "difficulty": "easy",
+                "snapshot_dependency": "helpful",
+                "expected_exception": "AssertionError",
+                "repro_mode": "native_dataset_test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return case_dir
+
+
+def test_dat05_native_repro_case_passes_schema_without_buggy_py(tmp_path: Path) -> None:
+    """The schema check required buggy.py, so --validate rejected every native case."""
+    assert validate_generated_case(_native_case(tmp_path, with_source=True)) == (
+        True,
+        "schema valid",
+    )
+
+
+def test_dat05_native_repro_case_needs_the_oracle_target(tmp_path: Path) -> None:
+    ok, message = validate_generated_case(_native_case(tmp_path, with_source=False))
+    assert not ok
+    assert message == "missing required file: src/demo.py"

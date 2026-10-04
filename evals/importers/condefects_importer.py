@@ -274,7 +274,7 @@ def import_condefects(
     repo_path: Path | None = None,
     test_zip: Path | None = None,
     max_cases: int = 0,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Import cases from ConDefects repository.
@@ -464,13 +464,14 @@ def import_condefects(
                     metadata=metadata,
                 )
 
-                if validate:
-                    ok, msg = validate_generated_case(case_dir, schema_only=True)
-                    if not ok:
-                        print(f"  [skip] {case_id}: validation failed: {msg}")
-                        skipped += 1
-                        shutil.rmtree(case_dir, ignore_errors=True)
-                        continue
+                # DAT-05: the schema is always checked; --validate also runs the case
+                # (the baseline must fail and the oracle must fix it).
+                ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+                if not ok:
+                    print(f"  [skip] {case_id}: validation failed: {msg}")
+                    skipped += 1
+                    shutil.rmtree(case_dir, ignore_errors=True)
+                    continue
 
                 imported.append(case_info)
 

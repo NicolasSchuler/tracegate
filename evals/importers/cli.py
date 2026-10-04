@@ -126,7 +126,14 @@ def _handle_materialize_top3(args: argparse.Namespace) -> int:
 
 def _add_common_import_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-dir", default="evals/cases")
-    parser.add_argument("--validate", action="store_true")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help=(
+            "Run each generated case (the baseline must fail and oracle.patch must fix it) "
+            "instead of checking its schema only. Not supported for native-repro sources."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
 
 
@@ -191,7 +198,14 @@ def _add_materialize_top3_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--max-cases", type=int, default=0)
-    parser.add_argument("--validate", action="store_true")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help=(
+            "Run each generated case (the baseline must fail and oracle.patch must fix it) "
+            "instead of checking its schema only. Not supported for native-repro sources."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
 
 

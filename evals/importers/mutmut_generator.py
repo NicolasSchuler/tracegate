@@ -200,7 +200,7 @@ def import_mutmut(
     *,
     target: str,
     max_cases: int = 30,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Generate cases from mutmut mutations on a target module.
@@ -323,13 +323,14 @@ def import_mutmut(
             metadata=metadata,
         )
 
-        if validate:
-            ok, msg = validate_generated_case(case_dir, schema_only=True)
-            if not ok:
-                print(f"  [skip] {case_id}: validation failed: {msg}")
-                skipped += 1
-                shutil.rmtree(case_dir, ignore_errors=True)
-                continue
+        # DAT-05: the schema is always checked; --validate also runs the case
+        # (the baseline must fail and the oracle must fix it).
+        ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+        if not ok:
+            print(f"  [skip] {case_id}: validation failed: {msg}")
+            skipped += 1
+            shutil.rmtree(case_dir, ignore_errors=True)
+            continue
 
         imported.append(case_info)
 
