@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
@@ -73,13 +74,29 @@ def _test_surface_entries(root: Path) -> dict[Path, Path]:
         for name in [*filenames, *(d for d in dirnames if (base / d).is_symlink())]:
             path = base / name
             relative = path.relative_to(root)
-            if path.is_symlink() or (path.is_file() and is_test_surface_path(relative)):
+            if _is_hostile_entry(path) or (path.is_file() and is_test_surface_path(relative)):
                 found[relative] = path
     return found
 
 
+def _is_regular_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _is_hostile_entry(path: Path) -> bool:
+    """Symlinks and special files (FIFOs, devices, sockets) never belong in a workdir."""
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return False
+    return not (stat.S_ISREG(mode) or stat.S_ISDIR(mode))
+
+
 def _remove_entry(path: Path) -> None:
-    if path.is_symlink() or path.is_file():
+    if _is_hostile_entry(path) or _is_regular_file(path):
         path.unlink()
 
 
@@ -107,7 +124,7 @@ def restore_test_surface(*, workdir: Path, pristine_dir: Path) -> tuple[str, ...
     pristine = {
         relative: path
         for relative, path in _test_surface_entries(pristine_dir).items()
-        if not path.is_symlink()
+        if _is_regular_file(path)
     }
     changed: list[str] = []
     for relative, path in current.items():
@@ -115,7 +132,7 @@ def restore_test_surface(*, workdir: Path, pristine_dir: Path) -> tuple[str, ...
         if source is None:
             _remove_entry(path)
             changed.append(relative.as_posix())
-        elif path.is_symlink() or path.read_bytes() != source.read_bytes():
+        elif not _is_regular_file(path) or path.read_bytes() != source.read_bytes():
             _write_inside(workdir, relative, source)
             changed.append(relative.as_posix())
     for relative, source in pristine.items():
@@ -147,10 +164,10 @@ def clear_junit_reports(workdir: Path) -> None:
     if not workdir.is_dir():
         return
     for path in workdir.glob(f"{JUNIT_REPORT_PREFIX}*"):
-        if path.is_symlink() or path.is_file():
-            path.unlink()
-        elif path.is_dir():
+        if stat.S_ISDIR(os.lstat(path).st_mode):
             shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink()
 
 
 @dataclass(frozen=True)
@@ -196,7 +213,7 @@ def read_junit_counts(path: Path) -> PytestCounts | None:
 def consume_junit_counts(workdir: Path, report_name: str) -> PytestCounts | None:
     """Read and delete a run's JUnit report, so later prompts never see it."""
     path = workdir / report_name
-    counts = None if path.is_symlink() else read_junit_counts(path)
+    counts = read_junit_counts(path) if _is_regular_file(path) else None
     clear_junit_reports(workdir)
     return counts
 

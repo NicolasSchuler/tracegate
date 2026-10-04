@@ -269,3 +269,19 @@ def test_genuine_fix_is_success_via_junit_end_to_end(tmp_path: Path) -> None:
         "skipped": 0,
     }
     assert not list(workdir.glob(f"{JUNIT_REPORT_PREFIX}*"))
+
+
+def test_special_files_are_removed_and_never_read(tmp_path: Path) -> None:
+    import os
+
+    pristine = tmp_path / "case"
+    work = tmp_path / "work"
+    _write(pristine / "test_buggy.py", "def test_x():\n    assert False\n")
+    _write(work / "test_buggy.py", "def test_x():\n    assert False\n")
+    os.mkfifo(work / "planted_fifo")
+    name = f"{JUNIT_REPORT_PREFIX}_fifo.xml"
+    os.mkfifo(work / name)
+
+    assert consume_junit_counts(work, name) is None
+    assert restore_test_surface(workdir=work, pristine_dir=pristine) == ("planted_fifo",)
+    assert sorted(p.name for p in work.iterdir()) == ["test_buggy.py"]
