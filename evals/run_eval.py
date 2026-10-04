@@ -998,6 +998,38 @@ _ACTIVE_EXECUTION_CONFIG = ExecutionConfig()
 _ACTIVE_CONTAINER_POOL: _EvalContainerPool | None = None
 
 
+# ORC-01/ORC-02: run-scoped globals are set through these functions. Assigning
+# ``eval_main_support.<NAME> = ...`` binds on the forwarding shim and never reaches
+# the readers in this module (tests/test_evals_shim_writes.py guards against it).
+
+
+def set_active_run_settings(settings: _ActiveRunSettings) -> _ActiveRunSettings:
+    """Install the run settings read by ``_base_pytest_env``; return the previous ones."""
+    global _ACTIVE_RUN_SETTINGS
+    previous = _ACTIVE_RUN_SETTINGS
+    _ACTIVE_RUN_SETTINGS = settings
+    return previous
+
+
+def set_active_container_pool(pool: _EvalContainerPool | None) -> _EvalContainerPool | None:
+    """Install the container pool used by ``run_pytest``; return the previous one."""
+    global _ACTIVE_CONTAINER_POOL
+    previous = _ACTIVE_CONTAINER_POOL
+    _ACTIVE_CONTAINER_POOL = pool
+    return previous
+
+
+def set_active_policy_controllers(
+    *,
+    online: AdaptiveOnlinePolicyController | None,
+    budget: AdaptiveBudgetPolicyController | None,
+) -> None:
+    """Record the run's policy controllers for cleanup."""
+    global _ACTIVE_ONLINE_POLICY_CONTROLLER, _ACTIVE_BUDGET_POLICY_CONTROLLER
+    _ACTIVE_ONLINE_POLICY_CONTROLLER = online
+    _ACTIVE_BUDGET_POLICY_CONTROLLER = budget
+
+
 def _normalized_progress_verbosity(raw: Any) -> str:
     text = str(raw or "").strip().lower()
     return text if text in PROGRESS_VERBOSITIES else "basic"

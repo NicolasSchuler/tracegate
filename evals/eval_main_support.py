@@ -43,6 +43,9 @@ from evals.run_eval import (
     _single_line_error,
     _usage_token_counts_from_patch_meta,
     _validate_external_baseline_runtime_requirements,
+    set_active_container_pool,
+    set_active_policy_controllers,
+    set_active_run_settings,
 )
 
 

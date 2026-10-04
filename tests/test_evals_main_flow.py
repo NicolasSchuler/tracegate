@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from evals import run_eval as run_eval_mod
 from evals.eval_types import (
     ADAPTIVE_REWARD_MATERIALIZATION_SCALE_DEFAULT,
     ADAPTIVE_REWARD_PROGRESS_SCALE_DEFAULT,
@@ -481,14 +482,14 @@ class TestFinallyCleanup:
         mock_controller.close.side_effect = RuntimeError("close failed")
 
         # Set the global directly
-        original = flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER
-        flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = mock_controller
+        original = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
+        run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = mock_controller
         try:
             mock_display = MagicMock()
             # Simulate the cleanup code from lines 1006-1014
-            if flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER is not None:
+            if run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER is not None:
                 try:
-                    flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER.close()
+                    run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER.close()
                 except Exception as exc:
                     mock_display.add_event(
                         message=(
@@ -496,14 +497,14 @@ class TestFinallyCleanup:
                         ),
                         style="warning",
                     )
-                flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = None
+                run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = None
 
             mock_display.add_event.assert_called_once()
             msg = mock_display.add_event.call_args[1]["message"]
             assert "close failed" in msg
             assert mock_display.add_event.call_args[1]["style"] == "warning"
         finally:
-            flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = original
+            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = original
 
     def test_budget_policy_close_warning_on_error(self, monkeypatch) -> None:
         """When budget policy controller.close() raises, a warning is shown."""
@@ -512,13 +513,13 @@ class TestFinallyCleanup:
         mock_controller = MagicMock()
         mock_controller.close.side_effect = RuntimeError("budget close boom")
 
-        original = flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER
-        flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = mock_controller
+        original = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
+        run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = mock_controller
         try:
             mock_display = MagicMock()
-            if flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER is not None:
+            if run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER is not None:
                 try:
-                    flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER.close()
+                    run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER.close()
                 except Exception as exc:
                     mock_display.add_event(
                         message=(
@@ -527,13 +528,13 @@ class TestFinallyCleanup:
                         ),
                         style="warning",
                     )
-                flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = None
+                run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = None
 
             mock_display.add_event.assert_called_once()
             msg = mock_display.add_event.call_args[1]["message"]
             assert "budget close boom" in msg
         finally:
-            flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = original
+            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = original
 
 
 # ---------------------------------------------------------------------------
@@ -653,12 +654,12 @@ class TestFullRunLoopAllResumed:
         return mock_display, flow_mod
 
     def test_all_resumed_units_complete_successfully(self, monkeypatch) -> None:
-        mock_display, flow_mod = self._setup_full_flow(monkeypatch)
+        mock_display, _flow_mod = self._setup_full_flow(monkeypatch)
 
         # Save originals for cleanup
-        orig_settings = flow_mod.legacy._ACTIVE_RUN_SETTINGS
-        orig_online = flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER
+        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
+        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
+        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
 
         try:
             from evals.eval_main_flow import run_main_flow
@@ -672,9 +673,9 @@ class TestFullRunLoopAllResumed:
             # Display should have been closed
             mock_display.close.assert_called()
         finally:
-            flow_mod.legacy._ACTIVE_RUN_SETTINGS = orig_settings
-            flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
+            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
+            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
 
     def test_run_with_runtime_errors_returns_2(self, monkeypatch) -> None:
         """Drive through with a unit that yields a runtime error."""
@@ -768,9 +769,9 @@ class TestFullRunLoopAllResumed:
             lambda recs: recs or [],
         )
 
-        orig_settings = flow_mod.legacy._ACTIVE_RUN_SETTINGS
-        orig_online = flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER
+        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
+        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
+        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
 
         try:
             from evals.eval_main_flow import run_main_flow
@@ -782,9 +783,9 @@ class TestFullRunLoopAllResumed:
             )
             assert result == 2  # runtime errors -> exit 2
         finally:
-            flow_mod.legacy._ACTIVE_RUN_SETTINGS = orig_settings
-            flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
+            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
+            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
 
     def test_run_with_successful_unit(self, monkeypatch) -> None:
         """Drive through with a successful unit execution."""
@@ -895,9 +896,9 @@ class TestFullRunLoopAllResumed:
             lambda case_records: ("none", "none"),
         )
 
-        orig_settings = flow_mod.legacy._ACTIVE_RUN_SETTINGS
-        orig_online = flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER
+        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
+        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
+        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
 
         try:
             from evals.eval_main_flow import run_main_flow
@@ -909,9 +910,9 @@ class TestFullRunLoopAllResumed:
             )
             assert result == 0
         finally:
-            flow_mod.legacy._ACTIVE_RUN_SETTINGS = orig_settings
-            flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
+            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
+            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
 
 
 # ---------------------------------------------------------------------------
@@ -1012,17 +1013,17 @@ def _run_with_cleanup(flow_mod, *, args_override=None):
 
     class _Ctx:
         def __enter__(self):
-            self.orig_settings = flow_mod.legacy._ACTIVE_RUN_SETTINGS
-            self.orig_online = flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER
-            self.orig_budget = flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER
-            self.orig_pool = getattr(flow_mod.legacy, "_ACTIVE_CONTAINER_POOL", None)
+            self.orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
+            self.orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
+            self.orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
+            self.orig_pool = getattr(run_eval_mod, "_ACTIVE_CONTAINER_POOL", None)
             return self
 
         def __exit__(self, *exc):
-            flow_mod.legacy._ACTIVE_RUN_SETTINGS = self.orig_settings
-            flow_mod.legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = self.orig_online
-            flow_mod.legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = self.orig_budget
-            flow_mod.legacy._ACTIVE_CONTAINER_POOL = self.orig_pool
+            run_eval_mod._ACTIVE_RUN_SETTINGS = self.orig_settings
+            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = self.orig_online
+            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = self.orig_budget
+            run_eval_mod._ACTIVE_CONTAINER_POOL = self.orig_pool
             return False
 
     return _Ctx()
@@ -2427,3 +2428,87 @@ class TestDecisionModelBinding:
         assert binding.role == "shadow"
         assert binding.advisor is not None
         binding.advisor.close()
+
+
+# ---------------------------------------------------------------------------
+# ORC-01 / ORC-02 (2026-10-04 review): run settings and the container pool
+# must reach the pytest executor through run_main_flow.
+# ---------------------------------------------------------------------------
+
+
+def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path) -> None:
+    from evals.eval_types import Condition, ExecutionConfig, RunResult, UnitExecutionOutcome
+
+    case = _FakeCaseSpec(case_id="c1")
+    cond = _FakeCondition(value="base_repair")
+    _mock_display, flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
+    setup = _FakeSetup(
+        cases=[case],
+        conditions=[cond],
+        execution_config=ExecutionConfig(executor="testcontainers"),
+    )
+    monkeypatch.setattr("evals.eval_main_flow.prepare_main_setup", lambda **kw: setup)
+
+    seen: dict[str, object] = {}
+
+    class _FakeContainer:
+        def exec_pytest(self, *, host_cwd, command, env, timeout_sec):
+            seen["env"] = dict(env)
+            return RunResult(returncode=0, duration_sec=0.0, stdout="1 passed", stderr="")
+
+    class _FakePool:
+        def __init__(self, **kwargs):
+            self.acquired = 0
+
+        def acquire(self):
+            self.acquired += 1
+            seen["pool"] = self
+            return _FakeContainer()
+
+        def release(self, container):
+            seen["released"] = True
+
+        def shutdown(self):
+            seen["shutdown"] = True
+
+    monkeypatch.setattr("evals.eval_main_flow._EvalContainerPool", _FakePool)
+
+    def _execute_unit(**kwargs):
+        # Inside a unit, exactly what the attempt flow does: the real run_pytest.
+        run_eval_mod.run_pytest(
+            tmp_path,
+            ["-m", "pytest", "-q"],
+            Condition.BASE_REPAIR,
+            5,
+            "json",
+            execution=ExecutionConfig(executor="testcontainers"),
+        )
+        outcome = MagicMock(spec=UnitExecutionOutcome)
+        outcome.case = case
+        outcome.condition = cond
+        outcome.case_records = []
+        outcome.records_streamed = True
+        outcome.unit_duration_sec = 0.1
+        outcome.runtime_error = None
+        return outcome
+
+    monkeypatch.setattr("evals.eval_main_flow._execute_eval_unit", _execute_unit)
+    monkeypatch.setattr(
+        "evals.eval_main_flow.classify_failure_reason", lambda case_records: ("none", "none")
+    )
+
+    with _run_with_cleanup(flow_mod):
+        from evals.eval_main_flow import run_main_flow
+
+        run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(deterministic=True, seed=1234),
+            argv_tokens=[],
+        )
+
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["PYTHONHASHSEED"] == "1234"  # ORC-01
+    assert seen["pool"].acquired == 1  # ORC-02: the pool is used, not a one-shot container
+    assert seen["shutdown"] is True
+    assert run_eval_mod._ACTIVE_CONTAINER_POOL is None

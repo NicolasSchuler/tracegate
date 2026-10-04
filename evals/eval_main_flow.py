@@ -360,7 +360,7 @@ def run_main_flow(
             else ("loaded" if online_init_state_path else "fresh")
         )
 
-    legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = online_policy_controller
+    legacy.set_active_policy_controllers(online=online_policy_controller, budget=None)
 
     try:
         budget_init_state_path = str(getattr(args, "adaptive_budget_init_state_path", "") or "")
@@ -414,13 +414,16 @@ def run_main_flow(
             else ("loaded" if budget_init_state_path else "fresh")
         )
 
-    legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = budget_policy_controller
+    legacy.set_active_policy_controllers(
+        online=online_policy_controller, budget=budget_policy_controller
+    )
 
-    previous_run_settings = legacy._ACTIVE_RUN_SETTINGS
     previous_execution_config = set_active_execution_config(execution_config)
-    legacy._ACTIVE_RUN_SETTINGS = _ActiveRunSettings(
-        deterministic=bool(args.deterministic),
-        seed=args.seed if args.deterministic else None,
+    previous_run_settings = legacy.set_active_run_settings(
+        _ActiveRunSettings(
+            deterministic=bool(args.deterministic),
+            seed=args.seed if args.deterministic else None,
+        )
     )
     run_started = time.monotonic()
     completed_units = 0
@@ -856,10 +859,12 @@ def run_main_flow(
             style="info",
         )
         try:
-            legacy._ACTIVE_CONTAINER_POOL = _EvalContainerPool(
-                size=pool_size,
-                execution=execution_config,
-                workdirs_host=artifacts_root / "workdirs",
+            legacy.set_active_container_pool(
+                _EvalContainerPool(
+                    size=pool_size,
+                    execution=execution_config,
+                    workdirs_host=artifacts_root / "workdirs",
+                )
             )
             display.add_event(
                 message=f"Container pool: {pool_size} container(s) ready",
@@ -980,9 +985,9 @@ def run_main_flow(
                     ):
                         pass
     finally:
-        if legacy._ACTIVE_CONTAINER_POOL is not None:
-            legacy._ACTIVE_CONTAINER_POOL.shutdown()
-            legacy._ACTIVE_CONTAINER_POOL = None
+        active_pool = legacy.set_active_container_pool(None)
+        if active_pool is not None:
+            active_pool.shutdown()
         if legacy._ACTIVE_ONLINE_POLICY_CONTROLLER is not None:
             try:
                 legacy._ACTIVE_ONLINE_POLICY_CONTROLLER.close()
@@ -991,7 +996,6 @@ def run_main_flow(
                     message=f"Online adaptive policy close warning: {type(exc).__name__}: {exc}",
                     style="warning",
                 )
-            legacy._ACTIVE_ONLINE_POLICY_CONTROLLER = None
         if legacy._ACTIVE_BUDGET_POLICY_CONTROLLER is not None:
             try:
                 legacy._ACTIVE_BUDGET_POLICY_CONTROLLER.close()
@@ -1002,9 +1006,9 @@ def run_main_flow(
                     ),
                     style="warning",
                 )
-            legacy._ACTIVE_BUDGET_POLICY_CONTROLLER = None
+        legacy.set_active_policy_controllers(online=None, budget=None)
         _close_run_results_io()
-        legacy._ACTIVE_RUN_SETTINGS = previous_run_settings
+        legacy.set_active_run_settings(previous_run_settings)
         set_active_execution_config(previous_execution_config)
 
     total_elapsed = time.monotonic() - run_started
