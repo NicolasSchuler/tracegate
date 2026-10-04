@@ -13,6 +13,7 @@ import pytest
 
 from evals.importers import debugbench_importer, fixup_expected_exceptions, pyresbugs_importer
 from evals.importers.base import (
+    RuffFormatError,
     _extract_import_roots_fallback,
     _extract_import_roots_from_ast,
     count_patch_lines,
@@ -1348,31 +1349,51 @@ class TestRuffFormat:
     """Lines 240-242: ruff_format failure paths."""
 
     def test_returns_formatted_code_on_success(self) -> None:
-        """Happy path: ruff formats correctly (if ruff available)."""
-        code = "x=1\n"
-        result = ruff_format(code)
-        # Either ruff formatted it or returned original (if ruff missing).
-        assert isinstance(result, str)
-        assert len(result) > 0
+        """Happy path: the ruff installed with this interpreter formats the code."""
+        assert ruff_format("x=1\n") == "x = 1\n"
 
-    def test_returns_original_on_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 240: FileNotFoundError when ruff is not installed."""
-
-        def fake_run(*args: Any, **kwargs: Any) -> None:
-            raise FileNotFoundError("ruff not found")
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        code = "x=1\n"
+    def test_formatting_ignores_the_working_directory_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DAT-15: a pyproject.toml in the cwd used to change imported case content."""
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.ruff]\nline-length = 20\n[tool.ruff.format]\nquote-style = 'single'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        code = 'value = call_something("a", "b", "c")\n'
         assert ruff_format(code) == code
 
-    def test_returns_original_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 240: TimeoutExpired when ruff hangs."""
+    def test_raises_when_ruff_cannot_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DAT-15: a missing ruff used to return unformatted code silently."""
 
         def fake_run(*args: Any, **kwargs: Any) -> None:
-            raise subprocess.TimeoutExpired(cmd="ruff", timeout=10)
+            raise FileNotFoundError("python not found")
 
         monkeypatch.setattr(subprocess, "run", fake_run)
-        code = "y = 2\n"
+        with pytest.raises(RuffFormatError):
+            ruff_format("x=1\n")
+
+    def test_raises_when_ruff_module_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=["python"], returncode=1, stdout="", stderr="No module named ruff"
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(RuffFormatError, match="not installed"):
+            ruff_format("x=1\n")
+
+    def test_raises_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_run(*args: Any, **kwargs: Any) -> None:
+            raise subprocess.TimeoutExpired(cmd="ruff", timeout=30)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(RuffFormatError):
+            ruff_format("y = 2\n")
+
+    def test_unparsable_code_is_returned_unchanged(self) -> None:
+        code = "def broken(:\n    pass\n"
         assert ruff_format(code) == code
 
     def test_returns_original_on_nonzero_returncode(self, monkeypatch: pytest.MonkeyPatch) -> None:

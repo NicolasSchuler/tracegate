@@ -205,18 +205,45 @@ def has_external_deps(code: str, *, allowed_externals: set[str] | None = None) -
     return any(root not in allowed for root in roots)
 
 
+class RuffFormatError(RuntimeError):
+    """ruff could not run, so imported case content would depend on the environment."""
+
+
+# The repository's settings, given explicitly so neither the working directory's
+# pyproject.toml nor the ruff on PATH changes imported case content (DAT-15).
+_RUFF_FORMAT_ARGS = (
+    "-m",
+    "ruff",
+    "format",
+    "--isolated",
+    "--config",
+    "line-length = 100",
+    "--config",
+    'target-version = "py310"',
+    "--stdin-filename=buggy.py",
+    "-",
+)
+
+
 def ruff_format(code: str) -> str:
-    """Format Python code through ruff, returning original on failure."""
+    """Format Python code with the ruff installed alongside this interpreter.
+
+    Code ruff can't parse (exit code 2, for example a syntax-error case) is returned
+    unchanged. A missing ruff or a timeout raises :class:`RuffFormatError` instead of
+    silently skipping formatting (DAT-15).
+    """
     try:
         result = subprocess.run(
-            ["ruff", "format", "--stdin-filename=buggy.py"],
+            [sys.executable, *_RUFF_FORMAT_ARGS],
             input=code,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuffFormatError(f"ruff format could not run: {exc}") from exc
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout
+    if "No module named ruff" in result.stderr:
+        raise RuffFormatError(f"ruff is not installed for {sys.executable}")
     return code
