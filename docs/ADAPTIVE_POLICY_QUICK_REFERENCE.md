@@ -18,7 +18,8 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
    ▼
 2. SCALE FEATURES (profile "v1" / "percentile_v1" / "none")
    • Count features: log1p normalization
-   • `percentile_v1`: fit runtime caps from recent history, else fall back to `v1`
+   • `percentile_v1`: fit each count-like cap once from its first 30 observations, then
+     freeze it (POL-09); `v1` caps until then
    • Clip all to [-4, 4]
    ▼
 3. DECIDE ACTION

@@ -38,6 +38,7 @@ from .eval_types import (
 )
 from .policy_feature_scaling import (
     INTERACTION_POLICY_FEATURE_SCALING_PROFILE,
+    interaction_features,
     normalize_feature_scaling_profile,
 )
 
@@ -257,15 +258,7 @@ def _adaptive_online_feature_vector(
         normalize_feature_scaling_profile(feature_scaling_profile)
         == INTERACTION_POLICY_FEATURE_SCALING_PROFILE
     ):
-        features["attempt_frac_x_stagnation_streak"] = float(
-            features["attempt_frac"] * features["stagnation_streak"]
-        )
-        features["pregate_score_x_snapshot_available"] = float(
-            features["pregate_score"] * features["snapshot_available"]
-        )
-        features["helper_calls_used_x_helper_low_yield_ratio"] = float(
-            features["helper_calls_used"] * features["helper_low_yield_ratio"]
-        )
+        features.update(interaction_features(features))
     return features
 
 

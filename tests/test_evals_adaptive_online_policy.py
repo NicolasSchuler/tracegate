@@ -829,9 +829,13 @@ def test_online_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
         decision_after_threshold.feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # POL-09: the cap is frozen once MIN_SAMPLES observations exist, so the history stops
+    # growing (it used to keep every observation and refit the cap on each decision).
+    frozen_cap = state.feature_scaling_caps["helper_calls_used"]
+    assert frozen_cap == decision_after_threshold.feature_scaling_caps["helper_calls_used"]
     assert (
         len(state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
     reloaded = AdaptiveOnlinePolicyController(config)
@@ -841,8 +845,9 @@ def test_online_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
     assert reloaded.load_error is None
     assert (
         len(reloaded_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
+    assert reloaded_state.feature_scaling_caps == {"helper_calls_used": frozen_cap}
 
 
 def test_online_policy_linucb_scores_match_known_ucb_values(tmp_path) -> None:

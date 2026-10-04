@@ -48,6 +48,11 @@ from evals.eval_types import (
     AdaptiveBudgetControlProfile,
     PreGateResult,
 )
+from evals.policy_feature_scaling import (
+    INTERACTION_FEATURE_FACTORS,
+    is_count_like_feature,
+    scale_feature_mapping,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -336,9 +341,21 @@ class TestOnlineFeatureVector:
                 feature_scaling_profile="v1_interactions",
             )
         )
-        assert features["attempt_frac_x_stagnation_streak"] == pytest.approx(1.5)
-        assert features["pregate_score_x_snapshot_available"] == pytest.approx(0.5)
-        assert features["helper_calls_used_x_helper_low_yield_ratio"] == pytest.approx(3.0)
+        # POL-19: products of v1-scaled factors, under names that aren't count-like. They
+        # used to multiply raw values (1.5, 0.5, 3.0) as attempt_frac_x_stagnation_streak,
+        # pregate_score_x_snapshot_available and helper_calls_used_x_helper_low_yield_ratio.
+        stagnation_scaled = math.log1p(2) / math.log1p(10)
+        helper_calls_scaled = math.log1p(4) / math.log1p(8)
+        assert features["ix_attempt_frac_x_stagnation"] == pytest.approx(0.75 * stagnation_scaled)
+        assert features["ix_pregate_score_x_snapshot_available"] == pytest.approx(0.5)
+        assert features["ix_helper_calls_used_x_low_yield_ratio"] == pytest.approx(
+            helper_calls_scaled * 0.75
+        )
+        assert "attempt_frac_x_stagnation_streak" not in features
+        scaled = scale_feature_mapping(features, profile="v1_interactions")
+        for name in INTERACTION_FEATURE_FACTORS:
+            assert not is_count_like_feature(name)
+            assert scaled[name] == features[name]
 
     def test_bug_source_imported(self) -> None:
         features_hc = _adaptive_online_feature_vector(

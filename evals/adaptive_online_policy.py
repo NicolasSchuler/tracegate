@@ -59,9 +59,10 @@ from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     POLICY_FEATURE_SCALING_PROFILES,
-    PercentileScaler,
     is_percentile_feature_scaling_profile,
     normalize_feature_scaling_profile,
+    percentile_scale,
+    prune_percentile_state,
     scale_feature_mapping,
 )
 from .seed_derivation import derive_seed
@@ -339,21 +340,14 @@ class AdaptiveOnlinePolicyController:
                 self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
         return result
 
-    def _record_feature_scaling_history(self, *, cleaned_features: Mapping[str, float]) -> None:
-        """Append raw feature observations used by percentile scaling."""
-        if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
-            return
-        for key, value in cleaned_features.items():
-            history = list(self._state.feature_scaling_history.get(str(key), []))
-            history.append(float(value))
-            if len(history) > DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:
-                history = history[-DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:]
-            self._state.feature_scaling_history[str(key)] = history
-
     def _scale_features(
         self, *, cleaned_features: Mapping[str, float]
     ) -> tuple[dict[str, float], dict[str, float], dict[str, int], bool]:
-        """Scale features and expose percentile-cap telemetry when enabled."""
+        """Scale features; under ``percentile_v1`` also collect history and freeze caps.
+
+        Each count-like feature's cap is fitted once from its first observations and then
+        kept (POL-09); see ``policy_feature_scaling.percentile_scale``.
+        """
         if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
             return (
                 scale_feature_mapping(
@@ -364,24 +358,17 @@ class AdaptiveOnlinePolicyController:
                 {},
                 False,
             )
-        history = {
-            str(name): [float(item) for item in values]
-            for name, values in self._state.feature_scaling_history.items()
-        }
-        scaler = PercentileScaler(min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES)
-        scaler.fit(history)
-        caps = scaler.caps
-        history_sizes = {str(name): len(values) for name, values in history.items()}
-        self._state.feature_scaling_caps = {str(name): float(value) for name, value in caps.items()}
-        fallback_to_v1 = any(
-            history_sizes.get(str(name), 0) < DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
-            for name in cleaned_features
+        scaled = percentile_scale(
+            cleaned_features,
+            history=self._state.feature_scaling_history,
+            caps=self._state.feature_scaling_caps,
+            min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
         )
         return (
-            scaler.scale(cleaned_features, profile="v1"),
-            {str(name): float(value) for name, value in caps.items()},
-            history_sizes,
-            bool(fallback_to_v1),
+            scaled.values,
+            dict(scaled.caps),
+            dict(scaled.history_sizes),
+            scaled.fallback_to_v1,
         )
 
     def _normalize_available_actions(
@@ -468,7 +455,6 @@ class AdaptiveOnlinePolicyController:
                 feature_scaling_history_sizes,
                 feature_scaling_fallback_to_v1,
             ) = self._scale_features(cleaned_features=cleaned_features)
-            self._record_feature_scaling_history(cleaned_features=cleaned_features)
             self._ensure_feature_state(cleaned_features=scaled_features)
             decision_index = self._state.decisions + 1
             mode = self.config.mode
@@ -986,6 +972,11 @@ class AdaptiveOnlinePolicyController:
                 for key, value in feature_scaling_caps_raw.items():
                     if isinstance(value, (int, float)) and np.isfinite(float(value)):
                         feature_scaling_caps[str(key)] = float(value)
+            feature_scaling_history, feature_scaling_caps = prune_percentile_state(
+                feature_scaling_history,
+                feature_scaling_caps,
+                min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
+            )
             if dim <= 0:
                 self._state = LinUCBState(
                     feature_names=[],

@@ -512,9 +512,11 @@ def test_budget_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
         decision_after_threshold.feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # POL-09: the cap is frozen once MIN_SAMPLES observations exist, so the history stops
+    # growing (it used to keep every observation and refit the cap on each decision).
     assert (
         len(state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
     reloaded = AdaptiveBudgetPolicyController(config)
@@ -524,8 +526,9 @@ def test_budget_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
     assert reloaded.load_error is None
     assert (
         len(reloaded_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
+    assert reloaded_state.feature_scaling_caps == state.feature_scaling_caps
 
 
 def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history(
@@ -592,13 +595,14 @@ def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history
         decision_after_threshold.family_feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # Frozen at MIN_SAMPLES observations (POL-09); the history used to keep growing.
     assert (
         len(gate_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
     assert (
         len(family_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
 
@@ -1257,11 +1261,12 @@ def test_controller_architecture_property(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _record_feature_scaling_history — history exceeds limit (line 476)
+# percentile_v1 history — bounded by the freeze, and only for count-like features
+# (POL-09; this test used to check truncation at the 256-entry limit)
 # ---------------------------------------------------------------------------
 
 
-def test_feature_scaling_history_truncated_at_limit(tmp_path) -> None:
+def test_feature_scaling_history_is_bounded_and_count_like_only(tmp_path) -> None:
     from evals.policy_feature_scaling import (
         DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT,
     )
@@ -1278,12 +1283,17 @@ def test_feature_scaling_history_truncated_at_limit(tmp_path) -> None:
     ctrl = AdaptiveBudgetPolicyController(cfg)
     for i in range(DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT + 10):
         ctrl.decide(
-            feature_values={"x": float(i)},
+            feature_values={"x": float(i), "stagnation_streak": float(i % 7)},
             default_action=ACTION_KEEP_BUDGET,
         )
     state = ctrl.state
     ctrl.close()
-    assert len(state.feature_scaling_history["x"]) <= DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT
+    assert "x" not in state.feature_scaling_history
+    assert "x" not in state.feature_scaling_caps
+    assert (
+        len(state.feature_scaling_history["stagnation_streak"])
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
+    )
 
 
 # ---------------------------------------------------------------------------

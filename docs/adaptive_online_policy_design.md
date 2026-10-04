@@ -152,7 +152,10 @@ The budget policy uses the same runtime modes as helper policy:
 - Feature scaling supports:
   - `v1`: fixed log-scaled caps
   - `none`: raw features
-  - `percentile_v1`: runtime percentile-fitted caps with safe fallback to `v1` until enough samples exist
+  - `percentile_v1`: each count-like feature's cap is fitted once from its first 30
+    observations and then frozen (POL-09); until then it uses the `v1` cap
+  - `v1_interactions`: `v1` plus three `ix_*` interaction features built from `v1`-scaled
+    factors (POL-19)
 
 ## Persistence and observability
 - State JSON:

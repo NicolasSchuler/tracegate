@@ -442,14 +442,27 @@ _V1_FINAL_CLIP = 4.0
 ```
 
 ### Percentile Scaler
-**Class**: `PercentileScaler` (policy_feature_scaling.py:140-195)
+**Function**: `percentile_scale()` in `policy_feature_scaling.py` (used by both controllers
+under `percentile_v1`)
 
-Optionally learns caps from historical data:
+Each count-like feature collects observations until it has `min_samples` (30), then its
+95th-percentile cap is fitted once and frozen, so a raw value keeps its scaled value for the
+rest of the run (POL-09). Until then the feature uses its `v1` cap. Only count-like features
+are log-scaled, so only they get history and caps; an all-zero history keeps the `v1` cap.
+States saved before POL-09 are pruned to that layout on load. `PercentileScaler` (fit, then
+scale) remains for offline use:
 ```python
 scaler = PercentileScaler(percentile=95.0, min_samples=30)
 scaler.fit({"stagnation_streak": [1, 2, 3, ...], ...})
 scaled = scaler.scale(raw_features, profile="v1")
 ```
+
+### Interaction Features (`v1_interactions`)
+`interaction_features()` adds `ix_attempt_frac_x_stagnation`,
+`ix_pregate_score_x_snapshot_available` and `ix_helper_calls_used_x_low_yield_ratio`:
+products of the `v1`-scaled factors. They used to multiply raw values, and
+`attempt_frac_x_stagnation_streak` was log-scaled again because of its `_streak` suffix
+(POL-19).
 
 ---
 
