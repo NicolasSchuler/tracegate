@@ -309,3 +309,54 @@ def test_derive_seed_is_stable_and_separates_streams() -> None:
     assert derive_seed(1, "helper") != derive_seed(1, "budget")
     assert derive_seed(1, "helper") != derive_seed(2, "helper")
     assert 0 <= derive_seed(123, "x", 4) < 2**63
+
+
+def test_bas01_baseline_case_support_counts_convertible_cases(tmp_path: Path) -> None:
+    from baselines.ldb.adapter import LDBAdapter
+    from evals.patchers.baseline_patcher import baseline_case_support
+
+    simple = tmp_path / "simple"
+    simple.mkdir()
+    (simple / "buggy.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (simple / "test_buggy.py").write_text(
+        "from buggy import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        encoding="utf-8",
+    )
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "buggy.py").write_text("def add(a, b:\n", encoding="utf-8")
+    (broken / "test_buggy.py").write_text("from buggy import add\n", encoding="utf-8")
+
+    support = baseline_case_support(LDBAdapter(), [("simple", simple), ("broken", broken)])
+    assert support == {
+        "baseline": "ldb",
+        "total_cases": 2,
+        "convertible_cases": 1,
+        "incompatible_reasons": {"buggy_syntax_error": 1},
+    }
+
+
+def test_bas01_condition_summary_excludes_unsupported_cases() -> None:
+    from evals.analyze_results import _derive_case_condition_rows, _summarize_bucket
+
+    def _record(case_id: str, success: bool, **patch_meta: Any) -> dict[str, Any]:
+        return {
+            "run_id": "r",
+            "case_id": case_id,
+            "condition": "ldb",
+            "attempt": 1,
+            "success": success,
+            "patch_meta": patch_meta,
+        }
+
+    rows = _derive_case_condition_rows(
+        {
+            ("r", "c1", "ldb"): [_record("c1", True)],
+            ("r", "c2", "ldb"): [
+                _record("c2", False, baseline_supported=False, compatibility_reason="x")
+            ],
+        }
+    )
+    summary = _summarize_bucket(rows)["ldb"]
+    assert summary["success_rate"] == 1.0
+    assert summary["baseline_unsupported_cases"] == 1

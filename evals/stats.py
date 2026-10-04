@@ -452,6 +452,8 @@ def _extract_pairs(
     """
     by_key: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
+        if row.get("baseline_supported") is False:
+            continue  # BAS-01 / D3: not a comparable outcome
         run_id = str(row.get("run_id", ""))
         case_id = str(row.get("case_id", ""))
         condition = str(row.get("condition", ""))

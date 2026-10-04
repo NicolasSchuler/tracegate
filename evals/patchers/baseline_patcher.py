@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -561,6 +562,39 @@ def _infer_repair_contract(result: BaselineResult) -> tuple[str, list[str]]:
         return "single_file", [target_path]
 
     return "unknown", []
+
+
+def baseline_case_support(
+    adapter: BaselineAdapter, case_dirs: Sequence[tuple[str, Path]]
+) -> dict[str, Any]:
+    """Count the cases *adapter* can convert (BAS-01, D3).
+
+    Recorded in run metadata so a baseline's comparison states its N explicitly; the
+    incompatible cases are excluded from its success rate and paired statistics.
+    """
+    reasons: dict[str, int] = {}
+    convertible = 0
+    for case_id, case_dir in case_dirs:
+        try:
+            adapter.convert_case(
+                case_dir,
+                case_context=BaselineCaseContext(
+                    case_id=case_id, python_args=("-m", "pytest", "-q"), timeout_sec=0
+                ),
+            )
+        except BaselineCaseIncompatibleError as exc:
+            reasons[exc.reason] = reasons.get(exc.reason, 0) + 1
+        except Exception as exc:  # converter bug: count it, don't hide it
+            key = f"conversion_error:{type(exc).__name__}"
+            reasons[key] = reasons.get(key, 0) + 1
+        else:
+            convertible += 1
+    return {
+        "baseline": adapter.name,
+        "total_cases": len(case_dirs),
+        "convertible_cases": convertible,
+        "incompatible_reasons": dict(sorted(reasons.items())),
+    }
 
 
 class BaselinePatcher(Patcher):

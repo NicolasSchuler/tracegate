@@ -664,6 +664,12 @@ def _derive_case_condition_rows(
         baseline_output_contract = _baseline_patch_meta_last_str(ordered, "output_contract")
         baseline_upstream_commit = _baseline_patch_meta_last_str(ordered, "upstream_commit")
         is_external_baseline = _is_external_baseline_condition(condition)
+        # BAS-01 / D3: a case the baseline can't represent is not a baseline failure.
+        baseline_supported = not any(
+            isinstance(item.get("patch_meta"), dict)
+            and item["patch_meta"].get("baseline_supported") is False
+            for item in ordered
+        )
         baseline_attempt_rollup = (
             _baseline_attempt_rollup(ordered) if is_external_baseline else {"attempt_count": 0}
         )
@@ -819,6 +825,12 @@ def _derive_case_condition_rows(
                 "retry_gate_attempts": retry_gate_attempts,
                 "retry_gate_blocks": retry_gate_blocks,
                 "patch_attempts": patch_attempts,
+                "baseline_supported": baseline_supported,
+                "baseline_compatibility_reason": (
+                    None
+                    if baseline_supported
+                    else _baseline_patch_meta_last_str(ordered, "compatibility_reason")
+                ),
                 "test_touch_attempts": test_touch_attempts,
                 "test_touch_attempt_rate": (
                     (test_touch_attempts / patch_attempts) if patch_attempts > 0 else None
@@ -1237,7 +1249,11 @@ def _summarize_bucket(
         by_condition[str(row["condition"])].append(row)
 
     out: dict[str, Any] = {}
-    for condition, condition_rows in sorted(by_condition.items()):
+    for condition, all_condition_rows in sorted(by_condition.items()):
+        # BAS-01 / D3: baselines are scored on the cases they can represent; the excluded
+        # count is reported so the comparison's N stays explicit.
+        condition_rows = [row for row in all_condition_rows if row.get("baseline_supported", True)]
+        baseline_unsupported_cases = len(all_condition_rows) - len(condition_rows)
         successes = sum(1 for row in condition_rows if bool(row["success"]))
         cases = len(condition_rows)
         success_rate = (successes / cases) if cases else 0.0
@@ -1564,6 +1580,7 @@ def _summarize_bucket(
             "cases": cases,
             "successes": successes,
             "success_rate": success_rate,
+            "baseline_unsupported_cases": baseline_unsupported_cases,
             "median_attempts_to_success": _median(successful_attempts),
             "mean_attempts_to_success": _mean(successful_attempt_values),
             "mean_attempts_when_failed": _mean(failed_attempt_values),

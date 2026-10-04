@@ -46,6 +46,15 @@ decision D1). It fixes which case data any arm may see:
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
   the run-level policy.
 
+## Unsupported cases (BAS-01, decision D3)
+
+A baseline that can't represent a case (for example LDB's converter rejects subprocess-driven,
+class-based or multi-file cases) records `error="case_incompatible"` and
+`baseline_supported=False`. The analysis drops those rows from the baseline's success rate and
+from paired statistics, so the comparison runs on the convertible subset and reports
+`baseline_unsupported_cases`. `run_metadata.baseline_case_support` records `total_cases`,
+`convertible_cases` and `incompatible_reasons` for the run's case selection.
+
 Runs recorded before this contract gave the baselines `case.description`
 (often a root-cause statement or bug-type label) while the native conditions
 never saw it; see the 2026-10-04 review findings before comparing them.
