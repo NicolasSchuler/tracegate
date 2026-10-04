@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,16 +58,34 @@ def _adaptive_optional_int(value: Any) -> int | None:
         return None
 
 
+def _helper_evidence_reached_prompt(
+    *, helper_evidence_ids: Collection[str], prompt_evidence_ids: Collection[str]
+) -> bool:
+    """Whether evidence the helper added was sent again in a later prompt (POL-11)."""
+    added = {str(item) for item in helper_evidence_ids if str(item)}
+    return bool(added & {str(item) for item in prompt_evidence_ids})
+
+
 def _adaptive_online_delayed_rescue_bonus(
     *,
     origin_attempt: int,
     resolved_attempt: int,
     failure_signature_repeat: bool,
-    case_difficulty: str,
-    case_snapshot_dependency: str,
+    helper_evidence_ids: Collection[str],
+    prompt_evidence_ids: Collection[str],
 ) -> float:
+    """Bonus for a helper call followed by a success within the horizon.
+
+    Paid only when evidence the helper added at *origin_attempt* is in the successful
+    attempt's prompt (POL-11); timing alone used to earn up to 0.75. The unused
+    ``case_difficulty`` and ``case_snapshot_dependency`` inputs are gone.
+    """
     horizon_attempts = max(0, int(resolved_attempt) - int(origin_attempt))
     if horizon_attempts <= 0 or horizon_attempts > ADAPTIVE_DELAYED_RESCUE_HORIZON_ATTEMPTS:
+        return 0.0
+    if not _helper_evidence_reached_prompt(
+        helper_evidence_ids=helper_evidence_ids, prompt_evidence_ids=prompt_evidence_ids
+    ):
         return 0.0
     bonus = ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE
     if horizon_attempts == 2:
@@ -657,8 +676,6 @@ def _finalize_adaptive_online_attempt(
     online_policy_features_scaled: dict[str, float],
     helper_decision_reason: str,
     normalized_adaptive_online_policy_mode: str,
-    case_difficulty: str,
-    case_snapshot_dependency: str,
     adaptive_progress_made: bool,
     adaptive_progress_score: float,
     adaptive_no_progress_streak_current: int,
@@ -848,8 +865,6 @@ def _finalize_adaptive_online_attempt(
                     ),
                 ),
                 failure_signature_repeat=bool(attempt_metadata.get("adaptive_signature_repeat")),
-                case_difficulty=str(case_difficulty or ""),
-                case_snapshot_dependency=str(case_snapshot_dependency or ""),
                 enable_auxiliary_rewards=enable_auxiliary_rewards,
                 aux_pytest_fail_reduction=aux_pytest_fail_reduction,
                 aux_evidence_novelty_ratio=aux_evidence_novelty_ratio,

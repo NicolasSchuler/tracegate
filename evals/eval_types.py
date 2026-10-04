@@ -1461,8 +1461,6 @@ class PendingAdaptiveOnlineCredit:
     helper_outcome: str
     progress_state: AdaptiveProgressState
     failure_signature_repeat: bool
-    case_difficulty: str
-    case_snapshot_dependency: str
     reward_success_hint_scale: float = ADAPTIVE_LOCAL_REWARD_SUCCESS_HINT
     reward_progress_hint_scale: float = ADAPTIVE_LOCAL_REWARD_PROGRESS_HINT_SCALE
     reward_stagnation_penalty_scale: float = ADAPTIVE_LOCAL_REWARD_STAGNATION_PENALTY_SCALE

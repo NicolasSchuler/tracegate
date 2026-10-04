@@ -145,6 +145,10 @@ reward = success_hint (if success)
        + delayed_rescue_bonus (if resolved later)
 ```
 
+The delayed rescue bonus goes to the newest helper call one or two attempts before a success,
+and only when evidence that call added is sent again in the successful attempt's prompt
+(POL-11); otherwise the credit resolves as `local_only_evidence_not_in_success_prompt`.
+
 **Default parameters** (eval_types.py):
 - λ_tokens = 0.08
 - μ_latency = 0.05

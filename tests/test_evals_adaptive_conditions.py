@@ -6447,21 +6447,21 @@ def test_adaptive_progress_signal_uses_weighted_components_and_reason_priority()
 
 
 def test_adaptive_online_delayed_rescue_bonus_uses_horizon_and_context_multiplier() -> None:
-    # case_snapshot_dependency no longer triggers the context multiplier;
-    # only failure_signature_repeat does.
+    # Only failure_signature_repeat triggers the context multiplier, and the helper's
+    # evidence must reach the successful prompt (POL-11).
     assert run_eval._adaptive_online_delayed_rescue_bonus(
         origin_attempt=1,
         resolved_attempt=2,
         failure_signature_repeat=False,
-        case_difficulty="easy",
-        case_snapshot_dependency="required",
+        helper_evidence_ids=["file:helper.py"],
+        prompt_evidence_ids=["file:helper.py"],
     ) == pytest.approx(0.5)
     assert run_eval._adaptive_online_delayed_rescue_bonus(
         origin_attempt=1,
         resolved_attempt=3,
         failure_signature_repeat=False,
-        case_difficulty="easy",
-        case_snapshot_dependency="none",
+        helper_evidence_ids=["file:helper.py"],
+        prompt_evidence_ids=["file:helper.py", "frame:0"],
     ) == pytest.approx(0.25)
 
 
@@ -6472,18 +6472,49 @@ def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_next_success(
         tmp_path,
         monkeypatch,
         patch_outcomes=("no_diff", "fix"),
-        adaptive_max_helper_calls=1,
+        adaptive_max_helper_calls=2,
         k=2,
         run_id="run-adaptive-delayed-credit",
     )
 
     assert [bool(record["success"]) for record in records] == [False, True]
-    assert patcher.request_calls == 1
+    assert patcher.request_calls == 2
     first_meta = records[0]["attempt_metadata"]
+    # The first helper's evidence is sent again in the successful prompt (POL-11).
+    assert set(records[0]["patch_meta"]["evidence_ids_new"]) & set(
+        records[1]["patch_meta"]["evidence_ids_reused"]
+    )
     assert first_meta["adaptive_online_reward_scope"] == "helper_credit_v2"
     assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == pytest.approx(0.5)
     assert first_meta["adaptive_online_reward_credit_horizon_attempts"] == 1
     assert first_meta["adaptive_online_reward_credit_resolution_reason"] == "future_success_attempt"
+
+    event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(event_lines) == 2
+
+
+def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent(
+    tmp_path, monkeypatch
+) -> None:
+    """POL-11: with one helper call, the success at attempt 2 never sees the helper's
+    evidence. This scenario used to pay the 0.5 bonus on timing alone."""
+    records, patcher, events_path = _run_adaptive_delayed_credit_case(
+        tmp_path,
+        monkeypatch,
+        patch_outcomes=("no_diff", "fix"),
+        adaptive_max_helper_calls=1,
+        k=2,
+        run_id="run-adaptive-delayed-credit-unused",
+    )
+
+    assert [bool(record["success"]) for record in records] == [False, True]
+    assert patcher.request_calls == 1
+    first_meta = records[0]["attempt_metadata"]
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
 
     event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(event_lines) == 1
@@ -6522,7 +6553,7 @@ def test_adaptive_llm_discretion_delayed_credit_sink_emits_resolved_case_end_met
     assert len(event_lines) == 1
 
 
-def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_horizon_two_success(
+def test_adaptive_llm_discretion_horizon_two_success_without_resent_evidence_earns_no_bonus(
     tmp_path, monkeypatch
 ) -> None:
     records, patcher, events_path = _run_adaptive_delayed_credit_case(
@@ -6538,9 +6569,13 @@ def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_horizon_two_s
     assert [bool(record["success"]) for record in records] == [False, False, True]
     assert patcher.request_calls == 1
     first_meta = records[0]["attempt_metadata"]
-    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == pytest.approx(0.25)
-    assert first_meta["adaptive_online_reward_credit_horizon_attempts"] == 2
-    assert first_meta["adaptive_online_reward_credit_resolution_reason"] == "future_success_attempt"
+    # Two attempts later, without another helper call, the evidence isn't in the
+    # successful prompt, so no bonus (POL-11; this used to pay 0.25 on timing alone).
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
 
     event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(event_lines) == 1
@@ -6670,8 +6705,6 @@ def test_finalize_adaptive_policy_uses_recomputed_progress_metadata() -> None:
         "online_policy_features_scaled": {},
         "helper_decision_reason": "llm_discretion_pending",
         "normalized_adaptive_online_policy_mode": "on",
-        "case_difficulty": "easy",
-        "case_snapshot_dependency": "helpful",
         # Deliberately stale values: should be overwritten from attempt_metadata.
         "adaptive_progress_made": True,
         "adaptive_progress_score": 1.0,

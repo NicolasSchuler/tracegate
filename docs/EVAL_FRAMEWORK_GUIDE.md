@@ -227,7 +227,7 @@ reward = success_hint
 | token_penalty | λ_tokens × (tokens / token_scale) | Discourage token usage |
 | latency_penalty | μ_latency × (wall_sec / latency_scale) | Discourage slow calls |
 | stagnation_penalty | κ_stagnation × min(1, no_progress_streak/3) × SCALE | Discourage repeated failures |
-| delayed_rescue_bonus | Deferred credit from later rescue | Exploit-later reward |
+| delayed_rescue_bonus | Deferred credit when a success within two attempts re-sends evidence the helper added (POL-11) | Exploit-later reward |
 
 **Default Parameters** (eval_types.py):
 - λ_tokens = 0.08 (token scaling)
