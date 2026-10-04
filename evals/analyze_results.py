@@ -214,7 +214,10 @@ def main(argv: list[str] | None = None) -> int:
         "--aggregation",
         choices=["per_run", "majority_vote", "any_success"],
         default="per_run",
-        help="Aggregation strategy for multi-run (k>1) analysis.",
+        help=(
+            "How repeated runs of a case form one paired observation: per_run (one run "
+            "per case; refuses several), majority_vote (ties are left out) or any_success."
+        ),
     )
     parser.add_argument(
         "--bootstrap-seed",
@@ -6307,84 +6310,22 @@ def _run_statistical_analysis_pair(
     pair_b: str,
     seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
-    """Run statistical analysis for one selected condition pair."""
-    from evals.stats import (
-        analyze_paired_results,
-        any_success_aggregation,
-        majority_vote_aggregation,
-    )
+    """Run statistical analysis for one selected condition pair, case as the unit.
 
-    if aggregation in ("majority_vote", "any_success"):
-        # Group rows by (case_id, condition) across runs.
-        from evals.stats import BinaryPair
-
-        by_case: dict[str, list[BinaryPair]] = {}
-        case_meta: dict[str, dict[str, str]] = {}
-        # First, group by (run_id, case_id) to get matched pairs per run.
-        run_case_map: dict[str, dict[str, dict[str, Any]]] = defaultdict(lambda: defaultdict(dict))
-        for row in rows:
-            run_id = str(row.get("run_id", ""))
-            case_id = str(row.get("case_id", ""))
-            condition = str(row.get("condition", ""))
-            run_case_map[run_id][case_id][condition] = row
-            if case_id not in case_meta:
-                case_meta[case_id] = {
-                    "category": str(row.get("category", "unknown")),
-                    "run_id": run_id,
-                }
-
-        # Build per-case lists of (A, B) pairs across runs.
-        for cases in run_case_map.values():
-            for case_id, conditions in cases.items():
-                a = conditions.get(pair_a)
-                b = conditions.get(pair_b)
-                if a is not None and b is not None:
-                    pair: BinaryPair = (bool(a.get("success")), bool(b.get("success")))
-                    by_case.setdefault(case_id, []).append(pair)
-
-        if aggregation == "majority_vote":
-            aggregated_pairs = majority_vote_aggregation(by_case)
-        else:
-            aggregated_pairs = any_success_aggregation(by_case)
-
-        # Rebuild rows from aggregated pairs for analyze_paired_results.
-        aggregated_rows: list[dict[str, Any]] = []
-        for case_id, pair_val in zip(sorted(by_case), aggregated_pairs, strict=True):
-            meta = case_meta.get(case_id, {})
-            aggregated_rows.append(
-                {
-                    "run_id": "aggregated",
-                    "case_id": case_id,
-                    "condition": pair_a,
-                    "category": meta.get("category", "unknown"),
-                    "success": pair_val[0],
-                }
-            )
-            aggregated_rows.append(
-                {
-                    "run_id": "aggregated",
-                    "case_id": case_id,
-                    "condition": pair_b,
-                    "category": meta.get("category", "unknown"),
-                    "success": pair_val[1],
-                }
-            )
-        result = analyze_paired_results(
-            aggregated_rows,
-            condition_a=pair_a,
-            condition_b=pair_b,
-            seed=seed,
-        )
-        result["aggregation"] = aggregation
-        return result
+    ``per_run`` refuses inputs with several runs of a case instead of pooling them as
+    independent pairs (STA-02); ``majority_vote`` and ``any_success`` aggregate a
+    case's runs first.
+    """
+    from evals.stats import analyze_paired_results
 
     result = analyze_paired_results(
         rows,
         condition_a=pair_a,
         condition_b=pair_b,
         seed=seed,
+        run_aggregation=aggregation,
     )
-    result["aggregation"] = "per_run"
+    result["aggregation"] = aggregation
     return result
 
 

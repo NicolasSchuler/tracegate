@@ -268,7 +268,6 @@ def test_sta01_missing_token_usage_is_none_not_zero() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="STA-02")
 def test_sta02_repeated_runs_do_not_inflate_significance() -> None:
     from evals.stats import analyze_paired_results
 

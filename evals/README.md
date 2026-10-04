@@ -1582,10 +1582,12 @@ The `--stats` flag adds:
 - **Power report**: Post-hoc power assessment to gauge result trustworthiness.
 - **Pairwise condition matrix**: always reports pairwise A/B summaries for all conditions in the input.
 
-For multi-run (k>1) analysis, use `--aggregation`:
+For multi-run (k>1) analysis, use `--aggregation`. The case is the unit: each case gives one
+paired observation, and the default `per_run` refuses input with several runs of a case
+instead of counting them as independent pairs (STA-02).
 
 ```bash
-# Majority vote: case succeeds if >50% of runs succeed
+# Majority vote: case succeeds if >50% of runs succeed; an exact tie leaves the case out
 uv run python -m evals.analyze_results evals/results/*.jsonl --stats --aggregation majority_vote
 
 # Any success: case succeeds if any run succeeds

@@ -639,27 +639,70 @@ class TestAnalyzeWithCategories:
         result = analyze_paired_results(rows, seed=42, n_bootstrap=100, condition_b="cot_repair")
         assert result["n_pairs"] == 1
 
-    def test_empty_cat_pairs_continue(self, monkeypatch) -> None:
-        """When _extract_pairs returns a category with an empty list, it is skipped (line 353)."""
-        import evals.stats as stats_mod
+    def test_per_category_holm_is_always_present(self) -> None:
+        rows = [
+            {"run_id": "r1", "case_id": "c1", "condition": "a", "category": "x", "success": True},
+            {"run_id": "r1", "case_id": "c1", "condition": "b", "category": "x", "success": False},
+        ]
+        result = analyze_paired_results(
+            rows, seed=42, n_bootstrap=50, condition_a="a", condition_b="b"
+        )
+        assert set(result["per_category"]) == {"x"}
+        assert set(result["holm_bonferroni"]) == {"x"}
 
-        pairs = [(True, False), (False, True)]
-        categories = {"real_cat": [(True, False)], "empty_cat": []}
 
-        monkeypatch.setattr(stats_mod, "_extract_pairs", lambda *a, **kw: (pairs, categories))
-        result = analyze_paired_results([{"dummy": True}], seed=42, n_bootstrap=50, condition_b="b")
-        assert "per_category" in result
-        assert "real_cat" in result["per_category"]
-        assert "empty_cat" not in result["per_category"]
+def _runs(per_case: list[list[tuple[bool, bool]]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for idx, runs in enumerate(per_case):
+        for run_no, (a_ok, b_ok) in enumerate(runs):
+            for condition, ok in (("a", a_ok), ("b", b_ok)):
+                rows.append(
+                    {
+                        "run_id": f"r{run_no}",
+                        "case_id": f"c{idx}",
+                        "condition": condition,
+                        "category": "logic",
+                        "success": ok,
+                    }
+                )
+    return rows
 
-    def test_no_categories_skips_per_category(self, monkeypatch) -> None:
-        """When _extract_pairs returns empty categories dict, per_category is omitted (branch [348,371])."""
-        import evals.stats as stats_mod
 
-        pairs = [(True, False), (False, True)]
-        monkeypatch.setattr(stats_mod, "_extract_pairs", lambda *a, **kw: (pairs, {}))
-        result = analyze_paired_results([{"dummy": True}], seed=42, n_bootstrap=50, condition_b="b")
-        assert "per_category" not in result
+def test_sta02_case_is_the_unit_and_runs_are_averaged_in_the_bootstrap() -> None:
+    rows = _runs([[(False, True), (False, False), (False, True)], [(True, True)] * 3])
+    result = analyze_paired_results(rows, condition_a="a", condition_b="b", n_bootstrap=200)
+    assert result["n_pairs"] == 2
+    assert result["unit"] == "case"
+    assert result["runs_per_case_max"] == 3
+    assert result["b_success_rate"] == pytest.approx((2 / 3 + 1) / 2)
+    assert result["overall_bootstrap_ci"]["uplift"] == pytest.approx((2 / 3) / 2)
+    assert result["overall_mcnemar"]["n_01"] == 1  # the majority of c0's runs favour B
+
+
+def test_sta02_per_run_refuses_repeated_runs_of_a_case() -> None:
+    rows = _runs([[(True, False), (True, False)]])
+    result = analyze_paired_results(
+        rows, condition_a="a", condition_b="b", run_aggregation="per_run"
+    )
+    assert "STA-02" in result["error"]
+    assert result["runs_per_case_max"] == 2
+    single = analyze_paired_results(
+        _runs([[(True, False)]]), condition_a="a", condition_b="b", run_aggregation="per_run"
+    )
+    assert single["n_pairs"] == 1
+
+
+def test_sta14_majority_vote_tie_is_undecided_not_a_failure() -> None:
+    """STA-14: with k=2, one success of two used to count as a failure."""
+    assert majority_vote_aggregation({"c": [(True, True), (False, True)]}) == []
+    assert majority_vote_aggregation({"c": [(True, True), (True, False), (True, True)]}) == [
+        (True, True)
+    ]
+    result = analyze_paired_results(
+        _runs([[(True, True), (False, True)], [(False, True)]]), condition_a="a", condition_b="b"
+    )
+    assert result["tied_cases"] == 1
+    assert result["n_decided_pairs"] == 1
 
 
 def test_sta24_holm_rejects_at_the_exact_boundary() -> None:

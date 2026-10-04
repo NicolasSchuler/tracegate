@@ -382,12 +382,16 @@ def _paired_binary_agreement(
             pl.col("success").filter(pl.col("condition") == condition_b).first().alias("b_success"),
         )
         .drop_nulls(["a_success", "b_success"])
+        # STA-02: each case's majority outcome over its runs; ties are left out.
+        .group_by("case_id")
+        .agg(pl.col("a_success").mean(), pl.col("b_success").mean())
+        .filter((pl.col("a_success") != 0.5) & (pl.col("b_success") != 0.5))
     )
     if paired.is_empty():
         return {"available": False, "error": "No matched A/B pairs found."}
 
-    a_success = paired["a_success"].cast(pl.Int64).to_list()
-    b_success = paired["b_success"].cast(pl.Int64).to_list()
+    a_success = (paired["a_success"] > 0.5).cast(pl.Int64).to_list()
+    b_success = (paired["b_success"] > 0.5).cast(pl.Int64).to_list()
     kappa = float(cohen_kappa_score(a_success, b_success))
     return {
         "available": True,
@@ -521,7 +525,16 @@ def _paired_success_cost_frame(
             .alias("b_tokens"),
         )
         .drop_nulls(["a_success", "b_success"])
-        .sort(["run_id", "case_id"])
+        # STA-02: one row per case. Success becomes the case's success fraction over its
+        # runs (1/0 for a single run) and tokens the mean over runs that reported them.
+        .group_by("case_id")
+        .agg(
+            pl.col("a_success").cast(pl.Float64).mean(),
+            pl.col("b_success").cast(pl.Float64).mean(),
+            pl.col("a_tokens").mean(),
+            pl.col("b_tokens").mean(),
+        )
+        .sort("case_id")
     )
 
 
@@ -581,8 +594,8 @@ def _compute_dual_objective_summary(
 
     a_tokens = covered["a_tokens"].cast(pl.Float64).to_list()
     b_tokens = covered["b_tokens"].cast(pl.Float64).to_list()
-    a_success = covered["a_success"].cast(pl.Int64).to_list()
-    b_success = covered["b_success"].cast(pl.Int64).to_list()
+    a_success = covered["a_success"].cast(pl.Float64).to_list()
+    b_success = covered["b_success"].cast(pl.Float64).to_list()
     token_pairs = list(zip(a_tokens, b_tokens, strict=True))
     token_deltas = paired_numeric_deltas([(a_value, b_value) for a_value, b_value in token_pairs])
     a_successes = sum(a_success)
@@ -620,14 +633,14 @@ def _compute_dual_objective_summary(
     fixed_budget_rows: list[dict[str, Any]] = []
     for threshold in fixed_budget_thresholds:
         a_under = sum(
-            1
+            success
             for success, token_total in zip(a_success, a_tokens, strict=True)
-            if success > 0 and token_total <= float(threshold)
+            if token_total <= float(threshold)
         )
         b_under = sum(
-            1
+            success
             for success, token_total in zip(b_success, b_tokens, strict=True)
-            if success > 0 and token_total <= float(threshold)
+            if token_total <= float(threshold)
         )
         coverage = covered_pairs if covered_pairs > 0 else None
         fixed_budget_rows.append(
@@ -720,7 +733,10 @@ def _paired_metric_deltas(
             pl.col(metric).filter(pl.col("condition") == condition_b).first().alias("b_value"),
         )
         .drop_nulls(["a_value", "b_value"])
-        .sort(["run_id", "case_id"])
+        # STA-02: one observation per case; repeated runs are averaged, not extra pairs.
+        .group_by("case_id")
+        .agg(pl.col("a_value").mean(), pl.col("b_value").mean())
+        .sort("case_id")
     )
     if paired.is_empty():
         return [], [], []
