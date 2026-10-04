@@ -830,9 +830,19 @@ def test_runner_force_patch_recovers_after_apply_failure(tmp_path, monkeypatch) 
 
     assert len(records) == 1
     record = records[0]
-    assert record["note"] == "tests_still_failing"
+    # ATT-07 / D8: a runner marker is not the model's patch, so the attempt stays an
+    # apply failure, the metadata describes the applied marker diff and the marker is
+    # reverted afterwards.
+    assert record["note"] == "patch_apply_failed"
+    assert record["success"] is False
     assert record["patch_meta"]["runner_forced_patch_recovery"] is True
     assert record["patch_meta"]["runner_forced_patch_recovery_target"] == "buggy.py"
+    assert record["patch_meta"]["runner_forced_patch_recovery_reverted"] is True
+    assert record["patch_meta"]["runner_forced_patch_recovery_tests_passed"] is False
+    assert record["patch_meta"]["model_patch_diff_xxh3_128"] != (
+        record["patch_meta"]["patch_diff_xxh3_128"]
+    )
+    assert "llmdebug-force-attempt" not in (workdir / "buggy.py").read_text(encoding="utf-8")
     assert apply_attempts["count"] == 2
 
     recovery_diff = (context_dir / "attempt_01" / "patch_recovery.diff").read_text(encoding="utf-8")

@@ -174,6 +174,7 @@ from evals.eval_patches import (
     _build_runner_forced_attempt_diff,
     _is_forced_noop_marker_diff,
     _render_patch_verifier_recovery_feedback,
+    _restore_diff_target_files,
 )
 from evals.eval_policy_budget import (
     AdaptiveBudgetMetadataUpdate,
@@ -5939,6 +5940,8 @@ def run_one_condition_impl(
         attempt_terminated_early = False
         should_break_after_attempt = False
         patch_applied_and_ready = False
+        runner_forced_recovery_applied = False
+        runner_forced_recovery_backups: dict[str, bytes] = {}
 
         def _accumulate_timing_metadata_field(
             field: str,
@@ -7432,6 +7435,15 @@ def run_one_condition_impl(
             applied_diff_for_preflight = patch_application.applied_diff_for_preflight
             apply_ok = patch_application.apply_ok
             apply_msg = patch_application.apply_msg
+            runner_forced_recovery_applied = bool(apply_ok and patch_application.recovery_applied)
+            if runner_forced_recovery_applied:
+                # ATT-07 / D8: describe the diff that was applied; keep the model's diff hash.
+                runner_forced_recovery_backups = dict(file_backups)
+                patch_meta["model_patch_diff_xxh3_128"] = patch_meta.get("patch_diff_xxh3_128")
+                patch_meta["model_patch_file_paths"] = list(
+                    patch_meta.get("patch_file_paths") or []
+                )
+                _sync_patch_diff_metadata(patch_meta=patch_meta, diff=applied_diff_for_preflight)
             if not apply_ok:
                 _refresh_adaptive_progress_for_note(
                     note="patch_apply_failed",
@@ -7745,6 +7757,14 @@ def run_one_condition_impl(
             asdict(after_junit_counts) if after_junit_counts is not None else None
         )
         note = "success" if success else "tests_still_failing"
+        if runner_forced_recovery_applied:
+            # ATT-07 / D8: only a runner marker was applied, so this stays an apply failure,
+            # and the marker is reverted instead of leaking into later prompts.
+            patch_meta["runner_forced_patch_recovery_tests_passed"] = success
+            success = False
+            note = "patch_apply_failed"
+            _restore_diff_target_files(cwd=workdir, backups=runner_forced_recovery_backups)
+            patch_meta["runner_forced_patch_recovery_reverted"] = True
         adaptive_progress_stop_candidate_for_note = adaptive_progress_stop_candidate
         adaptive_progress_stop_reason_for_note = adaptive_progress_stop_reason
         after_failure_signature = ""

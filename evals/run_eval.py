@@ -1867,8 +1867,11 @@ def main(argv: list[str] | None = None) -> int:
         "--force-patch-attempt",
         dest="force_patch_attempt",
         action="store_true",
-        default=True,
-        help="Force a deterministic runner-side patch attempt when patcher returns no diff (default: enabled).",
+        default=False,
+        help=(
+            "Try a runner-side marker patch when the model's diff is missing or fails to apply "
+            "(default: off). The attempt is still recorded as patch_apply_failed (ATT-07)."
+        ),
     )
     parser.add_argument(
         "--no-force-patch-attempt",

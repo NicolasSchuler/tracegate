@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `--force-patch-attempt` now defaults to off. When enabled, a runner marker patch applied after the model's diff failed keeps the attempt `patch_apply_failed` (with `runner_forced_patch_recovery*` modifiers), the patch metadata describes the applied marker diff (`model_patch_*` keeps the model's), and the marker is reverted so it can't leak into later prompts (ATT-07, D8). Runner and patcher forced-patch markers share one constant, so patcher-generated marker-only patches are recognized as no-ops (LLM-13).
 - `--patch-verifier-scope` now defaults to `all`, so the verifier (rejections, recovery calls, test-edit penalties) applies to every condition; `adaptive_only` remains available as an ablation (ATT-14, D7).
 - Eval success can no longer be produced by editing the test oracle: the harness restores the pristine test surface before each verification run and requires a JUnit report with at least one executed test and no failures or errors. Records carry `test_surface_modified` and `pytest_verdict_*` (ATT-01, D10).
 - SWE-Bench Lite/Pro generation: the `llmdebug` condition now fails fast without `--snapshot-dir` (it previously equaled `baseline`), and `run_metadata.json` records `prompt_policy` and per-run `snapshot_coverage` (DAT-03). Prompts no longer include `hints_text` or the FAIL_TO_PASS/PASS_TO_PASS test IDs by default; `--include-hints` / `--include-test-ids` restore them (DAT-01, DAT-02, D2).

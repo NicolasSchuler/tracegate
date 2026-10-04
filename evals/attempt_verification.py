@@ -59,6 +59,8 @@ class PatchApplicationResult:
     apply_msg: str
     applied_diff_for_preflight: str
     file_backups: dict[str, bytes]
+    recovery_applied: bool = False
+    """The model's diff failed and the runner's marker recovery was applied instead."""
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ def apply_diff_with_optional_recovery(
         apply_diff_fn = apply_diff
     file_backups = _backup_diff_target_files(cwd=workdir, diff=diff_to_apply)
     applied_diff_for_preflight = diff_to_apply
+    recovery_applied = False
     apply_ok, apply_msg = apply_diff_fn(workdir, diff_to_apply)
     if not apply_ok and runner_force_patch_attempt_enabled:
         patch_meta["initial_apply_error"] = apply_msg
@@ -138,6 +141,7 @@ def apply_diff_with_optional_recovery(
                 apply_ok = True
                 apply_msg = recovery_msg
                 applied_diff_for_preflight = recovery_diff
+                recovery_applied = True
             else:
                 patch_meta["runner_forced_patch_recovery_error"] = recovery_msg
     return PatchApplicationResult(
@@ -145,6 +149,7 @@ def apply_diff_with_optional_recovery(
         apply_msg=apply_msg,
         applied_diff_for_preflight=applied_diff_for_preflight,
         file_backups=file_backups,
+        recovery_applied=recovery_applied,
     )
 
 

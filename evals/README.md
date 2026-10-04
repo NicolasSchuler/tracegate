@@ -841,8 +841,10 @@ uv run python -m evals.run_eval \
 falls back internally to `diff` when the copied case workdir contains more than one
 non-test `.py` file.
 `--no-files-context` is useful when prompts are too long.
-Runner-level forced patch attempts are enabled by default to reduce `no_patch_proposed`
-and `patch_apply_failed` records; disable with `--no-force-patch-attempt`.
+Runner-level forced patch attempts are off by default (`--force-patch-attempt` enables them).
+They never change an outcome: a marker-only patch is recorded as `forced_noop_patch`, and a
+marker applied after the model's diff failed keeps the attempt `patch_apply_failed` with
+`runner_forced_patch_recovery*` modifiers, then is reverted (ATT-07, D8).
 `no_patch_proposed` and `forced_noop_patch` are runner-level notes, not baseline-native
 root causes. For external baselines, the underlying cause may instead live in
 `patch_meta.baseline_meta.error` (for example `timeout`, `learner_empty_response`)
@@ -1342,7 +1344,8 @@ unsupported and should be regenerated with the current harness before analysis.
   (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07); success is judged against
   the pristine test surface and pytest's JUnit counts, so patches that edit tests or add
   `conftest.py` hooks no longer count (ATT-01); the patch verifier runs for every condition by
-  default (ATT-14). Later review fixes extend this list.
+  default (ATT-14); `--force-patch-attempt` defaults to off and a forced marker recovery stays
+  `patch_apply_failed` (ATT-07). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with

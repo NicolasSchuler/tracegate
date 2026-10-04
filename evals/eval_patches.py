@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .eval_patch_constants import PATCH_APPLY_TIMEOUT_SEC
+from .eval_patch_constants import FORCED_PATCH_MARKER, PATCH_APPLY_TIMEOUT_SEC
 
 
 @dataclass(frozen=True)
@@ -824,7 +824,7 @@ def _is_forced_noop_marker_diff(diff: str) -> bool:
             if not payload:
                 continue
             changed_lines_seen = True
-            if not payload.startswith("# llmdebug-force-attempt-"):
+            if not payload.startswith(FORCED_PATCH_MARKER):
                 return False
             continue
         return False
@@ -852,7 +852,7 @@ def _build_runner_forced_attempt_diff(
         return None
 
     before = target_path.read_text(encoding="utf-8")
-    marker_base = f"# llmdebug-force-attempt-{attempt}"
+    marker_base = f"{FORCED_PATCH_MARKER}-{attempt}"
     marker = marker_base
     suffix = 2
     while marker in before:
