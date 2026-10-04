@@ -1914,3 +1914,65 @@ class TestRetryContext:  # BAS-02 / D4
         result = patcher.propose_patch(prompt="ignored", context_dir=second, cwd=stub_case)
         assert result.meta is not None
         assert result.meta["baseline_retry_context_consumed"] is False  # no prompt field
+
+
+class _RecordingStubAdapter(_StubAdapter):
+    """Reports repo state and case information like the real adapters (BAS-14, ATT-02)."""
+
+    repo_state = {"observed_commit": "abc", "dirty": False, "tree_patch_sha256": "f00"}
+
+    def convert_case(
+        self,
+        case_dir: Path,
+        *,
+        case_context: BaselineCaseContext | None = None,
+    ) -> dict[str, Any]:
+        converted = super().convert_case(case_dir, case_context=case_context)
+        return {**converted, "case_information": {"case_info_policy": "neutral_v1"}}
+
+
+class TestRecordedBaselineMetadata:
+    def test_repo_state_and_case_information_reach_patch_meta(
+        self, stub_case: Path, tmp_path: Path
+    ) -> None:
+        patcher = BaselinePatcher(adapter=_RecordingStubAdapter(), config=BaselineConfig())
+
+        result = patcher.propose_patch(prompt="ignored", context_dir=tmp_path, cwd=stub_case)
+
+        assert result.meta is not None
+        assert result.meta["baseline_repo_state"] == _RecordingStubAdapter.repo_state
+        assert result.meta["case_information"] == {"case_info_policy": "neutral_v1"}
+
+
+class _BrokenConverterAdapter(_StubAdapter):
+    def convert_case(
+        self,
+        case_dir: Path,
+        *,
+        case_context: BaselineCaseContext | None = None,
+    ) -> dict[str, Any]:
+        if case_dir.name == "incompatible":
+            raise BaselineCaseIncompatibleError(
+                reason="subprocess_task_unsupported", detail="no entry point"
+            )
+        if case_dir.name == "broken":
+            raise KeyError("converter bug")
+        return super().convert_case(case_dir, case_context=case_context)
+
+
+def test_baseline_case_support_counts_converter_errors_separately(tmp_path: Path) -> None:
+    """BAS-01: a converter bug is counted under its own reason, not hidden."""
+    case_dirs: list[tuple[str, Path]] = []
+    for name in ("ok", "incompatible", "broken"):
+        case_dir = tmp_path / name
+        case_dir.mkdir()
+        (case_dir / "buggy.py").write_text("x = 1\n", encoding="utf-8")
+        case_dirs.append((name, case_dir))
+
+    support = baseline_patcher_module.baseline_case_support(_BrokenConverterAdapter(), case_dirs)
+
+    assert support["convertible_cases"] == 1
+    assert support["incompatible_reasons"] == {
+        "conversion_error:KeyError": 1,
+        "subprocess_task_unsupported": 1,
+    }
