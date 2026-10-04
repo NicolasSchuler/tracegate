@@ -341,10 +341,10 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] **POL-20:** cache inverse matrices and maintain caps incrementally.
 
 ### 3.3. Rewards and budget
-- [ ] **POL-08:** charge only the incremental cost of escalation.
-- [ ] **POL-11:** award the rescue bonus only when the evidence appears in the successful prompt; remove the dead parameters.
-- [ ] **POL-04:** wire the BwK dual variable into the scores and fix its update, or rename the architecture.
-- [ ] **POL-10:** the context family widens by at least 1.
+- [x] **POL-08:** charge only the incremental cost of escalation. *(`1 − default/applied` multiplier share of the attempt's tokens and time.)*
+- [x] **POL-11:** award the rescue bonus only when the evidence appears in the successful prompt; remove the dead parameters.
+- [x] **POL-04:** wire the BwK dual variable into the scores and fix its update, or rename the architecture. *(Wired: pacing target `budget / (cases × k)`, dual step 0.05, score penalty `λ · ĉ_k / target`.)*
+- [x] **POL-10:** the context family widens by at least 1.
 
 ### 3.4. Logging and off-policy data
 - [ ] **POL-03:** correct propensities for shadow mode and warm-up.
