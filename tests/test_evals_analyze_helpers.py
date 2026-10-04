@@ -1086,3 +1086,42 @@ def test_sta01_uncovered_case_has_no_tokens_and_is_excluded_from_means() -> None
     assert stats["mean_token_usage"] == 10.0  # the uncovered case used to count as 0
     assert stats["token_covered_cases"] == 1
     assert stats["token_covered_fraction"] == 0.5
+
+
+def _ope_record(case_id: str, action: str, reward: float, propensity: float | None) -> dict:
+    extra: dict[str, object] = {
+        "adaptive_mode": "gated",
+        "adaptive_online_decision_id": f"d-{case_id}",
+        "adaptive_online_reward_scope": "helper_credit_v2",
+        "adaptive_online_reward": reward,
+        "adaptive_online_behavior_action": action,
+        "adaptive_online_feature_vector": {"x": 1.0},
+        "adaptive_online_feature_scaling_profile": "v1",
+    }
+    if propensity is not None:
+        extra["adaptive_online_propensity"] = propensity
+    return _record(case_id=case_id, attempt=1, attempt_metadata_extra=extra)
+
+
+def test_sta12_missing_propensity_is_dropped_and_counted() -> None:
+    """STA-12: a missing propensity silently became 1.0 in IPS, SNIPS and DR."""
+    records = [
+        _ope_record("c1", "invoke_helper", 1.0, 0.5),
+        _ope_record("c2", "invoke_helper", 0.0, None),
+        _ope_record("c3", "skip_helper", 0.2, 0.5),
+    ]
+    samples = ar._adaptive_ope_samples(
+        records=records, prefix="adaptive_online", valid_actions={"invoke_helper", "skip_helper"}
+    )
+    assert [sample["propensity_missing"] for sample in samples] == [False, True, False]
+
+    summary = ar._adaptive_ope_summary(
+        samples=samples,
+        action_space={"invoke_helper", "skip_helper"},
+        target_policies={"always_invoke": "invoke_helper"},
+        min_action_support=1,
+        propensity_floor=0.01,
+    )
+    assert summary["sample_count"] == 2
+    assert summary["propensity_missing_dropped"] == 1
+    assert summary["action_counts"]["invoke_helper"] == 1

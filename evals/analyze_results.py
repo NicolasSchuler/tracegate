@@ -4295,6 +4295,9 @@ def _adaptive_ope_samples(
                 patch_meta_dict,
                 key=f"{prefix}_propensity",
             )
+        # STA-12: a missing propensity used to become 1.0; such samples are now marked
+        # and dropped from IPS/SNIPS/DR by the summary, which counts them.
+        propensity_missing = _as_float_or_none(behavior_propensity_raw) is None
         logged_propensity = _sanitize_propensity(
             behavior_propensity_raw,
             floor=ADAPTIVE_OPE_RAW_PROPENSITY_FLOOR,
@@ -4309,6 +4312,7 @@ def _adaptive_ope_samples(
         ).strip()
         shadow_mode = policy_mode == ADAPTIVE_OPE_SHADOW_POLICY_MODE
         propensity = 1.0 if shadow_mode else logged_propensity
+        propensity_missing = propensity_missing and not shadow_mode
 
         features_raw = _metadata_with_fallback(
             attempt_meta_dict,
@@ -4332,6 +4336,7 @@ def _adaptive_ope_samples(
                 "features": feature_values,
                 "feature_scaling_profile": feature_scaling_profile,
                 "propensity_shadow_corrected": shadow_mode and logged_propensity < 1.0,
+                "propensity_missing": propensity_missing,
                 **_ope_sample_policy_context(
                     attempt_meta_dict,
                     patch_meta_dict,
@@ -4542,8 +4547,11 @@ def _adaptive_ope_summary(
     """Build an off-policy evaluation summary from pre-extracted samples.
 
     Returns sample counts, action counts, and per-target-policy IPS /
-    SNIPS / DR estimates.
+    SNIPS / DR estimates. Samples without a logged propensity are dropped and counted
+    in ``propensity_missing_dropped`` (STA-12).
     """
+    propensity_missing_dropped = sum(1 for sample in samples if sample.get("propensity_missing"))
+    samples = [sample for sample in samples if not sample.get("propensity_missing")]
     action_counts = _action_counts_for_samples(samples=samples, action_space=action_space)
     support_threshold = max(1, int(min_action_support))
     trimmed_propensity_floor = _sanitize_propensity(
@@ -4609,6 +4617,7 @@ def _adaptive_ope_summary(
         "ridge_alpha": ADAPTIVE_OPE_RIDGE_ALPHA,
         "feature_scaling_profiles": feature_scaling_profiles,
         "mean_reward": _mean([float(sample.get("reward") or 0.0) for sample in samples]),
+        "propensity_missing_dropped": propensity_missing_dropped,
         "shadow_corrected_samples": sum(
             1 for sample in samples if bool(sample.get("propensity_shadow_corrected"))
         ),
@@ -6198,7 +6207,21 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
             f"{target_name}: ips={ips}, snips={snips}, dr={dr}, ess={ess}, "
             f"support={matched}/{total}{diagnostics_fragment}"
         )
-    return "; ".join(parts) if parts else "n/a"
+    notes = _ope_sample_notes(ope)
+    rendered = "; ".join(parts) if parts else "n/a"
+    return f"{notes}{rendered}" if notes else rendered
+
+
+def _ope_sample_notes(ope: dict[str, Any]) -> str:
+    """Samples left out of or corrected in the estimates (STA-12, POL-03)."""
+    notes: list[str] = []
+    dropped = int(ope.get("propensity_missing_dropped") or 0)
+    if dropped:
+        notes.append(f"{dropped} sample(s) without a propensity dropped")
+    corrected = int(ope.get("shadow_corrected_samples") or 0)
+    if corrected:
+        notes.append(f"{corrected} shadow-mode propensity(ies) corrected to 1.0")
+    return f"[{'; '.join(notes)}] " if notes else ""
 
 
 def _fmt_num(value: Any) -> str:

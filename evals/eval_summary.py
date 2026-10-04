@@ -468,7 +468,21 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
             f"ess={_fmt_num(target.get('effective_sample_size'))}"
             f"{diagnostics_fragment}"
         )
-    return "; ".join(parts) if parts else "n/a"
+    notes = _ope_sample_notes(ope)
+    rendered = "; ".join(parts) if parts else "n/a"
+    return f"{notes}{rendered}" if notes else rendered
+
+
+def _ope_sample_notes(ope: dict[str, Any]) -> str:
+    """Samples left out of or corrected in the estimates (STA-12, POL-03)."""
+    notes: list[str] = []
+    dropped = int(ope.get("propensity_missing_dropped") or 0)
+    if dropped:
+        notes.append(f"{dropped} sample(s) without a propensity dropped")
+    corrected = int(ope.get("shadow_corrected_samples") or 0)
+    if corrected:
+        notes.append(f"{corrected} shadow-mode propensity(ies) corrected to 1.0")
+    return f"[{'; '.join(notes)}] " if notes else ""
 
 
 if __name__ == "__main__":
