@@ -102,7 +102,9 @@ generation fails fast without it (DAT-03). `run_metadata.json` records
 `prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
 Prompts carry only the issue text by default; `--include-hints` (Lite) and
 `--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
-which are not part of the official task (DAT-01, DAT-02).
+which are not part of the official task (DAT-01, DAT-02). A request that fails is not saved
+as an empty patch: the instance stays missing, `prepare-handoff` refuses the unequal paired
+sets, and `--resume` retries it (DAT-08).
 
 Local Docker convenience wrapper:
 

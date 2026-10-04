@@ -839,8 +839,9 @@ def test_runner_force_patch_recovers_after_apply_failure(tmp_path, monkeypatch) 
     assert record["patch_meta"]["runner_forced_patch_recovery_target"] == "buggy.py"
     assert record["patch_meta"]["runner_forced_patch_recovery_reverted"] is True
     assert record["patch_meta"]["runner_forced_patch_recovery_tests_passed"] is False
-    assert record["patch_meta"]["model_patch_diff_xxh3_128"] != (
-        record["patch_meta"]["patch_diff_xxh3_128"]
+    assert (
+        record["patch_meta"]["model_patch_diff_xxh3_128"]
+        != (record["patch_meta"]["patch_diff_xxh3_128"])
     )
     assert "llmdebug-force-attempt" not in (workdir / "buggy.py").read_text(encoding="utf-8")
     assert apply_attempts["count"] == 2

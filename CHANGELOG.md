@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- SWE-Bench Lite/Pro generation no longer saves failed requests as empty patches; the instance stays missing (paired validation blocks scoring) and `--resume` retries it (DAT-08).
 - SWE-Bench Pro scoring: empty `fail_to_pass` lists, unexplained container failures, missing `output.json` and wait timeouts are infrastructure errors instead of wrong patches, with per-instance reasons persisted in `eval_results_detail.json` (DAT-04, DAT-09); patches are applied with the official fallback sequence and a non-applying patch is a model failure (DAT-19); cached outputs are reused only for the same patch (DAT-13); dataset values are shell-quoted in the entry script (DAT-11).
 - Record `patch_meta.patch_apply_mode` (`strict`, `relaxed_fallback`, `runner_marker`) and report `relaxed_apply_attempts` and `test_surface_modified_attempts` per case and condition (ATT-10). Failed or fuzzy `patch` runs no longer leave `.rej`/`.orig` files in the workdir (ATT-16).
 - `--force-patch-attempt` now defaults to off. When enabled, a runner marker patch applied after the model's diff failed keeps the attempt `patch_apply_failed` (with `runner_forced_patch_recovery*` modifiers), the patch metadata describes the applied marker diff (`model_patch_*` keeps the model's), and the marker is reverted so it can't leak into later prompts (ATT-07, D8). Runner and patcher forced-patch markers share one constant, so patcher-generated marker-only patches are recognized as no-ops (LLM-13).

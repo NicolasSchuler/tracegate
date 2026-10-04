@@ -17,6 +17,7 @@ from evals.swebench.generate import (
     _propose_prediction,
     _select_instance_ids,
 )
+from evals.swebench.io import read_predictions
 from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import PredictionRecord
 
@@ -527,8 +528,11 @@ def test_generate_for_condition_single_job_counts(monkeypatch, tmp_path: Path) -
         min_requests_for_error_rate_check=10,
     )
     assert summary.generated == 2
-    assert summary.empty_patch_count == 1
+    # DAT-08: a failed request is not an empty prediction and is not persisted.
+    assert summary.empty_patch_count == 0
     assert summary.request_error_count == 1
+    persisted = read_predictions(run_dir / "baseline" / "predictions.jsonl")
+    assert [record.instance_id for record in persisted] == ["a"]
 
 
 # ---------------------------------------------------------------------------
@@ -587,8 +591,9 @@ async def test_generate_for_condition_async_counts(
         prediction_path_value=pred_path,
     )
     assert gen == 2
-    assert empty == 1
+    assert empty == 0  # DAT-08
     assert errors == 1
+    assert sorted(existing_map) == ["a"]
 
 
 @pytest.mark.asyncio
@@ -632,3 +637,50 @@ async def test_generate_for_condition_async_cancels_on_error(
             min_requests_for_error_rate_check=1,
             prediction_path_value=pred_path,
         )
+
+
+def test_resume_retries_predictions_whose_request_failed(tmp_path: Path) -> None:  # DAT-08
+    from evals.swebench.generate import _generate_for_condition
+
+    class _Patcher:
+        def __init__(self, failing: set[str]) -> None:
+            self.failing = failing
+            self.calls: list[str] = []
+
+        def propose_patch(self, *, prompt, context_dir, cwd):
+            del context_dir, cwd
+            instance_id = next(iid for iid in ("a", "b") if f"Instance ID: {iid}" in prompt)
+            self.calls.append(instance_id)
+            if instance_id in self.failing:
+                raise RuntimeError("transient timeout")
+            return PatchResult(diff=f"diff --git a/{instance_id} b/{instance_id}", meta=None)
+
+    rows_by_id = {iid: dict(_SAMPLE_ROW, instance_id=iid) for iid in ("a", "b")}
+    run_dir = tmp_path / "run"
+    (run_dir / "baseline").mkdir(parents=True)
+
+    def _run(patcher: _Patcher, *, resume: bool):
+        return _generate_for_condition(
+            run_dir=run_dir,
+            condition="baseline",
+            selected_ids=["a", "b"],
+            rows_by_id=rows_by_id,
+            patcher=cast(OpenAICompatPatcher, patcher),
+            model_label="test",
+            resume=resume,
+            prompt_inputs=PromptInputs(),
+            jobs=1,
+            openai_async=False,
+            max_request_errors=25,
+            max_request_error_rate=1.0,
+            min_requests_for_error_rate_check=10,
+        )
+
+    first = _run(_Patcher({"b"}), resume=False)
+    assert first.request_error_count == 1
+    retry_patcher = _Patcher(set())
+    second = _run(retry_patcher, resume=True)
+    assert retry_patcher.calls == ["b"]
+    assert second.resumed == 1
+    persisted = read_predictions(run_dir / "baseline" / "predictions.jsonl")
+    assert [record.instance_id for record in persisted] == ["a", "b"]
