@@ -317,7 +317,7 @@ from evals.policy_feature_scaling import (
     scale_feature_mapping,
 )
 from evals.stage_a_contract import StageARequestPayloadModel, normalize_stage_a_request_payload
-from evals.token_counting import estimate_text_token_count
+from evals.token_counting import estimate_text_token_count, merge_llm_call_usage
 from evals.toon_llm_encoder import estimate_token_savings
 
 # Preserve the historical eval_attempt_flow helper surface for downstream imports.
@@ -1194,6 +1194,42 @@ def execute_eval_unit_impl(
     )
 
 
+def _fold_tep_learning_usage(
+    *,
+    learning: dict[str, Any],
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+) -> None:
+    """Add TEP critic/update calls to the attempt's usage (POL-02).
+
+    They run after the propose-path aggregation, so token, latency and reward accounting
+    used to miss up to 12 calls per attempt.
+    """
+    metas = learning.pop("llm_call_metas", None) or []
+    calls = sum(_llm_call_count_from_meta(meta, default=1) for meta in metas)
+    prompt = completion = total = 0
+    for meta in metas:
+        meta_prompt, meta_completion, meta_total = _usage_token_counts_from_patch_meta(meta)
+        prompt += meta_prompt
+        completion += meta_completion
+        total += meta_total
+    learning["llm_call_count"] = calls
+    learning["tokens_prompt"] = prompt
+    learning["tokens_completion"] = completion
+    learning["tokens_total"] = total
+    patch_meta["tep_learning_llm_call_count"] = calls
+    patch_meta["tep_learning_tokens_total"] = total
+    if not calls:
+        return
+    for key, value in (
+        ("llm_call_count", calls),
+        ("tokens_prompt", prompt),
+        ("tokens_completion", completion),
+        ("tokens_total", total),
+    ):
+        attempt_metadata[key] = _nonnegative_int(attempt_metadata.get(key), default=0) + value
+
+
 def _unit_runtime_error_record(
     *,
     case: CaseSpec,
@@ -1653,7 +1689,12 @@ def _run_one_condition_attempts(
 
         transport_recovery_gate.wait_if_open()
         replay_result = invoke()
-        replay_meta = _result_meta_dict(replay_result)
+        # ATT-15: the failed first call is paid for too; keep it next to the replay's usage.
+        replay_meta = merge_llm_call_usage(_result_meta_dict(replay_result), result_meta)
+        replay_meta["transport_recovery_first_call_llm_call_count"] = int(
+            result_meta.get("llm_call_count") or 1
+        )
+        replay_meta["transport_recovery_first_call_usage"] = dict(result_meta.get("usage") or {})
         replay_meta["transport_recovery_operation"] = operation_name
         replay_meta["transport_recovery_attempted"] = True
         replay_meta["transport_recovery_recovered"] = True
@@ -8074,6 +8115,11 @@ def _run_one_condition_attempts(
                 cwd=workdir,
                 case_id=case.case_id,
                 node_packets=tep_node_packets,
+            )
+            _fold_tep_learning_usage(
+                learning=adaptive_tep_learning,
+                attempt_metadata=attempt_metadata,
+                patch_meta=patch_meta,
             )
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning

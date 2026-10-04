@@ -605,3 +605,19 @@ def test_compute_overhead_analysis_missing_condition() -> None:
     )
     assert "cot_repair" not in result["per_condition"]
     assert "base_repair" in result["per_condition"]
+
+
+def test_att13_compaction_without_its_own_meta_reports_no_compaction_tokens() -> None:
+    record = _make_record(
+        patch_meta={
+            "context_compaction_invoked": True,
+            "usage": {"prompt_tokens": 90, "completion_tokens": 40, "total_tokens": 130},
+        },
+        tokens_prompt=90,
+        tokens_completion=40,
+        tokens_total=130,
+    )
+    _finalize_breakdowns(record)
+    tokens = record["attempt_metadata"]["token_breakdown"]
+    # The propose call's usage is not compaction usage.
+    assert tokens["compaction_tokens_total"] == 0

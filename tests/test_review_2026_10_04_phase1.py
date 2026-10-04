@@ -499,3 +499,32 @@ def test_att08_unit_runtime_error_record_is_schema_valid_and_scored(tmp_path: Pa
     rows = _derive_case_condition_rows({("r", case.case_id, "base_repair"): [record]})
     assert rows[0]["success"] is False
     assert record["attempt"] == 1 and record["record_type"] == "attempt"
+
+
+def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
+    from evals.eval_attempt_flow import _fold_tep_learning_usage
+
+    call_meta = {
+        "llm_call_count": 1,
+        "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
+    }
+    learning: dict[str, Any] = {"enabled": True, "llm_call_metas": [call_meta] * 3}
+    attempt_metadata: dict[str, Any] = {"llm_call_count": 2, "tokens_total": 500}
+    patch_meta: dict[str, Any] = {}
+    _fold_tep_learning_usage(
+        learning=learning, attempt_metadata=attempt_metadata, patch_meta=patch_meta
+    )
+    assert attempt_metadata["llm_call_count"] == 5
+    assert attempt_metadata["tokens_total"] == 860
+    assert patch_meta["tep_learning_llm_call_count"] == 3
+    assert "llm_call_metas" not in learning
+
+
+def test_att09_equilibrium_replans_accumulate_usage() -> None:
+    from evals.token_counting import merge_llm_call_usage
+
+    first = {"llm_call_count": 1, "usage": {"prompt_tokens": 50, "completion_tokens": 10}}
+    second = {"usage": {"prompt_tokens": 40, "completion_tokens": 5, "total_tokens": 45}}
+    merged = merge_llm_call_usage(first, second)
+    assert merged["llm_call_count"] == 2
+    assert merged["usage"] == {"prompt_tokens": 90, "completion_tokens": 15, "total_tokens": 105}

@@ -4911,17 +4911,11 @@ def _finalize_breakdowns(record: dict[str, Any]) -> None:
     tokens["stage_a_tokens_completion"] = sa_c
     tokens["stage_a_tokens_total"] = sa_t
 
-    # Compaction tokens
-    if isinstance(context_compaction_meta, dict):
-        cc_meta = context_compaction_meta
-    elif context_compaction_invoked:
-        # Compaction meta may be stored at top level of patch_meta
-        cc_meta = pm
-    else:
-        cc_meta = None
+    # Compaction tokens. ATT-13: without compaction's own meta the tokens are unknown;
+    # falling back to patch_meta reported the propose call's tokens as compaction tokens.
     cc_p = cc_c = cc_t = 0
-    if cc_meta is not None and isinstance(cc_meta, dict) and context_compaction_invoked:
-        cc_p, cc_c, cc_t = _usage_token_counts_from_patch_meta(cc_meta)
+    if context_compaction_invoked and isinstance(context_compaction_meta, dict):
+        cc_p, cc_c, cc_t = _usage_token_counts_from_patch_meta(context_compaction_meta)
     tokens["compaction_tokens_prompt"] = cc_p
     tokens["compaction_tokens_completion"] = cc_c
     tokens["compaction_tokens_total"] = cc_t
