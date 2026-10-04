@@ -46,6 +46,9 @@ from evals.adaptive_online_policy import (
     OnlinePolicyConfig,
 )
 from evals.adaptive_online_policy import (
+    EVENT_SCHEMA_VERSION as ONLINE_EVENT_SCHEMA_VERSION,
+)
+from evals.adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
 from evals.decision_model.config import DecisionModelPolicyConfig
@@ -1971,7 +1974,7 @@ def test_adaptive_llm_discretion_decision_model_policy_role_drives_helper_action
     assert str(tmp_path) not in built.rendered
 
     events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
-    assert events[0]["schema_version"] == 6  # POL-01 added effective_evidence
+    assert events[0]["schema_version"] == ONLINE_EVENT_SCHEMA_VERSION  # 7 since POL-21
     assert events[0]["decision_model"]["role"] == "policy"
     states = [json.loads(line) for line in states_path.read_text(encoding="utf-8").splitlines()]
     assert states[0]["decision_id"] == attempt_meta["adaptive_online_decision_id"]

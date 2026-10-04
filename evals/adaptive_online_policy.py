@@ -255,6 +255,9 @@ class AdaptiveOnlinePolicyController:
         self._state = LinUCBState()
         self._save_counter = 0
         self._nan_counts: dict[str, int] = {}
+        # POL-21: cumulative model resets (``arm:<action>``, ``feature_set_mismatch``).
+        self._state_resets: dict[str, int] = {}
+        self._check_loaded_features = False
         self.load_error: str | None = None
         self._load_state_if_present()
 
@@ -300,6 +303,29 @@ class AdaptiveOnlinePolicyController:
         """Return a snapshot of per-feature NaN replacement counts."""
         with self._lock:
             return dict(self._nan_counts)
+
+    def get_state_resets(self) -> dict[str, int]:
+        """Return a snapshot of the model reset counts (POL-21)."""
+        with self._lock:
+            return dict(self._state_resets)
+
+    def _count_state_reset(self, key: str) -> None:
+        self._state_resets[key] = self._state_resets.get(key, 0) + 1
+
+    def _discard_mismatched_loaded_state(self, feature_names: Collection[str]) -> None:
+        """Treat a loaded state that lacks this run's features as a load failure (POL-21).
+
+        The features a model was trained on must all still be produced; zero-filling a
+        removed feature would silently reinterpret its learned weights.
+        """
+        if not self._check_loaded_features:
+            return
+        self._check_loaded_features = False
+        missing = core.missing_features(self._state, feature_names)
+        if missing:
+            self.load_error = core.feature_set_mismatch_error(missing)
+            self._state = LinUCBState()
+            self._count_state_reset("feature_set_mismatch")
 
     def _tracked_safe_float(self, value: Any, *, feature_name: str, default: float = 0.0) -> float:
         """Convert *value* via :func:`safe_float`, tracking NaN replacements.
@@ -435,6 +461,7 @@ class AdaptiveOnlinePolicyController:
         if role == ROLE_FEATURES:
             cleaned_features.update(advice_feature_values(advice))
         with self._lock, self._decision_rng(rng_key):
+            self._discard_mismatched_loaded_state(cleaned_features)
             (
                 scaled_features,
                 feature_scaling_caps,
@@ -762,6 +789,7 @@ class AdaptiveOnlinePolicyController:
                 effective_evidence=core.effective_evidence(self._state, l2=float(self.config.l2)),
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
+                state_resets=dict(self._state_resets),
                 created_at_utc=_utc_now(),
                 decision_model=dict(getattr(decision, "decision_model", None) or {}),
             )
@@ -786,7 +814,9 @@ class AdaptiveOnlinePolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in ONLINE_POLICY_ALGOS:
             return
-        core.ensure_feature_state(self._state, cleaned_features, l2=float(self.config.l2))
+        change = core.ensure_feature_state(self._state, cleaned_features, l2=float(self.config.l2))
+        for action in change.reset_arms:
+            self._count_state_reset(f"arm:{action}")
 
     def _feature_vector(self, *, cleaned_features: Mapping[str, float]) -> np.ndarray:
         """Build a numpy feature vector aligned with ``feature_names``."""
@@ -999,6 +1029,7 @@ class AdaptiveOnlinePolicyController:
                 feature_scaling_caps=feature_scaling_caps,
             )
             self.load_error = None
+            self._check_loaded_features = True
         except Exception as exc:  # pragma: no cover - defensive load hardening
             self.load_error = f"{type(exc).__name__}: {exc}"
             self._state = LinUCBState()

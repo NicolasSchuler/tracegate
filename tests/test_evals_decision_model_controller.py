@@ -207,9 +207,9 @@ def test_events_carry_the_decision_model_block_since_schema_v5(tmp_path: Path) -
     event = _record(controller, _decide(controller, _advice()))
     payload = event.to_json()
 
-    # Schema 5 added the block; schema 6 added ``effective_evidence`` (POL-01).
-    assert EVENT_SCHEMA_VERSION == 6
-    assert payload["schema_version"] == 6
+    # Schema 5 added the block; later versions keep it (6: POL-01, 7: POL-21).
+    assert EVENT_SCHEMA_VERSION >= 5
+    assert payload["schema_version"] == EVENT_SCHEMA_VERSION
     assert payload["decision_model"]["role"] == "shadow"
     logged = json.loads(
         (tmp_path / "events_shadow_on.jsonl").read_text(encoding="utf-8").splitlines()[0]

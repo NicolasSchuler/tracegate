@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 import threading
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,7 +73,8 @@ STATE_SCHEMA_VERSION = 4
 SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 1.0
 """Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
-EVENT_SCHEMA_VERSION = 5
+EVENT_SCHEMA_VERSION = 6
+"""v5 adds ``effective_evidence`` (POL-01); v6 adds ``state_resets`` (POL-21)."""
 
 
 @dataclass(frozen=True)
@@ -302,6 +303,7 @@ class BudgetPolicyEvent:
     bwk_dual_variable_after: float = 0.0
     bwk_budget_exhausted: bool = False
     effective_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
+    state_resets: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dict."""
@@ -409,6 +411,7 @@ class BudgetPolicyEvent:
                 model: {action: float(value) for action, value in evidence.items()}
                 for model, evidence in self.effective_evidence.items()
             },
+            "state_resets": {key: int(value) for key, value in self.state_resets.items()},
         }
 
 
@@ -438,6 +441,10 @@ class AdaptiveBudgetPolicyController:
         self._bwk_remaining_token_budget = int(self._bwk_run_token_budget)
         self._bwk_cumulative_tokens_charged = 0
         self._bwk_dual_variable = 0.0
+        # POL-21: cumulative model resets (``gate_arm:<a>``, ``family_arm:<f>``,
+        # ``feature_set_mismatch``).
+        self._state_resets: dict[str, int] = {}
+        self._check_loaded_features = False
         self.load_error: str | None = None
         self._load_state_if_present()
 
@@ -501,6 +508,34 @@ class AdaptiveBudgetPolicyController:
         """Return a snapshot of per-feature NaN replacement counts."""
         with self._lock:
             return dict(self._nan_counts)
+
+    def get_state_resets(self) -> dict[str, int]:
+        """Return a snapshot of the model reset counts (POL-21)."""
+        with self._lock:
+            return dict(self._state_resets)
+
+    def _count_state_reset(self, key: str) -> None:
+        self._state_resets[key] = self._state_resets.get(key, 0) + 1
+
+    def _discard_mismatched_loaded_state(
+        self, gate_features: Collection[str], family_features: Collection[str]
+    ) -> None:
+        """Treat a loaded state that lacks this run's features as a load failure (POL-21)."""
+        if not self._check_loaded_features:
+            return
+        self._check_loaded_features = False
+        missing = sorted(
+            set(core.missing_features(self._state, gate_features))
+            | {
+                f"family:{name}"
+                for name in core.missing_features(self._family_state, family_features)
+            }
+        )
+        if missing:
+            self.load_error = core.feature_set_mismatch_error(missing)
+            self._state = LinUCBState(action_names=BUDGET_POLICY_ACTIONS)
+            self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
+            self._count_state_reset("feature_set_mismatch")
 
     def _tracked_safe_float(self, value: Any, *, feature_name: str, default: float = 0.0) -> float:
         """Convert *value* via :func:`safe_float`, tracking NaN replacements.
@@ -689,6 +724,7 @@ class AdaptiveBudgetPolicyController:
             if str(key) in BUDGET_POLICY_FAMILIES and str(value)
         }
         with self._lock, self._decision_rng(rng_key):
+            self._discard_mismatched_loaded_state(cleaned_features, cleaned_family_features)
             default_norm = (
                 default_action if default_action in BUDGET_POLICY_ACTIONS else ACTION_KEEP_BUDGET
             )
@@ -1028,6 +1064,7 @@ class AdaptiveBudgetPolicyController:
                 model_updated=model_updated,
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
+                state_resets=dict(self._state_resets),
                 created_at_utc=_utc_now(),
                 bwk_run_token_budget=bwk_run_token_budget,
                 bwk_remaining_token_budget_before=bwk_remaining_token_budget_before,
@@ -1064,7 +1101,10 @@ class AdaptiveBudgetPolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in BUDGET_POLICY_ALGOS:
             return
-        core.ensure_feature_state(state, cleaned_features, l2=float(self.config.l2))
+        change = core.ensure_feature_state(state, cleaned_features, l2=float(self.config.l2))
+        model = "family" if state is self._family_state else "gate"
+        for action in change.reset_arms:
+            self._count_state_reset(f"{model}_arm:{action}")
 
     def _feature_vector(
         self,
@@ -1293,6 +1333,7 @@ class AdaptiveBudgetPolicyController:
                 )
                 self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
                 self.load_error = None
+                self._check_loaded_features = True
                 return
             if schema_version not in SUPPORTED_STATE_SCHEMA_VERSIONS:
                 raise ValueError("unsupported schema version")
@@ -1349,6 +1390,7 @@ class AdaptiveBudgetPolicyController:
                     _coerce_float(raw.get("bwk_dual_variable"), default=0.0),
                 )
             self.load_error = None
+            self._check_loaded_features = True
         except Exception as exc:
             self._state = LinUCBState(action_names=BUDGET_POLICY_ACTIONS)
             self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)

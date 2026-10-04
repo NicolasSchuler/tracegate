@@ -504,7 +504,7 @@ For the budget policy, use the corresponding flag:
 --adaptive-budget-online-state-path evals/artifacts/policies/prior-run-001.adaptive_budget_policy.json
 ```
 
-**Caveat**: Feature dimensions must match between runs.  If you changed the feature set or scaling profile, start fresh.
+**Caveat**: Feature dimensions must match between runs.  If you changed the feature set or scaling profile, start fresh. The controller enforces this (POL-21): a state whose features the run no longer produces is discarded at the first decision with a `FeatureSetMismatch` `load_error` and `state_resets.feature_set_mismatch` in the policy events (helper event schema 7, budget event schema 6); features the run adds are fine and start from the prior. States saved before POL-06 (2026-10-04 review) carry `last_helper_action_skip_helper` and `attempts_remaining_frac` and are discarded this way.
 
 ### Reward Debugging
 

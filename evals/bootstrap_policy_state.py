@@ -237,7 +237,9 @@ def _bootstrap_online_state(
             if len(masked_features) != len(feature_values):
                 warnings.append("case_label_features_dropped")
             feature_values = masked_features
-        _ensure_feature_state(state=state, cleaned_features=feature_values, l2=l2)
+        _ensure_feature_state(
+            state=state, cleaned_features=feature_values, l2=l2, warnings=warnings
+        )
         _update_feature_scaling_caps(
             state=state,
             raw_caps=payload.get("feature_scaling_caps"),
@@ -352,7 +354,9 @@ def _bootstrap_budget_state(
         _count_applied(gate_state, payload.get("applied_action"))
 
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
-        _ensure_feature_state(state=gate_state, cleaned_features=feature_values, l2=l2)
+        _ensure_feature_state(
+            state=gate_state, cleaned_features=feature_values, l2=l2, warnings=warnings
+        )
         _update_feature_scaling_caps(
             state=gate_state,
             raw_caps=payload.get("feature_scaling_caps"),
@@ -376,6 +380,7 @@ def _bootstrap_budget_state(
                 state=family_state,
                 cleaned_features=family_feature_values,
                 l2=l2,
+                warnings=warnings,
             )
             _update_feature_scaling_caps(
                 state=family_state,
@@ -734,8 +739,14 @@ def _ensure_feature_state(
     state: ReplayState,
     cleaned_features: dict[str, float],
     l2: float,
+    warnings: list[str] | None = None,
 ) -> None:
-    core.ensure_feature_state(state, cleaned_features, l2=float(l2))
+    """Expand the replay model; flag events that lack known features or reset an arm (POL-21)."""
+    if warnings is not None and core.missing_features(state, cleaned_features):
+        warnings.append("feature_set_changed_across_events")
+    change = core.ensure_feature_state(state, cleaned_features, l2=float(l2))
+    if warnings is not None and change.reset_arms:
+        warnings.append("arm_reset_to_prior")
 
 
 def _apply_recency_decay(*, state: ReplayState, action: str, decay: float, l2: float) -> None:

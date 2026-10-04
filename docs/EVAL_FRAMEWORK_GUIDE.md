@@ -351,6 +351,8 @@ class PolicyEvent:
     model_updated: bool
     update_reason: str            # "on_policy_update", "shadow_no_update", etc.
     nan_replacement_counts: dict[str, int]
+    effective_evidence: dict[str, float]  # trace(A_k) - d*l2 per arm (schema 6, POL-01)
+    state_resets: dict[str, int]  # arm:<action>, feature_set_mismatch (schema 7, POL-21)
 ```
 
 ---

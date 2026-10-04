@@ -98,11 +98,41 @@ def epsilon_greedy_propensity(
     return propensity
 
 
-def ensure_feature_state(state: LinUCBState, feature_names: Iterable[str], *, l2: float) -> None:
+@dataclass(frozen=True)
+class FeatureStateChange:
+    """What ``ensure_feature_state`` changed: features added, arms reset to the prior."""
+
+    added: tuple[str, ...] = ()
+    reset_arms: tuple[str, ...] = ()
+
+
+def missing_features(state: LinUCBState, feature_names: Iterable[str]) -> list[str]:
+    """Features the model was trained on that *feature_names* lacks (POL-21)."""
+    if not state.feature_names:
+        return []
+    present = {str(name) for name in feature_names}
+    return sorted(name for name in state.feature_names if name not in present)
+
+
+def feature_set_mismatch_error(missing: Sequence[str]) -> str:
+    """The ``load_error`` for a loaded state whose features this run doesn't produce."""
+    shown = ", ".join(missing[:5])
+    more = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
+    return (
+        "FeatureSetMismatch: the loaded state was trained on features this run doesn't "
+        f"produce: {shown}{more}"
+    )
+
+
+def ensure_feature_state(
+    state: LinUCBState, feature_names: Iterable[str], *, l2: float
+) -> FeatureStateChange:
     """Initialise the model on first use, or expand it when new features appear.
 
     Existing rows and columns are carried over; new features start from the ``l2``
-    prior. Arms whose matrices have the wrong shape are reset to the prior.
+    prior. Arms whose matrices have the wrong shape are reset to the prior and reported in
+    ``reset_arms`` (POL-21). Features the model knows but *feature_names* lacks read as 0;
+    callers check a loaded state with ``missing_features`` first.
     """
     seen = sorted(str(name) for name in feature_names)
     if not state.feature_names:
@@ -110,7 +140,10 @@ def ensure_feature_state(state: LinUCBState, feature_names: Iterable[str], *, l2
         dim = len(state.feature_names)
         state.A = {action: np.eye(dim, dtype=float) * float(l2) for action in state.action_names}
         state.b = {action: np.zeros((dim,), dtype=float) for action in state.action_names}
-        return
+        return FeatureStateChange(added=tuple(state.feature_names))
+    known = set(state.feature_names)
+    added = tuple(name for name in seen if name not in known)
+    reset_arms: list[str] = []
     expanded = sorted(set(state.feature_names) | set(seen))
     if expanded != state.feature_names:
         previous_index = {name: idx for idx, name in enumerate(state.feature_names)}
@@ -122,12 +155,14 @@ def ensure_feature_state(state: LinUCBState, feature_names: Iterable[str], *, l2
             previous_b = state.b.get(action)
             next_A = np.eye(new_dim, dtype=float) * float(l2)
             next_b = np.zeros((new_dim,), dtype=float)
-            if (
+            if not (
                 isinstance(previous_A, np.ndarray)
                 and isinstance(previous_b, np.ndarray)
                 and previous_A.shape == (previous_dim, previous_dim)
                 and previous_b.shape == (previous_dim,)
             ):
+                reset_arms.append(action)
+            else:
                 for new_row, feature_row in enumerate(expanded):
                     old_row = previous_index.get(feature_row)
                     if old_row is None:
@@ -144,10 +179,12 @@ def ensure_feature_state(state: LinUCBState, feature_names: Iterable[str], *, l2
     for action in state.action_names:
         A = state.A.get(action)
         b = state.b.get(action)
-        if A is None or A.shape != (dim, dim):
+        if A is None or A.shape != (dim, dim) or b is None or b.shape != (dim,):
             state.A[action] = np.eye(dim, dtype=float) * float(l2)
-        if b is None or b.shape != (dim,):
             state.b[action] = np.zeros((dim,), dtype=float)
+            if action not in reset_arms:
+                reset_arms.append(action)
+    return FeatureStateChange(added=added, reset_arms=tuple(reset_arms))
 
 
 def feature_vector(
