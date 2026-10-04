@@ -245,10 +245,10 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
   - LDB run metadata includes the convertible count.
 
 ### 1F. Record completeness and cost accounting (D9)
-- [ ] **ATT-08, ORC-10, ORC-17:** write a terminal `unit_runtime_error` record when a unit raises. Flush the deferred record queue in a `finally`. Keep streamed usage in the run totals.
-- [ ] **ATT-05:** retry gate per D9.
-- [ ] **POL-02, ATT-09, ATT-13, ATT-15:** count every LLM call: TEP critic and update calls, equilibrium re-plans, and the first call before a transport replay. Stop double-counting compaction tokens.
-- [ ] **ATT-11, ATT-12:** record the final prompt with per-cycle hashes, and don't delete artifacts that records reference.
+- [x] **ATT-08, ORC-10, ORC-17:** write a terminal `unit_runtime_error` record when a unit raises. Flush the deferred record queue in a `finally`. Keep streamed usage in the run totals.
+- [x] **ATT-05:** retry gate per D9.
+- [x] **POL-02, ATT-09, ATT-13, ATT-15:** count every LLM call: TEP critic and update calls, equilibrium re-plans, and the first call before a transport replay. Stop double-counting compaction tokens.
+- [x] **ATT-11, ATT-12:** record the final prompt with per-cycle hashes, and don't delete artifacts that records reference.
 - **Acceptance:** using the stub server's request log, the summed usage of every LLM call in a fixture attempt equals the recorded attempt total.
 
 ### 1G. LLM output handling that changes outcomes
