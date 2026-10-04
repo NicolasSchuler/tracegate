@@ -232,13 +232,13 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
   - A test shows argparse abbreviations are rejected.
 
 ### 1E. Baseline contract (D3, D4)
-- [ ] **BAS-01:** apply D3, and record the convertible-case count in run metadata.
-- [ ] **BAS-03, BAS-04, BAS-08, BAS-11, BAS-12:** extend `BaselineConfig` with temperature, seed, a completion cap, retry settings and one deadline. Forward them from `run_eval`, honour them in all five adapters and both upstream patches, and record the effective values per record.
-- [ ] **BAS-02:** retry context per D4.
-- [ ] **BAS-10, BAS-15:** keep usage and the last candidate on timeouts and errors, and compute metrics on every return path.
-- [ ] **BAS-05, BAS-14:** record the observed commit plus a post-patch tree hash, and fail setup on mismatch.
-- [ ] **BAS-13, BAS-16, BAS-17, BAS-19:** RLM smoke gate as telemetry only, LDB model routing, `extra_body` capability check, one OpenAI-compatible defaults factory.
-- [ ] **ORC-03, ORC-18, ORC-19:** subprocess monitor. Use `start_new_session=True` and `killpg`, a bounded drain after exit, `stdin=DEVNULL`, and no deadline when the timeout is 0. Fix this before any baseline re-run.
+- [x] **BAS-01:** apply D3, and record the convertible-case count in run metadata.
+- [x] **BAS-03, BAS-04, BAS-08, BAS-11, BAS-12:** extend `BaselineConfig` with temperature, seed, a completion cap, retry settings and one deadline. Forward them from `run_eval`, honour them in all five adapters and both upstream patches, and record the effective values per record. *(Partial: INTERVENOR, lambda-RLM and RLM enforce the contract; LDB and TraceCoder get `TRACEGATE_BASELINE_*` env vars and records say `enforced: false`, because editing their upstream patches needs the provisioned repos to verify. The single deadline is enforced in INTERVENOR and measured for every adapter; lambda-RLM/RLM still bound each inner call.)*
+- [x] **BAS-02:** retry context per D4.
+- [x] **BAS-10, BAS-15:** keep usage and the last candidate on timeouts and errors, and compute metrics on every return path.
+- [x] **BAS-05, BAS-14:** record the observed commit plus a post-patch tree hash, and fail setup on mismatch. *(The tree hash is recorded per record; asserting it against a manifest is deferred until the upstream repos are provisioned.)*
+- [x] **BAS-13, BAS-16, BAS-17, BAS-19:** RLM smoke gate as telemetry only, LDB model routing, `extra_body` capability check, one OpenAI-compatible defaults factory.
+- [x] **ORC-03, ORC-18, ORC-19:** subprocess monitor. Use `start_new_session=True` and `killpg`, a bounded drain after exit, `stdin=DEVNULL`, and no deadline when the timeout is 0. Fix this before any baseline re-run.
 - **Acceptance:**
   - A test asserts every adapter receives the same temperature, cap, retries and deadline from one config.
   - A subprocess-monitor test whose child spawns a grandchild returns within timeout plus grace.
