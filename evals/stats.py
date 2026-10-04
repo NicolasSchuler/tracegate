@@ -177,7 +177,7 @@ def bootstrap_ci(
         sum(differences[rng.randint(0, n - 1)] for _ in range(n)) / n for _ in range(n_bootstrap)
     ]
 
-    ci_lower, ci_upper = _percentile_interval(deltas, confidence)
+    ci_lower, ci_upper = percentile_interval(deltas, confidence)
     return {
         "uplift": observed_uplift,
         "ci_lower": ci_lower,
@@ -219,7 +219,7 @@ def bootstrap_mean_ci(
         sample = [values[rng.randint(0, n - 1)] for _ in range(n)]
         bootstrap_means.append(sum(sample) / float(n))
 
-    ci_lower, ci_upper = _percentile_interval(bootstrap_means, confidence)
+    ci_lower, ci_upper = percentile_interval(bootstrap_means, confidence)
     return {
         "mean": mean_value,
         "ci_lower": ci_lower,
@@ -231,7 +231,7 @@ def bootstrap_mean_ci(
     }
 
 
-def _percentile_interval(resampled: list[float], confidence: float) -> tuple[float, float]:
+def percentile_interval(resampled: list[float], confidence: float) -> tuple[float, float]:
     """Percentile bootstrap interval; the only interval method in eval reports (STA-05)."""
     ordered = sorted(resampled)
     n_bootstrap = len(ordered)

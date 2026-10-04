@@ -4,6 +4,7 @@
 
 ### Features
 
+- Off-policy estimates (IPS, SNIPS, DR) carry 95% case-bootstrap intervals (`ope_ci`, 1,000 seeded resamples, cross-fitted models held fixed), printed next to each estimate; they had no uncertainty at all.
 - Add an offline `llmdebug quickstart` command that creates and displays a real synthetic snapshot.
 - Add a System-1 decision-model advisor for the adaptive helper policy (`evals/decision_model/`): a SystemOne-compatible endpoint (e.g. Cloudflare clef-flash served by llama.cpp through llama-swap, or the bundled PyTorch sidecar) can run in `shadow`, `policy`, `features` or `prior` role via `--adaptive-decision-model-role`, with versioned question profiles, a redacted bounded decision state, policy-event schema v5, decision-model off-policy targets, and an `--adaptive-decision-model-api-key` (default `$TRACEGATE_DECISION_MODEL_API_KEY`) that `run_eval_docker.sh` passes as a flag and lockfiles redact.
 

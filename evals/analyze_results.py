@@ -40,7 +40,7 @@ from .eval_types import (
     condition_family,
     normalize_condition_name,
 )
-from .stats import BOOTSTRAP_METHOD, DEFAULT_BOOTSTRAP_SEED, format_p_value
+from .stats import BOOTSTRAP_METHOD, DEFAULT_BOOTSTRAP_SEED, format_p_value, percentile_interval
 
 logger = logging.getLogger(__name__)
 
@@ -4339,6 +4339,7 @@ def _adaptive_ope_samples(
                 "feature_scaling_profile": feature_scaling_profile,
                 "propensity_shadow_corrected": shadow_mode and logged_propensity < 1.0,
                 "propensity_missing": propensity_missing,
+                "case_key": f"{record.get('run_id') or ''}\x1f{record.get('case_id') or ''}",
                 **_ope_sample_policy_context(
                     attempt_meta_dict,
                     patch_meta_dict,
@@ -4918,7 +4919,7 @@ def _deterministic_target_ope(
     snips = (weighted_reward_sum / weight_sum) if weight_sum > 0.0 else None
     ess = ((weight_sum * weight_sum) / weight_sq_sum) if weight_sq_sum > 0.0 else None
 
-    dr, dr_reason = _stratified_doubly_robust_estimate(
+    dr_terms, dr_reason = _stratified_doubly_robust_terms(
         samples=samples,
         target_action=target_action,
         action_space=action_space,
@@ -4926,6 +4927,15 @@ def _deterministic_target_ope(
         ridge_alpha=ridge_alpha,
         propensity_floor=propensity_floor,
     )
+    dr = (sum(dr_terms) / float(len(dr_terms))) if dr_terms else None
+    weights = [
+        (
+            1.0 / _sanitize_propensity(sample.get("propensity"), floor=propensity_floor)
+            if str(sample.get("action") or "") == target_action
+            else 0.0
+        )
+        for sample in samples
+    ]
 
     support_warning = _support_warning_for_target(
         matched_samples=matched,
@@ -4944,9 +4954,70 @@ def _deterministic_target_ope(
         "support_warning": support_warning,
         "dr_supported": dr is not None,
         "dr_reason": dr_reason if dr is None else "",
+        "ope_ci": _ope_case_bootstrap(samples, weights=weights, dr_terms=dr_terms),
     }
     result.update(_estimator_agreement_summary(result))
     return result
+
+
+OPE_BOOTSTRAP_RESAMPLES = 1000
+
+
+def _ope_case_bootstrap(
+    samples: list[dict[str, Any]],
+    *,
+    weights: list[float],
+    dr_terms: list[float] | None,
+) -> dict[str, Any]:
+    """95% percentile bootstrap over cases for IPS, SNIPS and DR (Phase 2.3).
+
+    Off-policy estimates carried no uncertainty. Cases are resampled with their
+    samples; the cross-fitted reward models are held fixed, so DR resamples its
+    per-sample terms. Seeded with ``DEFAULT_BOOTSTRAP_SEED``.
+    """
+    by_case: dict[str, list[int]] = defaultdict(list)
+    for idx, sample in enumerate(samples):
+        by_case[str(sample.get("case_key") or idx)].append(idx)
+    cases = [by_case[key] for key in sorted(by_case)]
+    if len(cases) < 2:
+        return {"available": False, "n_cases": len(cases)}
+    rewards = np.array([float(sample.get("reward") or 0.0) for sample in samples])
+    weight_arr = np.asarray(weights, dtype=float)
+    dr_arr = np.asarray(dr_terms if dr_terms is not None else [0.0] * len(samples), dtype=float)
+    totals = np.array(
+        [
+            [
+                float((weight_arr[idx] * rewards[idx]).sum()),
+                float(weight_arr[idx].sum()),
+                float(dr_arr[idx].sum()),
+                float(len(idx)),
+            ]
+            for idx in cases
+        ]
+    )
+    rng = np.random.default_rng(DEFAULT_BOOTSTRAP_SEED)
+    draws = totals[rng.integers(0, len(cases), size=(OPE_BOOTSTRAP_RESAMPLES, len(cases)))].sum(
+        axis=1
+    )
+    weighted, weight, dr_sum, n = draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3]
+    ips_draws = (weighted / n).tolist()
+    snips_draws = (weighted[weight > 0] / weight[weight > 0]).tolist()
+    dr_draws = (dr_sum / n).tolist()
+
+    def interval(draws: list[float]) -> list[float] | None:
+        return list(percentile_interval(draws, 0.95)) if draws else None
+
+    return {
+        "available": True,
+        "unit": "case",
+        "n_cases": len(cases),
+        "n_bootstrap": OPE_BOOTSTRAP_RESAMPLES,
+        "method": BOOTSTRAP_METHOD,
+        "seed": DEFAULT_BOOTSTRAP_SEED,
+        "ips": interval(ips_draws),
+        "snips": interval(snips_draws),
+        "dr": interval(dr_draws) if dr_terms is not None else None,
+    }
 
 
 def _stratified_doubly_robust_estimate(
@@ -4960,19 +5031,43 @@ def _stratified_doubly_robust_estimate(
 ) -> tuple[float | None, str]:
     """Stratified doubly-robust OPE across feature-scaling profiles.
 
-    Fits per-action ridge models within each feature-scaling stratum,
-    then weight-averages stratum-level DR estimates by sample count.
+    Fits per-action ridge models within each feature-scaling stratum (cross-fitted),
+    and averages the per-sample DR terms, which weight-averages the stratum estimates by
+    sample count.
 
     Returns:
         Tuple of (DR estimate or None, reason string if unsupported).
     """
+    terms, reason = _stratified_doubly_robust_terms(
+        samples=samples,
+        target_action=target_action,
+        action_space=action_space,
+        min_action_support=min_action_support,
+        ridge_alpha=ridge_alpha,
+        propensity_floor=propensity_floor,
+    )
+    if terms is None:
+        return None, reason
+    return sum(terms) / float(len(terms)), ""
+
+
+def _stratified_doubly_robust_terms(
+    *,
+    samples: list[dict[str, Any]],
+    target_action: str,
+    action_space: set[str],
+    min_action_support: int,
+    ridge_alpha: float,
+    propensity_floor: float,
+) -> tuple[list[float] | None, str]:
+    """Per-sample DR terms aligned with *samples*, or ``None`` and the reason."""
     total = len(samples)
     if total <= 0:
         return None, "no_samples"
     if target_action not in action_space:
         return None, "target_action_out_of_space"
 
-    weighted_dr_sum = 0.0
+    term_by_sample: dict[int, float] = {}
     for bucket_samples in _samples_by_feature_scaling_profile(samples).values():
         action_counts = _action_counts_for_samples(
             samples=bucket_samples,
@@ -5015,15 +5110,16 @@ def _stratified_doubly_robust_estimate(
         )
         if any(target_action not in sample_models for sample_models in crossfit.per_sample):
             return None, "insufficient_crossfit_support"
-        bucket_dr = _doubly_robust_estimate(
+        bucket_terms = _doubly_robust_terms(
             samples=bucket_samples,
             target_action=target_action,
             feature_names=crossfit.feature_names,
             models=crossfit.per_sample,
             propensity_floor=propensity_floor,
         )
-        weighted_dr_sum += bucket_dr * len(bucket_samples)
-    return weighted_dr_sum / float(total), ""
+        for sample, term in zip(bucket_samples, bucket_terms, strict=True):
+            term_by_sample[id(sample)] = term
+    return [term_by_sample[id(sample)] for sample in samples], ""
 
 
 def _doubly_robust_estimate(
@@ -5040,6 +5136,29 @@ def _doubly_robust_estimate(
     term for samples matching the target action. *models* is one shared model set or,
     when cross-fitted, one out-of-fold set per sample (STA-11).
     """
+    return float(
+        _mean(
+            _doubly_robust_terms(
+                samples=samples,
+                target_action=target_action,
+                feature_names=feature_names,
+                models=models,
+                propensity_floor=propensity_floor,
+            )
+        )
+        or 0.0
+    )
+
+
+def _doubly_robust_terms(
+    *,
+    samples: list[dict[str, Any]],
+    target_action: str,
+    feature_names: list[str],
+    models: dict[str, np.ndarray] | list[dict[str, np.ndarray]],
+    propensity_floor: float,
+) -> list[float]:
+    """Per-sample DR terms: target prediction plus the IPS-weighted residual."""
     model_sets = models if isinstance(models, list) else [models] * len(samples)
     terms: list[float] = []
     for sample, models in zip(samples, model_sets, strict=True):
@@ -5062,7 +5181,7 @@ def _doubly_robust_estimate(
             )
         correction = (reward - behavior_hat) / propensity if action == target_action else 0.0
         terms.append(target_hat + correction)
-    return float(_mean(terms) or 0.0)
+    return terms
 
 
 @dataclass(frozen=True)
@@ -5260,11 +5379,16 @@ def _stochastic_target_ope(
     ips = (weighted_reward_sum / float(total)) if (total > 0 and matched > 0) else None
     snips = (weighted_reward_sum / weight_sum) if weight_sum > 0.0 else None
     ess = ((weight_sum * weight_sum) / weight_sq_sum) if weight_sq_sum > 0.0 else None
-    dr, dr_reason = _stratified_stochastic_doubly_robust_estimate(
+    dr_terms, dr_reason = _stratified_stochastic_doubly_robust_terms(
         samples=samples,
         target_distributions=target_distributions,
         settings=settings,
     )
+    dr = (sum(dr_terms) / float(len(dr_terms))) if dr_terms else None
+    weights = [
+        _target_importance_weight(sample, distribution, propensity_floor=settings.propensity_floor)
+        for sample, distribution in zip(samples, target_distributions, strict=True)
+    ]
     result: dict[str, Any] = {
         "target_kind": "stochastic",
         "ips": ips,
@@ -5282,6 +5406,7 @@ def _stochastic_target_ope(
         "dr_supported": dr is not None,
         "dr_reason": dr_reason if dr is None else "",
         "mean_action_probabilities": _mean_target_action_probabilities(target_distributions),
+        "ope_ci": _ope_case_bootstrap(samples, weights=weights, dr_terms=dr_terms),
     }
     result.update(_estimator_agreement_summary(result))
     return result
@@ -5293,6 +5418,21 @@ def _stratified_stochastic_doubly_robust_estimate(
     target_distributions: list[dict[str, float]],
     settings: StochasticTargetOpeSettings,
 ) -> tuple[float | None, str]:
+    """Mean of :func:`_stratified_stochastic_doubly_robust_terms`, or ``None`` and reason."""
+    terms, reason = _stratified_stochastic_doubly_robust_terms(
+        samples=samples, target_distributions=target_distributions, settings=settings
+    )
+    if terms is None:
+        return None, reason
+    return sum(terms) / float(len(terms)), ""
+
+
+def _stratified_stochastic_doubly_robust_terms(
+    *,
+    samples: list[dict[str, Any]],
+    target_distributions: list[dict[str, float]],
+    settings: StochasticTargetOpeSettings,
+) -> tuple[list[float] | None, str]:
     """Stratified DR for a per-sample target, reusing the deterministic reward models.
 
     Like the deterministic estimator this stratifies by feature-scaling profile and
@@ -5307,7 +5447,7 @@ def _stratified_stochastic_doubly_robust_estimate(
         profile = _feature_scaling_profile_bucket(sample.get("feature_scaling_profile"))
         buckets.setdefault(profile, []).append((sample, distribution))
 
-    weighted_dr_sum = 0.0
+    term_by_sample: dict[int, float] = {}
     for profile in sorted(buckets):
         bucket_samples = [sample for sample, _distribution in buckets[profile]]
         bucket_distributions = [distribution for _sample, distribution in buckets[profile]]
@@ -5344,14 +5484,16 @@ def _stratified_stochastic_doubly_robust_estimate(
                 needed.add(str(sample.get("action") or ""))
             if not needed <= set(sample_models):
                 return None, "insufficient_crossfit_support"
-        weighted_dr_sum += len(bucket_samples) * _stochastic_doubly_robust_estimate(
+        bucket_terms = _stochastic_doubly_robust_terms(
             samples=bucket_samples,
             target_distributions=bucket_distributions,
             feature_names=crossfit.feature_names,
             models=crossfit.per_sample,
             propensity_floor=settings.propensity_floor,
         )
-    return weighted_dr_sum / float(total), ""
+        for sample, term in zip(bucket_samples, bucket_terms, strict=True):
+            term_by_sample[id(sample)] = term
+    return [term_by_sample[id(sample)] for sample in samples], ""
 
 
 def _stochastic_dr_support_reason(
@@ -5389,6 +5531,29 @@ def _stochastic_doubly_robust_estimate(
 
     *models* is one shared model set or one out-of-fold set per sample (STA-11).
     """
+    return float(
+        _mean(
+            _stochastic_doubly_robust_terms(
+                samples=samples,
+                target_distributions=target_distributions,
+                feature_names=feature_names,
+                models=models,
+                propensity_floor=propensity_floor,
+            )
+        )
+        or 0.0
+    )
+
+
+def _stochastic_doubly_robust_terms(
+    *,
+    samples: list[dict[str, Any]],
+    target_distributions: list[dict[str, float]],
+    feature_names: list[str],
+    models: dict[str, np.ndarray] | list[dict[str, np.ndarray]],
+    propensity_floor: float,
+) -> list[float]:
+    """Per-sample DR terms for a per-sample target distribution."""
     model_sets = models if isinstance(models, list) else [models] * len(samples)
     terms: list[float] = []
     for sample, distribution, models in zip(samples, target_distributions, model_sets, strict=True):
@@ -5413,7 +5578,7 @@ def _stochastic_doubly_robust_estimate(
             )
             correction = weight * (float(sample.get("reward") or 0.0) - behavior_hat)
         terms.append(direct + correction)
-    return float(_mean(terms) or 0.0)
+    return terms
 
 
 def _looks_like_test_path(path: str) -> bool:
@@ -6326,9 +6491,11 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
         target = targets.get(target_name)
         if not isinstance(target, dict):
             continue
-        ips = _fmt_num(target.get("ips"))
-        snips = _fmt_num(target.get("snips"))
-        dr = _fmt_num(target.get("dr"))
+        ci_raw = target.get("ope_ci")
+        ci: dict[str, Any] = ci_raw if isinstance(ci_raw, dict) else {}
+        ips = _fmt_num_with_ci(target.get("ips"), ci.get("ips"))
+        snips = _fmt_num_with_ci(target.get("snips"), ci.get("snips"))
+        dr = _fmt_num_with_ci(target.get("dr"), ci.get("dr"))
         ess = _fmt_num(target.get("effective_sample_size"))
         matched = int(target.get("matched_samples") or 0)
         total = int(target.get("total_samples") or 0)
@@ -6347,6 +6514,13 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
     notes = _ope_sample_notes(ope)
     rendered = "; ".join(parts) if parts else "n/a"
     return f"{notes}{rendered}" if notes else rendered
+
+
+def _fmt_num_with_ci(value: Any, interval: Any) -> str:
+    """``value [lo, hi]`` with the case-bootstrap interval when there is one."""
+    if isinstance(interval, list) and len(interval) == 2 and value is not None:
+        return f"{_fmt_num(value)} [{_fmt_num(interval[0])}, {_fmt_num(interval[1])}]"
+    return _fmt_num(value)
 
 
 def _ope_sample_notes(ope: dict[str, Any]) -> str:
