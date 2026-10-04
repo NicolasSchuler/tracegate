@@ -1103,7 +1103,7 @@ Argument mapping:
 - `eval-traceback-only <run_id>`: runs `evals/docker/run_eval_docker.sh` with traceback config, writes `evals/results/<run_id>.jsonl`.
 - `eval-select-failed <run_id> [condition] [max_attempt]`: reads `evals/results/<run_id>.jsonl`, writes `evals/artifacts/case_lists/<run_id>.failed.txt` (default `max_attempt=2`; pass `0` to disable filtering).
 - `eval-adaptive-online-failed <source_run_id> <rescue_run_id>`: runs `evals/docker/run_eval_docker.sh` with adaptive config and failed-case list, writes `evals/results/<rescue_run_id>.jsonl` plus online-policy state/events artifacts.
-- `eval-two-pass-summary <baseline_run_id> <rescue_run_id>`: reports rescue coverage on baseline failures, rescued success rate on failed cases, and net success uplift vs baseline.
+- `eval-two-pass-summary <baseline_run_id> <rescue_run_id>`: reports rescue coverage on baseline failures, rescued success rate on failed cases, the cumulative success after both passes and each pass's own token and runtime cost. The cumulative gain is the effect of extra compute on failures only, not a treatment effect, and cannot show a regression (STA-22).
 - both Docker-backed `just` eval recipes honor `OPENAI_BASE_URL` (default: `http://127.0.0.1:12000/v1`).
 
 ### Reproducibility controls

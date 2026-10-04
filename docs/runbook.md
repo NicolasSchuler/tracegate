@@ -732,7 +732,7 @@ just eval-summary <run_id>
 uv run python -m evals.eval_summary <run_id>
 ```
 
-### Two-pass uplift summary
+### Two-pass cumulative summary
 
 ```bash
 just eval-two-pass-summary <base_run_id> <rescue_run_id>

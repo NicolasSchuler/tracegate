@@ -154,10 +154,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Base-record assembly still mirrors the stable JSONL record schema.",
         {"_build_base_record": 9},
     ),
-    "evals/eval_two_pass_summary.py": _FileArityDebt(
-        "The reporting helper still receives separate baseline and rescue aggregates.",
-        {"_print_two_pass_summary": 8},
-    ),
     "evals/eval_types.py": _FileArityDebt(
         "Compatibility constructors and policy helpers still expose flat inputs.",
         {

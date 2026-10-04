@@ -560,7 +560,7 @@ Uses RidgeCV regression to estimate expected reward under target policy:
 **Output includes**:
 - Baseline success rate
 - Rescue effectiveness on baseline failures
-- Net uplift
+- Cumulative success after both passes, with each pass's own cost (a compute effect, not a treatment effect; STA-22)
 - Coverage diagnostics
 
 ---
