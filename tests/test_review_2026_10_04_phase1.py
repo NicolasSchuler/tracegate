@@ -271,10 +271,13 @@ def test_pol05_pol23_budget_controllers_are_per_condition_with_own_seeds(
     assert gated.random_seed is not None and gated.random_seed != 7
 
     single = _per_condition_budget_configs(
-        base, conditions=[Condition.LAYERED_ADAPTIVE_LLM], seed=None
+        base, conditions=[Condition.LAYERED_ADAPTIVE_LLM], seed=None, horizon_decisions=30
     )
     assert single["layered_adaptive_llm"].state_path == tmp_path / "budget.json"
     assert single["layered_adaptive_llm"].random_seed is None
+    # POL-04: the bwk_v1 pacing horizon (cases x attempts) reaches every controller.
+    assert single["layered_adaptive_llm"].bwk_horizon_decisions == 30
+    assert gated.bwk_horizon_decisions == 0
 
 
 def test_pol05_keyed_decisions_do_not_depend_on_decision_order() -> None:

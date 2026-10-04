@@ -70,20 +70,27 @@ _BUDGET_POLICY_CONDITIONS = (Condition.LAYERED_ADAPTIVE_GATED, Condition.LAYERED
 
 
 def _per_condition_budget_configs(
-    config: BudgetPolicyConfig, *, conditions: list[Condition], seed: int | None
+    config: BudgetPolicyConfig,
+    *,
+    conditions: list[Condition],
+    seed: int | None,
+    horizon_decisions: int = 0,
 ) -> dict[str, BudgetPolicyConfig]:
     """Budget-policy configs keyed by condition value (POL-05, POL-23).
 
     With more than one adaptive condition each gets its own state and event files
     (``<stem>.<condition><suffix>``); every controller gets a seed derived from the run
     seed and its condition. Runs without an adaptive condition keep one shared config.
+    *horizon_decisions* (cases x attempts per condition) sets the ``bwk_v1`` pacing
+    horizon (POL-04).
     """
     keys = [condition.value for condition in conditions if condition in _BUDGET_POLICY_CONDITIONS]
     separate_files = len(keys) > 1
     out: dict[str, BudgetPolicyConfig] = {}
     for key in keys or [""]:
         updates: dict[str, Any] = {
-            "random_seed": derive_seed(int(seed), "budget", key) if seed is not None else None
+            "random_seed": derive_seed(int(seed), "budget", key) if seed is not None else None,
+            "bwk_horizon_decisions": max(0, int(horizon_decisions)),
         }
         if separate_files:
             for field_name in ("state_path", "events_path"):
@@ -447,7 +454,11 @@ def run_main_flow(
     budget_policy_controllers: dict[str, AdaptiveBudgetPolicyController] = {}
     if budget_policy_config.mode != "off":
         for condition_key, condition_config in _per_condition_budget_configs(
-            budget_policy_config, conditions=conditions, seed=args.seed
+            budget_policy_config,
+            conditions=conditions,
+            seed=args.seed,
+            # POL-04: bwk_v1 paces its token budget over at most one decision per attempt.
+            horizon_decisions=len(cases) * max(1, int(getattr(args, "k", 1) or 1)),
         ).items():
             try:
                 controller = AdaptiveBudgetPolicyController(condition_config)

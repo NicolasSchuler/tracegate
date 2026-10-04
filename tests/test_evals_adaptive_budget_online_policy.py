@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -1137,6 +1138,8 @@ def test_budget_policy_bwk_state_path_resume_preserves_run_budget_counters(tmp_p
         random_seed=0,
         decay=1.0,
     )
+    # Pacing target 40 / 4 = 10 tokens per decision (POL-04).
+    cfg = dataclasses.replace(cfg, bwk_horizon_decisions=4)
     ctrl = AdaptiveBudgetPolicyController(cfg)
     decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
     event = _record(ctrl, decision, local_tokens_total=50)
@@ -1151,11 +1154,13 @@ def test_budget_policy_bwk_state_path_resume_preserves_run_budget_counters(tmp_p
     assert resumed.load_error is None
     assert event.bwk_remaining_token_budget_after == 0
     assert event.bwk_cumulative_tokens_charged == 50
-    assert event.bwk_dual_variable_after == pytest.approx(0.25)
+    # 0.05 * (50 - 10) / 10; the old overspend rule gave (50 - 40) / 40 = 0.25.
+    assert event.bwk_dual_variable_after == pytest.approx(0.2)
     assert resumed.bwk_status["run_token_budget"] == 40
     assert resumed.bwk_status["remaining_token_budget"] == 0
     assert resumed.bwk_status["cumulative_tokens_charged"] == 50
-    assert resumed.bwk_status["dual_variable"] == pytest.approx(0.25)
+    assert resumed.bwk_status["dual_variable"] == pytest.approx(0.2)
+    assert resumed.bwk_status["cost_estimates"][decision.applied_action] == pytest.approx(50.0)
     assert resumed_decision.bwk_budget_exhausted is True
     resumed.close()
 
@@ -2027,3 +2032,66 @@ def test_budget_thompson_state_roundtrip(tmp_path) -> None:
     for score in d2.scores.values():
         assert math.isfinite(score)
     ctrl2.close()
+
+
+# ---------------------------------------------------------------------------
+# POL-04: the bwk_v1 dual variable paces spending and enters the gate scores
+# ---------------------------------------------------------------------------
+
+
+def _bwk_controller(tmp_path, *, horizon: int) -> AdaptiveBudgetPolicyController:
+    cfg = BudgetPolicyConfig.normalize(
+        mode="on",
+        architecture=BUDGET_POLICY_ARCH_BWK_V1,
+        alpha=0.0,
+        epsilon=0.0,
+        warmup_decisions=0,
+        bwk_run_token_budget=1000,
+        state_path=tmp_path / "bwk_state.json",
+        events_path=tmp_path / "bwk_events.jsonl",
+        random_seed=3,
+        decay=1.0,
+    )
+    return AdaptiveBudgetPolicyController(dataclasses.replace(cfg, bwk_horizon_decisions=horizon))
+
+
+def test_bwk_dual_rises_on_overspend_and_falls_on_underspend(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=100)  # target 10 tokens per decision
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    first = _record(ctrl, decision, local_tokens_total=30)
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    second = _record(ctrl, decision, local_tokens_total=0)
+    status = ctrl.bwk_status
+    ctrl.close()
+
+    # The old rule stayed 0 until the remaining budget was nearly exhausted.
+    assert first.bwk_dual_variable_after == pytest.approx(0.05 * (30 - 10) / 10)
+    assert second.bwk_dual_variable_after == pytest.approx(0.1 - 0.05)
+    assert first.bwk_target_tokens_per_decision == pytest.approx(10.0)
+    assert status["target_tokens_per_decision"] == pytest.approx(10.0)
+
+
+def test_bwk_dual_penalizes_the_costlier_gate_arm(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=100)
+    ctrl._bwk_dual_variable = 1.0
+    ctrl._bwk_cost_sums.update({ACTION_INCREASE_BUDGET: 400.0, ACTION_KEEP_BUDGET: 50.0})
+    ctrl._bwk_cost_counts.update({ACTION_INCREASE_BUDGET: 10, ACTION_KEEP_BUDGET: 10})
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_INCREASE_BUDGET)
+    ctrl.close()
+
+    # Untrained arms tie at 0; the Lagrangian term lambda * cost / target breaks it.
+    assert decision.scores[ACTION_INCREASE_BUDGET] == pytest.approx(-4.0)
+    assert decision.scores[ACTION_KEEP_BUDGET] == pytest.approx(-0.5)
+    assert decision.selected_action == ACTION_KEEP_BUDGET
+    assert decision.propensity == pytest.approx(1.0)
+
+
+def test_bwk_without_a_horizon_only_masks_on_exhaustion(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=0)
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    event = _record(ctrl, decision, local_tokens_total=500)
+    ctrl.close()
+
+    assert event.bwk_dual_variable_after == 0.0
+    assert event.bwk_target_tokens_per_decision == 0.0
+    assert ctrl._bwk_score_penalties() == {}

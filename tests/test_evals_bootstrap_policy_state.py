@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import numpy as np
@@ -550,14 +551,18 @@ def test_bootstrap_budget_bwk_replays_budget_telemetry(tmp_path: Path) -> None:
     saved_state_path = tmp_path / "bwk_state_saved.json"
     bootstrapped_state_path = tmp_path / "bwk_state_bootstrapped.json"
     controller = AdaptiveBudgetPolicyController(
-        BudgetPolicyConfig.normalize(
-            mode="on",
-            architecture="bwk_v1",
-            decay=0.98,
-            bwk_run_token_budget=100,
-            state_path=saved_state_path,
-            events_path=events_path,
-            random_seed=0,
+        dataclasses.replace(
+            BudgetPolicyConfig.normalize(
+                mode="on",
+                architecture="bwk_v1",
+                decay=0.98,
+                bwk_run_token_budget=100,
+                state_path=saved_state_path,
+                events_path=events_path,
+                random_seed=0,
+            ),
+            # Pacing target 100 / 5 = 20 tokens per decision (POL-04).
+            bwk_horizon_decisions=5,
         )
     )
     decision_one = controller.decide(
@@ -662,10 +667,14 @@ def test_bootstrap_budget_bwk_replays_budget_telemetry(tmp_path: Path) -> None:
     assert bootstrapped["bwk_run_token_budget"] == saved["bwk_run_token_budget"]
     assert bootstrapped["bwk_remaining_token_budget"] == saved["bwk_remaining_token_budget"]
     assert bootstrapped["bwk_cumulative_tokens_charged"] == saved["bwk_cumulative_tokens_charged"]
+    assert float(saved["bwk_dual_variable"]) > 0.0
     assert np.isclose(
         float(bootstrapped["bwk_dual_variable"]),
         float(saved["bwk_dual_variable"]),
     )
+    assert bootstrapped["bwk_cost_counts"] == saved["bwk_cost_counts"]
+    assert bootstrapped["bwk_cost_sums"] == pytest.approx(saved["bwk_cost_sums"])
+    assert "bwk_dual_variable_mismatch" not in bootstrapped["bootstrap_warning_codes"]
 
 
 def test_bootstrap_online_preserves_feature_expansion_without_model_update(

@@ -26,6 +26,7 @@ from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCH_TIER_BINARY,
     BUDGET_POLICY_ARCHITECTURES,
     BUDGET_POLICY_FAMILIES,
+    BWK_DUAL_STEP,
 )
 from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ACTIONS as BUDGET_GATE_ACTIONS,
@@ -333,6 +334,8 @@ def _bootstrap_budget_state(
     bwk_remaining_token_budget = 0
     bwk_cumulative_tokens_charged = 0
     bwk_dual_variable = 0.0
+    bwk_cost_sums: dict[str, float] = dict.fromkeys(BUDGET_GATE_ACTIONS, 0.0)
+    bwk_cost_counts: dict[str, int] = dict.fromkeys(BUDGET_GATE_ACTIONS, 0)
     if architecture == BUDGET_POLICY_ARCH_BWK_V1:
         bwk_run_token_budget = _infer_uniform_positive_int(
             events,
@@ -425,13 +428,28 @@ def _bootstrap_budget_state(
             remaining_before = bwk_remaining_token_budget
             bwk_cumulative_tokens_charged += charged
             bwk_remaining_token_budget = max(0, remaining_before - charged)
-            denom = max(1, bwk_run_token_budget or charged)
-            overspend_tokens = max(0, charged - remaining_before)
-            bwk_dual_variable = max(
-                0.0,
-                (float(bwk_dual_variable) * float(decay))
-                + (float(overspend_tokens) / float(denom)),
-            )
+            applied_action = str(payload.get("applied_action") or "")
+            if applied_action in bwk_cost_counts:
+                bwk_cost_sums[applied_action] += float(charged)
+                bwk_cost_counts[applied_action] += 1
+            if "bwk_target_tokens_per_decision" in payload:
+                # Event schema 7+: the pacing dual step (POL-04).
+                target = _safe_float(payload.get("bwk_target_tokens_per_decision"), default=0.0)
+                if target > 0.0:
+                    bwk_dual_variable = max(
+                        0.0,
+                        float(bwk_dual_variable)
+                        + BWK_DUAL_STEP * (float(charged) - target) / target,
+                    )
+            else:
+                # Older logs used the overspend rule; replay it so logged values reconcile.
+                denom = max(1, bwk_run_token_budget or charged)
+                overspend_tokens = max(0, charged - remaining_before)
+                bwk_dual_variable = max(
+                    0.0,
+                    (float(bwk_dual_variable) * float(decay))
+                    + (float(overspend_tokens) / float(denom)),
+                )
             after_logged = _safe_int(
                 payload.get("bwk_remaining_token_budget_after"),
                 default=bwk_remaining_token_budget,
@@ -467,6 +485,8 @@ def _bootstrap_budget_state(
         "bwk_remaining_token_budget": int(bwk_remaining_token_budget),
         "bwk_cumulative_tokens_charged": int(bwk_cumulative_tokens_charged),
         "bwk_dual_variable": float(bwk_dual_variable),
+        "bwk_cost_sums": dict(bwk_cost_sums),
+        "bwk_cost_counts": dict(bwk_cost_counts),
         "saved_at_utc": _utc_now(),
         "bootstrap_kind": "budget",
         "bootstrap_events_replayed": len(events),

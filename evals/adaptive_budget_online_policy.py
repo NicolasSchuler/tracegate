@@ -74,8 +74,11 @@ STATE_SCHEMA_VERSION = 4
 SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 1.0
 """Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
-EVENT_SCHEMA_VERSION = 6
-"""v5 adds ``effective_evidence`` (POL-01); v6 adds ``state_resets`` (POL-21)."""
+EVENT_SCHEMA_VERSION = 7
+"""v5 adds ``effective_evidence`` (POL-01); v6 adds ``state_resets`` (POL-21); v7 adds
+``bwk_target_tokens_per_decision`` and ``bwk_cost_estimates`` (POL-04)."""
+BWK_DUAL_STEP = 0.05
+"""Step size of the ``bwk_v1`` dual update ``lambda += step * (spend - target) / target``."""
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,10 @@ class BudgetPolicyConfig:
     events_path: Path | None = None
     bwk_run_token_budget: int | None = None
     random_seed: int | None = None
+    bwk_horizon_decisions: int = 0
+    """Expected budget decisions in the run (cases x attempts), set by the eval harness.
+    ``bwk_v1`` paces spending to ``bwk_run_token_budget / bwk_horizon_decisions`` tokens per
+    decision; 0 disables pacing and leaves only the exhaustion mask (POL-04)."""
 
     @classmethod
     def normalize(
@@ -305,6 +312,8 @@ class BudgetPolicyEvent:
     bwk_budget_exhausted: bool = False
     effective_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
     state_resets: dict[str, int] = field(default_factory=dict)
+    bwk_target_tokens_per_decision: float = 0.0
+    bwk_cost_estimates: dict[str, float] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dict."""
@@ -413,6 +422,10 @@ class BudgetPolicyEvent:
                 for model, evidence in self.effective_evidence.items()
             },
             "state_resets": {key: int(value) for key, value in self.state_resets.items()},
+            "bwk_target_tokens_per_decision": float(self.bwk_target_tokens_per_decision),
+            "bwk_cost_estimates": {
+                action: float(value) for action, value in self.bwk_cost_estimates.items()
+            },
         }
 
 
@@ -442,6 +455,8 @@ class AdaptiveBudgetPolicyController:
         self._bwk_remaining_token_budget = int(self._bwk_run_token_budget)
         self._bwk_cumulative_tokens_charged = 0
         self._bwk_dual_variable = 0.0
+        self._bwk_cost_sums: dict[str, float] = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0.0)
+        self._bwk_cost_counts: dict[str, int] = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0)
         # POL-21: cumulative model resets (``gate_arm:<a>``, ``family_arm:<f>``,
         # ``feature_set_mismatch``).
         self._state_resets: dict[str, int] = {}
@@ -486,7 +501,42 @@ class AdaptiveBudgetPolicyController:
                 "cumulative_tokens_charged": int(self._bwk_cumulative_tokens_charged),
                 "dual_variable": float(self._bwk_dual_variable),
                 "budget_exhausted": bool(self._bwk_remaining_token_budget <= 0),
+                "target_tokens_per_decision": self._bwk_target_tokens(),
+                "cost_estimates": self._bwk_cost_estimates(),
             }
+
+    def _bwk_target_tokens(self) -> float:
+        """Per-decision spend that makes the run budget last the horizon (0: no pacing)."""
+        horizon = max(0, int(self.config.bwk_horizon_decisions))
+        if self.config.architecture != BUDGET_POLICY_ARCH_BWK_V1 or horizon <= 0:
+            return 0.0
+        return float(self._bwk_run_token_budget) / float(horizon)
+
+    def _bwk_cost_estimates(self) -> dict[str, float]:
+        """Mean tokens per applied gate action; an arm not yet observed is assumed to
+        spend the target."""
+        target = self._bwk_target_tokens()
+        return {
+            action: (
+                self._bwk_cost_sums[action] / self._bwk_cost_counts[action]
+                if self._bwk_cost_counts[action] > 0
+                else target
+            )
+            for action in BUDGET_POLICY_ACTIONS
+        }
+
+    def _bwk_score_penalties(self) -> dict[str, float]:
+        """Lagrangian cost term ``lambda * cost_k / target`` per gate action (POL-04).
+
+        The dual variable used to be computed and logged but never read.
+        """
+        target = self._bwk_target_tokens()
+        if target <= 0.0 or self._bwk_dual_variable <= 0.0:
+            return {}
+        return {
+            action: float(self._bwk_dual_variable) * cost / target
+            for action, cost in self._bwk_cost_estimates().items()
+        }
 
     def _copy_state(self, state: LinUCBState) -> LinUCBState:
         return LinUCBState(
@@ -591,6 +641,7 @@ class AdaptiveBudgetPolicyController:
         cleaned_features: Mapping[str, float],
         default_action: str,
         available_actions: tuple[str, ...],
+        score_penalties: Mapping[str, float] | None = None,
     ) -> tuple[
         str,
         float,
@@ -627,6 +678,9 @@ class AdaptiveBudgetPolicyController:
                 scores = self._thompson_scores(state=state, x=x)
             else:
                 scores = self._linucb_scores(state=state, x=x)
+            for action, penalty in dict(score_penalties or {}).items():
+                if action in scores:
+                    scores[action] = float(scores[action]) - float(penalty)
             tied = core.greedy_ties(scores, available)
             if decision_index <= self.config.warmup_decisions:
                 selected = self._rng.choice(list(available))
@@ -742,6 +796,7 @@ class AdaptiveBudgetPolicyController:
                 cleaned_features=cleaned_features,
                 default_action=default_norm,
                 available_actions=gate_available_actions,
+                score_penalties=self._bwk_score_penalties(),
             )
             mode = self.config.mode
             applied = selected if mode == "on" else default_norm
@@ -886,13 +941,19 @@ class AdaptiveBudgetPolicyController:
                     bwk_remaining_token_budget_before - bwk_tokens_charged,
                 )
                 self._bwk_remaining_token_budget = bwk_remaining_token_budget_after
-                budget_denom = max(1, bwk_run_token_budget or bwk_tokens_charged)
-                overspend_tokens = max(0, bwk_tokens_charged - bwk_remaining_token_budget_before)
-                bwk_dual_variable_after = max(
-                    0.0,
-                    float(self._bwk_dual_variable) * float(self.config.decay)
-                    + (float(overspend_tokens) / float(budget_denom)),
-                )
+                if decision.applied_action in self._bwk_cost_counts:
+                    self._bwk_cost_sums[decision.applied_action] += float(bwk_tokens_charged)
+                    self._bwk_cost_counts[decision.applied_action] += 1
+                # POL-04: projected dual step on the pacing constraint. The old update added
+                # max(0, charged - remaining) / budget, which stayed 0 until the budget was
+                # nearly gone, and nothing read the result.
+                target = self._bwk_target_tokens()
+                if target > 0.0:
+                    bwk_dual_variable_after = max(
+                        0.0,
+                        float(self._bwk_dual_variable)
+                        + BWK_DUAL_STEP * (float(bwk_tokens_charged) - target) / target,
+                    )
                 self._bwk_dual_variable = bwk_dual_variable_after
 
             gate_model_updated = False
@@ -1055,6 +1116,12 @@ class AdaptiveBudgetPolicyController:
                 bwk_dual_variable_before=bwk_dual_variable_before,
                 bwk_dual_variable_after=bwk_dual_variable_after,
                 bwk_budget_exhausted=bool(bwk_remaining_token_budget_after <= 0),
+                bwk_target_tokens_per_decision=self._bwk_target_tokens(),
+                bwk_cost_estimates=(
+                    self._bwk_cost_estimates()
+                    if self.config.architecture == BUDGET_POLICY_ARCH_BWK_V1
+                    else {}
+                ),
                 effective_evidence={
                     "gate": core.effective_evidence(self._state, l2=float(self.config.l2)),
                     "family": core.effective_evidence(self._family_state, l2=float(self.config.l2)),
@@ -1272,6 +1339,8 @@ class AdaptiveBudgetPolicyController:
             "bwk_remaining_token_budget": int(self._bwk_remaining_token_budget),
             "bwk_cumulative_tokens_charged": int(self._bwk_cumulative_tokens_charged),
             "bwk_dual_variable": float(self._bwk_dual_variable),
+            "bwk_cost_sums": {key: float(value) for key, value in self._bwk_cost_sums.items()},
+            "bwk_cost_counts": {key: int(value) for key, value in self._bwk_cost_counts.items()},
             "saved_at_utc": _utc_now(),
         }
 
@@ -1375,6 +1444,16 @@ class AdaptiveBudgetPolicyController:
                     0.0,
                     _coerce_float(raw.get("bwk_dual_variable"), default=0.0),
                 )
+                cost_sums_raw = raw.get("bwk_cost_sums")
+                cost_sums = cost_sums_raw if isinstance(cost_sums_raw, dict) else {}
+                cost_counts = core.parse_action_counts(
+                    raw.get("bwk_cost_counts"), BUDGET_POLICY_ACTIONS
+                )
+                for action in BUDGET_POLICY_ACTIONS:
+                    self._bwk_cost_sums[action] = max(
+                        0.0, _coerce_float(cost_sums.get(action), default=0.0)
+                    )
+                    self._bwk_cost_counts[action] = cost_counts[action]
             self.load_error = None
             self._check_loaded_features = True
         except Exception as exc:
@@ -1384,6 +1463,8 @@ class AdaptiveBudgetPolicyController:
             self._bwk_remaining_token_budget = int(self._bwk_run_token_budget)
             self._bwk_cumulative_tokens_charged = 0
             self._bwk_dual_variable = 0.0
+            self._bwk_cost_sums = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0.0)
+            self._bwk_cost_counts = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0)
             self.load_error = f"{type(exc).__name__}: {exc}"
 
     def _append_event(self, *, event: BudgetPolicyEvent) -> None:

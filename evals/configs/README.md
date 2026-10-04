@@ -431,5 +431,5 @@ Bootstrap notes:
 - `*_init_state_path` warm-starts learned controller state only; exact run
   continuation should keep using the run-scoped `*_state_path`
 - for `bwk_v1`, warm-starting from `budget_init_state_path` resets the new run's
-  remaining-budget / cumulative-charge / dual-variable telemetry from the
-  current config instead of inheriting prior-run depletion
+  remaining-budget / cumulative-charge / dual-variable / per-arm cost state from
+  the current config instead of inheriting prior-run depletion
