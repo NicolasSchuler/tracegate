@@ -174,3 +174,15 @@ def test_online_controller_and_replay_match_the_golden_scenario() -> None:
             np.testing.assert_allclose(observed[key][action], values, atol=1e-8)
         for action, values in golden["replay"][key].items():
             np.testing.assert_allclose(observed["replay"][key][action], values, atol=1e-8)
+
+
+def test_pol22_scoring_a_singular_arm_does_not_change_it() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, {"x": 1.0, "y": 1.0}, l2=1.0)
+    state.A["a"] = np.zeros((2, 2))  # singular
+    before = state.A["a"].copy()
+
+    scores = core.linucb_scores(state, np.array([1.0, 0.5]), l2=1.0, alpha=1.0)
+
+    assert np.isfinite(scores["a"])
+    np.testing.assert_array_equal(state.A["a"], before)

@@ -905,8 +905,9 @@ def test_online_policy_linucb_scores_regularize_singular_covariance(tmp_path) ->
     scores = controller._linucb_scores(x=x)
 
     assert all(math.isfinite(score) for score in scores.values())
-    assert controller.state.A[ACTION_INVOKE_HELPER][0, 0] == pytest.approx(1.0)
-    assert controller.state.A[ACTION_SKIP_HELPER][0, 0] == pytest.approx(1.0)
+    # POL-22: the regularized matrix is used for the score only; A is left as loaded.
+    assert controller.state.A[ACTION_INVOKE_HELPER][0, 0] == pytest.approx(0.0)
+    assert controller.state.A[ACTION_SKIP_HELPER][0, 0] == pytest.approx(0.0)
     controller.close()
 
 

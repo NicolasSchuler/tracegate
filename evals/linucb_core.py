@@ -110,7 +110,12 @@ def feature_vector(
 def linucb_scores(
     state: LinUCBState, x: np.ndarray, *, l2: float, alpha: float
 ) -> dict[str, float]:
-    """UCB score (exploit + alpha * explore) per action."""
+    """UCB score (exploit + alpha * explore) per action.
+
+    Scoring never changes the model (POL-22): when ``A`` is singular, the re-regularized
+    matrix is used for this score only; it used to be written back, adding ``l2 * I``
+    to the arm on every such call.
+    """
     scores: dict[str, float] = {}
     for action in state.action_names:
         A = state.A.get(action)
@@ -118,9 +123,7 @@ def linucb_scores(
         if A is None or b is None:
             scores[action] = 0.0
             continue
-        exploit, explore, updated_A = linucb_exploit_explore(A, b, x, l2=float(l2))
-        if updated_A is not None:
-            state.A[action] = updated_A
+        exploit, explore, _regularized = linucb_exploit_explore(A, b, x, l2=float(l2))
         scores[action] = exploit + (float(alpha) * explore)
     return scores
 

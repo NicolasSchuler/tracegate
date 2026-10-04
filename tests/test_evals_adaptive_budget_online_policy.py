@@ -891,8 +891,9 @@ def test_budget_policy_linucb_scores_regularize_singular_covariance(tmp_path) ->
     scores = controller._linucb_scores(state=state, x=x)
 
     assert all(math.isfinite(score) for score in scores.values())
-    assert state.A[ACTION_KEEP_BUDGET][0, 0] == pytest.approx(1.0)
-    assert state.A[ACTION_INCREASE_BUDGET][0, 0] == pytest.approx(1.0)
+    # POL-22: the regularized matrix is used for the score only; A is left as loaded.
+    assert state.A[ACTION_KEEP_BUDGET][0, 0] == pytest.approx(0.0)
+    assert state.A[ACTION_INCREASE_BUDGET][0, 0] == pytest.approx(0.0)
     controller.close()
 
 
