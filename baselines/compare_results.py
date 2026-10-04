@@ -31,6 +31,7 @@ from evals.analyze_results import _derive_case_condition_rows, _load_and_group_r
 from evals.stats import (
     bootstrap_ci,
     cohens_h,
+    format_p_value,
     holm_bonferroni,
     mcnemar_test,
 )
@@ -322,7 +323,7 @@ def _format_report(result: dict[str, Any]) -> str:
             p = mcn.get("p_value", 1.0)
             sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
             lines.append(
-                f"  McNemar p={p:.4f} ({sig})  "
+                f"  McNemar p={format_p_value(p)} ({sig})  "
                 f"[A-only={pw.get('a_only_wins', 0)}, B-only={pw.get('b_only_wins', 0)}]"
             )
 
@@ -364,7 +365,7 @@ def _format_report(result: dict[str, Any]) -> str:
             adj_p = info.get("adjusted_p", 1.0)
             rejected = info.get("rejected", False)
             sig_str = "REJECT" if rejected else "fail to reject"
-            lines.append(f"  {key}: adj_p={adj_p:.4f} → {sig_str}")
+            lines.append(f"  {key}: adj_p={format_p_value(adj_p)} → {sig_str}")
 
     lines.append("")
     return "\n".join(lines)
@@ -395,7 +396,8 @@ def _format_latex_table(result: dict[str, Any]) -> str:
         sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
 
         label = cb.replace("_", r"\_")
-        lines.append(f"{label} & {n} & {br:.1%} & {uplift:+.1%} & {p:.3f} & {sig} \\\\")
+        p_text = format_p_value(p).replace("<", "$<$")
+        lines.append(f"{label} & {n} & {br:.1%} & {uplift:+.1%} & {p_text} & {sig} \\\\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")

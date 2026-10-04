@@ -32,6 +32,7 @@ from .adaptive_online_policy import (
 from .decision_model.policy import atomic_action_from_answers
 from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
 from .eval_types import EVAL_RECORD_SCHEMA_VERSION
+from .stats import BOOTSTRAP_METHOD, DEFAULT_BOOTSTRAP_SEED, format_p_value
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Aggregation strategy for multi-run (k>1) analysis.",
     )
     parser.add_argument(
+        "--bootstrap-seed",
+        type=int,
+        default=DEFAULT_BOOTSTRAP_SEED,
+        help=(
+            "Seed for every bootstrap interval (default: "
+            f"{DEFAULT_BOOTSTRAP_SEED}); recorded in analysis_config."
+        ),
+    )
+    parser.add_argument(
         "--stats-pair-a",
         default="base_repair",
         help="Condition name for A side of statistical pairing (default: base_repair).",
@@ -324,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         "analysis_config": {
             "adaptive_ope_min_action_support": adaptive_ope_min_action_support,
             "adaptive_ope_propensity_floor": adaptive_ope_propensity_floor,
+            "bootstrap_seed": int(args.bootstrap_seed),
+            "bootstrap_method": BOOTSTRAP_METHOD,
         },
         "input_errors": input_errors,
     }
@@ -336,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             aggregation=args.aggregation,
             pair_a=str(args.stats_pair_a),
             pair_b=str(args.stats_pair_b),
+            seed=int(args.bootstrap_seed),
         )
         summary["statistics"] = stats_result
         _print_stats(stats_result)
@@ -6175,13 +6188,18 @@ def _run_statistical_analysis(
     aggregation: str = "per_run",
     pair_a: str = "base_repair",
     pair_b: str = "layered_adaptive_llm",
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
-    """Run statistical analysis on paired rows and emit pairwise matrix entries."""
+    """Run statistical analysis on paired rows and emit pairwise matrix entries.
+
+    Every bootstrap uses *seed*, so identical inputs give identical intervals (STA-07).
+    """
     primary = _run_statistical_analysis_pair(
         rows,
         aggregation=aggregation,
         pair_a=pair_a,
         pair_b=pair_b,
+        seed=seed,
     )
     conditions = sorted({str(row.get("condition") or "") for row in rows if row.get("condition")})
     pairwise: list[dict[str, Any]] = []
@@ -6192,6 +6210,7 @@ def _run_statistical_analysis(
                 aggregation=aggregation,
                 pair_a=condition_a,
                 pair_b=condition_b,
+                seed=seed,
             )
             entry: dict[str, Any] = {
                 "condition_a": condition_a,
@@ -6236,6 +6255,7 @@ def _run_statistical_analysis_pair(
     aggregation: str,
     pair_a: str,
     pair_b: str,
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Run statistical analysis for one selected condition pair."""
     from evals.stats import (
@@ -6303,6 +6323,7 @@ def _run_statistical_analysis_pair(
             aggregated_rows,
             condition_a=pair_a,
             condition_b=pair_b,
+            seed=seed,
         )
         result["aggregation"] = aggregation
         return result
@@ -6311,6 +6332,7 @@ def _run_statistical_analysis_pair(
         rows,
         condition_a=pair_a,
         condition_b=pair_b,
+        seed=seed,
     )
     result["aggregation"] = "per_run"
     return result
@@ -6334,7 +6356,7 @@ def _print_stats(stats: dict[str, Any]) -> None:
     mcn = stats.get("overall_mcnemar", {})
     print(
         f"  McNemar's test: n_01={mcn.get('n_01', 0)}, n_10={mcn.get('n_10', 0)}, "
-        f"p={mcn.get('p_value', 1.0):.4f} ({mcn.get('method', '?')})"
+        f"p={format_p_value(mcn.get('p_value'))} ({mcn.get('method', '?')})"
         f"{' *' if mcn.get('significant') else ''}"
     )
 
@@ -6360,10 +6382,10 @@ def _print_stats(stats: dict[str, Any]) -> None:
             hb_entry = hb.get(cat, {})
             sig_marker = " *" if hb_entry.get("rejected") else ""
             adj_p = hb_entry.get("adjusted_p")
-            adj_str = f", adj_p={adj_p:.4f}" if adj_p is not None else ""
+            adj_str = f", adj_p={format_p_value(adj_p)}" if adj_p is not None else ""
             print(
                 f"    {cat}: n={cat_stats.get('n_pairs', 0)}, "
-                f"p={cat_mcn.get('p_value', 1.0):.4f}{adj_str}, "
+                f"p={format_p_value(cat_mcn.get('p_value'))}{adj_str}, "
                 f"h={cat_ch.get('h', 0):.3f}{sig_marker}"
             )
 
@@ -6384,7 +6406,7 @@ def _print_stats(stats: dict[str, Any]) -> None:
                 f"    {condition_a} -> {condition_b}: "
                 f"uplift={_fmt_signed_percent(entry.get('uplift_success_rate'))}, "
                 f"n={_fmt_num(entry.get('n_pairs'))}, "
-                f"p={_fmt_num(entry.get('mcnemar_p_value'))}, "
+                f"p={format_p_value(entry.get('mcnemar_p_value'))}, "
                 f"sig={'yes' if entry.get('mcnemar_significant') else 'no'}"
             )
 

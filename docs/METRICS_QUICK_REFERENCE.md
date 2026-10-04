@@ -181,6 +181,19 @@ All metrics → attempt_metadata
 
 ---
 
+## Statistical Conventions
+
+One implementation in `evals/stats.py` serves `analyze_results --stats`,
+`report_run_metrics` and `baselines/compare_results` (2026-10-04 review, Phase 2).
+
+| Topic | Convention |
+|-------|------------|
+| Paired success test | Exact McNemar: two-sided `scipy.stats.binomtest` on the discordant pairs at every sample size; significant when `p <= alpha` (default 0.05, `alpha` recorded in the result). The chi-square approximation above 25 discordant pairs is gone (STA-23). |
+| Paired sign test | The same exact binomial helper, `exact_binomial_p_value`. |
+| Multiple comparisons | Holm step-down: adjusted p is the running max of `p * (m - rank + 1)`, capped at 1; rejected when adjusted p `<= alpha` (STA-24). |
+| Confidence intervals | Percentile bootstrap, 10,000 resamples, seeded `random.Random`; default seed `DEFAULT_BOOTSTRAP_SEED = 42`. Results carry `method` and `seed`. `analyze_results --bootstrap-seed` sets it and records `bootstrap_seed`/`bootstrap_method` in `analysis_config`; `report_run_metrics --seed` does the same for its report (STA-05, STA-07). |
+| p-value display | `format_p_value`: three significant digits, `<0.0001` below that, `n/a` when missing (STA-15). |
+
 ## Schema Validation
 
 **File**: `analyze_results.py`

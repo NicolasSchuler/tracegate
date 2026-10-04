@@ -715,30 +715,24 @@ class TestPairedWilcoxonTest:
 
 
 # ---------------------------------------------------------------------------
-# _bootstrap_mean_ci — edge cases (line 846)
+# Paired deltas use the shared seeded percentile bootstrap (STA-05)
 # ---------------------------------------------------------------------------
 
 
-class TestBootstrapMeanCi:
-    def test_empty_values_returns_none_mean(self) -> None:
-        result = mod._bootstrap_mean_ci(values=[], n_bootstrap=100, confidence=0.95, seed=42)
-        assert result["mean"] is None
+class TestPairedDeltaBootstrap:
+    def test_uses_the_shared_bootstrap_helper(self) -> None:
+        from evals.stats import bootstrap_mean_ci
 
-    def test_single_value_skips_bootstrap(self) -> None:
-        result = mod._bootstrap_mean_ci(values=[5.0], n_bootstrap=100, confidence=0.95, seed=42)
-        assert result["mean"] == 5.0
-        assert result["ci_lower"] == 5.0
-
-    def test_zero_bootstrap_skips_bootstrap(self) -> None:
-        result = mod._bootstrap_mean_ci(
-            values=[1.0, 2.0], n_bootstrap=0, confidence=0.95, seed=None
+        deltas = [1.0, -2.0, 3.0, 4.0, 0.5]
+        summary = mod._summarize_paired_deltas(
+            label="tokens",
+            deltas=deltas,
+            a_values=[0.0] * 5,
+            b_values=deltas,
+            n_bootstrap=200,
+            seed=7,
         )
-        assert result["n_bootstrap"] == 0
-
-    def test_no_seed_runs_without_error(self) -> None:
-        """Line 846: seed is None, so no random_state is passed."""
-        result = mod._bootstrap_mean_ci(
-            values=[1.0, 2.0, 3.0], n_bootstrap=50, confidence=0.95, seed=None
+        assert summary["bootstrap_ci_mean_delta"] == bootstrap_mean_ci(
+            deltas, n_bootstrap=200, confidence=0.95, seed=7
         )
-        assert "mean" in result
-        assert result["mean"] is not None
+        assert summary["bootstrap_ci_mean_delta"]["method"] == "percentile"
