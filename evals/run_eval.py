@@ -1221,6 +1221,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional run identifier. If the matching results file exists, unfinished units are resumed.",
     )
     parser.add_argument(
+        "--allow-settings-drift",
+        action="store_true",
+        help=(
+            "Resume even when the run settings fingerprint differs from the existing results; "
+            "new records then carry their own run metadata (ORC-04)."
+        ),
+    )
+    parser.add_argument(
         "--config",
         action="append",
         default=[],
@@ -3147,6 +3155,9 @@ def _build_run_settings_fingerprint(
         "record_evidence": str(args.record_evidence),
         "record_env": sorted(key.strip() for key in args.record_env if str(key).strip()),
         "record_deps": str(args.record_deps),
+        # ORC-05: the seed drives bandit exploration even without --deterministic.
+        "seed": args.seed,
+        "deterministic": bool(args.deterministic),
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "prompt_budget_retry_history_chars": int(args.prompt_budget_retry_history_chars),

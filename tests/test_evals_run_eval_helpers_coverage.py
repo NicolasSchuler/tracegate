@@ -717,6 +717,8 @@ class TestRunStateRepair:
             retry_context_mode="history",
             retry_history_max_chars=123,
             prompt_budget_retry_history_chars=456,
+            seed=7,
+            deterministic=False,
         )
         cases = [_make_case(tmp_path, "case_a"), _make_case(tmp_path, "case_b")]
         conditions = [run_eval.Condition.BASE_REPAIR, run_eval.Condition.COT_REPAIR]
@@ -728,6 +730,12 @@ class TestRunStateRepair:
         )
         assert isinstance(fingerprint, str)
         assert len(fingerprint) > 0
+        # ORC-05: the seed drives bandit exploration even without --deterministic.
+        args.seed = 8
+        assert (
+            run_eval._build_run_settings_fingerprint(args=args, cases=cases, conditions=conditions)
+            != fingerprint
+        )
 
 
 class TestPytestAndContainerHelpers:

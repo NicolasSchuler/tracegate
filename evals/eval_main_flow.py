@@ -209,7 +209,15 @@ def run_main_flow(
             style="info",
         )
 
-    if isinstance(existing_run_metadata, dict):
+    existing_fingerprint = (
+        existing_run_metadata.get("run_settings_fingerprint")
+        if isinstance(existing_run_metadata, dict)
+        else None
+    )
+    if isinstance(existing_run_metadata, dict) and existing_fingerprint in {
+        None,
+        run_settings_fingerprint,
+    }:
         run_metadata = dict(existing_run_metadata)
         run_metadata.setdefault("run_id", run_id)
         run_metadata.setdefault("run_settings_fingerprint", run_settings_fingerprint)
@@ -224,6 +232,9 @@ def run_main_flow(
             started_at_utc=started_at_utc,
             run_settings_fingerprint=run_settings_fingerprint,
         )
+        if existing_fingerprint is not None:
+            # ORC-04: resumed with --allow-settings-drift; keep the link to the old settings.
+            run_metadata["settings_drift_from_fingerprint"] = existing_fingerprint
     if config_state.config_paths:
         run_metadata.setdefault("config_files", list(config_state.config_paths))
     if resolved_config_lock_path is not None:

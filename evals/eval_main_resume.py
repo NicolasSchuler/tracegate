@@ -109,9 +109,19 @@ def prepare_main_resume(
                     "cannot safely resume."
                 )
             if existing_run_settings_fingerprint != run_settings_fingerprint:
+                if not bool(getattr(args, "allow_settings_drift", False)):
+                    _release_lock(run_results_lock)
+                    raise MainFlowCliError(
+                        "Resume aborted: run settings fingerprint mismatch for existing run_id "
+                        f"(existing={existing_run_settings_fingerprint}, "
+                        f"current={run_settings_fingerprint}). Records written now would "
+                        "claim the old configuration; use a new --run-id, or pass "
+                        "--allow-settings-drift to stamp new records with their own settings."
+                    )
                 print(
                     "Resume warning: run settings fingerprint mismatch for existing run_id; "
-                    "continuing with existing completed-unit state."
+                    "continuing with --allow-settings-drift (new records carry their own "
+                    "run metadata)."
                 )
     except ValueError as exc:
         _release_lock(run_results_lock)

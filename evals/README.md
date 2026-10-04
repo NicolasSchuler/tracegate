@@ -892,6 +892,13 @@ to forced-patch handling.
   prompt-char/token usage for the unit,
 - `SKIP (resumed) <case>/<condition>` for units already completed in a resumed run.
 
+Resuming requires the same run settings: when the run settings fingerprint (which covers the
+patcher config, the case and condition selection, the record policy and `--seed`) differs from
+the existing results, the run aborts instead of writing records that would claim the old
+configuration (ORC-04). `--allow-settings-drift` resumes anyway; new records then carry fresh
+run metadata with `settings_drift_from_fingerprint`. `--seed` is always recorded, with
+`deterministic` as a separate flag, because it also seeds bandit exploration (ORC-05).
+
 For long-running units, enable richer in-flight visibility:
 
 ```bash
