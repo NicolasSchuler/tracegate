@@ -264,9 +264,9 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - **Acceptance:** the corpus test passes, and the failure taxonomy has a distinct `truncated_response` reason.
 
 ### 1H. Case-suite validity (D12)
-- [ ] **DAT-05:** make `--validate` real in all importers. **DAT-14:** AST-based determinism check. **DAT-10:** oracle-patch trailing newline. **DAT-15:** pinned, isolated ruff. **DAT-16:** stable IDs; don't rename existing cases without a mapping. **DAT-20:** `literal_eval` for dataset values.
-- [ ] **DAT-17, DAT-21:** document the current state in `evals/README.md` now. Further research changes follow D12.
-- [ ] Run the new determinism check over all of `evals/cases/` and report the flagged case IDs to the user. Full execution validation of the corpus is long, so ask before running it.
+- [x] **DAT-05:** make `--validate` real in all importers. **DAT-14:** AST-based determinism check. **DAT-10:** oracle-patch trailing newline. **DAT-15:** pinned, isolated ruff. **DAT-16:** stable IDs; don't rename existing cases without a mapping. **DAT-20:** `literal_eval` for dataset values. (DAT-16: IDs kept as they are; imports now dedupe by `source_id`.)
+- [x] **DAT-17, DAT-21:** document the current state in `evals/README.md` now. Further research changes follow D12.
+- [x] Run the new determinism check over all of `evals/cases/` and report the flagged case IDs to the user. Full execution validation of the corpus is long, so ask before running it.
 
 **Phase 1 exit criteria:**
 - Every Critical finding is fixed or explicitly deferred by the user.
