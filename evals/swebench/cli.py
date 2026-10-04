@@ -15,6 +15,7 @@ from .io import (
     write_copy_instructions,
     write_run_index,
 )
+from .prompt_policy import PromptInputs
 from .score_official import run_official_scoring
 from .smoke import prepare_scoring_smoke_subset
 from .types import SWEBENCH_LITE_DATASET_NAME, SWEBENCH_LITE_DEFAULT_SPLIT
@@ -117,7 +118,20 @@ def _add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--snapshot-dir",
         default="",
-        help="Optional directory for request/response snapshots and debug artifacts.",
+        help=(
+            "Directory of per-instance llmdebug snapshot artifacts (<instance_id>.txt/.md/.json). "
+            "Required when the llmdebug condition is requested."
+        ),
+    )
+    parser.add_argument(
+        "--include-hints",
+        action="store_true",
+        help="Add the dataset's hints_text to the prompt (not part of the official task).",
+    )
+    parser.add_argument(
+        "--include-test-ids",
+        action="store_true",
+        help="Add the FAIL_TO_PASS/PASS_TO_PASS test IDs to the prompt (the scorer's tests).",
     )
     parser.add_argument(
         "--resume",
@@ -312,7 +326,11 @@ def main(argv: list[str] | None = None) -> int:
                 openai_max_tokens=int(args.openai_max_tokens),
                 openai_temperature=float(args.openai_temperature),
                 openai_response_mode=str(args.openai_response_mode),
-                snapshot_dir=snapshot_dir,
+                prompt_inputs=PromptInputs(
+                    snapshot_dir=snapshot_dir,
+                    include_hints=bool(args.include_hints),
+                    include_test_ids=bool(args.include_test_ids),
+                ),
                 resume=bool(args.resume),
                 seed=args.seed if args.seed is None else int(args.seed),
                 jobs=int(args.jobs),

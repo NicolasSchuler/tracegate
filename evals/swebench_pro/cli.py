@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from evals.swebench.prompt_policy import PromptInputs
+
 from .generate import generate_pro_predictions
 from .io import (
     instance_ids_path,
@@ -53,7 +55,19 @@ def _add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--openai-max-tokens", type=int, default=2048)
     parser.add_argument("--openai-temperature", type=float, default=0.0)
     parser.add_argument("--openai-response-mode", choices=["diff", "edits"], default="diff")
-    parser.add_argument("--snapshot-dir", default="")
+    parser.add_argument(
+        "--snapshot-dir",
+        default="",
+        help=(
+            "Directory of per-instance llmdebug snapshot artifacts (<instance_id>.txt/.md/.json). "
+            "Required when the llmdebug condition is requested."
+        ),
+    )
+    parser.add_argument(
+        "--include-test-ids",
+        action="store_true",
+        help="Add the fail_to_pass/pass_to_pass test IDs to the prompt (the scorer's tests).",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--jobs", type=int, default=1)
@@ -192,7 +206,9 @@ def main(argv: list[str] | None = None) -> int:
                 openai_max_tokens=int(args.openai_max_tokens),
                 openai_temperature=float(args.openai_temperature),
                 openai_response_mode=str(args.openai_response_mode),
-                snapshot_dir=snapshot_dir,
+                prompt_inputs=PromptInputs(
+                    snapshot_dir=snapshot_dir, include_test_ids=bool(args.include_test_ids)
+                ),
                 resume=bool(args.resume),
                 seed=args.seed if args.seed is None else int(args.seed),
                 jobs=int(args.jobs),

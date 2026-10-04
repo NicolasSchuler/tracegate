@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from evals.patchers import OpenAICompatPatcher
+from evals.swebench.prompt_policy import (
+    PromptInputs,
+    render_snapshot_section,
+    require_snapshot_dir,
+    snapshot_coverage,
+)
 from evals.swebench.types import CONDITION_LLMDEBUG, PredictionRecord
 
 from .. import _json as json
@@ -52,7 +58,7 @@ def generate_pro_predictions(
     openai_max_tokens: int = 2048,
     openai_temperature: float = 0.0,
     openai_response_mode: str = "diff",
-    snapshot_dir: Path | None = None,
+    prompt_inputs: PromptInputs | None = None,
     resume: bool = False,
     seed: int | None = None,
     jobs: int = 1,
@@ -82,6 +88,8 @@ def generate_pro_predictions(
         raise ValueError("max_request_error_rate must be between 0 and 1")
     if min_requests_for_error_rate_check < 1:
         raise ValueError("min_requests_for_error_rate_check must be >= 1")
+    prompt_inputs = prompt_inputs or PromptInputs()
+    require_snapshot_dir(condition_list, prompt_inputs.snapshot_dir)
 
     run_dir = run_dir_for_id(safe_run_id, root=root)
     ensure_run_layout(run_dir, conditions=condition_list)
@@ -116,7 +124,7 @@ def generate_pro_predictions(
             patcher=patcher,
             model_label=f"{openai_model}::{condition}",
             resume=resume,
-            snapshot_dir=snapshot_dir,
+            prompt_inputs=prompt_inputs,
             jobs=jobs,
             openai_async=openai_async,
             max_request_errors=max_request_errors,
@@ -136,6 +144,12 @@ def generate_pro_predictions(
         "instance_ids_file": (str(instance_ids_file) if instance_ids_file is not None else None),
         "max_instances": int(max_instances),
         "resume": bool(resume),
+        "prompt_policy": prompt_inputs.to_metadata(),
+        "snapshot_coverage": (
+            snapshot_coverage(snapshot_dir=prompt_inputs.snapshot_dir, instance_ids=selected_ids)
+            if CONDITION_LLMDEBUG in condition_list
+            else None
+        ),
         "openai": {
             "base_url": openai_base_url,
             "model": openai_model,
@@ -267,7 +281,7 @@ def _generate_for_condition(
     patcher: OpenAICompatPatcher,
     model_label: str,
     resume: bool,
-    snapshot_dir: Path | None,
+    prompt_inputs: PromptInputs,
     jobs: int,
     openai_async: bool,
     max_request_errors: int,
@@ -298,7 +312,7 @@ def _generate_for_condition(
                     selected_ids=selected_ids,
                     rows_by_id=rows_by_id,
                     existing_map=existing_map,
-                    snapshot_dir=snapshot_dir,
+                    prompt_inputs=prompt_inputs,
                     patcher=patcher,
                     model_label=model_label,
                     workspace_root=tmp_root,
@@ -319,7 +333,7 @@ def _generate_for_condition(
                     instance_id=instance_id,
                     row=rows_by_id[instance_id],
                     condition=condition,
-                    snapshot_dir=snapshot_dir,
+                    prompt_inputs=prompt_inputs,
                     patcher=patcher,
                     model_label=model_label,
                     workspace_root=tmp_root,
@@ -368,7 +382,7 @@ def _generate_for_condition(
                         instance_id=instance_id,
                         row=rows_by_id[instance_id],
                         condition=condition,
-                        snapshot_dir=snapshot_dir,
+                        prompt_inputs=prompt_inputs,
                         patcher=patcher,
                         model_label=model_label,
                         workspace_root=tmp_root,
@@ -456,7 +470,7 @@ def _propose_prediction(
     instance_id: str,
     row: dict[str, Any],
     condition: str,
-    snapshot_dir: Path | None,
+    prompt_inputs: PromptInputs,
     patcher: OpenAICompatPatcher,
     model_label: str,
     workspace_root: Path,
@@ -464,7 +478,7 @@ def _propose_prediction(
     prompt = _build_prompt_pro(
         row=row,
         condition=condition,
-        snapshot_dir=snapshot_dir,
+        prompt_inputs=prompt_inputs,
     )
     patch = ""
     request_error: str | None = None
@@ -506,7 +520,7 @@ async def _propose_prediction_async(
     instance_id: str,
     row: dict[str, Any],
     condition: str,
-    snapshot_dir: Path | None,
+    prompt_inputs: PromptInputs,
     patcher: OpenAICompatPatcher,
     model_label: str,
     workspace_root: Path,
@@ -514,7 +528,7 @@ async def _propose_prediction_async(
     prompt = _build_prompt_pro(
         row=row,
         condition=condition,
-        snapshot_dir=snapshot_dir,
+        prompt_inputs=prompt_inputs,
     )
     patch = ""
     request_error: str | None = None
@@ -563,7 +577,7 @@ async def _generate_for_condition_async(
     selected_ids: list[str],
     rows_by_id: dict[str, dict[str, Any]],
     existing_map: dict[str, PredictionRecord],
-    snapshot_dir: Path | None,
+    prompt_inputs: PromptInputs,
     patcher: OpenAICompatPatcher,
     model_label: str,
     workspace_root: Path,
@@ -587,7 +601,7 @@ async def _generate_for_condition_async(
                 instance_id=instance_id,
                 row=rows_by_id[instance_id],
                 condition=condition,
-                snapshot_dir=snapshot_dir,
+                prompt_inputs=prompt_inputs,
                 patcher=patcher,
                 model_label=model_label,
                 workspace_root=workspace_root,
@@ -695,7 +709,7 @@ def _build_prompt_pro(
     *,
     row: dict[str, Any],
     condition: str,
-    snapshot_dir: Path | None,
+    prompt_inputs: PromptInputs,
 ) -> str:
     """Build the LLM prompt for a SWE-Bench Pro instance.
 
@@ -712,22 +726,26 @@ def _build_prompt_pro(
     requirements = str(row.get("requirements") or "").strip()
     interface = str(row.get("interface") or "").strip()
 
-    fail_to_pass = _stringify_field(row.get("fail_to_pass"))
-    pass_to_pass = _stringify_field(row.get("pass_to_pass"))
-
     extra_sections: list[str] = []
     if requirements:
         extra_sections.append("Requirements:\n" + requirements)
     if interface:
         extra_sections.append("Interface:\n" + interface)
-    if fail_to_pass:
-        extra_sections.append("Fail-to-pass tests:\n" + fail_to_pass)
-    if pass_to_pass:
-        extra_sections.append("Pass-to-pass tests:\n" + pass_to_pass)
+    # The scorer's test IDs are not part of the official task (DAT-01); opt-in only.
+    if prompt_inputs.include_test_ids:
+        fail_to_pass = _stringify_field(row.get("fail_to_pass"))
+        pass_to_pass = _stringify_field(row.get("pass_to_pass"))
+        if fail_to_pass:
+            extra_sections.append("Fail-to-pass tests:\n" + fail_to_pass)
+        if pass_to_pass:
+            extra_sections.append("Pass-to-pass tests:\n" + pass_to_pass)
 
     if condition == CONDITION_LLMDEBUG:
-        snapshot_text = _load_snapshot_text(snapshot_dir=snapshot_dir, instance_id=instance_id)
-        extra_sections.append("llmdebug runtime evidence:\n" + snapshot_text)
+        extra_sections.append(
+            render_snapshot_section(
+                snapshot_dir=prompt_inputs.snapshot_dir, instance_id=instance_id
+            )
+        )
 
     extra = "\n\n".join(extra_sections)
 
@@ -750,22 +768,6 @@ def _build_prompt_pro(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_snapshot_text(*, snapshot_dir: Path | None, instance_id: str) -> str:
-    if snapshot_dir is None:
-        return "No snapshot directory was provided for this run."
-    candidates = [
-        snapshot_dir / f"{instance_id}.txt",
-        snapshot_dir / f"{instance_id}.md",
-        snapshot_dir / f"{instance_id}.json",
-    ]
-    for path in candidates:
-        if path.exists() and path.is_file():
-            text = path.read_text(encoding="utf-8", errors="replace").strip()
-            if text:
-                return text
-    return "No instance-specific snapshot artifact was found."
 
 
 def _stringify_field(value: Any) -> str:

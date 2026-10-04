@@ -11,6 +11,7 @@ import pytest
 
 from evals.patchers.base import PatchResult
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import PredictionRecord
 from evals.swebench_pro.generate import (
     ProposalOutcome,
@@ -166,7 +167,7 @@ def test_propose_prediction_returns_record_on_success(tmp_path: Path) -> None:
         instance_id="pro-inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-pro-model",
         workspace_root=tmp_path,
@@ -189,7 +190,7 @@ def test_propose_prediction_marks_empty_patch(tmp_path: Path) -> None:
         instance_id="pro-inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-pro-model",
         workspace_root=tmp_path,
@@ -210,7 +211,7 @@ def test_propose_prediction_captures_patcher_exception(tmp_path: Path) -> None:
         instance_id="pro-inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-pro-model",
         workspace_root=tmp_path,
@@ -238,7 +239,7 @@ def test_propose_prediction_uses_build_prompt_pro(tmp_path: Path) -> None:
         instance_id="pro-inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-pro-model",
         workspace_root=tmp_path,

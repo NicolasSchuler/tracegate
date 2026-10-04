@@ -9,6 +9,7 @@ import pytest
 
 from evals.patchers.base import PatchResult
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import PredictionRecord
 from evals.swebench_pro.generate import (
     ProposalOutcome,
@@ -40,7 +41,7 @@ async def test_propose_prediction_async_uses_async_patcher(tmp_path: Path) -> No
             "problem_statement": "Fix Pro bug.",
         },
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=cast(OpenAICompatPatcher, _StubAsyncPatcher()),
         model_label="model::baseline",
         workspace_root=tmp_path,
@@ -69,7 +70,7 @@ async def test_propose_prediction_async_captures_error(tmp_path: Path) -> None:
             "problem_statement": "Some Pro problem.",
         },
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=cast(OpenAICompatPatcher, _ErrorAsyncPatcher()),
         model_label="model::baseline",
         workspace_root=tmp_path,
@@ -132,6 +133,7 @@ def test_generate_pro_predictions_prefers_async_path_when_enabled(
         openai_async=True,
         jobs=1,
         root=tmp_path,
+        prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
     )
 
     assert summary.instance_count == 1

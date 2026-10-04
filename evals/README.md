@@ -69,6 +69,7 @@ Primary CLI:
 python -m evals.swebench.cli generate-lite \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --instance-ids-file <optional> \
   --openai-base-url http://localhost:<port> \
@@ -94,6 +95,14 @@ python -m evals.swebench.cli prepare-scoring-smoke \
   --run-dir /path/to/evals/swebench_runs/<id> \
   --max-instances 2
 ```
+
+`--snapshot-dir` is required whenever the `llmdebug` condition is requested: it
+holds one `<instance_id>.txt|.md|.json` llmdebug artifact per instance, and
+generation fails fast without it (DAT-03). `run_metadata.json` records
+`prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
+Prompts carry only the issue text by default; `--include-hints` (Lite) and
+`--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
+which are not part of the official task (DAT-01, DAT-02).
 
 Local Docker convenience wrapper:
 
@@ -166,6 +175,7 @@ Primary CLI:
 python -m evals.swebench_pro.cli generate-pro \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --openai-base-url http://localhost:<port> \
   --openai-model <model_alias> \

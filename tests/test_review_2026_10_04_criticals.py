@@ -295,7 +295,6 @@ def test_sta02_repeated_runs_do_not_inflate_significance() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="DAT-03")
 def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path) -> None:
     from evals.swebench.generate import generate_lite_predictions
 
@@ -306,9 +305,33 @@ def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path
             openai_base_url="http://127.0.0.1:9",
             openai_model="stub",
             openai_api_key=None,
-            snapshot_dir=None,
             root=tmp_path,
         )
+
+
+@pytest.mark.parametrize("cli_module", ["evals.swebench.cli", "evals.swebench_pro.cli"])
+def test_dat03_cli_rejects_llmdebug_without_snapshot_dir(
+    cli_module: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import importlib
+
+    cli = importlib.import_module(cli_module)
+    command = "generate-lite" if cli_module == "evals.swebench.cli" else "generate-pro"
+    exit_code = cli.main(
+        [
+            command,
+            "--run-id",
+            "dat03-cli",
+            "--conditions",
+            "baseline,llmdebug",
+            "--openai-base-url",
+            "http://127.0.0.1:9",
+            "--openai-model",
+            "stub",
+        ]
+    )
+    assert exit_code == 1
+    assert "--snapshot-dir" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
