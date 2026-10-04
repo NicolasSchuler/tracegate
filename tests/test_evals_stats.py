@@ -255,34 +255,53 @@ class TestHolmBonferroni:
 
 class TestPowerReport:
     def test_sufficient_power(self) -> None:
-        """Large n_discordant with strong uplift -> sufficient."""
-        result = power_report(200, 80, 0.4)
+        result = power_report(200, 50, 20)
         assert result["sufficient"] is True
         assert result["approximate_power"] >= 0.8
 
     def test_zero_discordant(self) -> None:
-        """Zero discordant -> zero power."""
-        result = power_report(50, 0, 0.2)
+        result = power_report(50, 0, 0)
         assert result["approximate_power"] == 0.0
         assert result["sufficient"] is False
 
-    def test_zero_uplift(self) -> None:
-        """Zero uplift -> zero power."""
-        result = power_report(50, 20, 0.0)
+    def test_balanced_discordance_has_no_power(self) -> None:
+        result = power_report(50, 10, 10)
         assert result["approximate_power"] == 0.0
         assert result["sufficient"] is False
 
     def test_moderate_power(self) -> None:
-        """Moderate power: 0.5 <= power < 0.8."""
-        result = power_report(100, 20, 0.5)
+        result = power_report(100, 20, 6)
         assert not result["sufficient"]
         assert "Moderate power" in result["recommendation"]
 
     def test_low_power(self) -> None:
-        """Very few discordant pairs -> low power."""
-        result = power_report(50, 5, 0.1)
+        result = power_report(50, 4, 1)
         assert not result["sufficient"]
         assert "Low power" in result["recommendation"]
+
+    def test_sta04_matches_simulated_power_of_the_exact_test(self) -> None:
+        """STA-04: n=200, pi01=0.25, pi10=0.10 reported 0.245; simulation gives ~0.949."""
+        import random
+
+        from scipy.stats import binomtest
+
+        n, pi_01, pi_10 = 200, 0.25, 0.10
+        rng = random.Random(0)
+        reps = 2000
+        rejections = 0
+        for _ in range(reps):
+            n_01 = n_10 = 0
+            for _ in range(n):
+                draw = rng.random()
+                if draw < pi_01:
+                    n_01 += 1
+                elif draw < pi_01 + pi_10:
+                    n_10 += 1
+            rejections += binomtest(n_01, n_01 + n_10, 0.5).pvalue <= 0.05
+        simulated = rejections / reps
+
+        expected = power_report(n, round(n * pi_01), round(n * pi_10))["approximate_power"]
+        assert expected == pytest.approx(simulated, abs=0.02)
 
 
 # ---------------------------------------------------------------------------

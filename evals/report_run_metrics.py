@@ -393,6 +393,10 @@ def _paired_binary_agreement(
     a_success = (paired["a_success"] > 0.5).cast(pl.Int64).to_list()
     b_success = (paired["b_success"] > 0.5).cast(pl.Int64).to_list()
     kappa = float(cohen_kappa_score(a_success, b_success))
+    if not math.isfinite(kappa):
+        # STA-10: kappa is undefined when both sides are constant. NaN fell through every
+        # threshold to "almost_perfect" and json.dumps wrote invalid JSON.
+        return {"available": True, "kappa": None, "magnitude": "undefined"}
     return {
         "available": True,
         "kappa": kappa,

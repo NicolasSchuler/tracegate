@@ -19,7 +19,7 @@ import math
 import random
 from typing import Any
 
-from scipy.stats import binomtest
+from scipy.stats import binomtest, norm
 
 DEFAULT_ALPHA = 0.05
 DEFAULT_BOOTSTRAP_SEED = 42
@@ -288,27 +288,31 @@ def holm_bonferroni(
 # ---------------------------------------------------------------------------
 
 
-def power_report(n_cases: int, n_discordant: int, uplift: float) -> dict[str, Any]:
-    """Rough post-hoc power assessment.
+def power_report(
+    n_cases: int, n_01: int, n_10: int, *, alpha: float = DEFAULT_ALPHA
+) -> dict[str, Any]:
+    """Approximate power of the two-sided McNemar test at the observed discordance.
 
-    Uses the normal approximation for McNemar's test power:
-    power ~ Phi(sqrt(n_discordant) * |uplift| / sqrt(1 - uplift^2) - z_alpha/2)
-
-    This is approximate — true power depends on the marginal proportions.
+    Normal approximation for discordant counts ``n_01`` (favour B) and ``n_10``
+    (favour A): ``power = Phi(|n_01 - n_10| / sqrt(n_01 + n_10) - z_{alpha/2})``.
+    The old formula mixed the discordant count with the overall uplift and reported
+    0.245 where the true power is about 0.949 (n=200, pi01=0.25, pi10=0.10; STA-04).
     """
-    if n_discordant == 0 or abs(uplift) < 1e-10:
+    n_discordant = n_01 + n_10
+    uplift = (n_01 - n_10) / n_cases if n_cases > 0 else 0.0
+    if n_discordant == 0 or n_01 == n_10:
         return {
             "n_cases": n_cases,
             "n_discordant": n_discordant,
             "uplift": uplift,
+            "alpha": alpha,
             "approximate_power": 0.0,
             "sufficient": False,
             "recommendation": "Need more discordant pairs or larger effect size.",
         }
 
-    z_alpha_half = 1.96  # alpha = 0.05, two-sided
-    denom = math.sqrt(1 - uplift**2) if abs(uplift) < 1.0 else 0.01
-    z_power = math.sqrt(n_discordant) * abs(uplift) / denom - z_alpha_half
+    z_alpha_half = float(norm.ppf(1.0 - alpha / 2.0))
+    z_power = abs(n_01 - n_10) / math.sqrt(n_discordant) - z_alpha_half
     power = _normal_cdf(z_power)
 
     if power >= 0.8:
@@ -325,6 +329,7 @@ def power_report(n_cases: int, n_discordant: int, uplift: float) -> dict[str, An
         "n_cases": n_cases,
         "n_discordant": n_discordant,
         "uplift": uplift,
+        "alpha": alpha,
         "approximate_power": round(power, 4),
         "sufficient": sufficient,
         "recommendation": recommendation,
@@ -455,7 +460,7 @@ def analyze_paired_results(
         "overall_mcnemar": overall_mcnemar,
         "overall_cohens_h": cohens_h(a_rate, b_rate),
         "overall_bootstrap_ci": bootstrap_ci(rates, n_bootstrap=n_bootstrap, seed=seed),
-        "overall_power": power_report(len(pairs), overall_mcnemar["n_discordant"], b_rate - a_rate),
+        "overall_power": power_report(len(pairs), overall_mcnemar["n_01"], overall_mcnemar["n_10"]),
     }
 
     # Per-category analysis with Holm-Bonferroni.

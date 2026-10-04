@@ -66,3 +66,21 @@ def test_cost_frame_uses_success_fraction_over_runs() -> None:
     frame = report._paired_success_cost_frame(rows=rows, condition_a=_A, condition_b=_B)
     assert frame["a_success"].to_list() == [0.5]
     assert frame["b_success"].to_list() == [0.5]
+
+
+def test_sta10_undefined_kappa_is_reported_as_undefined() -> None:
+    """Both conditions constant: kappa is NaN, which used to read "almost_perfect"."""
+    import warnings
+
+    from evals import _json as json
+
+    rows = [
+        {"run_id": "r1", "case_id": f"c{idx}", "condition": cond, "success": True}
+        for idx in range(3)
+        for cond in (_A, _B)
+    ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        agreement = report._paired_binary_agreement(rows=rows, condition_a=_A, condition_b=_B)
+    assert agreement == {"available": True, "kappa": None, "magnitude": "undefined"}
+    assert "NaN" not in json.dumps(agreement)
