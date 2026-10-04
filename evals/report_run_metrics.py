@@ -20,6 +20,8 @@ from scipy import stats
 from sklearn.metrics import cohen_kappa_score
 
 from evals.analyze_results import (
+    ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
+    ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
     _derive_case_condition_rows,
     _is_external_baseline_condition,
     _load_and_group_records,
@@ -112,6 +114,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Random seed for bootstrap.",
     )
     parser.add_argument(
+        "--adaptive-ope-min-action-support",
+        type=int,
+        default=ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
+        help="Same as analyze_results: behaviour samples per action before DR is enabled.",
+    )
+    parser.add_argument(
+        "--adaptive-ope-propensity-floor",
+        type=float,
+        default=ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
+        help="Same as analyze_results: lower bound for OPE propensities.",
+    )
+    parser.add_argument(
         "--print-top-failures",
         type=int,
         default=10,
@@ -160,8 +174,22 @@ def main(argv: list[str] | None = None) -> int:
     run_context = _build_run_context(
         rows=rows, raw_records=raw_records, eval_log_path=args.eval_log
     )
+    # STA-21: the report used the OPE defaults whatever analyze_results was run with.
+    ope_settings = {
+        "adaptive_ope_min_action_support": int(args.adaptive_ope_min_action_support),
+        "adaptive_ope_propensity_floor": float(args.adaptive_ope_propensity_floor),
+    }
+    if ope_settings["adaptive_ope_min_action_support"] < 1 or not (
+        0.0 < ope_settings["adaptive_ope_propensity_floor"] <= 1.0
+    ):
+        print(
+            "Input error: --adaptive-ope-min-action-support must be >= 1 and "
+            "--adaptive-ope-propensity-floor in (0, 1]"
+        )
+        return 2
+    run_context["ope_settings"] = ope_settings
     condition_summary = _summarize_bucket(
-        rows, records_by_case_condition=_records_by_case_condition(grouped)
+        rows, records_by_case_condition=_records_by_case_condition(grouped), **ope_settings
     )
     primary_rows = _filter_rows_by_snapshot_dependency(rows, primary_slice)
     required_rows = _filter_rows_by_snapshot_dependency(rows, {"required"})
@@ -1556,6 +1584,13 @@ def _print_report(
     print(f"- Patcher(s): {', '.join(run_context.get('patchers', [])) or 'n/a'}")
     print(f"- Model(s): {', '.join(run_context.get('models', [])) or 'n/a'}")
     print(f"- Case-condition rows: {run_context.get('n_case_condition_rows', 0)}")
+    ope_settings = run_context.get("ope_settings") or {}
+    if ope_settings:
+        print(
+            "- Adaptive OPE settings: "
+            f"min_action_support={ope_settings.get('adaptive_ope_min_action_support')}, "
+            f"propensity_floor={ope_settings.get('adaptive_ope_propensity_floor')}"
+        )
     _print_input_errors(input_errors)
 
     print("\nPrimary Endpoint (pre-registered via --primary-slice; confirmatory)")

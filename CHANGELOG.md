@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `report_run_metrics` accepts `--adaptive-ope-min-action-support` and `--adaptive-ope-propensity-floor`, passes them to the condition summary and prints the effective values; it always used the defaults, so its off-policy numbers could differ from `analyze_results` (STA-21).
 - `budget_risk_report` reads attempts through the shared case-outcome rule (no `infra_event` rows, one row per attempt, so retried attempts aren't double-counted) and keys cases by `run_id`, so a case that failed in one run is no longer hidden by its success in another (STA-18).
 - Bucket-level adaptive rates (helper invocation, online and budget policy) are computed over the rows with adaptive telemetry only; every non-adaptive condition's cases used to dilute them, so with one adaptive and one native condition a 50% helper rate read 25% (STA-16).
 - `report_run_metrics` overhead shares are a ratio of sums over the rows that report both values, zeros included, with the row count printed; one 80 s LLM case among ten 100 s cases read 80% instead of 8% (STA-08). The baseline internal-total, eval and orchestration times, documented and labelled but never accumulated, now appear (STA-17).

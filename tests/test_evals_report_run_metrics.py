@@ -971,3 +971,58 @@ def test_main_baseline_diagnostics_prints_repair_fair_churn_metrics(tmp_path, ca
     assert "no_test_attempts=1/2 (50.00%)" in out
     assert "subcalls=2/2 (1.0000/attempt)" in out
     assert "test_runs=1/2 (0.5000/attempt)" in out
+
+
+def test_sta21_report_uses_and_prints_the_requested_ope_settings(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """STA-21: the report always used the default OPE settings."""
+    import evals.report_run_metrics as rrm
+
+    jsonl = tmp_path / "ope.jsonl"
+    records = [
+        _record(
+            run_id="r",
+            case_id="c1",
+            condition="base_repair",
+            success=False,
+            snapshot_dependency="required",
+        ),
+        _record(
+            run_id="r",
+            case_id="c1",
+            condition="layered_adaptive_llm",
+            success=True,
+            snapshot_dependency="required",
+        ),
+    ]
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    seen: dict[str, object] = {}
+    original = rrm._summarize_bucket
+
+    def _spy(rows, **kwargs):
+        seen.update(kwargs)
+        return original(rows, **kwargs)
+
+    monkeypatch.setattr(rrm, "_summarize_bucket", _spy)
+
+    rc = main(
+        [
+            "--jsonl",
+            str(jsonl),
+            "--bootstrap",
+            "50",
+            "--adaptive-ope-min-action-support",
+            "5",
+            "--adaptive-ope-propensity-floor",
+            "0.1",
+        ]
+    )
+
+    assert rc == 0
+    assert seen["adaptive_ope_min_action_support"] == 5
+    assert seen["adaptive_ope_propensity_floor"] == 0.1
+    assert "Adaptive OPE settings: min_action_support=5, propensity_floor=0.1" in (
+        capsys.readouterr().out
+    )
+    assert main(["--jsonl", str(jsonl), "--adaptive-ope-propensity-floor", "0"]) == 2
