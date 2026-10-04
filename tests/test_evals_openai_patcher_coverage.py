@@ -1566,10 +1566,10 @@ class TestProposePatchViaFullFileAsync:
         )
         _original_resolve = Path.resolve
 
-        def _bad_read(self, encoding="utf-8"):
+        def _bad_read(path):
             raise PermissionError("cannot read")
 
-        monkeypatch.setattr(Path, "read_text", _bad_read)
+        monkeypatch.setattr(openai_mod, "_read_edit_target", _bad_read)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -2829,10 +2829,10 @@ class TestSyncPatchProposalBranches:
             lambda *, cwd: ("foo.py", "single_non_test_python_file"),
         )
 
-        def _bad_read(self, encoding="utf-8"):
+        def _bad_read(path):
             raise PermissionError("cannot read")
 
-        monkeypatch.setattr(Path, "read_text", _bad_read)
+        monkeypatch.setattr(openai_mod, "_read_edit_target", _bad_read)
         result = openai_mod._propose_patch_via_full_file(
             url="http://localhost/v1/chat/completions",
             api_key="k",

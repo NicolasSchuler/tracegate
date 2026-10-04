@@ -102,6 +102,10 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
         "--- a/a.py\n+++ b/a.py\n@@ -1,3 +1,5 @@\n def f():\n-    return 1\n+    return 2\n",
         {"a.py": A_FIXED},
     ),
+    "form_feed_inside_a_line": (  # LLM-15
+        "--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n def f():\n-    return 1\n+    return 2  # \x0c\n",
+        {"a.py": "def f():\n    return 2  # \x0c\n"},
+    ),
     "git_diff_with_index_line": (
         DIFF_A.replace("--- a/a.py", "index 83db48f..bf269f4 100644\n--- a/a.py"),
         {"a.py": A_FIXED},

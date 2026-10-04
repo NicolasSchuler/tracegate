@@ -2393,7 +2393,12 @@ def test_openai_edits_find_recovery_fuzzy_block(tmp_path, monkeypatch) -> None:
     assert "return res // (n * (n + 1))" in (tmp_path / "buggy.py").read_text(encoding="utf-8")
 
 
-def test_openai_edits_fuzzy_recovery_skips_replace_all_count(tmp_path, monkeypatch) -> None:
+def test_openai_edits_count_zero_is_one_targeted_replacement(tmp_path, monkeypatch) -> None:
+    """LLM-05: ``count=0`` used to mean replace-all, which also disabled fuzzy recovery.
+
+    It now means one replacement, so the near-miss ``find`` is recovered in edits mode
+    instead of falling back to diff mode.
+    """
     (tmp_path / "buggy.py").write_text(
         "def f(res, n):\n    return res // (n * (n - 1))\n",
         encoding="utf-8",
@@ -2459,7 +2464,8 @@ def test_openai_edits_fuzzy_recovery_skips_replace_all_count(tmp_path, monkeypat
 
     assert result.diff is not None
     assert result.meta is not None
-    assert result.meta.get("fallback_reason") == "find_not_found"
+    assert "fallback_reason" not in result.meta
+    assert result.meta["find_recovery_applied"] is True
     applied, message = run_eval.apply_diff(tmp_path, result.diff)
     assert applied, message
     assert "return res // (n * (n + 1))" in (tmp_path / "buggy.py").read_text(encoding="utf-8")

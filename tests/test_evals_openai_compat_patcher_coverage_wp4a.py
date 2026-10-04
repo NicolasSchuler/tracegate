@@ -748,14 +748,10 @@ class TestProposePatchViaEdits:
 
         monkeypatch.setattr(mod, "_chat_completion", fake_chat)
 
-        original_read = Path.read_text
+        def bad_read(path):
+            raise PermissionError("nope")
 
-        def bad_read(self_path, *a, **kw):
-            if self_path.name == "foo.py":
-                raise PermissionError("nope")
-            return original_read(self_path, *a, **kw)
-
-        monkeypatch.setattr(Path, "read_text", bad_read)
+        monkeypatch.setattr(mod, "_read_edit_target", bad_read)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -1149,14 +1145,10 @@ class TestProposePatchViaEditsAsync:
 
         monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
 
-        original_read = Path.read_text
+        def bad_read(path):
+            raise PermissionError("nope")
 
-        def bad_read(self_path, *a, **kw):
-            if self_path.name == "foo.py":
-                raise PermissionError("nope")
-            return original_read(self_path, *a, **kw)
-
-        monkeypatch.setattr(Path, "read_text", bad_read)
+        monkeypatch.setattr(mod, "_read_edit_target", bad_read)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",

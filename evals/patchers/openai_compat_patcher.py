@@ -65,6 +65,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, cast
 
@@ -84,7 +85,7 @@ from baselines.openai_compat import (
 
 from .. import _json as json
 from ..eval_patch_constants import FORCED_PATCH_MARKER, TRUNCATED_RESPONSE_ERROR
-from ..eval_patches import _is_test_file_path
+from ..eval_patches import _build_diff_from_changes, _diff_lines, _is_test_file_path
 from ..stage_a_contract import (
     STAGE_A_REQUEST_SCHEMA_COMPACT,
     coerce_stage_a_bool,
@@ -417,9 +418,9 @@ PATCH_EDITS_JSON_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "properties": {
                     "path": {"type": "string", "minLength": 1},
-                    "find": {"type": "string"},
+                    "find": {"type": "string", "minLength": 1},
                     "replace": {"type": "string"},
-                    "count": {"type": "integer", "minimum": 0},
+                    "count": {"type": "integer", "minimum": 1},
                 },
             },
         }
@@ -3731,97 +3732,20 @@ def _propose_patch_via_edits(
         # Defensive guard: schema/validation above should prevent this.
         return PatchResult(diff=None, meta=_with_totals(dict(meta)))
 
-    changed: list[tuple[str, str, str]] = []
-    find_recovery_modes: list[str] = []
-    for entry in edits:
-        if not isinstance(entry, dict):
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_edit_entry", entry=_safe_trunc(entry))),
-            )
-
-        path = entry.get("path")
-        find = entry.get("find", entry.get("old"))
-        replace = entry.get("replace", entry.get("new"))
-        count_raw = entry.get("count", 1)
-        count = count_raw if isinstance(count_raw, int) else 1
-
-        if not isinstance(path, str) or not path.strip():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_path", entry=_safe_trunc(entry))),
-            )
-        if not isinstance(find, str) or not isinstance(replace, str):
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_find_replace", entry=_safe_trunc(entry))),
-            )
-        if count < 0:
-            count = 0
-
-        file_path = (cwd / path).resolve()
-        try:
-            file_path.relative_to(cwd.resolve())
-        except Exception:
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "path_outside_case", path=path)),
-            )
-        if not file_path.exists():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "file_not_found", path=path)),
-            )
-        if not file_path.is_file():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "path_not_file", path=path)),
-            )
-
-        try:
-            before = file_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(
-                    _error_meta(
-                        meta,
-                        "file_read_error",
-                        path=path,
-                        exc=f"{type(exc).__name__}: {exc}",
-                    )
-                ),
-            )
-        after, match_mode = _apply_find_replace_with_recovery(
-            before=before,
-            find=find,
-            replace=replace,
-            count=count,
+    resolved = _resolve_edits(edits, cwd=cwd)
+    if resolved.failure == "file_read_error":
+        return PatchResult(
+            diff=None,
+            meta=_with_totals(_error_meta(meta, resolved.failure, **resolved.failure_meta)),
         )
-        if after is None:
-            return _fallback_to_diff(
-                reason="find_not_found",
-                extra_error_meta={"path": path, "find_preview": find[:200]},
-            )
-        normalized_mode = match_mode.removesuffix("_noop")
-        if normalized_mode != "exact":
-            find_recovery_modes.append(normalized_mode)
-        if after == before:
-            continue
-        changed.append((path, before, after))
-
-    if not changed:
+    if resolved.failure:
+        # LLM-19: every payload-shape failure gets the diff fallback, not only find_not_found.
+        return _fallback_to_diff(reason=resolved.failure, extra_error_meta=resolved.failure_meta)
+    if not resolved.changed:
         return _fallback_to_diff(reason="no_effective_changes")
 
-    if find_recovery_modes:
-        unique_modes = sorted(set(find_recovery_modes))
-        meta["find_recovery_applied"] = True
-        meta["find_recovery_mode"] = unique_modes[0] if len(unique_modes) == 1 else "mixed"
-        meta["find_recovery_modes"] = unique_modes
-    else:
-        meta["find_recovery_applied"] = False
-
-    diff = _build_diff_from_changes(changed)
+    _record_find_recovery(meta, resolved.recovery_modes)
+    diff = _build_diff_from_changes(resolved.changed)
     return PatchResult(diff=diff, meta=_with_totals(dict(meta)))
 
 
@@ -3921,7 +3845,7 @@ def _propose_patch_via_full_file(
             ),
         )
     try:
-        before = target_path.read_text(encoding="utf-8")
+        before, before_crlf = _read_edit_target(target_path)
     except Exception as exc:
         return PatchResult(
             diff=None,
@@ -4013,10 +3937,18 @@ def _propose_patch_via_full_file(
             }:
                 break
             continue
+        repaired = _normalize_newlines(repaired)
         if repaired == before:
             return _fallback_to_diff(reason="no_effective_changes")
-
-        diff = _build_diff_from_changes([(target_rel, before, repaired)])
+        diff = _build_diff_from_changes(
+            [
+                (
+                    target_rel,
+                    _with_line_endings(before, before_crlf),
+                    _with_line_endings(repaired, before_crlf),
+                )
+            ]
+        )
         if diff.strip():
             return PatchResult(diff=diff, meta=_with_totals(attempt_meta))
         return _fallback_to_diff(reason="no_effective_changes")
@@ -4362,97 +4294,22 @@ async def _propose_patch_via_edits_async(
     if not isinstance(edits, list) or not edits:
         return PatchResult(diff=None, meta=_with_totals(dict(meta)))
 
-    changed: list[tuple[str, str, str]] = []
-    find_recovery_modes: list[str] = []
-    for entry in edits:
-        if not isinstance(entry, dict):
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_edit_entry", entry=_safe_trunc(entry))),
-            )
-
-        path = entry.get("path")
-        find = entry.get("find", entry.get("old"))
-        replace = entry.get("replace", entry.get("new"))
-        count_raw = entry.get("count", 1)
-        count = count_raw if isinstance(count_raw, int) else 1
-
-        if not isinstance(path, str) or not path.strip():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_path", entry=_safe_trunc(entry))),
-            )
-        if not isinstance(find, str) or not isinstance(replace, str):
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "bad_find_replace", entry=_safe_trunc(entry))),
-            )
-        if count < 0:
-            count = 0
-
-        file_path = (cwd / path).resolve()
-        try:
-            file_path.relative_to(cwd.resolve())
-        except Exception:
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "path_outside_case", path=path)),
-            )
-        if not file_path.exists():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "file_not_found", path=path)),
-            )
-        if not file_path.is_file():
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(_error_meta(meta, "path_not_file", path=path)),
-            )
-
-        try:
-            before = file_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            return PatchResult(
-                diff=None,
-                meta=_with_totals(
-                    _error_meta(
-                        meta,
-                        "file_read_error",
-                        path=path,
-                        exc=f"{type(exc).__name__}: {exc}",
-                    )
-                ),
-            )
-        after, match_mode = _apply_find_replace_with_recovery(
-            before=before,
-            find=find,
-            replace=replace,
-            count=count,
+    resolved = _resolve_edits(edits, cwd=cwd)
+    if resolved.failure == "file_read_error":
+        return PatchResult(
+            diff=None,
+            meta=_with_totals(_error_meta(meta, resolved.failure, **resolved.failure_meta)),
         )
-        if after is None:
-            return await _fallback_to_diff(
-                reason="find_not_found",
-                extra_error_meta={"path": path, "find_preview": find[:200]},
-            )
-        normalized_mode = match_mode.removesuffix("_noop")
-        if normalized_mode != "exact":
-            find_recovery_modes.append(normalized_mode)
-        if after == before:
-            continue
-        changed.append((path, before, after))
-
-    if not changed:
+    if resolved.failure:
+        # LLM-19: every payload-shape failure gets the diff fallback, not only find_not_found.
+        return await _fallback_to_diff(
+            reason=resolved.failure, extra_error_meta=resolved.failure_meta
+        )
+    if not resolved.changed:
         return await _fallback_to_diff(reason="no_effective_changes")
 
-    if find_recovery_modes:
-        unique_modes = sorted(set(find_recovery_modes))
-        meta["find_recovery_applied"] = True
-        meta["find_recovery_mode"] = unique_modes[0] if len(unique_modes) == 1 else "mixed"
-        meta["find_recovery_modes"] = unique_modes
-    else:
-        meta["find_recovery_applied"] = False
-
-    diff = _build_diff_from_changes(changed)
+    _record_find_recovery(meta, resolved.recovery_modes)
+    diff = _build_diff_from_changes(resolved.changed)
     return PatchResult(diff=diff, meta=_with_totals(dict(meta)))
 
 
@@ -4550,7 +4407,7 @@ async def _propose_patch_via_full_file_async(
             ),
         )
     try:
-        before = target_path.read_text(encoding="utf-8")
+        before, before_crlf = _read_edit_target(target_path)
     except Exception as exc:
         return PatchResult(
             diff=None,
@@ -4640,10 +4497,18 @@ async def _propose_patch_via_full_file_async(
             }:
                 break
             continue
+        repaired = _normalize_newlines(repaired)
         if repaired == before:
             return await _fallback_to_diff(reason="no_effective_changes")
-
-        diff = _build_diff_from_changes([(target_rel, before, repaired)])
+        diff = _build_diff_from_changes(
+            [
+                (
+                    target_rel,
+                    _with_line_endings(before, before_crlf),
+                    _with_line_endings(repaired, before_crlf),
+                )
+            ]
+        )
         if diff.strip():
             return PatchResult(diff=diff, meta=_with_totals(attempt_meta))
         return await _fallback_to_diff(reason="no_effective_changes")
@@ -4938,6 +4803,17 @@ def _chat_completion(
                 "status": int(status),
                 "body": raw_text[:2000],
             }
+        data: Any = None
+        if error_meta is None:
+            try:
+                data = json.loads(raw_text)
+            except Exception:
+                # A garbled body is a transport fault; retry it like one (LLM-19).
+                error_meta = {
+                    **attempt_meta,
+                    "error": "bad_json_response",
+                    "body": raw_text[:2000],
+                }
 
         if error_meta is not None:
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
@@ -4997,19 +4873,6 @@ def _chat_completion(
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             return None, final_error_meta
-
-        try:
-            data = json.loads(raw_text)
-        except Exception:
-            bad_json_meta: PatcherMeta = {
-                **attempt_meta,
-                "error": "bad_json_response",
-                "body": raw_text[:2000],
-                "transport_retry_count": len(retry_attempts),
-            }
-            if retry_attempts:
-                bad_json_meta["transport_retry_attempts"] = retry_attempts
-            return None, bad_json_meta
 
         meta: PatcherMeta = {
             **attempt_meta,
@@ -5274,6 +5137,17 @@ async def _chat_completion_async(
                 "status": int(status),
                 "body": raw_text[:2000],
             }
+        data: Any = None
+        if error_meta is None:
+            try:
+                data = json.loads(raw_text)
+            except Exception:
+                # A garbled body is a transport fault; retry it like one (LLM-19).
+                error_meta = {
+                    **attempt_meta,
+                    "error": "bad_json_response",
+                    "body": raw_text[:2000],
+                }
 
         if error_meta is not None:
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
@@ -5333,19 +5207,6 @@ async def _chat_completion_async(
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             return None, final_error_meta
-
-        try:
-            data = json.loads(raw_text)
-        except Exception:
-            bad_json_meta: PatcherMeta = {
-                **attempt_meta,
-                "error": "bad_json_response",
-                "body": raw_text[:2000],
-                "transport_retry_count": len(retry_attempts),
-            }
-            if retry_attempts:
-                bad_json_meta["transport_retry_attempts"] = retry_attempts
-            return None, bad_json_meta
 
         meta: PatcherMeta = {
             **attempt_meta,
@@ -5575,7 +5436,7 @@ def _is_retryable_chat_completion_http_status(status: int) -> bool:
 
 def _is_retryable_chat_completion_error(meta: PatcherMeta) -> bool:
     error = str(meta.get("error", "")).strip()
-    if error == "request_failed":
+    if error in {"request_failed", "bad_json_response"}:
         return True
     if error != "http_error":
         return False
@@ -5730,6 +5591,100 @@ def _looks_like_edit_entry(entry: dict[str, Any]) -> bool:
     return has_path and has_find and has_replace
 
 
+@dataclass(frozen=True)
+class _ResolvedEdits:
+    """Edits applied in memory; ``failure`` names the first entry that couldn't be."""
+
+    changed: list[tuple[str, str, str]]
+    recovery_modes: list[str]
+    failure: str = ""
+    failure_meta: PatcherMeta = dataclass_field(default_factory=lambda: cast(PatcherMeta, {}))
+
+
+def _read_edit_target(path: Path) -> tuple[str, bool]:
+    """Return the file as LF text and whether it uses CRLF throughout (LLM-09)."""
+    raw = path.read_bytes().decode("utf-8")
+    crlf = "\r\n" in raw and raw.count("\r\n") == raw.count("\n")
+    return _normalize_newlines(raw), crlf
+
+
+def _with_line_endings(text: str, crlf: bool) -> str:
+    return text.replace("\n", "\r\n") if crlf else text
+
+
+def _resolve_edits(edits: list[Any], *, cwd: Path) -> _ResolvedEdits:
+    """Apply an edits payload to in-memory copies of its files.
+
+    Shared by the sync and async edits paths. Edits to one file are chained, so each sees
+    the previous ones and the file gets a single diff. Matching runs on LF text and CRLF
+    files keep CRLF in the diff (LLM-09). ``find`` must be non-empty and a ``count`` below
+    1 means 1 (LLM-05).
+    """
+    originals: dict[str, tuple[str, bool]] = {}
+    current: dict[str, str] = {}
+    modes: list[str] = []
+
+    def _fail(reason: str, **extra: Any) -> _ResolvedEdits:
+        return _ResolvedEdits([], modes, failure=reason, failure_meta=cast(PatcherMeta, extra))
+
+    for entry in edits:
+        if not isinstance(entry, dict):
+            return _fail("bad_edit_entry", entry=_safe_trunc(entry))
+        entry_map = cast(dict[str, Any], entry)
+        path = entry_map.get("path")
+        find = entry_map.get("find", entry_map.get("old"))
+        replace = entry_map.get("replace", entry_map.get("new"))
+        count_raw = entry_map.get("count", 1)
+        count = max(1, count_raw) if isinstance(count_raw, int) else 1
+        if not isinstance(path, str) or not path.strip():
+            return _fail("bad_path", entry=_safe_trunc(entry))
+        if not isinstance(find, str) or not isinstance(replace, str):
+            return _fail("bad_find_replace", entry=_safe_trunc(entry))
+        if not find:
+            return _fail("empty_find", path=path)
+        if path not in current:
+            file_path = (cwd / path).resolve()
+            try:
+                file_path.relative_to(cwd.resolve())
+            except ValueError:
+                return _fail("path_outside_case", path=path)
+            if not file_path.exists():
+                return _fail("file_not_found", path=path)
+            if not file_path.is_file():
+                return _fail("path_not_file", path=path)
+            try:
+                text, crlf = _read_edit_target(file_path)
+            except Exception as exc:
+                return _fail("file_read_error", path=path, exc=f"{type(exc).__name__}: {exc}")
+            originals[path] = (text, crlf)
+            current[path] = text
+        after, match_mode = _apply_find_replace_with_recovery(
+            before=current[path], find=find, replace=replace, count=count
+        )
+        if after is None:
+            return _fail("find_not_found", path=path, find_preview=find[:200])
+        normalized_mode = match_mode.removesuffix("_noop")
+        if normalized_mode != "exact":
+            modes.append(normalized_mode)
+        current[path] = after
+    changed = [
+        (path, _with_line_endings(text, crlf), _with_line_endings(current[path], crlf))
+        for path, (text, crlf) in originals.items()
+        if current[path] != text
+    ]
+    return _ResolvedEdits(changed, modes)
+
+
+def _record_find_recovery(meta: PatcherMeta, modes: list[str]) -> None:
+    if not modes:
+        meta["find_recovery_applied"] = False
+        return
+    unique_modes = sorted(set(modes))
+    meta["find_recovery_applied"] = True
+    meta["find_recovery_mode"] = unique_modes[0] if len(unique_modes) == 1 else "mixed"
+    meta["find_recovery_modes"] = unique_modes
+
+
 def _apply_find_replace_with_recovery(
     *,
     before: str,
@@ -5737,7 +5692,10 @@ def _apply_find_replace_with_recovery(
     replace: str,
     count: int,
 ) -> tuple[str | None, str]:
-    replace_count = count or -1
+    # LLM-05: an empty find matches everywhere, and `count or -1` made 0 mean "all".
+    if not find:
+        return None, "none"
+    replace_count = max(1, count)
 
     if find in before:
         after = before.replace(find, replace, replace_count)
@@ -5992,26 +5950,6 @@ def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
     return None, "multiple_non_test_python_files"
 
 
-def _build_diff_from_changes(changes: list[tuple[str, str, str]]) -> str:
-    parts: list[str] = []
-    for path, before, after in changes:
-        udiff = difflib.unified_diff(
-            before.splitlines(),
-            after.splitlines(),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
-            lineterm="",
-        )
-        file_lines = list(udiff)
-        if not file_lines:
-            continue
-        parts.append(f"diff --git a/{path} b/{path}")
-        parts.extend(file_lines)
-        if parts and parts[-1] != "":
-            parts.append("")
-    return "\n".join(parts).rstrip("\n") + "\n"
-
-
 def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | None:
     """Build a deterministic minimal patch when model output is empty/invalid."""
     candidates = _extract_file_index_paths(prompt)
@@ -6092,7 +6030,7 @@ def _fix_hunk_counts(diff: str) -> str:
     Git treats those diffs as corrupt. We recompute the counts from the hunk body
     and rewrite the header counts, keeping the start line numbers as-is.
     """
-    lines = diff.splitlines()
+    lines = _diff_lines(diff)  # not splitlines(): form feeds etc. stay in their line (LLM-15)
     out: list[str] = []
     i = 0
     n = len(lines)

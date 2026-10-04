@@ -79,15 +79,22 @@ class TestApplyFindReplaceWithRecovery:
         assert result is not None or mode in ("none", "normalized_newlines")
 
     def test_empty_find_string_returns_none(self) -> None:
-        # find="" is in every string via `str.__contains__` → exact branch
-        # but replace="" → same → exact_noop
-        _result, mode = mod._apply_find_replace_with_recovery(
+        # LLM-05: an empty find used to match everywhere and insert `replace` between
+        # every character; it is now rejected.
+        result, mode = mod._apply_find_replace_with_recovery(
             before="hello",
             find="",
-            replace="",
-            count=1,
+            replace="# ",
+            count=0,
         )
-        assert mode == "exact_noop"
+        assert (result, mode) == (None, "none")
+
+    def test_count_zero_replaces_once(self) -> None:
+        # LLM-05: `count or -1` made 0 mean "replace all".
+        result, mode = mod._apply_find_replace_with_recovery(
+            before="a a a", find="a", replace="b", count=0
+        )
+        assert (result, mode) == ("b a a", "exact")
 
     def test_whitespace_normalized_match(self) -> None:
         before = "if  x  ==  1:\n    pass\n"

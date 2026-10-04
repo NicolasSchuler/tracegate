@@ -40,6 +40,18 @@ class _ParsedDiffEntry:
         return out
 
 
+def _diff_lines(text: str) -> list[str]:
+    """Split on ``\\n`` or ``\\r\\n`` only (LLM-15).
+
+    ``str.splitlines`` also splits on form feeds, ``\\x1c``-``\\x1e``, ``\\x85`` and
+    U+2028, which can appear inside source lines.
+    """
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return [line.removesuffix("\r") for line in lines]
+
+
 RELAXED_APPLY_MESSAGE = "applied via relaxed replacement fallback"
 _PATCH_LEFTOVER_SUFFIXES = (".rej", ".orig")
 
@@ -180,7 +192,7 @@ def _parse_diff_entries(diff: str) -> list[_ParsedDiffEntry]:
     diff_new_path: str | None = None
     pending_old_path: str | None = None
 
-    for raw_line in diff.splitlines():
+    for raw_line in _diff_lines(diff):
         stripped = raw_line.strip()
         if stripped.startswith("diff --git "):
             tokens = stripped.split()
@@ -336,7 +348,7 @@ def _run_patch_sanitization(*, diff: str) -> tuple[bool, dict[str, Any]]:
     checked_files: list[str] = []
     findings: list[str] = []
 
-    for raw_line in diff.splitlines():
+    for raw_line in _diff_lines(diff):
         if raw_line.startswith("+++ "):
             token = raw_line[4:].strip().split()[0] if raw_line[4:].strip() else ""
             normalized = _normalize_diff_path_token(token)
@@ -568,7 +580,7 @@ def _patch_mentions_scope_files(*, patch_files: list[str], scope_files: set[str]
 
 
 def _patch_contains_substantive_change(diff: str) -> bool:
-    for line in diff.splitlines():
+    for line in _diff_lines(diff):
         if not line:
             continue
         if line.startswith(("diff --git ", "index ", "@@", "--- ", "+++ ")):
@@ -640,7 +652,7 @@ def _validate_unified_diff_structure(diff: str) -> tuple[bool, str]:
     def _counts_match() -> bool:
         return actual_old == expected_old and actual_new == expected_new
 
-    for raw_line in diff.splitlines():
+    for raw_line in _diff_lines(diff):
         if raw_line.startswith("@@"):
             if in_hunk and not _counts_match():
                 return False, "patch rejected: malformed unified diff hunk counts"
@@ -688,7 +700,7 @@ def _apply_relaxed_replacements(cwd: Path, diff: str) -> tuple[bool, str]:
     """
     replacements: dict[str, list[tuple[list[str], list[str], list[str], list[str]]]] = {}
     current_path: str | None = None
-    lines = diff.splitlines()
+    lines = _diff_lines(diff)
     i = 0
     while i < len(lines):
         raw_line = lines[i]
@@ -734,7 +746,7 @@ def _apply_relaxed_replacements(cwd: Path, diff: str) -> tuple[bool, str]:
             return False, f"file not found: {rel_path}"
         text = file_path.read_text(encoding="utf-8")
         had_newline = text.endswith("\n")
-        line_values = text.splitlines()
+        line_values = _diff_lines(text)
 
         changed = False
         for old_lines, new_lines, before_ctx, after_ctx in pairs:
@@ -852,7 +864,7 @@ def _extract_relaxed_pairs_from_hunk(
 
 def _is_forced_noop_marker_diff(diff: str) -> bool:
     changed_lines_seen = False
-    for line in str(diff or "").splitlines():
+    for line in _diff_lines(str(diff or "")):
         if not line:
             continue
         if line.startswith(
@@ -946,23 +958,40 @@ def _select_forced_patch_target(candidates: list[str]) -> str | None:
     return None
 
 
+_NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
+
+
+def _keepends_lines(text: str) -> list[str]:
+    """Split on ``\\n`` only, keeping terminators; a ``\\r`` stays part of its line."""
+    lines = text.split("\n")
+    out = [line + "\n" for line in lines[:-1]]
+    if lines[-1]:
+        out.append(lines[-1])
+    return out
+
+
 def _build_diff_from_changes(changes: list[tuple[str, str, str]]) -> str:
+    """Build a git-style diff from ``(path, before, after)`` texts.
+
+    Lines are split on ``\\n`` only and a missing final newline gets the standard
+    marker (LLM-15): ``str.splitlines`` also split on form feeds, ``\\x1c``-``\\x1e``,
+    ``\\x85`` and U+2028, and dropped ``\\r``, so the diff didn't describe the file.
+    """
     parts: list[str] = []
     for path, before, after in changes:
-        udiff = difflib.unified_diff(
-            before.splitlines(),
-            after.splitlines(),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
-            lineterm="",
+        file_lines = list(
+            difflib.unified_diff(
+                _keepends_lines(before),
+                _keepends_lines(after),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="\n",
+            )
         )
-        file_lines = list(udiff)
         if not file_lines:
             continue
-        parts.append(f"diff --git a/{path} b/{path}")
-        parts.extend(file_lines)
-        if parts and parts[-1] != "":
-            parts.append("")
-    if not parts:
-        return ""
-    return "\n".join(parts).rstrip("\n") + "\n"
+        parts.append(f"diff --git a/{path} b/{path}\n")
+        parts.extend(
+            line if line.endswith("\n") else f"{line}\n{_NO_NEWLINE_MARKER}" for line in file_lines
+        )
+    return "".join(parts)
