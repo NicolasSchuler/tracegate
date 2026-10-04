@@ -1327,26 +1327,33 @@ def _ratio(numer: int, denom: int) -> float | None:
     return float(numer) / float(denom)
 
 
-_TIMING_SUMMARY_KEYS = (
-    "stage_a_llm_sec",
-    "stage_a_context_fulfillment_sec",
-    "snapshot_read_sec",
-    "adaptive_controller_prepare_sec",
-    "adaptive_controller_summarizer_sec",
-    "adaptive_controller_sidecar_build_sec",
-    "adaptive_controller_sidecar_write_sec",
-    "baseline_case_conversion_sec",
-    "baseline_sidecar_load_sec",
-    "context_compaction_llm_sec",
-    "prompt_assembly_sec",
-    "stage_b_llm_sec",
-    "test_before_sec",
-    "test_after_sec",
-    "recovery_llm_sec",
-    "llmdebug_total_sec",
-    "llm_total_sec",
-    "overhead_sec",
+# One list of timing fields drives both accumulation and display (STA-17): three baseline
+# fields had labels but were never accumulated.
+_TIMING_FIELDS: tuple[tuple[str, str], ...] = (
+    ("stage_a_llm_sec", "Stage-A LLM"),
+    ("stage_a_context_fulfillment_sec", "Stage-A context fulfillment"),
+    ("snapshot_read_sec", "Snapshot read (llmdebug)"),
+    ("adaptive_controller_prepare_sec", "Adaptive controller prepare"),
+    ("adaptive_controller_summarizer_sec", "Adaptive controller summarizer"),
+    ("adaptive_controller_sidecar_build_sec", "Adaptive controller sidecar build"),
+    ("adaptive_controller_sidecar_write_sec", "Adaptive controller sidecar write"),
+    ("baseline_case_conversion_sec", "Baseline case conversion"),
+    ("baseline_sidecar_load_sec", "Baseline sidecar load"),
+    ("context_compaction_llm_sec", "Context compaction LLM"),
+    ("prompt_assembly_sec", "Prompt assembly"),
+    ("stage_b_llm_sec", "Stage-B LLM (patch gen)"),
+    ("baseline_internal_total_sec", "Baseline internal total"),
+    ("baseline_eval_sec", "Baseline internal eval"),
+    ("baseline_orchestration_sec", "Baseline orchestration"),
+    ("test_before_sec", "Test before (pytest)"),
+    ("test_after_sec", "Test after (pytest)"),
+    ("recovery_llm_sec", "Recovery LLM"),
+    ("llmdebug_total_sec", "llmdebug total"),
+    ("llm_total_sec", "LLM total (all phases)"),
+    ("overhead_sec", "Framework overhead"),
 )
+_TIMING_SUMMARY_KEYS = tuple(key for key, _label in _TIMING_FIELDS)
+_TIMING_DISPLAY_LABELS: dict[str, str] = dict(_TIMING_FIELDS)
 
 _TOKEN_SUMMARY_KEYS = (
     "stage_a_tokens_total",
@@ -1356,6 +1363,31 @@ _TOKEN_SUMMARY_KEYS = (
     "tool_response_chars",
     "snapshot_chars",
 )
+
+
+def _share_of_runtime(rows: list[dict[str, Any]], key: str) -> tuple[float | None, int]:
+    """Percent of runtime spent in *key*, as a ratio of sums over the same rows (STA-08).
+
+    Only rows with a numeric runtime and a numeric *key* count, zeros included; the
+    old code divided a mean over rows that had *key* by a mean over all rows with a
+    truthy runtime, so one 80 s row among ten 100 s cases read 80% instead of 8%.
+    Returns ``(percent, rows used)``.
+    """
+    component_sum = 0.0
+    runtime_sum = 0.0
+    used = 0
+    for row in rows:
+        runtime = row.get("runtime_sec")
+        timing = row.get("timing_breakdown_sum")
+        value = timing.get(key) if isinstance(timing, dict) else None
+        if not isinstance(runtime, (int, float)) or not isinstance(value, (int, float)):
+            continue
+        component_sum += float(value)
+        runtime_sum += float(runtime)
+        used += 1
+    if used == 0 or runtime_sum <= 0:
+        return None, used
+    return component_sum / runtime_sum * 100.0, used
 
 
 def _compute_overhead_analysis(
@@ -1391,18 +1423,9 @@ def _compute_overhead_analysis(
         timing_mean = {k: _mean(v) for k, v in timing_accum.items()}
         token_mean = {k: _mean(v) for k, v in token_accum.items()}
 
-        llm_total = timing_mean.get("llm_total_sec")
-        overhead = timing_mean.get("overhead_sec")
-        llmdebug_total = timing_mean.get("llmdebug_total_sec")
-        runtime_values = [
-            float(r.get("runtime_sec") or 0.0) for r in cond_rows if r.get("runtime_sec")
-        ]
-        mean_runtime = _mean(runtime_values)
-        llm_pct = (llm_total / mean_runtime * 100.0) if llm_total and mean_runtime else None
-        overhead_pct = (overhead / mean_runtime * 100.0) if overhead and mean_runtime else None
-        llmdebug_pct = (
-            (llmdebug_total / mean_runtime * 100.0) if llmdebug_total and mean_runtime else None
-        )
+        llm_pct, llm_rows = _share_of_runtime(cond_rows, "llm_total_sec")
+        overhead_pct, overhead_rows = _share_of_runtime(cond_rows, "overhead_sec")
+        llmdebug_pct, llmdebug_rows = _share_of_runtime(cond_rows, "llmdebug_total_sec")
 
         per_condition[condition] = {
             "cases": len(cond_rows),
@@ -1411,6 +1434,11 @@ def _compute_overhead_analysis(
             "llm_pct_of_runtime": llm_pct,
             "overhead_pct_of_runtime": overhead_pct,
             "llmdebug_pct_of_runtime": llmdebug_pct,
+            "pct_of_runtime_rows": {
+                "llm": llm_rows,
+                "overhead": overhead_rows,
+                "llmdebug": llmdebug_rows,
+            },
         }
 
     return {"per_condition": per_condition}
@@ -1878,30 +1906,6 @@ def _print_if_present(data: dict[str, Any], key: str, label: str) -> None:
         print(f"- {label}: {value}")
 
 
-_TIMING_DISPLAY_LABELS: dict[str, str] = {
-    "stage_a_llm_sec": "Stage-A LLM",
-    "stage_a_context_fulfillment_sec": "Stage-A context fulfillment",
-    "snapshot_read_sec": "Snapshot read (llmdebug)",
-    "adaptive_controller_prepare_sec": "Adaptive controller prepare",
-    "adaptive_controller_summarizer_sec": "Adaptive controller summarizer",
-    "adaptive_controller_sidecar_build_sec": "Adaptive controller sidecar build",
-    "adaptive_controller_sidecar_write_sec": "Adaptive controller sidecar write",
-    "baseline_case_conversion_sec": "Baseline case conversion",
-    "baseline_sidecar_load_sec": "Baseline sidecar load",
-    "context_compaction_llm_sec": "Context compaction LLM",
-    "prompt_assembly_sec": "Prompt assembly",
-    "stage_b_llm_sec": "Stage-B LLM (patch gen)",
-    "baseline_internal_total_sec": "Baseline internal total",
-    "baseline_eval_sec": "Baseline internal eval",
-    "baseline_orchestration_sec": "Baseline orchestration",
-    "test_before_sec": "Test before (pytest)",
-    "test_after_sec": "Test after (pytest)",
-    "recovery_llm_sec": "Recovery LLM",
-    "llmdebug_total_sec": "llmdebug total",
-    "llm_total_sec": "LLM total (all phases)",
-    "overhead_sec": "Framework overhead",
-}
-
 _TOKEN_DISPLAY_LABELS: dict[str, str] = {
     "stage_a_tokens_total": "Stage-A tokens",
     "stage_b_tokens_total": "Stage-B tokens",
@@ -1930,12 +1934,23 @@ def _print_overhead_analysis(overhead: dict[str, Any], condition_a: str, conditi
         llm_pct = stats.get("llm_pct_of_runtime")
         overhead_pct = stats.get("overhead_pct_of_runtime")
         llmdebug_pct = stats.get("llmdebug_pct_of_runtime")
+        share_rows = stats.get("pct_of_runtime_rows", {})
+        cases = stats.get("cases", 0)
         if llm_pct is not None:
-            print(f"  LLM % of runtime: {_fmt_float(llm_pct)}%")
+            print(
+                f"  LLM % of runtime: {_fmt_float(llm_pct)}% "
+                f"({share_rows.get('llm', 0)}/{cases} cases)"
+            )
         if llmdebug_pct is not None:
-            print(f"  llmdebug % of runtime: {_fmt_float(llmdebug_pct)}%")
+            print(
+                f"  llmdebug % of runtime: {_fmt_float(llmdebug_pct)}% "
+                f"({share_rows.get('llmdebug', 0)}/{cases} cases)"
+            )
         if overhead_pct is not None:
-            print(f"  Framework overhead % of runtime: {_fmt_float(overhead_pct)}%")
+            print(
+                f"  Framework overhead % of runtime: {_fmt_float(overhead_pct)}% "
+                f"({share_rows.get('overhead', 0)}/{cases} cases)"
+            )
 
         timing_mean = stats.get("timing_mean", {})
         if any(v is not None for v in timing_mean.values()):

@@ -104,3 +104,44 @@ def test_sta20_secondary_slices_are_exploratory_and_holm_adjusted() -> None:
         assert exploratory[name]["role"] == "exploratory"
         assert exploratory[name]["holm_adjusted_p"] == expected[name]["adjusted_p"]
     assert exploratory["controls"]["holm_adjusted_p"] is None
+
+
+def _timed(llm: float | None, runtime: float = 100.0) -> dict[str, Any]:
+    timing = {} if llm is None else {"llm_total_sec": llm}
+    return {"condition": _A, "runtime_sec": runtime, "timing_breakdown_sum": timing}
+
+
+def test_sta08_share_of_runtime_is_a_ratio_of_sums() -> None:
+    """One 80 s LLM case among ten 100 s cases is 8%, not 80%; zeros count."""
+    rows = [_timed(80.0)] + [_timed(0.0) for _ in range(9)]
+    assert report._share_of_runtime(rows, "llm_total_sec") == (pytest.approx(8.0), 10)
+
+    partial = [_timed(80.0)] + [_timed(None) for _ in range(9)]
+    pct, used = report._share_of_runtime(partial, "llm_total_sec")
+    assert (pct, used) == (pytest.approx(80.0), 1)  # coverage is reported, not hidden
+
+    overhead = report._compute_overhead_analysis(rows=rows, condition_a=_A, condition_b=_B)
+    stats = overhead["per_condition"][_A]
+    assert stats["llm_pct_of_runtime"] == pytest.approx(8.0)
+    assert stats["pct_of_runtime_rows"]["llm"] == 10
+    assert report._share_of_runtime([_timed(0.0, runtime=0.0)], "llm_total_sec") == (None, 1)
+
+
+def test_sta17_every_displayed_timing_field_is_accumulated() -> None:
+    assert set(report._TIMING_DISPLAY_LABELS) == set(report._TIMING_SUMMARY_KEYS)
+    rows = [
+        {
+            "condition": _A,
+            "runtime_sec": 10.0,
+            "timing_breakdown_sum": {
+                "baseline_internal_total_sec": 4.0,
+                "baseline_eval_sec": 1.0,
+                "baseline_orchestration_sec": 0.5,
+            },
+        }
+    ]
+    stats = report._compute_overhead_analysis(rows=rows, condition_a=_A, condition_b=_B)
+    timing = stats["per_condition"][_A]["timing_mean"]
+    assert timing["baseline_internal_total_sec"] == 4.0
+    assert timing["baseline_eval_sec"] == 1.0
+    assert timing["baseline_orchestration_sec"] == 0.5

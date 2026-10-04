@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `report_run_metrics` overhead shares are a ratio of sums over the rows that report both values, zeros included, with the row count printed; one 80 s LLM case among ten 100 s cases read 80% instead of 8% (STA-08). The baseline internal-total, eval and orchestration times, documented and labelled but never accumulated, now appear (STA-17).
 - Multiple comparisons are controlled (STA-06, STA-20): `analyze_results --stats` Holm-adjusts the McNemar tests across every condition pair (`mcnemar_p_adjusted`, `holm_rejected`; nine conditions are 36 tests, so about 1.8 spurious significant pairs were expected), and `report_run_metrics` marks the `--primary-slice` test as the pre-registered primary endpoint and Holm-adjusts the three nested exploratory slices.
 - Success-rate uplifts compare conditions on the cases both ran (STA-03): raw rates over different case sets were subtracted, so a condition that ran only the 5 easiest of 10 cases showed +30pp where the matched uplift is 0. Pairwise entries carry `n_matched_cases` and `case_sets_match`, conditions report `cases_expected` and `cases_missing`, and both summaries print them.
 - `power_report` uses the McNemar power formula on the discordant counts (`|n01 - n10| / sqrt(n_discordant) - z`); it mixed the discordant count with the overall uplift and reported 0.245 where the power is about 0.949 (STA-04). An undefined Cohen's kappa is reported as `None`/`undefined` instead of "almost_perfect" and invalid `NaN` JSON (STA-10).
