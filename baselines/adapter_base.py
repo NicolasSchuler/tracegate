@@ -250,6 +250,9 @@ class BaselineAdapter(ABC):
     honours_generation_contract: bool = False
     """Whether ``run_repair`` applies ``BaselineConfig.generation`` itself (decision D4)."""
 
+    retry_context_prompt_field: str | None = None
+    """Free-text ``case_input`` field the harness may extend with retry context (BAS-02)."""
+
     #: Fallback model used when the harness does not configure one.
     default_model: str = ""
 

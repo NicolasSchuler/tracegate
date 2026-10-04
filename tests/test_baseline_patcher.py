@@ -1864,3 +1864,53 @@ class TestBuildBaselinePatcher:
             max_attempts=5,
         )
         assert patcher2.config.max_attempts == 5
+
+
+class _PromptStubAdapter(_StubAdapter):
+    retry_context_prompt_field = "prompt"
+
+    def convert_case(
+        self,
+        case_dir: Path,
+        *,
+        case_context: BaselineCaseContext | None = None,
+    ) -> dict[str, Any]:
+        return {**super().convert_case(case_dir, case_context=case_context), "prompt": "Fix it."}
+
+
+class TestRetryContext:  # BAS-02 / D4
+    def test_retry_attempt_appends_failure_to_prompt_field(
+        self, stub_case: Path, tmp_path: Path
+    ) -> None:
+        adapter = _PromptStubAdapter()
+        patcher = BaselinePatcher(adapter=adapter, config=BaselineConfig())
+        context_dir = tmp_path / "ctx" / "attempt_02"
+        context_dir.mkdir(parents=True)
+        (context_dir / "pytest_before_combined.txt").write_text(
+            "E   AssertionError: assert 0 == 42\n", encoding="utf-8"
+        )
+
+        result = patcher.propose_patch(prompt="ignored", context_dir=context_dir, cwd=stub_case)
+
+        assert adapter.seen_case_input is not None
+        assert "assert 0 == 42" in adapter.seen_case_input["prompt"]
+        assert adapter.seen_case_input["llmdebug_retry_context"]["attempt"] == 2
+        assert result.meta is not None
+        assert result.meta["baseline_retry_context_consumed"] is True
+
+    def test_first_attempt_and_adapters_without_prompt_field(
+        self, stub_case: Path, tmp_path: Path
+    ) -> None:
+        adapter = _StubAdapter()
+        patcher = BaselinePatcher(adapter=adapter, config=BaselineConfig())
+        first = tmp_path / "ctx" / "attempt_01"
+        first.mkdir(parents=True)
+        result = patcher.propose_patch(prompt="ignored", context_dir=first, cwd=stub_case)
+        assert result.meta is not None
+        assert result.meta["baseline_retry_context_consumed"] is False
+
+        second = tmp_path / "ctx" / "attempt_02"
+        second.mkdir(parents=True)
+        result = patcher.propose_patch(prompt="ignored", context_dir=second, cwd=stub_case)
+        assert result.meta is not None
+        assert result.meta["baseline_retry_context_consumed"] is False  # no prompt field

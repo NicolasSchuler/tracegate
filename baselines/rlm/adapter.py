@@ -126,6 +126,8 @@ def _is_guard_stop_reason(stop_reason: str) -> bool:
 class RLMAdapter(BaselineAdapter):
     """Adapter for the standalone upstream RLM baseline."""
 
+    retry_context_prompt_field = "prompt_context"
+
     honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"

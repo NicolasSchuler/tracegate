@@ -66,6 +66,16 @@ iterating when it is reached (`error="deadline_exceeded"`), and every record car
 TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
 (BAS-12).
 
+## Retry context (BAS-02, decision D4)
+
+`BaselinePatcher.propose_patch` ignores the harness repair prompt, so each harness attempt used
+to restart cold while the native conditions saw the previous failure. On attempt 2+ the patcher
+now injects `case_input["llmdebug_retry_context"]` and appends the same text (the attempt number
+and the tail of the failing pytest output) to the adapter's free-text task field
+(`retry_context_prompt_field`: INTERVENOR `prompt`, TraceCoder `complete_prompt`,
+lambda-RLM/RLM `prompt_context`). LDB's prompt is a function stub with no such field, so
+records carry `baseline_retry_context_consumed=false` there.
+
 ## Unsupported cases (BAS-01, decision D3)
 
 A baseline that can't represent a case (for example LDB's converter rejects subprocess-driven,

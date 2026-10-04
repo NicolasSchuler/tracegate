@@ -100,6 +100,8 @@ def _char_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
 class LambdaRLMAdapter(BaselineAdapter):
     """Adapter for a raw lambda-RLM repair baseline."""
 
+    retry_context_prompt_field = "prompt_context"
+
     honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"

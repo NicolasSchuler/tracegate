@@ -344,6 +344,8 @@ def _generation_seed_kwargs(config: BaselineConfig | None) -> dict[str, Any]:
 class IntervenorAdapter(BaselineAdapter):
     """Adapter for the INTERVENOR teacher-learner debugging baseline."""
 
+    retry_context_prompt_field = "prompt"
+
     honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"

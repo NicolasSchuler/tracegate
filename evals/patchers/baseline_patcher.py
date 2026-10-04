@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -565,6 +566,44 @@ def _infer_repair_contract(result: BaselineResult) -> tuple[str, list[str]]:
     return "unknown", []
 
 
+_RETRY_CONTEXT_MAX_CHARS = 2_000
+_ATTEMPT_DIR_RE = re.compile(r"attempt_(\d+)$")
+
+
+def _inject_retry_context(
+    *,
+    case_input: dict[str, Any],
+    context_dir: Path,
+    prompt_field: str | None,
+    meta: dict[str, Any],
+) -> None:
+    """Give retry attempts the failure the native retry prompt carries (BAS-02, D4).
+
+    On attempt 2+ the tail of the failing pytest output is appended to the adapter's own
+    task prompt; adapters without a free-text prompt field (LDB) record that they could
+    not consume it.
+    """
+    match = _ATTEMPT_DIR_RE.search(context_dir.name)
+    attempt = int(match.group(1)) if match else 1
+    meta["baseline_retry_context_attempt"] = attempt
+    if attempt <= 1:
+        meta["baseline_retry_context_consumed"] = False
+        return
+    output_path = context_dir / "pytest_before_combined.txt"
+    output = (
+        output_path.read_text(encoding="utf-8", errors="replace") if output_path.is_file() else ""
+    )
+    section = (
+        f"\n\nAttempt {attempt}: the previous repair attempt did not pass the tests. "
+        "Current test output (tail):\n" + output[-_RETRY_CONTEXT_MAX_CHARS:].rstrip() + "\n"
+    )
+    case_input["llmdebug_retry_context"] = {"attempt": attempt, "test_output_tail": section}
+    consumed = bool(prompt_field) and isinstance(case_input.get(str(prompt_field)), str)
+    if consumed:
+        case_input[str(prompt_field)] = str(case_input[str(prompt_field)]) + section
+    meta["baseline_retry_context_consumed"] = consumed
+
+
 def baseline_case_support(
     adapter: BaselineAdapter, case_dirs: Sequence[tuple[str, Path]]
 ) -> dict[str, Any]:
@@ -800,6 +839,12 @@ class BaselinePatcher(Patcher):
             meta["adaptive_verifier_report_loaded"] = True
         elif verifier_report_error:
             meta["adaptive_verifier_report_error"] = verifier_report_error
+        _inject_retry_context(
+            case_input=case_input,
+            context_dir=context_dir,
+            prompt_field=getattr(self.adapter, "retry_context_prompt_field", None),
+            meta=meta,
+        )
         hybrid_sidecars_active = _hybrid_sidecars_active(
             controller_packet=controller_packet,
             controller_packet_error=controller_packet_error,

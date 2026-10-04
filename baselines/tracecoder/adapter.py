@@ -399,6 +399,8 @@ def _case_test_timeout_sec(case_input: Mapping[str, Any], config: BaselineConfig
 class TraceCoderAdapter(BaselineAdapter):
     """Adapter for the patched upstream TraceCoder baseline."""
 
+    retry_context_prompt_field = "complete_prompt"
+
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
     repo_commit: str = ""
