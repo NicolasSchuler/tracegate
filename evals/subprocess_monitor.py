@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
+import os
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -12,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from . import _json as json
+
+DRAIN_GRACE_SEC = 2.0
+"""After the child exits, how long to wait for its pipes to close (ORC-03). A grandchild
+that inherited the pipes can keep them open indefinitely."""
 
 ProgressCallback = Callable[[str, dict[str, Any] | None], None]
 StateSupplier = Callable[[], Mapping[str, Any] | None]
@@ -27,6 +34,21 @@ class MonitoredSubprocessResult:
     stderr: str
     timed_out: bool = False
     timeout_sec: int | None = None
+
+
+def _kill_process_group(process: subprocess.Popen[str]) -> None:
+    """Kill the child and everything it started in its session (best effort)."""
+    killpg = getattr(os, "killpg", None)
+    if killpg is not None:
+        try:
+            killpg(process.pid, signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        return
 
 
 def sanitize_progress_excerpt(raw: str, *, max_chars: int = 120) -> str:
@@ -108,6 +130,10 @@ def run_monitored_subprocess(
         cmd,
         cwd=str(cwd) if cwd is not None else None,
         env=dict(env) if env is not None else None,
+        # ORC-19: never inherit the harness's stdin. ORC-03: own process group, so a timeout
+        # can kill grandchildren (LDB's multiprocessing pool, TraceCoder workers) too.
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -136,8 +162,10 @@ def run_monitored_subprocess(
         thread.start()
 
     timed_out = False
-    deadline = started_at + max(0, int(timeout_sec))
+    # ORC-18: a timeout of 0 means "no deadline", not a zero-wait busy loop.
+    deadline = started_at + int(timeout_sec) if int(timeout_sec) > 0 else math.inf
     next_poll = started_at + poll_interval
+    exited_at: float | None = None
 
     while True:
         now = time.perf_counter()
@@ -167,12 +195,19 @@ def run_monitored_subprocess(
             _poll_state()
             next_poll = now + poll_interval
 
-        if (not timed_out) and timeout_sec > 0 and now >= deadline and process.poll() is None:
+        if (not timed_out) and now >= deadline and process.poll() is None:
             timed_out = True
-            process.kill()
+            _kill_process_group(process)
 
-        if process.poll() is not None and all(stream_done.values()) and event_queue.empty():
-            break
+        if process.poll() is not None:
+            if all(stream_done.values()) and event_queue.empty():
+                break
+            if exited_at is None:
+                exited_at = now
+            elif now - exited_at >= DRAIN_GRACE_SEC and event_queue.empty():
+                # ORC-03: a surviving grandchild holds the pipes; stop it and stop waiting.
+                _kill_process_group(process)
+                break
 
     for thread in threads:
         thread.join(timeout=0.5)
