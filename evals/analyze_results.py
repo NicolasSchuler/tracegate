@@ -31,11 +31,14 @@ from .adaptive_online_policy import (
 )
 from .decision_model.policy import atomic_action_from_answers
 from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
+from .eval_types import EVAL_RECORD_SCHEMA_VERSION
 
 logger = logging.getLogger(__name__)
 
-EVAL_RECORD_SCHEMA_VERSION = 6
-SUPPORTED_EVAL_RECORD_SCHEMA_VERSIONS = frozenset({5, EVAL_RECORD_SCHEMA_VERSION})
+# v7 marks the 2026-10-04 review semantics (see evals/README.md, "Record schema versions").
+SUPPORTED_EVAL_RECORD_SCHEMA_VERSIONS = frozenset({5, 6, EVAL_RECORD_SCHEMA_VERSION})
+# Records from this version on use the xxh3_128 prompt/evidence hash field names.
+_XXH3_HASH_FIELDS_SINCE_SCHEMA = 6
 ADAPTIVE_ONLINE_REWARD_SCOPE_LEGACY = "helper_local_v1"
 ADAPTIVE_BUDGET_REWARD_SCOPE_LEGACY = "budget_local_v1"
 ADAPTIVE_ONLINE_REWARD_SCOPE = "helper_credit_v2"
@@ -154,13 +157,13 @@ _RIDGECV_MIN_SAMPLES = 10
 
 
 def _prompt_hash_field_for_schema(schema_version: int) -> str:
-    if schema_version >= EVAL_RECORD_SCHEMA_VERSION:
+    if schema_version >= _XXH3_HASH_FIELDS_SINCE_SCHEMA:
         return CURRENT_PROMPT_HASH_FIELD
     return LEGACY_PROMPT_HASH_FIELD
 
 
 def _evidence_hash_field_for_schema(schema_version: int) -> str:
-    if schema_version >= EVAL_RECORD_SCHEMA_VERSION:
+    if schema_version >= _XXH3_HASH_FIELDS_SINCE_SCHEMA:
         return CURRENT_EVIDENCE_HASH_FIELD
     return LEGACY_EVIDENCE_HASH_FIELD
 
