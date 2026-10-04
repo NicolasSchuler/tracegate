@@ -287,14 +287,14 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] **STA-23:** use `scipy.stats.binomtest` for an exact McNemar, with α as a parameter. **STA-24:** Holm with `<=`. **STA-15:** a p-value formatter.
 
 ### 2.2. Correctness
-- [ ] **STA-01, STA-09:** missing tokens become `None`; add `token_covered_attempts` and `token_covered_fraction`.
-- [ ] **STA-02:** use the case as the unit. Aggregate runs per case, or use a cluster bootstrap, and refuse `per_run` pooling across `run_id`s.
-- [ ] **STA-03:** compare matched case sets only. Emit `cases_expected` and `cases_missing`, and refuse uplifts when the case sets differ.
-- [ ] **STA-04:** fix the power formula.
-- [ ] **STA-06, STA-20:** apply Holm or BH across the pairwise family and the slice family, and label exploratory tests as such.
-- [ ] **STA-08:** ratio of sums. **STA-10:** NaN κ. **STA-13:** unbiased pass@k at a common k (D12). **STA-14:** majority vote.
-- [ ] **STA-16:** bucket dilution. **STA-17:** timing keys. **STA-18:** de-duplication in `budget_risk_report`. **STA-21:** OPE parameters. **STA-22:** two-pass labelling. **STA-25:** `--strict-input`.
-- [ ] **BAS-06, BAS-09:** `compare_results` run collapsing and the unreadable-file crash.
+- [x] **STA-01, STA-09:** missing tokens become `None`; add `token_covered_attempts` and `token_covered_fraction`.
+- [x] **STA-02:** use the case as the unit. Aggregate runs per case, or use a cluster bootstrap, and refuse `per_run` pooling across `run_id`s.
+- [x] **STA-03:** compare matched case sets only. Emit `cases_expected` and `cases_missing`, and refuse uplifts when the case sets differ. *(Uplifts are always computed over the matched cases and flagged `case_sets_match: false` with `n_matched_cases`, rather than suppressed.)*
+- [x] **STA-04:** fix the power formula.
+- [x] **STA-06, STA-20:** apply Holm or BH across the pairwise family and the slice family, and label exploratory tests as such.
+- [x] **STA-08:** ratio of sums. **STA-10:** NaN κ. **STA-13:** unbiased pass@k at a common k (D12). **STA-14:** majority vote.
+- [x] **STA-16:** bucket dilution. **STA-17:** timing keys. **STA-18:** de-duplication in `budget_risk_report`. **STA-21:** OPE parameters. **STA-22:** two-pass labelling. **STA-25:** `--strict-input`.
+- [x] **BAS-06, BAS-09:** `compare_results` run collapsing and the unreadable-file crash.
 
 ### 2.3. Off-policy evaluation
 - [ ] **STA-11:** cross-fitted doubly-robust estimate; record the selected alphas. **STA-12:** drop and count samples with a missing propensity.
