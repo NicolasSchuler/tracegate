@@ -212,6 +212,10 @@ DEFAULT_ADAPTIVE_BUDGET_ONLINE_EPSILON = 0.05
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS = 20
 DEFAULT_ADAPTIVE_BUDGET_POLICY_TIERS = "1.0,1.1,1.2,1.35,1.5"
 DEFAULT_ADAPTIVE_BUDGET_POLICY_MAX_UPS_PER_CASE = 1
+DEFAULT_ADAPTIVE_POLICY_L2 = 1.0
+"""Ridge prior of both LinUCB controllers (``--adaptive-online-l2``, ``--adaptive-budget-online-l2``)."""
+DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY = 50
+"""State save interval in updates for both controllers."""
 # Auxiliary reward signal weights (enabled by default; disable with --no-adaptive-aux-reward).
 ADAPTIVE_AUX_REWARD_PYTEST_REDUCTION_WEIGHT_DEFAULT = 0.15
 ADAPTIVE_AUX_REWARD_EVIDENCE_NOVELTY_WEIGHT_DEFAULT = 0.10

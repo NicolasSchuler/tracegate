@@ -24,8 +24,8 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
    ▼
 3. DECIDE ACTION
    • Feasibility-mask unavailable helper arms before scoring
-   • Warm-up phase (first 200): Uniform random over feasible actions
-   • Then: LinUCB greedy (95%) + ε-greedy (5%)
+   • Warm-up phase (first `warmup_decisions`, default 50): Uniform random over feasible actions
+   • Then: LinUCB greedy (1 − ε) + uniform random (ε, default 0.10)
    • Score = exploit + α × explore
    ▼
 4. EXECUTE ATTEMPT
@@ -149,12 +149,48 @@ The delayed rescue bonus goes to the newest helper call one or two attempts befo
 and only when evidence that call added is sent again in the successful attempt's prompt
 (POL-11); otherwise the credit resolves as `local_only_evidence_not_in_success_prompt`.
 
-**Default parameters** (eval_types.py):
-- λ_tokens = 0.08
-- μ_latency = 0.05
-- η_progress = 0.15
-- κ_stagnation = 0.10
-- token_scale = 1000, latency_scale = 10
+**Default parameters**: see the generated table in [Defaults](#defaults).
+
+## Defaults
+
+Generated from the code by `python -m evals.doc_sync --write` (POL-25).
+
+<!-- BEGIN AUTO-GENERATED: POLICY_DEFAULTS -->
+<!-- Rendered from the code by `python -m evals.doc_sync --write`; do not edit. -->
+
+| Setting | Helper policy | Budget policy |
+|---------|---------------|---------------|
+| Algorithms | `linucb`, `thompson` | `linucb`, `thompson` |
+| Modes | `off`, `on`, `shadow` | `off`, `on`, `shadow` |
+| Actions | 10: `skip_helper`, `invoke_helper`, `frame_only`, `file_only`, `search_only`, `snapshot_lite`, `frame_locals_lite`, `snapshot_full_lite`, `compact_then_patch`, `retry_helper_strict_json` | `keep_budget`, `increase_budget`; families `time`, `tokens`, `context` |
+| Architectures | - | `bwk_v1`, `hierarchical_v1`, `tier_binary` |
+| `alpha` (CLI / Python API) | 0.6 / 0.8 | 0.4 / 0.6 |
+| `epsilon` (CLI / Python API) | 0.1 / 0.15 | 0.05 / 0.08 |
+| Warm-up decisions (CLI / Python API) | 50 / 50 | 20 / 20 |
+| Recency decay | 1.0 (per arm when < 1) | 1.0 (per arm when < 1) |
+| `l2` | 1.0 | 1.0 |
+| Save every (updates) | 50 | 50 |
+| Feature scaling | `v1` (of `none`, `percentile_v1`, `v1`, `v1_interactions`) | `v1` |
+| Score biases | `frame_only=-0.05,search_only=-0.10`, each within ±0.1 | - |
+| Budget ladder | - | `1.0,1.1,1.2,1.35,1.5`, max 1 up(s) per case |
+| Event / state schema | 7 / 4 | 7 / 4 |
+
+| Reward coefficient (CLI default) | Value |
+|----------------------------------|-------|
+| `lambda_tokens` (token penalty weight) | 0.08 |
+| `token_scale` | 1000.0 |
+| `mu_latency` (latency penalty weight) | 0.05 |
+| `latency_scale` (seconds) | 10.0 |
+| `eta_progress` | 0.15 |
+| `kappa_stagnation` | 0.1 |
+| Success hint scale | 1.0 |
+| Progress hint scale | 1.0 |
+| Stagnation penalty scale | 1.0 |
+| Helper materialization scale | 0.5 |
+| Budget `rho_budget_exceeded` | 0.5 |
+
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+<!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## 🔧 Configuration
 
@@ -338,9 +374,9 @@ online_policy_controller.close()  # Flush state to disk
 
 ## 🎓 Learning Dynamics
 
-- **Warm-up (decisions 1-200)**: Uniform random → explores all actions equally
+- **Warm-up (the first `warmup_decisions`, default 50)**: Uniform random → explores all actions equally
 - **Early phase**: ε-greedy with high uncertainty → balanced exploration/exploitation
-- **Steady state**: Greedy arm selection (high confidence actions) with 5% random exploration
+- **Steady state**: Greedy arm selection (high confidence actions) with ε (default 10%) random exploration
 - **Uncertainty bonus**: √(x^T A^{-1} x) is **larger** when context x is new → encourages exploration of unfamiliar situations
 
 ## 💡 Key Insights
@@ -402,19 +438,22 @@ How to A/B test policy changes:
 
 Which parameters matter most and suggested sweep ranges:
 
-| Parameter | CLI Flag | Default | Sweep Range | Effect |
-|-----------|----------|---------|-------------|--------|
-| `alpha` | `--adaptive-online-alpha` | 0.8 | 0.3–2.0 | Higher = more exploration via UCB bonus |
-| `epsilon` | `--adaptive-online-epsilon` | 0.05 | 0.01–0.15 | Higher = more random exploration |
-| `lambda_tokens` | `--adaptive-reward-lambda-tokens` | 0.08 | 0.02–0.15 | Higher = heavier penalty for token usage |
-| `mu_latency` | `--adaptive-reward-mu-latency` | 0.05 | 0.01–0.10 | Higher = heavier penalty for wall-clock time |
-| `eta_progress` | `--adaptive-reward-eta-progress` | 0.15 | 0.05–0.30 | Higher = larger bonus for progress signals |
-| `kappa_stagnation` | `--adaptive-reward-kappa-stagnation` | 0.10 | 0.05–0.20 | Higher = larger penalty for no-progress streaks |
-| `pregate_threshold` | `--adaptive-informativeness-pregate-threshold` | 0.7 | 0.3–0.9 | Higher = skip helper more often |
-| `warmup_decisions` | `--adaptive-online-warmup-decisions` | 50 | 25–500 | Uniform random sampling before LinUCB kicks in |
-| `decay` | `--adaptive-online-decay` | 1.0 | 0.90–1.0 | Below 1, the updated arm forgets older data faster (opt-in, for non-stationary runs; POL-01) |
+Defaults are in the generated [Defaults](#defaults) table (this table listed `alpha` 0.8
+and `epsilon` 0.05; the CLI defaults are 0.6 and 0.10; POL-25).
 
-**Budget policy** has its own parameter set with different defaults (lower `alpha=0.4`, lower `epsilon=0.05`, shorter `warmup=20`). Use the `--adaptive-budget-*` family of flags to tune those independently.
+| Parameter | CLI Flag | Sweep Range | Effect |
+|-----------|----------|-------------|--------|
+| `alpha` | `--adaptive-online-alpha` | 0.3–2.0 | Higher = more exploration via UCB bonus |
+| `epsilon` | `--adaptive-online-epsilon` | 0.01–0.15 | Higher = more random exploration |
+| `lambda_tokens` | `--adaptive-reward-lambda-tokens` | 0.02–0.15 | Higher = heavier penalty for token usage |
+| `mu_latency` | `--adaptive-reward-mu-latency` | 0.01–0.10 | Higher = heavier penalty for wall-clock time |
+| `eta_progress` | `--adaptive-reward-eta-progress` | 0.05–0.30 | Higher = larger bonus for progress signals |
+| `kappa_stagnation` | `--adaptive-reward-kappa-stagnation` | 0.05–0.20 | Higher = larger penalty for no-progress streaks |
+| `pregate_threshold` | `--adaptive-informativeness-pregate-threshold` (default 0.7) | 0.3–0.9 | Higher = skip helper more often |
+| `warmup_decisions` | `--adaptive-online-warmup-decisions` | 25–500 | Uniform random sampling before LinUCB kicks in |
+| `decay` | `--adaptive-online-decay` | 0.90–1.0 | Below 1, the updated arm forgets older data faster (opt-in, for non-stationary runs; POL-01) |
+
+**Budget policy** has its own parameter set (see the Defaults table). Use the `--adaptive-budget-*` family of flags to tune those independently.
 
 ### Common Tuning Scenarios
 

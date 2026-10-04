@@ -22,6 +22,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
+from .doc_sync_policy import stale_policy_defaults_docs, write_policy_defaults_blocks
 from .run_eval import CaseSpec, load_cases
 
 BEGIN_CASE_INVENTORY_MARKER = "<!-- BEGIN AUTO-GENERATED: CASE_INVENTORY -->"
@@ -335,6 +336,11 @@ def run_checks() -> list[str]:
                 "Run `python -m evals.doc_sync --write`."
             )
 
+    errors.extend(
+        f"Policy defaults block in {doc} is out of date. Run `python -m evals.doc_sync --write`."
+        for doc in stale_policy_defaults_docs()
+    )
+
     changelog_text = CHANGELOG_PATH.read_text(encoding="utf-8")
     tagged_versions = get_git_tag_versions()
     project_version = load_project_version()
@@ -364,6 +370,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.write:
         _changed, message = write_case_inventory_block()
         print(message)
+        for doc in write_policy_defaults_blocks():
+            print(f"Updated {doc} policy defaults block.")
         return 0
 
     errors = run_checks()

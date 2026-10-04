@@ -18,22 +18,56 @@ Helper-policy reward is local to Stage A consultation:
 `reward = success_hint + progress_hint + helper_materialization_bonus - token_penalty - latency_penalty - stagnation_penalty`
 
 With:
-- `success_hint = 0.25` on final success
-- `progress_hint = 0.5 * eta_progress` when downstream progress is made
-- `helper_materialization_bonus = 0.25 * eta_progress` when Stage A yields context/snapshot for Stage B
+- `success_hint = success_hint_scale` on final success
+- `progress_hint = progress_hint_scale * eta_progress * progress_score` (score in [0, 1])
+- `helper_materialization_bonus = materialization_scale * eta_progress` when Stage A yields
+  context/snapshot for Stage B
 - `token_penalty = lambda_tokens * (helper_local_tokens_total / token_scale)`
 - `latency_penalty = mu_latency * (helper_local_wall_sec / latency_scale)`
-- `stagnation_penalty = 0.5 * kappa_stagnation * min(1, streak / 3)`
+- `stagnation_penalty = stagnation_scale * kappa_stagnation * min(1, streak / 3)`
+- plus the delayed rescue bonus when a later success re-sends the helper's evidence (POL-11)
 
-Default coefficients:
-- `lambda_tokens = 0.08`
-- `mu_latency = 0.05`
-- `token_scale = 1000`
-- `latency_scale = 10`
-- `success_hint = 0.25`
-- `progress_hint scale = 0.5`
-- `helper materialization scale = 0.25`
-- `stagnation scale = 0.5`
+## Defaults
+
+The tables are generated from the code (POL-25); the hand-written values that used to be
+here had drifted (8 actions, hint scales 0.25/0.5/0.25/0.5, event schema 3).
+
+<!-- BEGIN AUTO-GENERATED: POLICY_DEFAULTS -->
+<!-- Rendered from the code by `python -m evals.doc_sync --write`; do not edit. -->
+
+| Setting | Helper policy | Budget policy |
+|---------|---------------|---------------|
+| Algorithms | `linucb`, `thompson` | `linucb`, `thompson` |
+| Modes | `off`, `on`, `shadow` | `off`, `on`, `shadow` |
+| Actions | 10: `skip_helper`, `invoke_helper`, `frame_only`, `file_only`, `search_only`, `snapshot_lite`, `frame_locals_lite`, `snapshot_full_lite`, `compact_then_patch`, `retry_helper_strict_json` | `keep_budget`, `increase_budget`; families `time`, `tokens`, `context` |
+| Architectures | - | `bwk_v1`, `hierarchical_v1`, `tier_binary` |
+| `alpha` (CLI / Python API) | 0.6 / 0.8 | 0.4 / 0.6 |
+| `epsilon` (CLI / Python API) | 0.1 / 0.15 | 0.05 / 0.08 |
+| Warm-up decisions (CLI / Python API) | 50 / 50 | 20 / 20 |
+| Recency decay | 1.0 (per arm when < 1) | 1.0 (per arm when < 1) |
+| `l2` | 1.0 | 1.0 |
+| Save every (updates) | 50 | 50 |
+| Feature scaling | `v1` (of `none`, `percentile_v1`, `v1`, `v1_interactions`) | `v1` |
+| Score biases | `frame_only=-0.05,search_only=-0.10`, each within ±0.1 | - |
+| Budget ladder | - | `1.0,1.1,1.2,1.35,1.5`, max 1 up(s) per case |
+| Event / state schema | 7 / 4 | 7 / 4 |
+
+| Reward coefficient (CLI default) | Value |
+|----------------------------------|-------|
+| `lambda_tokens` (token penalty weight) | 0.08 |
+| `token_scale` | 1000.0 |
+| `mu_latency` (latency penalty weight) | 0.05 |
+| `latency_scale` (seconds) | 10.0 |
+| `eta_progress` | 0.15 |
+| `kappa_stagnation` | 0.1 |
+| Success hint scale | 1.0 |
+| Progress hint scale | 1.0 |
+| Stagnation penalty scale | 1.0 |
+| Helper materialization scale | 0.5 |
+| Budget `rho_budget_exceeded` | 0.5 |
+
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+<!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## Budget-policy extension (adaptive tooling only)
 The online policy now has a companion **adaptive budget policy** for adaptive conditions
