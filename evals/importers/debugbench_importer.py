@@ -17,6 +17,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from evals import _json as json
 from evals.category_mapping import infer_snapshot_dependency, map_debugbench_type
 from evals.importers.base import (
     count_patch_lines,
@@ -123,6 +124,29 @@ def _method_accepts_call_without_args(code: str, method_name: str) -> bool:
     return False
 
 
+def _python_literal(text: str) -> str | None:
+    """Return Python source for a dataset value, or ``None`` if it isn't a plain literal.
+
+    DAT-20: example values used to be pasted into ``test_buggy.py`` verbatim, so dataset
+    text became code that ran locally. Values are parsed as JSON (LeetCode writes
+    ``true``/``null``) or a Python literal and emitted with ``repr``; anything that doesn't
+    round-trip is rejected.
+    """
+    stripped = text.strip()
+    for parse in (json.loads, ast.literal_eval):
+        try:
+            value = parse(stripped)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            continue
+        source = repr(value)
+        try:
+            round_trips = bool(ast.literal_eval(source) == value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            round_trips = False
+        return source if round_trips else None
+    return None
+
+
 def _generate_test(fixed_code: str, examples: list[str] | None, category: str) -> str | None:
     """Generate test_buggy.py for a DebugBench LeetCode-style case.
 
@@ -147,11 +171,15 @@ def _generate_test(fixed_code: str, examples: list[str] | None, category: str) -
             args = _parse_input_args(input_str)
             if not args:
                 continue
-            arg_values = ", ".join(v for _, v in args)
+            arg_sources = [_python_literal(v) for _, v in args]
+            expected_source = _python_literal(expected)
+            if expected_source is None or None in arg_sources:
+                continue
+            arg_values = ", ".join(source for source in arg_sources if source is not None)
             lines.append(f"def test_case_{i}():")
             lines.append("    sol = Solution()")
             lines.append(f"    result = sol.{method_name}({arg_values})")
-            lines.append(f"    assert result == {expected}")
+            lines.append(f"    assert result == {expected_source}")
             lines.append("")
             lines.append("")
 

@@ -1634,3 +1634,56 @@ def test_dat05_native_repro_case_needs_the_oracle_target(tmp_path: Path) -> None
     ok, message = validate_generated_case(_native_case(tmp_path, with_source=False))
     assert not ok
     assert message == "missing required file: src/demo.py"
+
+
+_DEBUGBENCH_FIXED = "class Solution:\n    def solve(self, nums, flag):\n        return nums\n"
+
+
+def test_dat20_debugbench_values_are_emitted_as_literals() -> None:
+    """DAT-20: LeetCode JSON values become Python literals instead of raw source."""
+    from evals.importers import debugbench_importer
+
+    generated = debugbench_importer._generate_test(
+        _DEBUGBENCH_FIXED,
+        ["Input: nums = [1,2], flag = true\nOutput: null"],
+        "logic error",
+    )
+
+    assert generated is not None
+    assert "sol.solve([1, 2], True)" in generated
+    assert "assert result == None" in generated
+    compile(generated, "test_buggy.py", "exec")
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "Input: nums = __import__('os').system('echo pwned'), flag = 1\nOutput: 1",
+        "Input: nums = [1], flag = 1\nOutput: open('/etc/passwd').read()",
+        "Input: nums = (lambda: 1)(), flag = 1\nOutput: 1",
+    ],
+    ids=["code-in-input", "code-in-output", "lambda"],
+)
+def test_dat20_debugbench_rejects_values_that_are_not_literals(example: str) -> None:
+    from evals.importers import debugbench_importer
+
+    assert debugbench_importer._generate_test(_DEBUGBENCH_FIXED, [example], "logic error") is None
+
+
+def test_dat20_condefects_embeds_stdin_and_expected_output_as_strings() -> None:
+    """ConDefects already used repr(); pin it so dataset text stays data."""
+    import ast
+
+    from evals.importers import condefects_importer
+
+    payload = "__import__('os').system('echo pwned')"
+    generated = condefects_importer._generate_test([(payload, payload)])
+
+    tree = ast.parse(generated)
+    calls = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert "system" not in calls
+    assert repr(payload) in generated

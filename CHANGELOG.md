@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- DebugBench test generation parses example values as JSON or Python literals and emits them with `repr`, rejecting anything that doesn't round-trip, instead of pasting dataset text into `test_buggy.py` as code that runs under the default local executor; LeetCode `true`/`false`/`null` now become `True`/`False`/`None` (DAT-20). ConDefects already embedded its inputs with `repr`.
 - Importer `--validate` now runs every generated case (the baseline must fail, the oracle patch must fix it) in all nine importers; seven of them only checked the schema. The schema check always runs, the importer functions default to `validate=False` like the CLI, and native-repro cases (BugsInPy, PyBugHive, TrickyBugs) are checked for the files their oracle patch changes instead of a `buggy.py` they never have, which made `--validate` reject all of them (DAT-05).
 - Importers format code with `sys.executable -m ruff format --isolated` and the repository's line length and target version, so neither the `ruff` on `PATH` nor a `pyproject.toml` in the working directory changes imported case content; a missing ruff or a timeout raises `RuffFormatError` instead of silently skipping formatting (DAT-15).
 - `generate_oracle_patch` emits a correct diff when the source lacks a trailing newline (it used to merge the last removed and added lines) and shares the runner's diff builder; `count_patch_lines` splits on `\n` only (DAT-10). The 1,828 committed patches were unaffected because ruff had added the newline; the native and HumanEvalPack importers don't run ruff.
