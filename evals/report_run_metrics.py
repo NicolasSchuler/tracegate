@@ -26,6 +26,8 @@ from evals.analyze_results import (
     _records_by_case_condition,
     _summarize_bucket,
 )
+from evals.case_outcome import case_outcomes
+from evals.eval_types import normalize_condition_name
 from evals.stats import (
     analyze_paired_results,
     bootstrap_mean_ci,
@@ -845,19 +847,17 @@ def _compute_failure_diagnostics(
     """
     conditions = {condition_a, condition_b}
     flattened: list[dict[str, Any]] = []
-    terminal_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
+    # STA-19: case success and the terminal row come from the shared case outcome.
+    outcomes = {
+        key: outcome for key, outcome in case_outcomes(raw_records).items() if key[2] in conditions
+    }
 
     for record in raw_records:
-        condition = str(record.get("condition") or "")
+        condition = normalize_condition_name(record.get("condition"))
         if condition not in conditions:
             continue
         run_id = str(record.get("run_id") or "")
         case_id = str(record.get("case_id") or "")
-        key = (run_id, case_id, condition)
-        attempt = int(record.get("attempt") or 0)
-        previous = terminal_rows.get(key)
-        if previous is None or attempt >= int(previous.get("attempt") or 0):
-            terminal_rows[key] = record
 
         patch_meta = record.get("patch_meta")
         error = ""
@@ -938,11 +938,9 @@ def _compute_failure_diagnostics(
         }
         for condition in conditions
     }
-    for record in terminal_rows.values():
-        condition = str(record.get("condition") or "")
-        if condition not in conditions:
-            continue
-        success = bool(record.get("success"))
+    for (_run_id, _case_id, condition), outcome in outcomes.items():
+        record = dict(outcome.terminal)
+        success = outcome.success
         if not success:
             reason = _terminal_failure_reason(record)
             terminal_reason_counts[condition][reason] = (

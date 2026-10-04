@@ -188,6 +188,8 @@ One implementation in `evals/stats.py` serves `analyze_results --stats`,
 
 | Topic | Convention |
 |-------|------------|
+| Case outcome | `evals/case_outcome.py` is the one definition, used by `analyze_results`, `report_run_metrics`, `select_cases` and `extract_failed_cases`: `infra_event` rows aren't attempts, one row per attempt number (a real outcome beats a resume-eligible `unit_runtime_error` row, otherwise the later row), a case succeeded when any scored attempt succeeded, and the terminal row is the highest attempt (STA-19, DAT-24). |
+| Condition names | `normalize_condition_name` strips names; `condition_family` (`native`, `adaptive`, `external_baseline`, `unknown`) comes from the `CONDITION_FAMILIES` registry in `evals/eval_types.py`, not from substrings. |
 | Paired success test | Exact McNemar: two-sided `scipy.stats.binomtest` on the discordant pairs at every sample size; significant when `p <= alpha` (default 0.05, `alpha` recorded in the result). The chi-square approximation above 25 discordant pairs is gone (STA-23). |
 | Paired sign test | The same exact binomial helper, `exact_binomial_p_value`. |
 | Multiple comparisons | Holm step-down: adjusted p is the running max of `p * (m - rank + 1)`, capped at 1; rejected when adjusted p `<= alpha` (STA-24). |

@@ -100,6 +100,37 @@ def is_baseline_condition(condition: Condition) -> bool:
     return condition in set(BASELINE_CONDITION_BY_NAME.values())
 
 
+CONDITION_FAMILY_NATIVE = "native"
+CONDITION_FAMILY_ADAPTIVE = "adaptive"
+CONDITION_FAMILY_EXTERNAL_BASELINE = "external_baseline"
+CONDITION_FAMILY_UNKNOWN = "unknown"
+CONDITION_FAMILIES: dict[str, str] = {
+    Condition.BASE_REPAIR.value: CONDITION_FAMILY_NATIVE,
+    Condition.COT_REPAIR.value: CONDITION_FAMILY_NATIVE,
+    Condition.LAYERED_ADAPTIVE_GATED.value: CONDITION_FAMILY_ADAPTIVE,
+    Condition.LAYERED_ADAPTIVE_LLM.value: CONDITION_FAMILY_ADAPTIVE,
+    **dict.fromkeys(BASELINE_CONDITION_BY_NAME, CONDITION_FAMILY_EXTERNAL_BASELINE),
+}
+"""The one condition-family registry for analysis and reporting (2026-10-04 review, 2.1)."""
+
+
+def normalize_condition_name(value: object) -> str:
+    """Canonical condition name in records and reports: the stripped string.
+
+    ``analyze_results`` didn't strip while ``budget_risk_report`` and
+    ``extract_failed_cases`` did, so one condition could appear twice.
+    """
+    return str(value or "").strip()
+
+
+def condition_family(value: object) -> str:
+    """``native``, ``adaptive``, ``external_baseline`` or ``unknown``.
+
+    ``eval_summary`` used to detect adaptive conditions by the substring "adaptive".
+    """
+    return CONDITION_FAMILIES.get(normalize_condition_name(value), CONDITION_FAMILY_UNKNOWN)
+
+
 VALID_CATEGORIES = {
     "hidden_state",
     "mutability_aliasing",

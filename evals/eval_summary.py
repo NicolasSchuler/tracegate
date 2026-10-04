@@ -20,6 +20,7 @@ from evals.analyze_results import (
     _records_by_case_condition,
     _summarize_bucket,
 )
+from evals.eval_types import CONDITION_FAMILY_ADAPTIVE, condition_family
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -399,7 +400,7 @@ def _pairwise_uplifts(overall: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _has_adaptive_condition(conditions: list[str]) -> bool:
-    return any("adaptive" in condition for condition in conditions)
+    return any(condition_family(condition) == CONDITION_FAMILY_ADAPTIVE for condition in conditions)
 
 
 def _select_adaptive_stats(
@@ -410,12 +411,10 @@ def _select_adaptive_stats(
         condition = str(item.get("condition") or "")
         if condition:
             stats_by_condition[condition] = item
+    # Registered adaptive conditions only; any name containing "adaptive" used to match.
     for preferred in ("layered_adaptive_llm", "layered_adaptive_gated"):
         if preferred in stats_by_condition:
             return preferred, stats_by_condition[preferred]
-    for condition, stats in sorted(stats_by_condition.items()):
-        if "adaptive" in condition:
-            return condition, stats
     return None, None
 
 

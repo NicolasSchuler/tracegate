@@ -29,9 +29,16 @@ from .adaptive_online_policy import (
     ACTION_SKIP_HELPER,
     ONLINE_POLICY_ACTIONS,
 )
+from .case_outcome import case_outcome, is_resume_eligible, scored_attempts
 from .decision_model.policy import atomic_action_from_answers
 from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
-from .eval_types import EVAL_RECORD_SCHEMA_VERSION
+from .eval_types import (
+    CONDITION_FAMILIES,
+    CONDITION_FAMILY_EXTERNAL_BASELINE,
+    EVAL_RECORD_SCHEMA_VERSION,
+    condition_family,
+    normalize_condition_name,
+)
 from .stats import BOOTSTRAP_METHOD, DEFAULT_BOOTSTRAP_SEED, format_p_value
 
 logger = logging.getLogger(__name__)
@@ -151,7 +158,11 @@ DECISION_MODEL_TARGET_KINDS: tuple[tuple[str, str], ...] = (
 )
 # Ties in the greedy target and the baseline fallback resolve in controller action order.
 _ONLINE_ACTION_RANK = {action: index for index, action in enumerate(ONLINE_POLICY_ACTIONS)}
-EXTERNAL_BASELINE_CONDITIONS = frozenset({"ldb", "intervenor", "tracecoder", "lambda_rlm", "rlm"})
+EXTERNAL_BASELINE_CONDITIONS = frozenset(
+    name
+    for name, family in CONDITION_FAMILIES.items()
+    if family == CONDITION_FAMILY_EXTERNAL_BASELINE
+)
 # Minimum per-action sample count required for cross-validated alpha selection.
 # Below this threshold we fall back to ADAPTIVE_OPE_RIDGE_ALPHA.
 _RIDGECV_MIN_SAMPLES = 10
@@ -413,7 +424,7 @@ def _load_and_group_records(
                     continue
                 run_id = str(record.get("run_id") or src)
                 case_id = str(record.get("case_id") or "")
-                condition = str(record.get("condition") or "")
+                condition = normalize_condition_name(record.get("condition"))
                 if not case_id or not condition:
                     input_errors["records_skipped"] += 1
                     if strict_input:
@@ -427,8 +438,14 @@ def _load_and_group_records(
                     continue
                 attempt = _as_int(record.get("attempt"))
                 dedup_key = (run_id, case_id, condition, attempt)
-                if dedup_key in deduped_records:
+                previous = deduped_records.get(dedup_key)
+                if previous is not None:
                     input_errors["duplicate_attempt_rows_seen"] += 1
+                    # A resumed attempt's real outcome beats its runtime-error row.
+                    if is_resume_eligible(record) and not is_resume_eligible(previous):
+                        continue
+                if record.get("condition") != condition:
+                    record = {**record, "condition": condition}
                 deduped_records[dedup_key] = record
     input_errors["duplicate_attempt_rows_resolved"] = input_errors["duplicate_attempt_rows_seen"]
     for run_id, case_id, condition, _attempt in sorted(deduped_records):
@@ -619,7 +636,8 @@ def _derive_case_condition_rows(
     rows: list[dict[str, Any]] = []
     for (run_id, case_id, condition), records in sorted(grouped.items()):
         ordered = _dedupe_records_by_attempt(records)
-        success = any(bool(item.get("success")) for item in ordered)
+        outcome = case_outcome(ordered)  # STA-19: the one definition of "case succeeded"
+        success = outcome is not None and outcome.success
         attempts_executed = _attempts_executed(ordered)
         attempts_budget = _attempts_budget_from_records(ordered)
         attempts_to_success = _attempts_to_success(ordered)
@@ -5240,11 +5258,8 @@ def _attempts_to_success(records: list[dict[str, Any]]) -> int | None:
 
 
 def _dedupe_records_by_attempt(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate records by attempt number, keeping the last seen."""
-    deduped: dict[int, dict[str, Any]] = {}
-    for record in records:
-        deduped[_as_int(record.get("attempt"))] = record
-    return [deduped[attempt] for attempt in sorted(deduped)]
+    """One scored row per attempt number, by the shared rule in ``evals.case_outcome``."""
+    return [cast(dict[str, Any], record) for record in scored_attempts(records)]
 
 
 def _attempts_executed(records: list[dict[str, Any]]) -> int:
@@ -5570,7 +5585,7 @@ def _baseline_metric_last_int(records: list[dict[str, Any]], key: str) -> int | 
 
 
 def _is_external_baseline_condition(condition: str) -> bool:
-    return condition in EXTERNAL_BASELINE_CONDITIONS
+    return condition_family(condition) == CONDITION_FAMILY_EXTERNAL_BASELINE
 
 
 _TIMING_BREAKDOWN_KEYS = (
