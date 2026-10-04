@@ -59,8 +59,37 @@ from evals.eval_main_support import (
 from evals.progress_display import DisplayRunSummary, build_startup_sections, create_run_display
 from evals.progress_output import _is_infra_interrupted_records, classify_failure_reason
 from evals.run_condition_builder import build_run_condition_inputs
+from evals.seed_derivation import derive_seed
 
 RunConditionInputs = _RunConditionInputs
+
+
+_BUDGET_POLICY_CONDITIONS = (Condition.LAYERED_ADAPTIVE_GATED, Condition.LAYERED_ADAPTIVE_LLM)
+
+
+def _per_condition_budget_configs(
+    config: BudgetPolicyConfig, *, conditions: list[Condition], seed: int | None
+) -> dict[str, BudgetPolicyConfig]:
+    """Budget-policy configs keyed by condition value (POL-05, POL-23).
+
+    With more than one adaptive condition each gets its own state and event files
+    (``<stem>.<condition><suffix>``); every controller gets a seed derived from the run
+    seed and its condition. Runs without an adaptive condition keep one shared config.
+    """
+    keys = [condition.value for condition in conditions if condition in _BUDGET_POLICY_CONDITIONS]
+    separate_files = len(keys) > 1
+    out: dict[str, BudgetPolicyConfig] = {}
+    for key in keys or [""]:
+        updates: dict[str, Any] = {
+            "random_seed": derive_seed(int(seed), "budget", key) if seed is not None else None
+        }
+        if separate_files:
+            for field_name in ("state_path", "events_path"):
+                path = getattr(config, field_name)
+                if path is not None:
+                    updates[field_name] = path.with_name(f"{path.stem}.{key}{path.suffix}")
+        out[key] = replace(config, **updates)
+    return out
 
 
 def run_main_flow(
@@ -327,7 +356,8 @@ def run_main_flow(
             ),
             state_path=Path(str(args.adaptive_online_state_path)).expanduser().resolve(),
             events_path=Path(str(args.adaptive_online_events_path)).expanduser().resolve(),
-            random_seed=(int(args.seed) if args.seed is not None else None),
+            # POL-23: each controller gets its own stream, derived from the run seed.
+            random_seed=(derive_seed(int(args.seed), "helper") if args.seed is not None else None),
             action_score_biases=online_action_score_biases,
         )
     except BaseException:
@@ -394,29 +424,47 @@ def run_main_flow(
             state_path=Path(str(args.adaptive_budget_online_state_path)).expanduser().resolve(),
             events_path=Path(str(args.adaptive_budget_online_events_path)).expanduser().resolve(),
             bwk_run_token_budget=int(getattr(args, "adaptive_budget_bwk_run_token_budget", 0)),
-            random_seed=(int(args.seed) if args.seed is not None else None),
+            random_seed=None,
         )
     except BaseException:
         _close_run_results_io()
         display.close()
         raise
-    if budget_policy_config.mode == "off":
-        budget_policy_controller: AdaptiveBudgetPolicyController | None = None
-    else:
-        try:
-            budget_policy_controller = AdaptiveBudgetPolicyController(budget_policy_config)
-        except BaseException:
-            _close_run_results_io()
-            display.close()
-            raise
-        if budget_policy_controller.load_error:
-            display.add_event(
-                message=(
-                    "Online adaptive budget policy state load warning: "
-                    f"{budget_policy_controller.load_error}; starting with a fresh state."
-                ),
-                style="warning",
-            )
+    # POL-05: one budget controller per adaptive condition, so the conditions being
+    # compared don't train (and draw exploration from) one shared model.
+    budget_policy_controllers: dict[str, AdaptiveBudgetPolicyController] = {}
+    if budget_policy_config.mode != "off":
+        for condition_key, condition_config in _per_condition_budget_configs(
+            budget_policy_config, conditions=conditions, seed=args.seed
+        ).items():
+            try:
+                controller = AdaptiveBudgetPolicyController(condition_config)
+            except BaseException:
+                for created in budget_policy_controllers.values():
+                    created.close()
+                _close_run_results_io()
+                display.close()
+                raise
+            if controller.load_error:
+                display.add_event(
+                    message=(
+                        "Online adaptive budget policy state load warning: "
+                        f"{controller.load_error}; starting with a fresh state."
+                    ),
+                    style="warning",
+                )
+            budget_policy_controllers[condition_key] = controller
+    budget_policy_controller: AdaptiveBudgetPolicyController | None = next(
+        iter(budget_policy_controllers.values()), None
+    )
+    if isinstance(patcher_config, dict) and budget_policy_controllers:
+        patcher_config["adaptive_budget_controllers"] = {
+            (key or "shared"): {
+                "state_path": str(controller.config.state_path),
+                "events_path": str(controller.config.events_path),
+            }
+            for key, controller in budget_policy_controllers.items()
+        }
     if isinstance(patcher_config, dict):
         patcher_config["adaptive_budget_warm_start_source"] = budget_init_state_path
         patcher_config["adaptive_budget_warm_start_result"] = (
@@ -860,6 +908,33 @@ def run_main_flow(
         progress_heartbeat_sec=float(args.progress_heartbeat_sec),
         unit_progress_callback=_on_unit_progress,
     )
+    unit_inputs_by_condition: dict[str, EvalUnitInputs] = {
+        key: replace(
+            shared_unit_inputs,
+            run_condition=replace(
+                shared_run_condition_inputs, adaptive_budget_policy_controller=controller
+            ),
+        )
+        for key, controller in budget_policy_controllers.items()
+        if key
+    }
+
+    def _unit_inputs_for(condition: Condition) -> EvalUnitInputs:
+        return unit_inputs_by_condition.get(condition.value, shared_unit_inputs)
+
+    if (
+        bool(args.deterministic)
+        and jobs > 1
+        and (online_policy_controller is not None or budget_policy_controllers)
+    ):
+        display.add_event(
+            message=(
+                "Deterministic mode with --jobs > 1: policy decisions use per-unit random "
+                "streams, but learning order still depends on scheduling; use --jobs 1 for "
+                "reproducible policy learning."
+            ),
+            style="warning",
+        )
     _sync_display_summary(elapsed_sec=0.0, eta_sec=None)
     display.start_runtime()
 
@@ -910,7 +985,7 @@ def run_main_flow(
                     case=case,
                     condition=condition,
                     artifacts_root=artifacts_root,
-                    inputs=replace(shared_unit_inputs, patcher_override=patcher),
+                    inputs=replace(_unit_inputs_for(condition), patcher_override=patcher),
                 )
                 should_abort = _handle_outcome(outcome)
                 if should_abort:
@@ -948,7 +1023,7 @@ def run_main_flow(
                     case=case,
                     condition=condition,
                     artifacts_root=artifacts_root,
-                    inputs=shared_unit_inputs,
+                    inputs=_unit_inputs_for(condition),
                 )
                 future_map[future] = (case, condition)
                 submitted_units += 1
@@ -1011,9 +1086,9 @@ def run_main_flow(
                     message=f"Online adaptive policy close warning: {type(exc).__name__}: {exc}",
                     style="warning",
                 )
-        if legacy._ACTIVE_BUDGET_POLICY_CONTROLLER is not None:
+        for active_budget_controller in budget_policy_controllers.values():
             try:
-                legacy._ACTIVE_BUDGET_POLICY_CONTROLLER.close()
+                active_budget_controller.close()
             except Exception as exc:
                 display.add_event(
                     message=(

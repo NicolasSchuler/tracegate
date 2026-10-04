@@ -205,6 +205,13 @@ historical runs can be reproduced, and all are recorded in the run configuration
   `retry_helper_strict_json`, the action is `compact_then_patch`, or a lite action runs in
   `supplement` mode. Rows record `adaptive_snapshot_requested` (the Stage-A request),
   `stage_b_snapshot_in_prompt`, and `adaptive_snapshot_included` (now equal to the latter).
+- **Independent controllers and seeds (POL-05, POL-23).** When a run includes both adaptive
+  conditions, each gets its own budget-policy controller and files
+  (`<stem>.<condition><suffix>`); the helper policy only serves `layered_adaptive_llm`. Each
+  controller's seed is derived from `--seed` (`evals.seed_derivation.derive_seed`), and every
+  decision draws from a stream keyed by (case, condition, attempt), so exploration does not
+  depend on how `--jobs` workers interleave. The model update order still does, so use
+  `--jobs 1` for reproducible learning curves.
 - **Restricted actions stay restricted (ATT-03, ATT-04).** When the request filter (layer 3)
   empties a `frame_only`/`file_only`/`search_only` request list, or Stage-A returns an invalid
   payload, those actions get an empty Stage-A context (reason

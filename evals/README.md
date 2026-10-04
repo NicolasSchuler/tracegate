@@ -1371,7 +1371,8 @@ unsupported and should be regenerated with the current harness before analysis.
   application (ATT-10); adaptive evidence follows the policy: no fallback or seed bundle for
   restricted actions, and the full snapshot only when the action grants it (ATT-03, ATT-04,
   ATT-06; new `seed_bundle_chars`, `evidence_chars_by_type`, `adaptive_snapshot_requested`,
-  `stage_b_snapshot_in_prompt`). Later review fixes extend this list.
+  `stage_b_snapshot_in_prompt`); runs with both adaptive conditions train separate budget
+  controllers with derived seeds (POL-05, POL-23). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
