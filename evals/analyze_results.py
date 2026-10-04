@@ -204,7 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict-input",
         action="store_true",
-        help="Fail on first unreadable input file or malformed JSONL record.",
+        help=(
+            "Fail on the first unreadable file, malformed JSONL line or schema-invalid "
+            "record; without it, such records are skipped and counted."
+        ),
     )
     parser.add_argument(
         "--stats",
@@ -395,6 +398,7 @@ def _load_and_group_records(
         "files_unreadable": 0,
         "json_lines_invalid": 0,
         "records_skipped": 0,
+        "records_schema_invalid": 0,
         "infra_event_rows_seen": 0,
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
@@ -434,7 +438,14 @@ def _load_and_group_records(
                     if strict_input:
                         raise ValueError(f"{src}:{line_no}: missing case_id/condition")
                     continue
-                _validate_eval_record_schema(record, src=src, line_no=line_no)
+                try:
+                    _validate_eval_record_schema(record, src=src, line_no=line_no)
+                except ValueError:
+                    # STA-25: --strict-input now governs schema errors too.
+                    input_errors["records_schema_invalid"] += 1
+                    if strict_input:
+                        raise
+                    continue
                 record_type = str(record.get("record_type") or "attempt").strip() or "attempt"
                 if record_type == "infra_event":
                     input_errors["infra_event_rows_seen"] += 1
@@ -6091,22 +6102,25 @@ def _print_input_errors(input_errors: Any) -> None:
     files_unreadable = int(input_errors.get("files_unreadable", 0))
     json_lines_invalid = int(input_errors.get("json_lines_invalid", 0))
     records_skipped = int(input_errors.get("records_skipped", 0))
+    records_schema_invalid = int(input_errors.get("records_schema_invalid", 0))
     duplicate_attempt_rows_seen = int(input_errors.get("duplicate_attempt_rows_seen", 0))
     duplicate_attempt_rows_resolved = int(input_errors.get("duplicate_attempt_rows_resolved", 0))
     if (
         files_unreadable == 0
         and json_lines_invalid == 0
         and records_skipped == 0
+        and records_schema_invalid == 0
         and duplicate_attempt_rows_seen == 0
     ):
         return
     print("\nInput diagnostics:")
-    if files_unreadable > 0 or json_lines_invalid > 0 or records_skipped > 0:
+    if files_unreadable or json_lines_invalid or records_skipped or records_schema_invalid:
         print(
             "- errors: "
             f"files_unreadable={files_unreadable}, "
             f"json_lines_invalid={json_lines_invalid}, "
-            f"records_skipped={records_skipped}"
+            f"records_skipped={records_skipped}, "
+            f"records_schema_invalid={records_schema_invalid}"
         )
     if duplicate_attempt_rows_seen > 0:
         print(

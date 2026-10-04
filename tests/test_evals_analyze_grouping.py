@@ -203,6 +203,7 @@ def test_analyze_grouping_and_uplift(tmp_path) -> None:
         "files_unreadable": 0,
         "json_lines_invalid": 0,
         "records_skipped": 0,
+        "records_schema_invalid": 0,
         "infra_event_rows_seen": 0,
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
@@ -643,10 +644,15 @@ def test_analyze_grouping_rejects_missing_schema_fields(tmp_path, capsys) -> Non
         encoding="utf-8",
     )
 
+    # STA-25: without --strict-input the invalid record is skipped and counted.
     exit_code = analyze_main([str(jsonl)])
-    assert exit_code == 2
+    assert exit_code == 1
     output = capsys.readouterr().out
-    assert "missing required field" in output
+    assert "No records found." in output
+
+    exit_code = analyze_main([str(jsonl), "--strict-input"])
+    assert exit_code == 2
+    assert "missing required field" in capsys.readouterr().out
 
 
 def test_load_and_group_records_skips_infra_event_rows(tmp_path) -> None:
@@ -685,3 +691,25 @@ def test_load_and_group_records_skips_infra_event_rows(tmp_path) -> None:
     assert input_errors["infra_event_rows_seen"] == 1
     assert input_errors["infra_event_rows_skipped"] == 1
     assert input_errors["duplicate_attempt_rows_seen"] == 0
+
+
+def test_sta25_schema_invalid_record_is_skipped_without_strict_input(tmp_path) -> None:
+    valid = _record(
+        run_id="run_a",
+        case_id="case_one",
+        condition="base_repair",
+        category="hidden_state",
+        difficulty="easy",
+        snapshot_dependency="required",
+        attempt=1,
+        success=True,
+    )
+    invalid = {"run_id": "run_a", "case_id": "case_two", "condition": "base_repair", "attempt": 1}
+    jsonl = tmp_path / "mixed.jsonl"
+    jsonl.write_text(json.dumps(valid) + "\n" + json.dumps(invalid) + "\n", encoding="utf-8")
+
+    grouped, input_errors = _load_and_group_records([str(jsonl)])
+    assert list(grouped) == [("run_a", "case_one", "base_repair")]
+    assert input_errors["records_schema_invalid"] == 1
+    with pytest.raises(ValueError, match="missing required field"):
+        _load_and_group_records([str(jsonl)], strict_input=True)

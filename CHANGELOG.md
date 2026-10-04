@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- `analyze_results --strict-input` now also governs schema validation: without it a schema-invalid record is skipped and counted as `records_schema_invalid` instead of aborting the whole analysis (STA-25).
 - `eval_two_pass_summary` labels its result as the cumulative outcome of two passes, not an "absolute uplift vs baseline": the rescue pass runs only on first-pass failures, so it is about twice the compute and cannot show a regression. It now prints each pass's own token and runtime cost (STA-22).
 - `report_run_metrics` accepts `--adaptive-ope-min-action-support` and `--adaptive-ope-propensity-floor`, passes them to the condition summary and prints the effective values; it always used the defaults, so its off-policy numbers could differ from `analyze_results` (STA-21).
 - `budget_risk_report` reads attempts through the shared case-outcome rule (no `infra_event` rows, one row per attempt, so retried attempts aren't double-counted) and keys cases by `run_id`, so a case that failed in one run is no longer hidden by its success in another (STA-18).
