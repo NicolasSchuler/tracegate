@@ -6306,8 +6306,34 @@ def _run_statistical_analysis(
                     }
                 )
             pairwise.append(entry)
+    _apply_pairwise_holm(pairwise)
     primary["pairwise"] = pairwise
+    primary["pairwise_correction"] = PAIRWISE_CORRECTION_FAMILY
     return primary
+
+
+PAIRWISE_CORRECTION_FAMILY = "holm_across_all_condition_pairs"
+
+
+def _apply_pairwise_holm(pairwise: list[dict[str, Any]]) -> None:
+    """Holm-adjust the McNemar p-values across every condition pair (STA-06).
+
+    Nine conditions give 36 tests; at an uncorrected 0.05 about 1.8 are significant by
+    chance. ``mcnemar_significant`` keeps the raw test; ``holm_rejected`` is the
+    family-wise decision.
+    """
+    from evals.stats import holm_bonferroni
+
+    p_values = {
+        f"{entry['condition_a']}|{entry['condition_b']}": float(entry["mcnemar_p_value"])
+        for entry in pairwise
+        if isinstance(entry.get("mcnemar_p_value"), (int, float))
+    }
+    adjusted = holm_bonferroni(p_values)
+    for entry in pairwise:
+        holm = adjusted.get(f"{entry['condition_a']}|{entry['condition_b']}")
+        entry["mcnemar_p_adjusted"] = holm["adjusted_p"] if holm else None
+        entry["holm_rejected"] = bool(holm["rejected"]) if holm else None
 
 
 def _run_statistical_analysis_pair(
@@ -6390,7 +6416,7 @@ def _print_stats(stats: dict[str, Any]) -> None:
 
     pairwise = stats.get("pairwise")
     if isinstance(pairwise, list) and pairwise:
-        print("  Pairwise matrix:")
+        print("  Pairwise matrix (Holm across all condition pairs):")
         for entry in pairwise:
             if not isinstance(entry, dict):
                 continue
@@ -6406,7 +6432,8 @@ def _print_stats(stats: dict[str, Any]) -> None:
                 f"uplift={_fmt_signed_percent(entry.get('uplift_success_rate'))}, "
                 f"n={_fmt_num(entry.get('n_pairs'))}, "
                 f"p={format_p_value(entry.get('mcnemar_p_value'))}, "
-                f"sig={'yes' if entry.get('mcnemar_significant') else 'no'}"
+                f"Holm adj p={format_p_value(entry.get('mcnemar_p_adjusted'))}, "
+                f"sig (Holm)={'yes' if entry.get('holm_rejected') else 'no'}"
             )
 
 

@@ -33,6 +33,7 @@ from evals.stats import (
     bootstrap_mean_ci,
     exact_binomial_p_value,
     format_p_value,
+    holm_bonferroni,
     paired_numeric_deltas,
 )
 
@@ -194,6 +195,14 @@ def main(argv: list[str] | None = None) -> int:
         n_bootstrap=args.bootstrap,
         seed=args.seed,
     )
+    _label_slice_family(
+        primary_effect=primary_effect,
+        exploratory={
+            "all_cases": overall_effect,
+            "required_only": required_effect,
+            "controls": control_effect,
+        },
+    )
     category_stats = _compute_category_stats(
         rows=primary_rows,
         condition_a=args.a,
@@ -252,6 +261,33 @@ def main(argv: list[str] | None = None) -> int:
         input_errors=input_errors,
     )
     return 0
+
+
+SLICE_CORRECTION_FAMILY = "holm_across_exploratory_slices"
+
+
+def _label_slice_family(
+    *, primary_effect: dict[str, Any], exploratory: dict[str, dict[str, Any]]
+) -> None:
+    """Mark the pre-registered primary test and Holm-adjust the exploratory slices (STA-20).
+
+    Primary, All, Required-only and Controls are four tests on nested subsets of the same
+    data. The ``--primary-slice`` test is the confirmatory endpoint; the other three are
+    exploratory, and their McNemar p-values are Holm-adjusted as one family.
+    """
+    primary_effect["role"] = "primary"
+    p_values: dict[str, float] = {}
+    for name, effect in exploratory.items():
+        effect["role"] = "exploratory"
+        effect["correction_family"] = SLICE_CORRECTION_FAMILY
+        p_value = (effect.get("mcnemar") or {}).get("p_value")
+        if effect.get("available") and isinstance(p_value, (int, float)):
+            p_values[name] = float(p_value)
+    adjusted = holm_bonferroni(p_values)
+    for name, effect in exploratory.items():
+        holm = adjusted.get(name)
+        effect["holm_adjusted_p"] = holm["adjusted_p"] if holm else None
+        effect["holm_rejected"] = bool(holm["rejected"]) if holm else None
 
 
 def _expand_paths(items: list[str]) -> list[str]:
@@ -1494,11 +1530,11 @@ def _print_report(
     print(f"- Case-condition rows: {run_context.get('n_case_condition_rows', 0)}")
     _print_input_errors(input_errors)
 
-    print("\nPrimary Endpoint")
+    print("\nPrimary Endpoint (pre-registered via --primary-slice; confirmatory)")
     print(f"- Primary snapshot slice: {', '.join(sorted(primary_slice))}")
     _print_effect_line("Primary", condition_a, condition_b, primary_effect)
 
-    print("\nSecondary Slices")
+    print("\nSecondary Slices (exploratory; Holm-adjusted across these three tests)")
     _print_effect_line("All cases", condition_a, condition_b, overall_effect)
     _print_effect_line("Required only", condition_a, condition_b, required_effect)
     _print_effect_line(
@@ -1965,6 +2001,11 @@ def _print_effect_line(
         f"95% CI[{_fmt_pct_signed(bci.get('ci_lower'))}, {_fmt_pct_signed(bci.get('ci_upper'))}], "
         f"Cohen h={_fmt_float(ch.get('h'))}, "
         f"Cohen kappa={_fmt_float((agreement or {}).get('kappa'))}"
+        + (
+            f", Holm adj p={_fmt_p(effect.get('holm_adjusted_p'))}"
+            if effect.get("role") == "exploratory"
+            else ""
+        )
     )
 
 

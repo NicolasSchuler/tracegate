@@ -208,3 +208,36 @@ def test_sta07_bootstrap_seed_is_recorded_in_analysis_config(tmp_path, capsys) -
     assert config["bootstrap_seed"] == 7
     assert config["bootstrap_method"] == "percentile"
     capsys.readouterr()
+
+
+def test_sta06_pairwise_tests_are_holm_adjusted_as_one_family() -> None:
+    """STA-06: 36 uncorrected McNemar tests for nine conditions."""
+    from evals.stats import holm_bonferroni
+
+    rows: list[dict[str, object]] = []
+    for idx in range(30):
+        for condition, success in (
+            ("base_repair", idx % 3 == 0),
+            ("cot_repair", idx % 2 == 0),
+            ("layered_adaptive_llm", idx < 25),
+        ):
+            rows.append(
+                {
+                    "run_id": "r1",
+                    "case_id": f"c{idx}",
+                    "condition": condition,
+                    "category": "logic_error",
+                    "success": success,
+                }
+            )
+    result = _run_statistical_analysis(rows)
+    pairwise = result["pairwise"]
+    assert result["pairwise_correction"] == "holm_across_all_condition_pairs"
+    expected = holm_bonferroni(
+        {f"{e['condition_a']}|{e['condition_b']}": e["mcnemar_p_value"] for e in pairwise}
+    )
+    for entry in pairwise:
+        holm = expected[f"{entry['condition_a']}|{entry['condition_b']}"]
+        assert entry["mcnemar_p_adjusted"] == holm["adjusted_p"]
+        assert entry["holm_rejected"] == holm["rejected"]
+        assert entry["mcnemar_p_adjusted"] >= entry["mcnemar_p_value"]

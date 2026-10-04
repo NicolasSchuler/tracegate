@@ -1209,7 +1209,7 @@ class TestPrintStats:
         }
         ar._print_stats(stats)
         out = capsys.readouterr().out
-        assert "Pairwise matrix:" in out
+        assert "Pairwise matrix (Holm across all condition pairs):" in out
         assert "A -> B:" in out
         assert "A -> C: error=" in out
 

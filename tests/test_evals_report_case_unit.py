@@ -84,3 +84,23 @@ def test_sta10_undefined_kappa_is_reported_as_undefined() -> None:
         agreement = report._paired_binary_agreement(rows=rows, condition_a=_A, condition_b=_B)
     assert agreement == {"available": True, "kappa": None, "magnitude": "undefined"}
     assert "NaN" not in json.dumps(agreement)
+
+
+def test_sta20_secondary_slices_are_exploratory_and_holm_adjusted() -> None:
+    from evals.stats import holm_bonferroni
+
+    primary = {"available": True, "mcnemar": {"p_value": 0.01}}
+    exploratory = {
+        "all_cases": {"available": True, "mcnemar": {"p_value": 0.01}},
+        "required_only": {"available": True, "mcnemar": {"p_value": 0.03}},
+        "controls": {"available": False, "error": "no pairs"},
+    }
+    report._label_slice_family(primary_effect=primary, exploratory=exploratory)
+
+    assert primary["role"] == "primary"
+    assert "holm_adjusted_p" not in primary
+    expected = holm_bonferroni({"all_cases": 0.01, "required_only": 0.03})
+    for name in ("all_cases", "required_only"):
+        assert exploratory[name]["role"] == "exploratory"
+        assert exploratory[name]["holm_adjusted_p"] == expected[name]["adjusted_p"]
+    assert exploratory["controls"]["holm_adjusted_p"] is None
