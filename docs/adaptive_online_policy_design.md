@@ -107,14 +107,19 @@ The budget policy uses the same runtime modes as helper policy:
 - `on`: policy decisions are applied and used for online updates.
 
 ## Current algorithm
-- Contextual bandit with LinUCB + epsilon exploration.
-- Action space:
+- Contextual bandit with LinUCB + epsilon exploration (`--adaptive-online-policy-algo thompson`
+  switches to Thompson sampling over the same A/b state; its greedy picks are logged as
+  `thompson_greedy`, and its logged propensity uses the epsilon-greedy formula, so it is only
+  approximate for off-policy evaluation).
+- Action space (10 actions):
   - `skip_helper`
   - `invoke_helper`
   - `frame_only`
   - `file_only`
   - `search_only`
   - `snapshot_lite`
+  - `frame_locals_lite`
+  - `snapshot_full_lite`
   - `compact_then_patch`
   - `retry_helper_strict_json`
 - Features are attempt-level signals (pregate score, stagnation, helper usage, etc.) from `run_eval`.
@@ -155,7 +160,8 @@ The budget policy uses the same runtime modes as helper policy:
   - helper policy: `evals/results/<run_id>.adaptive_policy.jsonl`
   - budget policy: `evals/results/<run_id>.adaptive_budget_policy.jsonl`
 - Event schema versions:
-  - helper policy events: `3`
+  - helper policy events: `5` (v5 adds the nested `decision_model` block; the record classes live
+    in `evals/adaptive_policy_records.py`)
   - budget policy events: `4`
 - Every decision/outcome emits one event with:
   - action selected/applied
@@ -176,6 +182,75 @@ The budget policy uses the same runtime modes as helper policy:
   - family propensity / family decision strategy
   - request-budget-exceeded penalty contribution
 
+## Policy inputs and evidence semantics (2026-10 defaults)
+
+Three changes make the helper policy's inputs and logs trustworthy; each has an opt-out so
+historical runs can be reproduced, and all are recorded in the run configuration.
+
+- **No oracle case labels.** `case_difficulty_ord`, `case_snapshot_dependency_ord` and
+  `case_bug_source_imported` come from `case.json` and are not observable at deployment time.
+  They are dropped from the helper feature vector by default (`drop_case_label_features`,
+  applied in the attempt flow so the raw, scaled and logged copies agree);
+  `--adaptive-online-include-case-labels` restores them. `bootstrap_policy_state` strips them
+  from replayed logs as well unless `--keep-case-label-features` is given.
+- **Lite actions replace the snapshot.** With `--adaptive-reveal-mode full` the full snapshot
+  section is always in the Stage-B prompt, so `snapshot_lite`, `frame_locals_lite` and
+  `snapshot_full_lite` used to add redundant text while still earning the materialization
+  bonus. Under `--adaptive-lite-snapshot-mode replace` (default) their compact section replaces
+  the full snapshot section; `supplement` restores the old behavior. Rows record
+  `adaptive_lite_replaced_snapshot`. `traceback_first` keeps its own reveal logic.
+- **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
+  logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
+  rows at read time.
+
+## Decision-model advice (System-1)
+
+`evals/decision_model/` lets a System-1 decision model (a SystemOne-compatible endpoint such
+as Cloudflare clef-flash: one forward pass, a probability for every allowed option) take part
+in helper-action selection. It acts only at layer 2 (policy action selection): it runs after the
+informativeness pregate and the budget/saturation/recovery constraints, only sees the feasible
+actions, and never changes Stage-A request filtering.
+
+Roles (`--adaptive-decision-model-role`, requires `layered_adaptive_llm`):
+
+| Role | Effect | Policy mode |
+|------|--------|-------------|
+| `off` | not consulted (default) | any |
+| `shadow` | queried and logged; selection unchanged | `shadow` or `on` |
+| `policy` | the decision model selects: argmax (`--adaptive-decision-model-temperature 0`) or tempered sampling, mixed with epsilon-uniform; atomic profiles map diagnostic answers to an action in code; no warm-up | `on` |
+| `features` | six diagnostic answers become LinUCB features (`dm_available`, `dm_traceback_sufficient`, `dm_need_runtime_values`, `dm_need_source_definition`, `dm_need_project_usage`, `dm_fix_confidence`) | `on` |
+| `prior` | warm-up samples from (1−ρ)·p + ρ/K (`--adaptive-decision-model-warmup-mix`), then a centered log-probability prior with weight β·n₀/(n₀+updates) is added to the greedy ranking (logged scores stay LinUCB's) | `on` |
+
+Every selection logs the full probability of the chosen action, so propensities stay valid for
+off-policy evaluation. LinUCB keeps updating in `on` mode under every role. If the sidecar
+fails, `policy` falls back to the baseline action (`decision_model_unavailable`), `features`
+sets `dm_available=0`, and `prior` falls back to the plain bandit.
+
+How the decision model is asked (versioned profiles in `evals/decision_model/schema.py`):
+
+- `evidence_v1` (default): a `next_evidence_action` choice over the feasible actions, with
+  option descriptions as `{choose_when, not_for, provides, cost}` written for the active reveal
+  mode, plus three joint diagnostic questions (`traceback_sufficient`, `missing_information`,
+  `fix_confidence`).
+- `evidence_atomic_v1`: only the diagnostic questions; `atomic_action_from_answers` maps them to
+  an action in code (sufficient ≥ 0.7 → `skip_helper`; otherwise the most likely missing
+  information routes to `frame_only` / `file_only` / `search_only`; uncertain → `invoke_helper`).
+- Ablations: `evidence_v1_noaux`, `evidence_v1_text`, `evidence_v1_nohints`.
+
+What it sees (`evals/decision_model/state.py`): a bounded state (about 6000 characters) with
+numeric-prefixed sections in priority order — failure, crash site, assertion lines, call path,
+crash-frame locals (only under full reveal), hints (pregate tier, top llmdebug hypotheses),
+history (attempt ≥ 2), budget, and the test-output tail last because Clef-style models cut
+over-long states from the end. It never receives `CaseSpec`; workdir paths (host and
+container), case id, condition and run id are redacted, and home/interpreter prefixes are
+normalized so state hashes are portable.
+
+Logging: result rows carry `adaptive_online_dm_*` fields; policy events (schema v5) carry the
+`decision_model` block (answers, applied effect, latency, state hash); with
+`--adaptive-decision-model-log-state full` (default) the rendered states go to
+`<artifacts_root>/decision_model_states.jsonl` keyed by `decision_id`. The sidecar is checked
+before the first unit runs; an unhealthy sidecar stops the run with a clear error.
+
 ## Offline training handoff
 - `python -m evals.export_policy_dataset` flattens event JSONL into CSV with:
   - metadata (`run_id`, `case_id`, `attempt`, etc.)
@@ -184,11 +259,29 @@ The budget policy uses the same runtime modes as helper policy:
   - local accounting columns (`local_*`)
   - feature columns (`feature_*`)
   - importance weights (`1 / propensity_clipped`)
-- The export path accepts both current helper-policy and budget-policy event schema versions.
+- The export path accepts helper-policy event schema versions 4 and 5 and budget-policy
+  version 4 (explicit sets, `SUPPORTED_*_EVENT_SCHEMA_VERSIONS`).
+- Decision-model columns (v5 events): `dm_role`, `dm_status`, `dm_profile`, `dm_model`,
+  `dm_top_action`, `dm_top_prob`, `dm_margin`, `dm_entropy`, `dm_atomic_action`,
+  `dm_traceback_sufficient`, `dm_fix_confidence`, `dm_latency_ms`, `dm_input_tokens`,
+  `dm_state_sha256`, `dm_prior_beta`, plus `dm_p_<action>` and `dm_missing_<option>`
+  expansions. Events without a decision-model block leave these cells empty, so "no advice" is
+  distinguishable from a probability of 0.
 - Budget-policy exports now include architecture/family telemetry (`architecture`,
   `selected_family`, `applied_family`, `family_propensity`, `family_score_*`,
   `family_feature_*`, and gate/family update flags).
 - This dataset is intended for future LR/MLP policy training and off-policy evaluation.
+- `analyze_results` OPE adds three per-sample targets whenever rows carry decision-model advice:
+  `decision_model_greedy` (argmax of its action probabilities), `decision_model_stochastic`
+  (its distribution over the feasible actions) and `decision_model_atomic` (the code-mapped
+  action of `evidence_atomic_v1`; for other profiles the same thresholds are applied to the
+  logged `traceback_sufficient`/`missing_information` answers, an approximation because Clef
+  answers a profile's questions jointly). Missing or failed advice puts all target mass on the
+  baseline action. Stochastic targets use IPS/SNIPS/ESS with w = π(a|x)/μ and a doubly robust
+  estimate Σₐ π(a|x)·q̂ₐ(x) + w·(r − q̂(x, a)) with the same ridge reward models;
+  `shadow_corrected_samples` counts old shadow rows whose propensity was corrected to 1.0.
+  Meaningful estimates need a stochastic behavior policy, i.e. LinUCB `on` with the decision
+  model in `shadow` role.
 
 ## Safety notes
 - `shadow` mode is the recommended first rollout for calibration.

@@ -38,6 +38,23 @@ from ._policy_utils import (
 from ._policy_utils import (
     utc_now as _utc_now,
 )
+from .adaptive_policy_records import EVENT_SCHEMA_VERSION as EVENT_SCHEMA_VERSION
+from .adaptive_policy_records import PolicyDecision as PolicyDecision
+from .adaptive_policy_records import PolicyEvent as PolicyEvent
+from .decision_model.policy import (
+    ROLE_FEATURES,
+    ROLE_OFF,
+    ROLE_POLICY,
+    ROLE_PRIOR,
+    DecisionModelAdvice,
+    DecisionModelBinding,
+    RoleSelection,
+    advice_feature_values,
+    advice_record,
+    guided_warmup_selection,
+    policy_role_selection,
+    prior_score_adjustment,
+)
 from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT,
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
@@ -78,7 +95,6 @@ DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES = {
     ACTION_FRAME_ONLY: -0.25,
 }
 STATE_SCHEMA_VERSION = 3
-EVENT_SCHEMA_VERSION = 4
 
 
 def default_online_action_score_biases() -> dict[str, float]:
@@ -189,167 +205,6 @@ class OnlinePolicyConfig:
         )
 
 
-@dataclass(frozen=True)
-class PolicyDecision:
-    """Snapshot of a single helper-invocation decision by the policy."""
-
-    decision_id: str
-    mode: str
-    algorithm: str
-    decision_index: int
-    created_at_utc: str
-    selected_action: str
-    applied_action: str
-    default_action: str
-    propensity: float
-    decision_strategy: str
-    scores: dict[str, float]
-    feature_values: dict[str, float]
-    available_actions: tuple[str, ...]
-    unavailable_action_reasons: dict[str, str]
-    configured_action_score_biases: dict[str, float]
-    feature_scaling_caps: dict[str, float]
-    feature_scaling_history_sizes: dict[str, int]
-    feature_scaling_fallback_to_v1: bool
-    configured_alpha: float
-    configured_epsilon: float
-    configured_decay: float
-    effective_epsilon: float
-    warmup_active: bool
-
-
-@dataclass(frozen=True)
-class PolicyEvent:
-    """Logged outcome record pairing a decision with its observed reward."""
-
-    run_id: str
-    case_id: str
-    condition: str
-    attempt: int
-    note: str
-    decision_id: str
-    mode: str
-    algorithm: str
-    decision_index: int
-    selected_action: str
-    applied_action: str
-    behavior_action: str
-    default_action: str
-    propensity: float
-    behavior_propensity: float
-    decision_strategy: str
-    feature_scaling_profile: str
-    feature_scaling_caps: dict[str, float]
-    feature_scaling_history_sizes: dict[str, int]
-    feature_scaling_fallback_to_v1: bool
-    configured_alpha: float
-    configured_epsilon: float
-    configured_decay: float
-    effective_epsilon: float
-    warmup_active: bool
-    scores: dict[str, float]
-    feature_values: dict[str, float]
-    available_actions: tuple[str, ...]
-    unavailable_action_reasons: dict[str, str]
-    configured_action_score_biases: dict[str, float]
-    reward_scope: str
-    reward_success_hint_scale: float
-    reward_progress_hint_scale: float
-    reward_stagnation_penalty_scale: float
-    reward_helper_materialization_bonus_scale: float
-    reward: float
-    reward_success_hint: float
-    reward_progress_hint: float
-    reward_progress_score: float
-    reward_token_penalty: float
-    reward_latency_penalty: float
-    reward_stagnation_penalty: float
-    reward_helper_materialization_bonus: float
-    reward_delayed_rescue_bonus: float
-    reward_credit_resolved_attempt: int
-    reward_credit_horizon_attempts: int
-    reward_credit_resolution_reason: str
-    success: bool
-    local_llm_call_count: int
-    local_tokens_prompt: int
-    local_tokens_completion: int
-    local_tokens_total: int
-    local_wall_sec: float
-    override_reason: str
-    model_updated: bool
-    update_reason: str
-    nan_replacement_counts: dict[str, int]
-    created_at_utc: str
-
-    def to_json(self) -> dict[str, Any]:
-        """Serialize the event to a JSON-compatible dict."""
-        return {
-            "schema_version": EVENT_SCHEMA_VERSION,
-            "run_id": self.run_id,
-            "case_id": self.case_id,
-            "condition": self.condition,
-            "attempt": self.attempt,
-            "note": self.note,
-            "decision_id": self.decision_id,
-            "mode": self.mode,
-            "algorithm": self.algorithm,
-            "decision_index": self.decision_index,
-            "selected_action": self.selected_action,
-            "applied_action": self.applied_action,
-            "behavior_action": self.behavior_action,
-            "default_action": self.default_action,
-            "propensity": self.propensity,
-            "behavior_propensity": self.behavior_propensity,
-            "decision_strategy": self.decision_strategy,
-            "feature_scaling_profile": self.feature_scaling_profile,
-            "feature_scaling_caps": {k: float(v) for k, v in self.feature_scaling_caps.items()},
-            "feature_scaling_history_sizes": {
-                k: int(v) for k, v in self.feature_scaling_history_sizes.items()
-            },
-            "feature_scaling_fallback_to_v1": bool(self.feature_scaling_fallback_to_v1),
-            "configured_alpha": self.configured_alpha,
-            "configured_epsilon": self.configured_epsilon,
-            "configured_decay": self.configured_decay,
-            "effective_epsilon": self.effective_epsilon,
-            "warmup_active": bool(self.warmup_active),
-            "scores": dict(self.scores),
-            "feature_values": dict(self.feature_values),
-            "available_actions": list(self.available_actions),
-            "unavailable_action_reasons": dict(self.unavailable_action_reasons),
-            "configured_action_score_biases": dict(self.configured_action_score_biases),
-            "reward_scope": self.reward_scope,
-            "reward_success_hint_scale": self.reward_success_hint_scale,
-            "reward_progress_hint_scale": self.reward_progress_hint_scale,
-            "reward_stagnation_penalty_scale": self.reward_stagnation_penalty_scale,
-            "reward_helper_materialization_bonus_scale": (
-                self.reward_helper_materialization_bonus_scale
-            ),
-            "reward": self.reward,
-            "reward_success_hint": self.reward_success_hint,
-            "reward_progress_hint": self.reward_progress_hint,
-            "reward_progress_score": self.reward_progress_score,
-            "reward_token_penalty": self.reward_token_penalty,
-            "reward_latency_penalty": self.reward_latency_penalty,
-            "reward_stagnation_penalty": self.reward_stagnation_penalty,
-            "reward_helper_materialization_bonus": self.reward_helper_materialization_bonus,
-            "reward_delayed_rescue_bonus": self.reward_delayed_rescue_bonus,
-            "reward_credit_resolved_attempt": self.reward_credit_resolved_attempt,
-            "reward_credit_horizon_attempts": self.reward_credit_horizon_attempts,
-            "reward_credit_resolution_reason": self.reward_credit_resolution_reason,
-            "success": self.success,
-            "local_llm_call_count": self.local_llm_call_count,
-            "local_tokens_prompt": self.local_tokens_prompt,
-            "local_tokens_completion": self.local_tokens_completion,
-            "local_tokens_total": self.local_tokens_total,
-            "local_wall_sec": self.local_wall_sec,
-            "override_reason": self.override_reason,
-            "model_updated": self.model_updated,
-            "update_reason": self.update_reason,
-            "nan_replacement_counts": dict(self.nan_replacement_counts),
-            "created_at_utc": self.created_at_utc,
-        }
-
-
 @dataclass
 class LinUCBState:
     """Mutable state for a per-action LinUCB model (A matrices and b vectors)."""
@@ -373,8 +228,13 @@ class AdaptiveOnlinePolicyController:
     persists model state to disk, and logs decision-outcome events as JSONL.
     """
 
-    def __init__(self, config: OnlinePolicyConfig) -> None:
+    def __init__(
+        self,
+        config: OnlinePolicyConfig,
+        decision_model: DecisionModelBinding | None = None,
+    ) -> None:
         self.config = config
+        self.decision_model = decision_model
         self._lock = threading.RLock()
         self._rng = random.Random(config.random_seed)
         self._state = LinUCBState()
@@ -392,6 +252,11 @@ class AdaptiveOnlinePolicyController:
     def algorithm(self) -> str:
         """Configured algorithm identifier."""
         return self.config.algorithm
+
+    @property
+    def decision_model_role(self) -> str:
+        """Role of the attached decision model (``off`` when none is attached)."""
+        return self.decision_model.role if self.decision_model is not None else ROLE_OFF
 
     @property
     def state(self) -> LinUCBState:
@@ -509,18 +374,25 @@ class AdaptiveOnlinePolicyController:
         default_action: str = ACTION_INVOKE_HELPER,
         available_actions: Collection[str] | None = None,
         unavailable_action_reasons: Mapping[str, str] | None = None,
+        advice: DecisionModelAdvice | None = None,
     ) -> PolicyDecision:
         """Select an action given the current context features.
 
         During warm-up or with probability *epsilon* the action is sampled
         uniformly; otherwise the LinUCB greedy arm is chosen.  In ``shadow``
         mode the selected action is logged but the *default_action* is
-        applied.
+        applied.  With an attached decision model, *advice* is only logged
+        (``shadow``), selects the action (``policy``), adds diagnostic
+        features (``features``), or guides warm-up and adds a fading score
+        prior (``prior``); see ``evals.decision_model.policy``.
         """
+        role = self.decision_model_role
         cleaned_features = {
             str(k): self._tracked_safe_float(v, feature_name=str(k), default=0.0)
             for k, v in dict(feature_values).items()
         }
+        if role == ROLE_FEATURES:
+            cleaned_features.update(advice_feature_values(advice))
         with self._lock:
             (
                 scaled_features,
@@ -554,6 +426,7 @@ class AdaptiveOnlinePolicyController:
                 default_action=default_norm,
                 available_actions=available_actions_norm,
             )
+            decision_model_effect: dict[str, Any] = {}
             if mode == "off":
                 selected = baseline_action
                 applied = baseline_action
@@ -566,28 +439,40 @@ class AdaptiveOnlinePolicyController:
                     scores = self._apply_action_score_biases(self._thompson_scores(x=x))
                 else:
                     scores = self._apply_action_score_biases(self._linucb_scores(x=x))
+                ranking = self._ranking_scores(
+                    scores, advice, available_actions_norm, decision_model_effect
+                )
                 greedy = max(
                     available_actions_norm,
-                    key=lambda action: (scores[action], action == ACTION_INVOKE_HELPER),
+                    key=lambda action: (ranking[action], action == ACTION_INVOKE_HELPER),
                 )
-                if decision_index <= self.config.warmup_decisions:
-                    selected = self._rng.choice(list(available_actions_norm))
-                    strategy = "warmup_uniform"
+                role_selection = self._role_selection(
+                    advice, available_actions_norm, decision_index, baseline_action
+                )
+                if role_selection is not None:
+                    selected = role_selection.action
+                    strategy = role_selection.strategy
+                    propensity = role_selection.propensity
+                    warmup_active = role_selection.warmup_active
+                    effective_epsilon = role_selection.effective_epsilon
+                    decision_model_effect.update(role_selection.effect)
                 else:
-                    if self._rng.random() < self.config.epsilon:
+                    if decision_index <= self.config.warmup_decisions:
+                        selected = self._rng.choice(list(available_actions_norm))
+                        strategy = "warmup_uniform"
+                    elif self._rng.random() < self.config.epsilon:
                         selected = self._rng.choice(list(available_actions_norm))
                         strategy = "epsilon_uniform"
                     else:
                         selected = greedy
-                        strategy = "linucb_greedy"
-                k_actions = float(len(available_actions_norm))
-                base_prob = self.config.epsilon / k_actions
-                if decision_index <= self.config.warmup_decisions:
-                    propensity = 1.0 / k_actions
-                else:
-                    propensity = base_prob + (
-                        (1.0 - self.config.epsilon) if selected == greedy else 0.0
-                    )
+                        strategy = f"{self.config.algorithm}_greedy"
+                    k_actions = float(len(available_actions_norm))
+                    if decision_index <= self.config.warmup_decisions:
+                        propensity = 1.0 / k_actions
+                    else:
+                        propensity = self.config.epsilon / k_actions + (
+                            (1.0 - self.config.epsilon) if selected == greedy else 0.0
+                        )
                 propensity = min(1.0, max(1e-9, propensity))
                 applied = selected if mode == "on" else baseline_action
 
@@ -619,7 +504,74 @@ class AdaptiveOnlinePolicyController:
                 configured_decay=float(self.config.decay),
                 effective_epsilon=float(effective_epsilon),
                 warmup_active=bool(warmup_active),
+                decision_model=advice_record(advice, role=role, effect=decision_model_effect),
             )
+
+    def _ranking_scores(
+        self,
+        scores: Mapping[str, float],
+        advice: DecisionModelAdvice | None,
+        available_actions: tuple[str, ...],
+        effect: dict[str, Any],
+    ) -> dict[str, float]:
+        """Scores for greedy ranking; the ``prior`` role adds its fading log-prior here.
+
+        The logged ``scores`` stay the bandit's own; the adjustment is logged in *effect*.
+        """
+        ranking = {action: float(value) for action, value in scores.items()}
+        binding = self.decision_model
+        if binding is None or binding.role != ROLE_PRIOR:
+            return ranking
+        adjustment = prior_score_adjustment(
+            advice,
+            available_actions=available_actions,
+            config=binding.config,
+            updates=int(self._state.updates),
+        )
+        if adjustment is None:
+            return ranking
+        effect.update(adjustment)
+        for action, delta in adjustment["prior_adjustment"].items():
+            ranking[action] = ranking.get(action, 0.0) + float(delta)
+        return ranking
+
+    def _role_selection(
+        self,
+        advice: DecisionModelAdvice | None,
+        available_actions: tuple[str, ...],
+        decision_index: int,
+        baseline_action: str,
+    ) -> RoleSelection | None:
+        """Selection made by the decision-model role, or ``None`` for the bandit path."""
+        binding = self.decision_model
+        if binding is None:
+            return None
+        if binding.role == ROLE_POLICY:
+            selection = policy_role_selection(
+                advice,
+                available_actions=available_actions,
+                config=binding.config,
+                epsilon=float(self.config.epsilon),
+                rng=self._rng,
+            )
+            if selection is not None:
+                return selection
+            return RoleSelection(
+                action=baseline_action,
+                propensity=1.0,
+                strategy="decision_model_unavailable",
+                warmup_active=False,
+                effective_epsilon=0.0,
+                effect={},
+            )
+        if binding.role == ROLE_PRIOR and decision_index <= self.config.warmup_decisions:
+            return guided_warmup_selection(
+                advice,
+                available_actions=available_actions,
+                config=binding.config,
+                rng=self._rng,
+            )
+        return None
 
     def record_outcome(
         self,
@@ -673,8 +625,10 @@ class AdaptiveOnlinePolicyController:
                     applied_action if applied_action in ONLINE_POLICY_ACTIONS else "none"
                 )
             if behavior_propensity is None:
+                # Only an applied ("on") selection was sampled by the policy; in shadow mode the
+                # executed baseline action is deterministic, so its probability is 1.
                 behavior_propensity_norm = 1.0
-                if selected_action == behavior_action_norm:
+                if str(decision.mode) == "on" and selected_action == behavior_action_norm:
                     behavior_propensity_norm = min(1.0, max(1e-9, float(decision.propensity)))
             else:
                 behavior_propensity_norm = min(1.0, max(1e-9, float(behavior_propensity)))
@@ -765,6 +719,7 @@ class AdaptiveOnlinePolicyController:
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
                 created_at_utc=_utc_now(),
+                decision_model=dict(getattr(decision, "decision_model", None) or {}),
             )
             self._append_event(event=event)
             if model_updated:
@@ -775,9 +730,13 @@ class AdaptiveOnlinePolicyController:
             return event
 
     def close(self) -> None:
-        """Flush the current model state to disk."""
+        """Flush the current model state to disk and release the decision-model client."""
         with self._lock:
             self._save_state()
+        advisor = self.decision_model.advisor if self.decision_model is not None else None
+        close_advisor = getattr(advisor, "close", None)
+        if callable(close_advisor):
+            close_advisor()
 
     def _ensure_feature_state(self, *, cleaned_features: Mapping[str, float]) -> None:
         """Initialise or expand A/b matrices when new features appear."""

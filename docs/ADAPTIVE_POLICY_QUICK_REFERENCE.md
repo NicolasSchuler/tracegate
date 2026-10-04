@@ -2,7 +2,7 @@
 
 ## 🎯 Core Concept
 
-A **contextual-bandit (LinUCB)** controller that learns which helper-invocation **action** (out of 8) to take given the current **context** (50+ features), by observing **rewards** from past attempts.
+A **contextual-bandit (LinUCB)** controller that learns which helper-invocation **action** (out of 10) to take given the current **context** (50+ features), by observing **rewards** from past attempts.
 
 ## 📊 The Learning Loop
 
@@ -42,7 +42,7 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
    • Every 50 updates: save to disk
 ```
 
-## 🎮 8 Actions the Policy Can Choose
+## 🎮 10 Actions the Policy Can Choose
 
 | Action | Meaning |
 |--------|---------|
@@ -51,9 +51,15 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
 | `frame_only` | Stack frames only (no code/search) |
 | `file_only` | Only requested files |
 | `search_only` | Only search results |
-| `snapshot_lite` | Minimal context |
+| `snapshot_lite` | Compact frame index (locations only) |
+| `frame_locals_lite` | Crash frame code plus up to 5 locals |
+| `snapshot_full_lite` | Up to 3 frames with code and locals |
 | `compact_then_patch` | Compress context first |
 | `retry_helper_strict_json` | Stricter JSON validation |
+
+The three `*_lite` actions call no model. Under `--adaptive-reveal-mode full` they replace the
+full snapshot section in the patch prompt (`--adaptive-lite-snapshot-mode replace`, default);
+`supplement` restores the pre-2026-10 behavior of adding them on top.
 
 ## 🧠 What Gets Learned
 
@@ -109,10 +115,13 @@ score_k = θ_k^T · x  +  α × √(x^T · A_k^{-1} · x)
 - `last_context_compaction_trigger_*`: categorical
 - (others)
 
-### Case Metadata (4)
+### Case Metadata (opt-in, off by default)
 - `case_difficulty_ord`: 0 (easy) / 0.5 / 1 (hard)
 - `case_snapshot_dependency_ord`: 0 / 0.5 / 1
 - `case_bug_source_imported`: binary
+
+These come from `case.json` labels, which are not observable at deployment time, so they are
+dropped unless `--adaptive-online-include-case-labels` is set.
 - (others)
 
 ### Pre-gate Signals (3)
@@ -144,7 +153,7 @@ reward = success_hint (if success)
 ```python
 OnlinePolicyConfig(
     mode: "off" | "shadow" | "on"        # off=no policy, shadow=eval only, on=active
-    algorithm: "linucb"                  # (only algorithm available)
+    algorithm: "linucb"                  # or "thompson"
     alpha: 0.6                           # Exploration bonus strength
     epsilon: 0.10                        # ε-greedy probability
     l2: 1.0                              # Regularization for the LinUCB solve
@@ -168,7 +177,7 @@ OnlinePolicyConfig(
 
 ## 📊 LinUCB Algorithm Overview
 
-1. **Maintain** A_k (d×d matrix) and b_k (d vector) for each of K=8 actions
+1. **Maintain** A_k (d×d matrix) and b_k (d vector) for each of K=10 actions
 2. **On decision** with context x:
     - Compute θ̂_k = A_k^{-1} b_k for each action
     - Score each action: UCB_k = θ̂_k^T x + α √(x^T A_k^{-1} x)
@@ -187,7 +196,7 @@ PolicyDecision:
   - selected_action: action chosen by LinUCB
   - applied_action: action actually executed (selected if mode="on", else default)
   - propensity: P(selected_action) — for off-policy corrections
-  - scores: dict of UCB scores for all 8 actions
+  - scores: dict of UCB scores for all 10 actions
   - configured_action_score_biases: additive score priors applied before greedy selection
   - feature_values: the scaled features used
   - available_actions / unavailable_action_reasons: feasibility mask telemetry
@@ -202,6 +211,27 @@ PolicyEvent:
   - model_updated: whether A/b matrices were updated
   - [all reward components broken down]
 ```
+
+## 🧩 Decision-Model Advice (System-1)
+
+A SystemOne-compatible decision model (e.g. Cloudflare clef-flash in a GPU sidecar) can take
+part in helper-action selection for `layered_adaptive_llm`. Details:
+`docs/adaptive_online_policy_design.md` ("Decision-model advice").
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--adaptive-decision-model-role` | `off` | `shadow` (log only), `policy` (it selects), `features` (6 diagnostic LinUCB features), `prior` (guided warm-up + fading score prior) |
+| `--adaptive-decision-model-url` | `$TRACEGATE_DECISION_MODEL_URL` or `http://127.0.0.1:8090` | Endpoint base URL (sidecar, or `.../upstream/<model>` on llama-swap) |
+| `--adaptive-decision-model-api-key` | `$TRACEGATE_DECISION_MODEL_API_KEY` | Bearer token for an API-key gateway such as llama-swap; redacted in lockfiles, rejected in config files |
+| `--adaptive-decision-model-profile` | `evidence_v1` | Question profile (`evidence_atomic_v1` maps diagnostic answers to an action in code) |
+| `--adaptive-decision-model-temperature` | `0` | `policy` role: 0 = argmax plus epsilon exploration, >0 = tempered sampling |
+| `--adaptive-decision-model-prior-beta` / `-prior-anneal-updates` / `-warmup-mix` | `0.5` / `50` / `0.3` | `prior` role weights |
+| `--adaptive-decision-model-log-state` | `full` | Write rendered states to `<artifacts>/decision_model_states.jsonl` |
+
+`policy`, `features` and `prior` need `--adaptive-online-policy-mode on`; `shadow` works with
+`shadow` or `on`. New decision strategies: `decision_model_greedy`, `decision_model_sample`,
+`decision_model_atomic`, `decision_model_epsilon`, `decision_model_unavailable`,
+`decision_model_guided_warmup`.
 
 ## 🎯 Budget Policy (Secondary)
 
@@ -262,7 +292,9 @@ Shared helper defaults also apply additive score priors:
 
 | File | Purpose |
 |------|---------|
-| `adaptive_online_policy.py` | Core LinUCB controller + decision/outcome classes |
+| `adaptive_online_policy.py` | Core LinUCB controller |
+| `adaptive_policy_records.py` | Decision/outcome records (`PolicyDecision`, `PolicyEvent`, event schema v5) |
+| `decision_model/` | System-1 decision-model advice (config, schema, state, policy roles, client, runtime, probe) |
 | `adaptive_budget_online_policy.py` | Budget escalation policy (secondary) |
 | `policy_feature_scaling.py` | Feature normalization (log1p for counts, clipping) |
 | `run_eval.py` | Orchestration: feature extraction, decision calling, reward calculation |

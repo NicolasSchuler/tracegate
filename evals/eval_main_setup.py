@@ -12,6 +12,10 @@ from typing import Any
 
 from evals import eval_main_support as legacy
 from evals.adaptive_budget_online_policy import BUDGET_POLICY_ARCHITECTURES
+from evals.decision_model.config import (
+    check_decision_model_settings,
+    decision_model_settings_from_args,
+)
 from evals.eval_config import (
     _apply_toml_configs_to_args,
     _parse_adaptive_budget_policy_tiers,
@@ -73,6 +77,29 @@ class MainSetupState:
 
 def _fail(message: str) -> None:
     raise MainFlowCliError(message)
+
+
+def _apply_decision_model_checks(
+    *,
+    args: argparse.Namespace,
+    config_state: Any,
+    conditions: list[Condition],
+    startup_warnings: list[str],
+) -> None:
+    """Validate decision-model flags once conditions are known (cross-flag rules)."""
+    check = check_decision_model_settings(
+        decision_model_settings_from_args(args),
+        llm_discretion_condition=Condition.LAYERED_ADAPTIVE_LLM in conditions,
+        online_policy_mode=str(getattr(args, "adaptive_online_policy_mode", "off")),
+    )
+    if check.errors:
+        _fail("Invalid decision-model settings: " + "; ".join(check.errors))
+    startup_warnings.extend(check.warnings)
+    if check.force_off:
+        args.adaptive_decision_model_role = "off"
+        config_state.value_sources["adaptive_decision_model_role"] = (
+            "forced_off:no_llm_discretion_condition"
+        )
 
 
 def _require_choice(*, value: Any, allowed: set[str] | tuple[str, ...], option: str) -> None:
@@ -218,6 +245,11 @@ def _force_adaptive_policies_off_when_unused(
         attr="adaptive_budget_policy_mode",
         forced_value="off",
         label="adaptive_budget_policy_mode",
+    )
+    _force_value(
+        attr="adaptive_decision_model_role",
+        forced_value="off",
+        label="adaptive_decision_model_role",
     )
     _force_value(
         attr="context_protocol",
@@ -764,6 +796,12 @@ def prepare_main_setup(
         args=args,
         config_state=config_state,
         conditions=conditions,
+    )
+    _apply_decision_model_checks(
+        args=args,
+        config_state=config_state,
+        conditions=conditions,
+        startup_warnings=startup_warnings,
     )
     explicit_run_id = bool(str(args.run_id).strip())
     run_id, artifacts_root, results_path = _derive_run_paths(args=args, config_state=config_state)

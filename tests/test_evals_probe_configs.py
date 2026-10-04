@@ -110,6 +110,30 @@ def test_research_probe_presets_select_expected_nondefault_knobs() -> None:
     assert tep_full["adaptive_tep_state_path"]
 
 
+def test_decision_model_probe_presets_select_roles_and_profiles() -> None:
+    presets = {
+        slug: _flatten_config(f"openai_adaptive_probe_decision_model_{slug}.template.toml")
+        for slug in ("shadow", "policy", "policy_atomic", "features", "prior")
+    }
+
+    for slug, config in presets.items():
+        assert config["jobs"] == 1, slug
+        assert config["conditions"] == "layered_adaptive_llm", slug
+        # Every live role (and the shadow logging path) needs the helper policy running.
+        assert config["adaptive_online_policy_mode"] == "on", slug
+
+    assert presets["shadow"]["adaptive_decision_model_role"] == "shadow"
+    assert presets["policy"]["adaptive_decision_model_role"] == "policy"
+    assert presets["policy_atomic"]["adaptive_decision_model_role"] == "policy"
+    assert presets["features"]["adaptive_decision_model_role"] == "features"
+    assert presets["prior"]["adaptive_decision_model_role"] == "prior"
+
+    # Only the atomic preset overrides the default question profile.
+    assert presets["policy_atomic"]["adaptive_decision_model_profile"] == "evidence_atomic_v1"
+    for slug in ("shadow", "policy", "features", "prior"):
+        assert "adaptive_decision_model_profile" not in presets[slug], slug
+
+
 def test_gated_policy_probe_presets_select_expected_gate_policies() -> None:
     aggressive = _flatten_config("openai_adaptive_gated_aggressive.template.toml")
     conservative = _flatten_config("openai_adaptive_gated_conservative.template.toml")

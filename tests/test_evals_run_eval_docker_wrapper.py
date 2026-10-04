@@ -137,6 +137,8 @@ def _run_wrapper(
         "LLMDEBUG_EVAL_OPENAI_API_KEY",
         "Z_API",
         "DOCKER_EXTRA_ARGS",
+        "TRACEGATE_DECISION_MODEL_URL",
+        "TRACEGATE_DECISION_MODEL_API_KEY",
     ):
         env.pop(key, None)
 
@@ -341,6 +343,127 @@ def test_run_eval_docker_translates_localhost_url_on_darwin(tmp_path: Path) -> N
     assert not _arg_values(docker_args, "--network")
     assert _arg_value(eval_args, "--openai-base-url") == "http://host.docker.internal:1234/v1"
     assert "Translating localhost URL for Docker access" in proc.stderr
+
+
+def test_run_eval_docker_lifts_local_decision_model_url_from_adaptive_config(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "decision-model.toml"
+    config_path.write_text(
+        """
+[run_eval]
+patcher = "openai"
+conditions = "layered_adaptive_llm"
+k = 2
+
+[run_eval.openai]
+base_url = "http://remote:9999/v1"
+model = "cfg-model"
+
+[run_eval.adaptive]
+online_policy_mode = "on"
+decision_model_role = "shadow"
+decision_model_url = "http://127.0.0.1:8090"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=["--config", str(config_path)],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert _arg_value(eval_args, "--adaptive-decision-model-url") == "http://127.0.0.1:8090"
+    assert _arg_value(eval_args, "--openai-base-url") == "http://remote:9999/v1"
+    # Host networking is required for the local sidecar even though the LLM is remote.
+    assert _arg_value(docker_args, "--network") == "host"
+
+
+def test_run_eval_docker_translates_decision_model_url_on_darwin(tmp_path: Path) -> None:
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Darwin",
+        args=[
+            "--patcher",
+            "openai",
+            "--openai-model",
+            "qwen-demo",
+            "--openai-base-url",
+            "http://remote:9999/v1",
+            "--adaptive-decision-model-url",
+            "http://localhost:8090",
+            "--k",
+            "1",
+        ],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert not _arg_values(docker_args, "--network")
+    assert (
+        _arg_value(eval_args, "--adaptive-decision-model-url") == "http://host.docker.internal:8090"
+    )
+
+
+def test_run_eval_docker_forwards_and_lifts_decision_model_url_env(tmp_path: Path) -> None:
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=["--patcher", "null", "--k", "1"],
+        env_overrides={"TRACEGATE_DECISION_MODEL_URL": "http://10.0.0.5:8090"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert "TRACEGATE_DECISION_MODEL_URL=http://10.0.0.5:8090" in _arg_values(docker_args, "-e")
+    assert _arg_value(eval_args, "--adaptive-decision-model-url") == "http://10.0.0.5:8090"
+    # A remote sidecar needs no host networking.
+    assert not _arg_values(docker_args, "--network")
+
+
+def test_run_eval_docker_omits_decision_model_url_when_unconfigured(tmp_path: Path) -> None:
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=["--patcher", "null", "--k", "1"],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    _docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert "--adaptive-decision-model-url" not in eval_args
+    assert "--adaptive-decision-model-api-key" not in eval_args
+
+
+def test_run_eval_docker_passes_decision_model_api_key_as_flag_only(tmp_path: Path) -> None:
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=["--patcher", "null", "--k", "1"],
+        env_overrides={"TRACEGATE_DECISION_MODEL_API_KEY": "dm-secret"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert _arg_value(eval_args, "--adaptive-decision-model-api-key") == "dm-secret"
+    assert not any("dm-secret" in value for value in docker_args)
+
+
+def test_run_eval_docker_keeps_explicit_decision_model_api_key(tmp_path: Path) -> None:
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=["--patcher", "null", "--k", "1", "--adaptive-decision-model-api-key", "cli-key"],
+        env_overrides={"TRACEGATE_DECISION_MODEL_API_KEY": "dm-secret"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    _docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert _arg_values(eval_args, "--adaptive-decision-model-api-key") == ["cli-key"]
+    assert "dm-secret" not in eval_args
 
 
 def test_run_eval_docker_uses_openai_env_defaults_with_key_precedence(tmp_path: Path) -> None:

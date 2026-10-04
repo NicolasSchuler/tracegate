@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from evals import eval_main_support as legacy
+from evals.decision_model.config import decision_model_settings_from_args
+from evals.decision_model.runtime import build_decision_model_binding
 from evals.eval_config import _parse_adaptive_online_action_score_biases
 from evals.eval_main_resume import prepare_main_resume
 from evals.eval_main_setup import MainFlowCliError, prepare_main_setup
@@ -325,7 +327,19 @@ def run_main_flow(
         online_policy_controller: AdaptiveOnlinePolicyController | None = None
     else:
         try:
-            online_policy_controller = AdaptiveOnlinePolicyController(online_policy_config)
+            decision_model_binding = build_decision_model_binding(
+                decision_model_settings_from_args(args),
+                artifacts_root=artifacts_root,
+            )
+            # Pass the binding only when a role is active (keeps the one-argument form intact).
+            online_policy_controller = (
+                AdaptiveOnlinePolicyController(
+                    online_policy_config,
+                    decision_model=decision_model_binding,
+                )
+                if decision_model_binding is not None
+                else AdaptiveOnlinePolicyController(online_policy_config)
+            )
         except BaseException:
             _close_run_results_io()
             display.close()

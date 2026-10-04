@@ -108,7 +108,7 @@ class OnlinePolicyConfig:
 8. `retry_helper_strict_json` — Retry with stricter JSON validation
 
 **Selection Mechanism**: 
-- Warm-up phase (first 200 decisions): Uniform random across all 8 actions
+- Warm-up phase (first `warmup_decisions`, default 50): Uniform random across the feasible actions (up to 10)
 - Then: epsilon-greedy (5% random, 95% LinUCB greedy)
 - LinUCB score = exploit + alpha × explore
 
@@ -174,7 +174,7 @@ The second term is the prediction confidence interval width.
 - `last_helper_invalid_response`: binary
 - `last_helper_declined`: binary
 - `supports_context_request`: patcher capability
-- `last_helper_action_executed`: one of 8 actions (encoded as binary flags)
+- `last_helper_action_executed`: one of 10 actions (encoded as binary flags)
 
 **Context Compaction**:
 - `context_compaction_enabled`: binary
@@ -184,7 +184,7 @@ The second term is the prediction confidence interval width.
 - `last_context_compaction_ratio`: 0-1 compression ratio
 - `last_context_compaction_trigger_*`: categorical (stage_a_requested, overflow, mode_always)
 
-**Case Metadata**:
+**Case Metadata** (opt-in via `--adaptive-online-include-case-labels`; off by default because `case.json` labels are not observable at deployment time):
 - `case_difficulty_ord`: 0 (easy) / 0.5 (medium) / 1.0 (hard)
 - `case_snapshot_dependency_ord`: 0 (none) / 0.5 (helpful) / 1.0 (required)
 - `case_bug_source_imported`: 1 if from dataset, 0 if hand-crafted
@@ -261,7 +261,7 @@ decision = online_policy_controller.decide(
 #   selected_action,  # From LinUCB arm selection
 #   applied_action,   # selected if mode="on", else default
 #   propensity,       # Sampling probability (for off-policy correction)
-#   scores,           # UCB scores for all 8 actions
+#   scores,           # UCB scores for all 10 actions
 #   feature_values    # The scaled features
 # )
 ```
@@ -310,8 +310,8 @@ class PolicyDecision:
     applied_action: str           # Action actually executed
     default_action: str           # Fallback action
     propensity: float             # P(selected_action)
-    decision_strategy: str        # "warmup_uniform", "epsilon_uniform", "linucb_greedy", "policy_off"
-    scores: dict[str, float]      # UCB scores for all 8 actions
+    decision_strategy: str        # "warmup_uniform", "epsilon_uniform", "linucb_greedy", "thompson_greedy", "policy_off", or "decision_model_*"
+    scores: dict[str, float]      # UCB scores for all 10 actions
     feature_values: dict[str, float]  # Scaled feature dict
 ```
 
@@ -670,7 +670,7 @@ adaptive_online_policy_controller.close()
 ## 12. KEY INSIGHTS & DESIGN PATTERNS
 
 ### Exploration vs. Exploitation
-- **Warm-up**: First 200 decisions uniformly random across 8 actions
+- **Warm-up**: First `warmup_decisions` (default 50) decisions uniformly random across the feasible actions
 - **Steady-state**: 95% LinUCB greedy (select max UCB score) + 5% random
 - **UCB bonus**: α × √(x^T A^{-1} x) encourages exploration of uncertain actions
 

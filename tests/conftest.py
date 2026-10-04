@@ -37,6 +37,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="auto",
         help=("OpenAI compatibility profile for live repair integration tests (default: auto)."),
     )
+    parser.addoption(
+        "--live-decision-model-url",
+        action="store",
+        default="",
+        help=(
+            "Base URL of a running System-1 decision-model sidecar (e.g. "
+            "http://127.0.0.1:8090) for the live decision-model integration test. "
+            "Falls back to $TRACEGATE_DECISION_MODEL_URL; the test skips when both are unset."
+        ),
+    )
 
 
 def read_latest_snapshot(out_dir: Path) -> dict[str, Any]:

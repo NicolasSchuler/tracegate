@@ -25,7 +25,7 @@ Comprehensive guide covering:
 ### 2. **ADAPTIVE_POLICY_QUICK_REFERENCE.md** (Visual Guide)
 Quick-reference with:
 - Visual decision-outcome cycle diagram
-- 8 actions matrix table
+- 10 actions matrix table
 - What gets learned (A/b matrices, LinUCB formula)
 - 50+ features grouped by category
 - Reward formula breakdown
@@ -73,16 +73,18 @@ Targeted guide covering:
 ### What Is the Adaptive Online Learning Policy?
 A **contextual-bandit (LinUCB) controller** that learns to select the best helper-invocation action (out of 8) based on the current evaluation state (50+ features). It observes rewards from past attempts and updates per-action prediction models.
 
-### 8 Actions the Policy Can Choose
+### 10 Actions the Policy Can Choose
 ```
 1. skip_helper              — Don't invoke helper
 2. invoke_helper            — Standard invocation (baseline)
 3. frame_only               — Only stack frames
 4. file_only                — Only requested files
 5. search_only              — Only search results
-6. snapshot_lite            — Minimal context
-7. compact_then_patch       — Compress context first
-8. retry_helper_strict_json — Stricter JSON validation
+6. snapshot_lite            — Compact frame index (no model call)
+7. frame_locals_lite        — Crash frame code + up to 5 locals (no model call)
+8. snapshot_full_lite       — Up to 3 frames with locals (no model call)
+9. compact_then_patch       — Compress context first
+10. retry_helper_strict_json — Stricter JSON validation
 ```
 
 ### 50+ Features the Policy Uses
@@ -92,10 +94,10 @@ A **contextual-bandit (LinUCB) controller** that learns to select the best helpe
 - `attempt_frac`: current_attempt / max_attempts
 - `stagnation_streak`: count of attempts with no progress
 - `helper_calls_used`: total calls made so far
-- `case_difficulty_ord`: 0 (easy) / 0.5 / 1 (hard)
+- `case_difficulty_ord`: 0 (easy) / 0.5 / 1 (hard) — opt-in via `--adaptive-online-include-case-labels` (off by default)
 
 ### What Gets Learned?
-**Per-action matrices** (one set for each of the 8 actions):
+**Per-action matrices** (one set for each of the 10 actions):
 - **A_k**: Accumulated feature covariance matrix (d×d)
 - **b_k**: Reward-weighted feature accumulation (d×1)
 - **θ_k = A_k^{-1} b_k**: Estimated reward coefficients

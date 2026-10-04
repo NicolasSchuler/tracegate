@@ -8,11 +8,22 @@ import stat
 
 import pytest
 
+from evals.adaptive_budget_online_policy import (
+    EVENT_SCHEMA_VERSION as LIVE_BUDGET_EVENT_SCHEMA_VERSION,
+)
+from evals.adaptive_online_policy import (
+    EVENT_SCHEMA_VERSION as LIVE_ONLINE_EVENT_SCHEMA_VERSION,
+)
 from evals.export_policy_dataset import (
+    DECISION_MODEL_SCALAR_COLUMNS,
     POLICY_EVENT_SCHEMA_VERSION,
+    SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS,
+    SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS,
+    SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS,
     _event_key,
     _expand_paths,
     _load_events,
+    _optional_float_cell,
     _safe_float,
 )
 from evals.export_policy_dataset import (
@@ -569,3 +580,171 @@ def test_expand_paths_non_matching_glob_kept_verbatim() -> None:
     """Non-matching globs are kept as-is (fallback to literal path)."""
     result = _expand_paths(["/no/such/path/*.jsonl"])
     assert result == ["/no/such/path/*.jsonl"]
+
+
+# ---------------------------------------------------------------------------
+# Decision-model columns and explicit per-kind schema acceptance
+# ---------------------------------------------------------------------------
+def test_supported_schema_versions_cover_live_controller_versions() -> None:
+    """The explicit version sets must keep covering the shipped controllers."""
+    assert LIVE_ONLINE_EVENT_SCHEMA_VERSION in SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS
+    assert LIVE_BUDGET_EVENT_SCHEMA_VERSION in SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS
+    # Helper logs from before the decision model (v4) stay readable.
+    assert 4 in SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS
+    assert sorted(SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS) == [4, 5]
+
+
+def _decision_model_block() -> dict[str, object]:
+    return {
+        "role": "policy",
+        "status": "ok",
+        "profile": "evidence_v1",
+        "model": "clef-flash",
+        "revision": "abc123",
+        "error": "",
+        "action_probs": {"skip_helper": 0.25, "invoke_helper": 0.75},
+        "top_action": "invoke_helper",
+        "top_prob": 0.75,
+        "margin": 0.5,
+        "entropy": 0.56,
+        "atomic_action": "frame_only",
+        "atomic_reason": "missing_runtime_values",
+        "traceback_sufficient": 0.3,
+        "missing_information": {"runtime_values": 0.7, "none": 0.1},
+        "fix_confidence": 0.4,
+        "latency_ms": 123.5,
+        "input_tokens": 2048,
+        "state_sha256": "deadbeef",
+        "state_chars": 5120,
+        "truncated_sections": ["9_test_output_tail"],
+        "effect": {"prior_beta": 0.25, "prior_adjustment": {"skip_helper": -0.1}},
+    }
+
+
+def _policy_event(**overrides: object) -> dict[str, object]:
+    event = {
+        "schema_version": POLICY_EVENT_SCHEMA_VERSION,
+        "run_id": "run_dm",
+        "case_id": "case_dm",
+        "condition": "layered_adaptive_llm",
+        "attempt": 1,
+        "decision_id": "dm1",
+        "decision_index": 1,
+        "mode": "on",
+        "algorithm": "linucb",
+        "selected_action": "invoke_helper",
+        "applied_action": "invoke_helper",
+        "behavior_action": "invoke_helper",
+        "propensity": 0.8,
+        "behavior_propensity": 0.8,
+        "decision_strategy": "decision_model_greedy",
+        "feature_scaling_profile": "v1",
+        "scores": {"skip_helper": 0.2, "invoke_helper": 0.5},
+        "feature_values": {"bias": 1.0},
+        "reward_scope": "helper_credit_v2",
+        "reward": 0.3,
+        "model_updated": True,
+        "created_at_utc": "2026-10-04T00:00:00Z",
+    }
+    event.update(overrides)
+    return event
+
+
+def _export_rows(tmp_path, events: list[dict[str, object]]) -> list[dict[str, str]]:
+    events_path = tmp_path / "events.jsonl"
+    output_csv = tmp_path / "dataset.csv"
+    events_path.write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
+        encoding="utf-8",
+    )
+    exit_code = export_policy_dataset_main(
+        ["--events", str(events_path), "--output-csv", str(output_csv)]
+    )
+    assert exit_code == 0
+    with output_csv.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_export_flattens_decision_model_block_for_v5_events(tmp_path) -> None:
+    rows = _export_rows(
+        tmp_path,
+        [_policy_event(schema_version=5, decision_model=_decision_model_block())],
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["dm_role"] == "policy"
+    assert row["dm_status"] == "ok"
+    assert row["dm_profile"] == "evidence_v1"
+    assert row["dm_model"] == "clef-flash"
+    assert row["dm_top_action"] == "invoke_helper"
+    assert row["dm_top_prob"] == "0.75"
+    assert row["dm_margin"] == "0.5"
+    assert row["dm_entropy"] == "0.56"
+    assert row["dm_atomic_action"] == "frame_only"
+    assert row["dm_traceback_sufficient"] == "0.3"
+    assert row["dm_fix_confidence"] == "0.4"
+    assert row["dm_latency_ms"] == "123.5"
+    assert row["dm_input_tokens"] == "2048"
+    assert row["dm_state_sha256"] == "deadbeef"
+    assert row["dm_prior_beta"] == "0.25"
+    assert row["dm_p_invoke_helper"] == "0.75"
+    assert row["dm_p_skip_helper"] == "0.25"
+    assert row["dm_missing_runtime_values"] == "0.7"
+    assert row["dm_missing_none"] == "0.1"
+
+
+def test_export_leaves_decision_model_columns_empty_for_v4_events(tmp_path) -> None:
+    rows = _export_rows(
+        tmp_path,
+        [
+            _policy_event(
+                schema_version=5, decision_id="dm1", decision_model=_decision_model_block()
+            ),
+            _policy_event(schema_version=4, decision_id="legacy1", case_id="case_legacy"),
+        ],
+    )
+
+    assert len(rows) == 2
+    by_decision = {row["decision_id"]: row for row in rows}
+    legacy = by_decision["legacy1"]
+    # Union-expanded dm columns exist for every row, but stay empty without a block so
+    # that "no advice" is distinguishable from a zero probability.
+    for column in (*DECISION_MODEL_SCALAR_COLUMNS, "dm_p_invoke_helper", "dm_missing_none"):
+        assert legacy[column] == "", column
+    assert by_decision["dm1"]["dm_p_invoke_helper"] == "0.75"
+
+
+def test_export_handles_decision_model_block_without_advice(tmp_path) -> None:
+    rows = _export_rows(
+        tmp_path,
+        [
+            _policy_event(
+                decision_model={
+                    "role": "shadow",
+                    "status": "timeout",
+                    "error": "read timeout",
+                    "action_probs": {},
+                    "missing_information": {},
+                    "effect": {},
+                }
+            )
+        ],
+    )
+
+    row = rows[0]
+    assert row["dm_role"] == "shadow"
+    assert row["dm_status"] == "timeout"
+    assert row["dm_top_prob"] == "0.0"
+    assert row["dm_input_tokens"] == "0"
+    assert row["dm_traceback_sufficient"] == ""
+    assert row["dm_fix_confidence"] == ""
+    assert row["dm_prior_beta"] == ""
+
+
+def test_optional_float_cell_renders_empty_for_unusable_values() -> None:
+    """Optional dm scalars stay empty instead of silently becoming 0.0."""
+    assert _optional_float_cell(None) == ""
+    assert _optional_float_cell("not_a_number") == ""
+    assert _optional_float_cell(float("nan")) == ""
+    assert _optional_float_cell("0.25") == 0.25

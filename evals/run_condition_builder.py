@@ -110,6 +110,12 @@ def build_run_condition_inputs(
                 DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
             )
         ),
+        adaptive_online_include_case_labels=bool(
+            _arg_value(args, "adaptive_online_include_case_labels", False)
+        ),
+        adaptive_lite_snapshot_mode=str(
+            _arg_value(args, "adaptive_lite_snapshot_mode", "replace") or "replace"
+        ),
         adaptive_budget_policy_controller=budget_policy_controller,
         adaptive_budget_policy_mode=str(args.adaptive_budget_policy_mode),
         adaptive_budget_policy_algo=str(args.adaptive_budget_policy_algo),

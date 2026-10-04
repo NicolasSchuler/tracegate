@@ -11,6 +11,7 @@ from .adaptive_online_policy import (
     AdaptiveOnlinePolicyController,
     PolicyDecision,
 )
+from .decision_model.policy import decision_model_metadata_fields
 from .eval_policy_features import _adaptive_online_local_reward_components
 from .eval_types import (
     ADAPTIVE_AUX_REWARD_COMPACTION_EFFICIENCY_WEIGHT_DEFAULT,
@@ -90,7 +91,9 @@ def _adaptive_online_behavior_fields(
     if behavior_action_norm == "none":
         return "none", 1.0
     behavior_propensity = 1.0
-    if decision.selected_action == behavior_action_norm:
+    # In shadow mode the executed baseline action is deterministic (probability 1); only an
+    # applied ("on") selection carries the policy's propensity.
+    if str(decision.mode) == "on" and decision.selected_action == behavior_action_norm:
         behavior_propensity = float(decision.propensity)
     return behavior_action_norm, behavior_propensity
 
@@ -397,6 +400,7 @@ def _sync_adaptive_online_metadata(
         "adaptive_online_updated": bool(update.updated),
         "adaptive_online_update_reason": str(update.update_reason),
         "adaptive_online_event_logged": bool(update.event_logged),
+        **decision_model_metadata_fields(decision.decision_model if decision is not None else None),
     }
     update.attempt_metadata.update(fields)
     update.patch_meta.update(fields)

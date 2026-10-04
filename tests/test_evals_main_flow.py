@@ -2379,3 +2379,51 @@ class TestTokenUsageUnavailable:
                 argv_tokens=[],
             )
             assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: decision-model binding is attached to the helper-policy controller
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionModelBinding:
+    def test_binding_is_passed_only_when_a_role_is_enabled(self, monkeypatch) -> None:
+        from evals.decision_model.policy import DecisionModelBinding
+
+        case = _FakeCaseSpec(case_id="c1")
+        cond = _FakeCondition(value="base_repair")
+        _mock_display, flow_mod, _ = _wire_full_flow(
+            monkeypatch,
+            cases_and_conditions=[(case, cond)],
+            resumed={("c1", "base_repair")},
+            remaining=1,
+        )
+        mock_online_config = MagicMock()
+        mock_online_config.mode = "on"
+        monkeypatch.setattr(
+            flow_mod.OnlinePolicyConfig,
+            "normalize",
+            staticmethod(lambda **kw: mock_online_config),
+        )
+        captured: dict[str, object] = {}
+
+        def _controller(cfg, decision_model=None):
+            captured["decision_model"] = decision_model
+            controller = MagicMock()
+            controller.load_error = None
+            return controller
+
+        monkeypatch.setattr("evals.eval_main_flow.AdaptiveOnlinePolicyController", _controller)
+        args = _make_args()
+        args.adaptive_decision_model_role = "shadow"
+
+        with _run_with_cleanup(flow_mod):
+            from evals.eval_main_flow import run_main_flow
+
+            run_main_flow(parser=_make_parser(), args=args, argv_tokens=[])
+
+        binding = captured["decision_model"]
+        assert isinstance(binding, DecisionModelBinding)
+        assert binding.role == "shadow"
+        assert binding.advisor is not None
+        binding.advisor.close()

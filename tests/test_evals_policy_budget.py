@@ -121,6 +121,17 @@ class TestBudgetBehaviorFields:
         assert action == ACTION_KEEP_BUDGET
         assert propensity == pytest.approx(0.7)
 
+    def test_shadow_mode_behavior_is_deterministic(self) -> None:
+        decision = _make_budget_decision(
+            mode="shadow",
+            selected_action=ACTION_KEEP_BUDGET,
+            applied_action=ACTION_KEEP_BUDGET,
+            propensity=0.2,
+        )
+        action, propensity = _adaptive_budget_behavior_fields(decision=decision)
+        assert action == ACTION_KEEP_BUDGET
+        assert propensity == 1.0
+
     def test_applied_action_not_in_actions(self) -> None:
         decision = _make_budget_decision(
             selected_action="keep_budget",

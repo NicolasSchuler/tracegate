@@ -45,7 +45,8 @@ def _adaptive_budget_behavior_fields(
     applied_action = str(decision.applied_action)
     behavior_action = applied_action if applied_action in BUDGET_POLICY_ACTIONS else "none"
     behavior_propensity = 1.0
-    if selected_action == behavior_action:
+    # Shadow mode applies the deterministic baseline, so only "on" decisions carry propensities.
+    if str(decision.mode) == "on" and selected_action == behavior_action:
         behavior_propensity = float(decision.propensity)
         if str(decision.applied_family) and str(decision.selected_family) == str(
             decision.applied_family

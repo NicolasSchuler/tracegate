@@ -26,7 +26,8 @@
   - Runtime integrations and support: `hooks.py`, `redaction_policy.py`, `git_context.py`, `coverage_context.py`, `async_context.py`, `log_capture.py`, `_rate_limiter.py`, `_warnings.py`.
 - `evals/`: benchmark and analysis harness.
   - Runners and summaries: `run_eval.py`, `eval_main_flow.py`, `eval_main_setup.py`, `eval_main_resume.py`, `eval_attempt_flow.py`, `eval_attempt_support.py`, `analyze_results.py`, `eval_summary.py`, `eval_two_pass_summary.py`, `report_run_metrics.py`, `select_cases.py`, `validate_cases.py`.
-  - Adaptive controller, policy, and contracts: `adaptive_online_policy.py`, `adaptive_budget_online_policy.py`, `adaptive_controller_packet.py`, `adaptive_controller_runtime.py`, `adaptive_history.py`, `bootstrap_policy_state.py`, `controller_summarizer.py`, `eval_policy_budget.py`, `eval_policy_features.py`, `eval_policy_online.py`, `policy_feature_scaling.py`, `stage_a_contract.py`.
+  - Adaptive controller, policy, and contracts: `adaptive_online_policy.py`, `adaptive_policy_records.py`, `adaptive_budget_online_policy.py`, `adaptive_controller_packet.py`, `adaptive_controller_runtime.py`, `adaptive_history.py`, `bootstrap_policy_state.py`, `controller_summarizer.py`, `eval_policy_budget.py`, `eval_policy_features.py`, `eval_policy_online.py`, `policy_feature_scaling.py`, `stage_a_contract.py`.
+  - System-1 decision-model advice: `decision_model/` (`config.py`, `schema.py`, `state.py`, `policy.py`, `client.py`, `runtime.py`, `probe.py`); its GPU sidecar lives in `docker/decision_model/`.
   - Runtime/evidence/patching support: `eval_config.py`, `eval_evidence.py`, `eval_patches.py`, `eval_patch_constants.py`, `attempt_metadata.py`, `attempt_verification.py`, `run_condition_builder.py`, `runtime_resolution.py`, `lambda_rlm_backend.py`, `token_counting.py`, `native_openai_attempt_flow.py`, `native_stage_b_flow.py`.
   - Support packages: `patchers/`, `importers/`, `swebench/`, `swebench_pro/`, `configs/`, `docker/`, `cases/`.
 - `tests/`: pytest suite for package behavior, RCA flows, MCP tools, eval harnesses, quality-contract checks, and SWE-Bench helpers.
@@ -80,7 +81,7 @@ uv run pyright
 uv run pytest -x -q -m "not integration"
 ```
 
-`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode, 7 core eval modules). This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
+`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode, a curated list of eval modules: core config/types/reporting, `decision_model/`, and `swebench/`). This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
 
 ### Full local quality pass
 ```bash
@@ -185,10 +186,10 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - In the adaptive conditions (`layered_adaptive_gated`, `layered_adaptive_llm`), a **policy layer — not the LLM — controls what evidence the patching model receives**. This is a deliberate design decision backed by empirical evidence: when given free choice, LLMs consistently over-request context (snapshots, files, frames), inflating token usage without proportional accuracy gains.
 - The architecture enforces evidence selection through 3 layers:
   1. **Informativeness pregate**: scores traceback diagnostic value; skips the helper entirely if the traceback is already sufficient.
-  2. **Policy action selection**: a rule-based gate or LinUCB contextual bandit picks one of 8 actions constraining which *types* of evidence the Stage-A LLM may request.
+  2. **Policy action selection**: a rule-based gate or a LinUCB/Thompson contextual bandit picks one of 10 actions constraining which *types* of evidence the Stage-A LLM may request. An optional System-1 decision model (`--adaptive-decision-model-role`) can advise or make this choice, but only over the feasible actions and after layer 1.
   3. **Request filtering**: any LLM requests outside the allowed types are silently discarded before execution.
 - This is a distinct contribution vs the baseline conditions (`ldb`, `intervenor`, `tracecoder`, `lambda_rlm`, `rlm`), where either the harness or the LLM has unconstrained control over evidence. The policy-controlled approach treats evidence selection as a *resource allocation* problem optimized via online learning.
-- When editing adaptive policy code (`adaptive_online_policy.py`, `adaptive_budget_online_policy.py`, `policy_feature_scaling.py`, `eval_attempt_flow.py`, `eval_policy_features.py`, `eval_policy_online.py`, and `run_eval.py` compatibility seams), preserve this 3-layer enforcement architecture. Do not bypass the policy by letting the LLM directly control evidence selection.
+- When editing adaptive policy code (`adaptive_online_policy.py`, `adaptive_policy_records.py`, `decision_model/`, `adaptive_budget_online_policy.py`, `policy_feature_scaling.py`, `eval_attempt_flow.py`, `eval_policy_features.py`, `eval_policy_online.py`, and `run_eval.py` compatibility seams), preserve this 3-layer enforcement architecture. Do not bypass the policy by letting the LLM directly control evidence selection.
 
 - SWE-Bench Lite support lives under `evals/swebench/` and uses a local/Docker paired workflow for generation, validation, and official scoring. Follow `evals/README.md` and `docs/local_docker_eval_runbook.md`.
 - SWE-Bench Pro support lives under `evals/swebench_pro/` — a contamination-free, multi-language benchmark (731 instances). Uses Docker-based scoring against pre-built DockerHub images. CLI: `python -m evals.swebench_pro.cli <subcommand>`. See `evals/README.md`.

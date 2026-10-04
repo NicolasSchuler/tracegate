@@ -5,16 +5,22 @@
 ### Features
 
 - Add an offline `llmdebug quickstart` command that creates and displays a real synthetic snapshot.
+- Add a System-1 decision-model advisor for the adaptive helper policy (`evals/decision_model/`): a SystemOne-compatible endpoint (e.g. Cloudflare clef-flash served by llama.cpp through llama-swap, or the bundled PyTorch sidecar) can run in `shadow`, `policy`, `features` or `prior` role via `--adaptive-decision-model-role`, with versioned question profiles, a redacted bounded decision state, policy-event schema v5, decision-model off-policy targets, and an `--adaptive-decision-model-api-key` (default `$TRACEGATE_DECISION_MODEL_API_KEY`) that `run_eval_docker.sh` passes as a flag and lockfiles redact.
 
 ### Bug Fixes
 
 - Apply `SnapshotConfig` redaction-profile defaults on the config-first capture path, preserve explicit overrides, and provide intent-aware frozen-config updates.
 - Compare both line and branch coverage in no-regression quality checks.
+- Stop feeding oracle case labels (`case_difficulty_ord`, `case_snapshot_dependency_ord`, `case_bug_source_imported`) to the helper policy by default; `--adaptive-online-include-case-labels` restores the old behavior.
+- Under `--adaptive-reveal-mode full`, the `snapshot_lite`, `frame_locals_lite` and `snapshot_full_lite` actions now replace the full snapshot section instead of duplicating evidence; `--adaptive-lite-snapshot-mode supplement` restores the old behavior.
+- Log behavior propensity 1.0 for shadow-mode helper and budget decisions (the executed baseline is deterministic), fixing inflated off-policy weights.
+- Label Thompson-sampling greedy helper decisions as `thompson_greedy` instead of `linucb_greedy`.
 
 ### Refactoring
 
 - Remove a Stage-B reverse dependency and consolidate legacy eval metadata plumbing behind typed request objects.
 - Move notebook/eval analytics libraries out of the core install and behind explicit extras.
+- Move the helper-policy decision/event records to `evals/adaptive_policy_records.py` (re-exported from `evals.adaptive_online_policy`).
 
 ### Documentation
 

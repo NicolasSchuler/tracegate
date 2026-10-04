@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import _json as json
+from .decision_model.config import DECISION_MODEL_API_KEY_ENV
 from .eval_types import (
     CONTAINER_NETWORK_MODES,
     DEFAULT_CONTAINER_CPUS,
@@ -49,6 +50,16 @@ if TYPE_CHECKING:
     pass
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# CLI flags whose values never reach lockfiles, and how to pass each secret instead of a config
+# literal.
+_SECRET_CLI_FLAGS = frozenset({"--openai-api-key", "--adaptive-decision-model-api-key"})
+_SECRET_CONFIG_HINTS = {
+    "openai_api_key": "Use 'openai_api_key_env' to reference an environment variable.",
+    "adaptive_decision_model_api_key": (
+        f"Set {DECISION_MODEL_API_KEY_ENV} in the environment instead."
+    ),
+}
 
 # Module-level reference to the active execution config (set by set_active_execution_config).
 _ACTIVE_EXECUTION_CONFIG = ExecutionConfig()
@@ -387,7 +398,7 @@ def _apply_toml_configs_to_args(
                     continue
                 raise ValueError(
                     f"{path}: '{key}' is not allowed in config files. "
-                    "Use 'openai_api_key_env' to reference an environment variable."
+                    f"{_SECRET_CONFIG_HINTS.get(key, 'Pass it via the environment instead.')}"
                 )
             if key in RUN_EVAL_SECRET_CONFIG_ENV_KEYS:
                 env_key = str(raw_value).strip()
@@ -439,12 +450,13 @@ def _redact_cli_argv(argv_tokens: list[str]) -> list[str]:
             out.append(RUN_EVAL_LOCKFILE_REDACTED)
             redact_next = False
             continue
-        if token == "--openai-api-key":
+        if token in _SECRET_CLI_FLAGS:
             out.append(token)
             redact_next = True
             continue
-        if token.startswith("--openai-api-key="):
-            out.append(f"--openai-api-key={RUN_EVAL_LOCKFILE_REDACTED}")
+        flag, separator, _value = token.partition("=")
+        if separator and flag in _SECRET_CLI_FLAGS:
+            out.append(f"{flag}={RUN_EVAL_LOCKFILE_REDACTED}")
             continue
         out.append(token)
     return out

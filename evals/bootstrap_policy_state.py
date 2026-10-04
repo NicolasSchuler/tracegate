@@ -39,6 +39,7 @@ from .adaptive_online_policy import (
 from .adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
+from .eval_policy_features import CASE_LABEL_FEATURE_NAMES, drop_case_label_features
 from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     normalize_feature_scaling_profile,
@@ -137,6 +138,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Fail on first unreadable file or malformed JSON line.",
     )
+    parser.add_argument(
+        "--keep-case-label-features",
+        action="store_true",
+        help=(
+            "Keep the oracle case-label features "
+            f"({', '.join(CASE_LABEL_FEATURE_NAMES)}) when replaying helper-policy events. "
+            "They are dropped by default to match the runtime feature mask; pass this flag "
+            "only to reproduce historical runs that learned from them."
+        ),
+    )
     args = parser.parse_args(argv)
 
     expanded = _expand_paths(args.events)
@@ -165,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
                 warmup_decisions=int(args.warmup_decisions),
                 save_every=max(1, _safe_int(args.save_every, default=50)),
                 source_paths=expanded,
+                keep_case_label_features=bool(args.keep_case_label_features),
             )
         else:
             payload, summary = _bootstrap_budget_state(
@@ -201,6 +213,7 @@ def _bootstrap_online_state(
     warmup_decisions: int,
     save_every: int,
     source_paths: list[str],
+    keep_case_label_features: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     algorithm = _infer_uniform_string(
         events,
@@ -238,6 +251,11 @@ def _bootstrap_online_state(
         else:
             warnings.append("invalid_selected_action_skipped")
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
+        if not keep_case_label_features:
+            masked_features = drop_case_label_features(feature_values)
+            if len(masked_features) != len(feature_values):
+                warnings.append("case_label_features_dropped")
+            feature_values = masked_features
         _ensure_feature_state(state=state, cleaned_features=feature_values, l2=l2)
         _update_feature_scaling_caps(
             state=state,
@@ -275,6 +293,7 @@ def _bootstrap_online_state(
         **_serialize_replay_state(state),
         "saved_at_utc": _utc_now(),
         "bootstrap_kind": "online",
+        "bootstrap_case_label_features_kept": bool(keep_case_label_features),
         "bootstrap_events_replayed": len(events),
         "bootstrap_source_paths": list(source_paths),
         "bootstrap_warning_codes": sorted(set(warnings)),

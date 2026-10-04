@@ -1,0 +1,104 @@
+[run_eval]
+# Decision-model probe: clef-flash answers stay advisory and enter LinUCB as six
+# diagnostic features, so every arm learns on its own how much to trust them.
+run_id = "replace-me-dm-features"
+patcher = "openai"
+conditions = "layered_adaptive_llm"
+max_cases = 0
+k = 2
+jobs = 1
+retry_prompt_mode = "full"
+# Optional prompt feature gates (all disabled by default).
+prompt_retry_reflection = false
+prompt_adaptive_stage_b_cot = false
+prompt_repair_method_scaffold = false
+prompt_retry_plan_then_patch = false
+prompt_order_mode = "current"
+adaptive_reveal_mode = "full"
+snapshot_frame_pruning_mode = "off"
+force_patch_attempt = true
+case_fail_fast_on_request_budget_exceeded = true
+transport_fail_fast_streak = 0
+
+# Secret policy: use env indirection, not plaintext keys.
+openai_api_key_env = "OPENAI_API_KEY"
+
+[run_eval.openai]
+base_url = "http://127.0.0.1:12000/v1"
+model = "Qwen3.5-35B-A3B-Q4_K_M"
+compat_profile = "lmstudio_model_yaml"
+allow_reasoning_fallback = true
+enable_thinking = true
+http2 = true
+response_mode = "edits"
+auto_context_window = true
+response_mode_autoswitch = "retry_to_diff"
+temperature = 0.0
+timeout_sec = 600.0
+max_propose_sec = 600.0
+transport_max_retries = 6
+transport_retry_backoff_base_sec = 1.0
+transport_retry_backoff_max_sec = 8.0
+
+[run_eval.adaptive]
+max_helper_calls = 1
+budget_topup_max_calls = 1
+informativeness_pregate = true
+informativeness_pregate_threshold = 0.7
+online_policy_mode = "on"
+# System-1 decision model (sidecar: just decision-model-up).
+decision_model_role = "features"
+online_policy_algo = "linucb"
+online_alpha = 0.6
+online_epsilon = 0.10
+online_l2 = 1.0
+online_warmup_decisions = 50
+online_save_every = 5
+# Use "v1_interactions" to add the curated helper-policy interaction terms.
+online_feature_scaling_profile = "v1"
+online_action_score_biases = "search_only=-1.00,frame_only=-0.50"
+online_init_state_path = ""
+online_state_path = "evals/artifacts/policies/replace-me-dm-features-policy.json"
+online_events_path = "evals/results/replace-me-dm-features-policy-events.jsonl"
+# Explicitly pin budget policy mode instead of relying on CLI defaults.
+budget_policy_mode = "on"
+budget_policy_algo = "linucb"
+budget_policy_architecture = "tier_binary"
+budget_policy_tiers = "1.0,1.1,1.2,1.35,1.5"
+budget_policy_max_ups_per_case = 1
+budget_online_alpha = 0.4
+budget_online_epsilon = 0.05
+budget_online_l2 = 1.0
+budget_online_warmup_decisions = 20
+budget_online_save_every = 5
+budget_feature_scaling_profile = "v1"
+budget_init_state_path = ""
+budget_online_state_path = "evals/artifacts/policies/replace-me-dm-features-budget-policy.json"
+budget_online_events_path = "evals/results/replace-me-dm-features-budget-policy-events.jsonl"
+# Required when budget_policy_architecture = "bwk_v1".
+budget_bwk_run_token_budget = 50000
+budget_reward_rho_budget_exceeded = 0.5
+reward_lambda_tokens = 0.02
+reward_mu_latency = 0.01
+reward_token_scale = 1000.0
+reward_latency_scale = 10.0
+reward_eta_progress = 0.15
+reward_kappa_stagnation = 0.10
+no_progress_token_cap = 15000
+
+[run_eval.context]
+compaction_mode = "auto_overflow"
+compaction_scope = "snapshot,pytest,files"
+compaction_max_calls = 1
+compaction_target_chars = 18000
+
+[run_eval.patch]
+sanitize_enabled = true
+verifier_scope = "adaptive_only"
+verifier_min_score = 2
+verifier_infer_test_source_scope = true
+
+[run_eval.syntax]
+preflight_enabled = true
+preflight_max_cycles = 2
+preflight_fallthrough = true

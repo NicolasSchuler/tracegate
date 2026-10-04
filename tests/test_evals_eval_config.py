@@ -565,6 +565,21 @@ class TestRedactCliArgv:
             "2",
         ]
 
+    def test_decision_model_api_key_redacted_in_both_forms(self) -> None:
+        tokens = [
+            "--adaptive-decision-model-api-key",
+            "dm-secret",
+            "--adaptive-decision-model-api-key=dm-secret",
+            "--adaptive-decision-model-url=http://gateway:9292/upstream/clef-flash-q4",
+        ]
+        result = eval_config._redact_cli_argv(tokens)
+        assert result == [
+            "--adaptive-decision-model-api-key",
+            RUN_EVAL_LOCKFILE_REDACTED,
+            f"--adaptive-decision-model-api-key={RUN_EVAL_LOCKFILE_REDACTED}",
+            "--adaptive-decision-model-url=http://gateway:9292/upstream/clef-flash-q4",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # _parse_container_env
@@ -931,6 +946,17 @@ class TestApplyTomlConfigsToArgs:
                 parser=parser, args=args, argv_tokens=["--config", cfg_str]
             )
 
+    def test_literal_decision_model_api_key_raises(self, tmp_path: Path) -> None:
+        cfg = tmp_path / "dm_secret.toml"
+        cfg.write_text('[adaptive]\ndecision_model_api_key = "dm-secret"\n', encoding="utf-8")
+        parser = _make_parser_with_flags()
+        cfg_str = str(cfg)
+        args = parser.parse_args(["--config", cfg_str])
+        with pytest.raises(ValueError, match="TRACEGATE_DECISION_MODEL_API_KEY"):
+            eval_config._apply_toml_configs_to_args(
+                parser=parser, args=args, argv_tokens=["--config", cfg_str]
+            )
+
     def test_literal_secret_key_empty_skipped(self, tmp_path: Path) -> None:
         """Line 286: openai_api_key with empty value → silently skipped."""
         cfg = tmp_path / "empty_secret.toml"
@@ -1112,6 +1138,11 @@ class TestResolvedArgsForLockfile:
         result = eval_config._resolved_args_for_lockfile(ns)
         assert result["openai_api_key"] == RUN_EVAL_LOCKFILE_REDACTED
         assert result["k"] == 2
+
+    def test_redacts_decision_model_api_key(self) -> None:
+        ns = argparse.Namespace(adaptive_decision_model_api_key="dm-secret", k=2)
+        result = eval_config._resolved_args_for_lockfile(ns)
+        assert result["adaptive_decision_model_api_key"] == RUN_EVAL_LOCKFILE_REDACTED
 
     def test_empty_api_key_not_redacted(self) -> None:
         ns = argparse.Namespace(openai_api_key="", k=2)
