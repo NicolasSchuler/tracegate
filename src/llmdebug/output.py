@@ -20,7 +20,12 @@ from ._debug_session import normalize_snapshot_view
 from ._hashing import xxh64_hexdigest_text
 from ._warnings import emit_warning
 from .config import SnapshotConfig
-from .snapshot_index import index_entry_from_payload, is_snapshot_name, snapshot_files
+from .snapshot_index import (
+    index_entry_from_payload,
+    is_snapshot_name,
+    snapshot_files,
+    traceback_sidecar,
+)
 from .state_db import (
     list_snapshot_records,
     remove_snapshot_records,
@@ -124,7 +129,7 @@ def _delete_snapshot_artifacts(snapshot: Path) -> bool:
         emit_warning(f"could not clean up {snapshot.name}: {type(e).__name__}: {e}")
         return False
 
-    traceback_file = snapshot.with_suffix("").with_suffix(".traceback.txt")
+    traceback_file = traceback_sidecar(snapshot)
     try:
         traceback_file.unlink(missing_ok=True)
     except Exception as e:
@@ -299,7 +304,7 @@ def write_bundle(payload: dict[str, Any], cfg: SnapshotConfig) -> Path:
             if isinstance(tb_raw, str):
                 traceback_text = tb_raw
     if traceback_text is not None:
-        tb_path = out_dir / f"{base}.traceback.txt"
+        tb_path = traceback_sidecar(snapshot_path)
         tb_path.write_text(traceback_text, encoding="utf-8")
 
     # Lock for symlink update and cleanup (these can race with concurrent writers)
