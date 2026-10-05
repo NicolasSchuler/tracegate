@@ -408,15 +408,15 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 
 ## Phase 5: structure and remaining hygiene
 
-These are behaviour-preserving refactors, each in its own commit or PR with no functional change. Prove each is behaviour-preserving with golden fixture runs: the stub server plus fixture cases should produce identical records, ignoring timestamps and durations.
+These are behaviour-preserving refactors, each in its own commit or PR with no functional change. Prove each is behaviour-preserving with golden fixture runs: the stub server plus fixture cases should produce identical records, ignoring timestamps and durations. *(Golden runs: `just golden-evals`, see `docs/testing-guide.md`; generated at `0c9a188`.)*
 
 ### 5.1. Replace the forwarding shims (X-02)
-- [ ] Introduce a `RunContext` holding the execution config, run settings, container pool and controllers, and pass it into the main and attempt flows. Retire the module globals.
-- [ ] Move shared helpers out of `run_eval` into modules that own them, imported in one direction.
-- [ ] Reduce `eval_attempt_support` and `eval_main_support` to thin, typed re-exports, or delete them. Keep the monkeypatch seams that tests and importers rely on until every consumer is updated (AGENTS.md).
-- [ ] Give the private `analyze_results` helpers that other modules import public names in a small module.
-- [ ] Break the `baselines/` ↔ `evals/` cycle: move the shared pieces (`adaptive_controller_packet` types, `subprocess_monitor`) to a neutral module.
-- [ ] Add an `evals/` architecture-boundary test, alongside `tests/test_architecture_boundaries.py`.
+- [x] Introduce a `RunContext` holding the execution config, run settings, container pool and controllers, and pass it into the main and attempt flows. Retire the module globals. *(`evals/run_context.py` travels in `RunConditionInputs` to `run_pytest`; the `_ACTIVE_*` globals and setters are gone. Controllers were already passed explicitly (POL-05), so the global was only used to close them and is now a local. Run-level collaborators go in `EvalSeams`, which `run_eval` builds from its own attributes so existing test patches keep working. The case tooling (`validate_cases`, importers, probe) still sets `eval_config`'s active execution config: it lives outside `run_eval`, is set and restored explicitly, and reaches every importer's validation path.)*
+- [x] Move shared helpers out of `run_eval` into modules that own them, imported in one direction. *(About 120 helpers in 14 owner modules; `run_eval` is the CLI plus re-exports, 6,705 → ~2,250 lines.)*
+- [x] Reduce `eval_attempt_support` and `eval_main_support` to thin, typed re-exports, or delete them. Keep the monkeypatch seams that tests and importers rely on until every consumer is updated (AGENTS.md). *(Deleted. Tests now patch attempt-level collaborators on `evals.eval_attempt_flow`; AGENTS.md documents the new seams. ATT-22's `run_pytest` compat wrapper went with them.)*
+- [x] Give the private `analyze_results` helpers that other modules import public names in a small module. *(`evals/analysis_api.py`.)*
+- [x] Break the `baselines/` ↔ `evals/` cycle: move the shared pieces (`adaptive_controller_packet` types, `subprocess_monitor`) to a neutral module. *(Into `baselines/`, so imports run `evals` → `baselines` only; `baselines.compare_results`, a CLI nothing imports, is the one exception.)*
+- [x] Add an `evals/` architecture-boundary test, alongside `tests/test_architecture_boundaries.py`. *(`tests/test_evals_architecture_boundaries.py`, replacing `test_evals_shim_writes.py`. It also rejects test patches of `run_eval` re-exports; it found one that had silently done nothing.)*
 
 ### 5.2. Split the very large functions (X-01)
 - [ ] Move `run_eval.main` into `evals/eval_cli_args.py::build_parser()`.
