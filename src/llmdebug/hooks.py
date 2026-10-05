@@ -276,9 +276,14 @@ def _make_unraisable_hook(
     def hook(unraisable: Any) -> None:
         exc = unraisable.exc_value
         tb = unraisable.exc_traceback
-        if exc is not None and tb is not None:
+        if (
+            exc is not None
+            and tb is not None
+            and not isinstance(exc, (KeyboardInterrupt, SystemExit))
+        ):
             try:
-                obj_repr = repr(unraisable.object) if unraisable.object else None
+                obj = unraisable.object
+                obj_repr = repr(obj) if obj is not None else None
             except Exception:
                 obj_repr = f"<repr failed: {type(unraisable.object).__name__}>"
             _capture_safely(
