@@ -58,7 +58,7 @@ from .openai_compat_patcher import (
     _normalize_base_url,
     _probe_server_ready,
 )
-from .payload_types import PatcherMeta
+from .payload_types import PatcherMeta, copy_patcher_meta
 
 logger = logging.getLogger(__name__)
 
@@ -718,13 +718,15 @@ class BaselinePatcher(Patcher):
         """Probe the OpenAI-compatible backend used by the baseline adapter."""
         base_url = _normalize_base_url(self.config.api_base_url)
         api_key = self.config.api_key or _default_api_key()
+        api_timeout_sec = self.config.api_timeout_sec
+        assert api_timeout_sec is not None  # the config's __post_init__ resolves it
         ready, meta = _probe_server_ready(
             base_url=base_url,
             api_key=api_key,
-            timeout_sec=self.config.api_timeout_sec,
+            timeout_sec=api_timeout_sec,
             http2=False,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault(
             "model",

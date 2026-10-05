@@ -9,6 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from evals.patchers.payload_types import as_patcher_meta
+
 
 def _measure_attempt_wall_clock_sec(attempt_start_monotonic: float) -> float:
     return max(0.0, float(time.perf_counter() - attempt_start_monotonic))
@@ -87,7 +89,7 @@ def _build_attempt_budget_exhausted_patch_result(
     response_mode = str(getattr(patcher, "response_mode", "") or "")
     if response_mode:
         meta["response_mode"] = response_mode
-    return PatchResult(diff=None, meta=meta)
+    return PatchResult(diff=None, meta=as_patcher_meta(meta))
 
 
 def _build_attempt_budget_exhausted_plan_result(
@@ -127,7 +129,7 @@ def _build_attempt_budget_exhausted_plan_result(
     response_mode = str(getattr(patcher, "response_mode", "") or "")
     if response_mode:
         meta["response_mode"] = response_mode
-    return PatchPlanResult(plan_text=None, raw_response=None, meta=meta)
+    return PatchPlanResult(plan_text=None, raw_response=None, meta=as_patcher_meta(meta))
 
 
 def _patcher_with_shared_attempt_budget(
@@ -234,7 +236,7 @@ def _propose_patch_with_snapshot_context(
             enriched_meta["attempt_shared_propose_call_budget_sec"] = call_budget_sec
         if budget_clamped:
             enriched_meta["attempt_shared_propose_budget_clamped"] = True
-    return PatchResult(diff=result.diff, meta=enriched_meta)
+    return PatchResult(diff=result.diff, meta=as_patcher_meta(enriched_meta))
 
 
 def _plan_patch_with_snapshot_context(
@@ -305,5 +307,5 @@ def _plan_patch_with_snapshot_context(
     return PatchPlanResult(
         plan_text=result.plan_text,
         raw_response=getattr(result, "raw_response", None),
-        meta=enriched_meta,
+        meta=as_patcher_meta(enriched_meta),
     )

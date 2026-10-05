@@ -15,6 +15,7 @@ from evals.eval_types import (
     PATCHER_CONTEXT_LIMIT_ERROR_MARKERS,
     RETRYABLE_HTTP_STATUS_CODES,
 )
+from evals.patchers.payload_types import as_patcher_meta
 from evals.record_keys import KEY_INFRA_RESUME_ELIGIBLE
 
 
@@ -159,24 +160,24 @@ def _result_with_meta(result: Any, meta: dict[str, Any]) -> Any:
     )
 
     if isinstance(result, PatchResult):
-        return PatchResult(diff=result.diff, meta=meta)
+        return PatchResult(diff=result.diff, meta=as_patcher_meta(meta))
     if isinstance(result, PatchPlanResult):
         return PatchPlanResult(
             plan_text=result.plan_text,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     if isinstance(result, ContextRequestResult):
         return ContextRequestResult(
             request_json=result.request_json,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     if isinstance(result, ContextCompactionResult):
         return ContextCompactionResult(
             compacted_text=result.compacted_text,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     return result
 

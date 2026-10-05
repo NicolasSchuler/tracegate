@@ -9,7 +9,7 @@ from typing import Any, cast
 from evals import _json as json
 from evals.coerce import nonnegative_int as _nonnegative_int
 from evals.patchers.openai_diff_text import _strip_think
-from evals.patchers.payload_types import PatcherMeta, UsagePayload
+from evals.patchers.payload_types import PatcherMeta, UsagePayload, copy_patcher_meta
 from evals.stage_a_contract import coerce_stage_a_bool
 
 
@@ -63,8 +63,8 @@ def _usage_payload_from_counts(
     completion_tokens: int,
     total_tokens: int,
     reasoning_tokens: int | None = None,
-) -> dict[str, int]:
-    out = {
+) -> UsagePayload:
+    out: UsagePayload = {
         "prompt_tokens": _nonnegative_int(prompt_tokens, default=0),
         "completion_tokens": _nonnegative_int(completion_tokens, default=0),
         "total_tokens": _nonnegative_int(
@@ -189,13 +189,13 @@ def _is_truncated_response(resp: dict[str, Any]) -> bool:
     return _get_first_choice_finish_reason(resp) == "length"
 
 
-def _error_meta(meta: Mapping[str, Any], reason: str, **extra: Any) -> PatcherMeta:
+def _error_meta(meta: Mapping[str, Any], reason: str, /, **extra: Any) -> PatcherMeta:
     """*meta* with ``error=reason``; an earlier call error is kept as ``transport_error``.
 
     Spreading *meta* after the reason let a stale transport error from an earlier
     stage replace the specific parse failure (LLM-14).
     """
-    out: PatcherMeta = {**meta, **extra}
+    out = copy_patcher_meta({**meta, **extra})
     stale = str(out.get("error") or "")
     if stale and stale != reason:
         out["transport_error"] = stale
