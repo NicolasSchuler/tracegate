@@ -81,7 +81,6 @@ from evals.patchers.openai_edits_apply import (  # noqa: F401
     _apply_fuzzy_block_replacement,
     _build_forced_attempt_diff,
     _compile_whitespace_normalized_pattern,
-    _extract_file_index_paths,
     _looks_like_edit_entry,
     _normalize_edits_payload,
     _normalize_full_file_response,
@@ -1453,7 +1452,7 @@ class OpenAICompatPatcher(Patcher):
             meta["forced_patch_skip_detail"] = skip_reason
             return PatchResult(diff=None, meta=meta)
 
-        forced = _build_forced_attempt_diff(prompt=prompt, cwd=cwd)
+        forced = _build_forced_attempt_diff(cwd=cwd)
         if forced is None:
             return result
 
@@ -1635,7 +1634,7 @@ class OpenAICompatPatcher(Patcher):
             meta["forced_patch_skip_detail"] = skip_reason
             return PatchResult(diff=None, meta=meta)
 
-        forced = _build_forced_attempt_diff(prompt=prompt, cwd=cwd)
+        forced = _build_forced_attempt_diff(cwd=cwd)
         if forced is None:
             return result
 

@@ -340,23 +340,22 @@ def _normalize_full_file_response(raw: dict[str, Any]) -> tuple[str | None, Patc
     return repaired, meta
 
 
-def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
+def _workdir_python_files(cwd: Path) -> list[str]:
+    """The workdir's Python files, relative and sorted, skipping tool directories."""
     exclude_dirs = {".llmdebug", "__pycache__", ".venv", ".git"}
-    candidates: list[str] = []
+    found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(cwd):
         dirnames[:] = sorted(name for name in dirnames if name not in exclude_dirs)
         dirpath_path = Path(dirpath)
         for filename in sorted(filenames):
-            if not filename.endswith(".py"):
-                continue
             path = dirpath_path / filename
-            if not path.is_file():
-                continue
-            rel = str(path.relative_to(cwd))
-            if _is_test_file_path(rel):
-                continue
-            candidates.append(rel)
-    candidates.sort()
+            if filename.endswith(".py") and path.is_file():
+                found.append(str(path.relative_to(cwd)))
+    return sorted(found)
+
+
+def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
+    candidates = [rel for rel in _workdir_python_files(cwd) if not _is_test_file_path(rel)]
     if len(candidates) == 1:
         return candidates[0], "single_non_test_python_file"
     if not candidates:
@@ -364,9 +363,13 @@ def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
     return None, "multiple_non_test_python_files"
 
 
-def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | None:
-    """Build a deterministic minimal patch when model output is empty/invalid."""
-    candidates = _extract_file_index_paths(prompt)
+def _build_forced_attempt_diff(*, cwd: Path) -> tuple[str, str] | None:
+    """Build a deterministic minimal patch when model output is empty/invalid.
+
+    The target comes from the workdir itself, not from a file list parsed back out of
+    the prompt, where a case file's text could redirect it (LLM-26).
+    """
+    candidates = _workdir_python_files(cwd)
     if not candidates:
         return None
 
@@ -407,28 +410,3 @@ def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | N
 
     diff = _build_diff_from_changes([(target_rel, before, after)])
     return target_rel, diff
-
-
-def _extract_file_index_paths(prompt: str) -> list[str]:
-    lines = prompt.splitlines()
-    start = None
-    for i, line in enumerate(lines):
-        if line.strip().startswith("Available files"):
-            start = i + 1
-            break
-    if start is None:
-        return []
-
-    out: list[str] = []
-    for line in lines[start:]:
-        s = line.strip()
-        if not s:
-            if out:
-                break
-            continue
-        if s.endswith(":"):
-            break
-        if s.startswith("Pytest output") or s.startswith("Project files:"):
-            break
-        out.append(s)
-    return out

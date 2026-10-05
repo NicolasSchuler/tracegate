@@ -2094,29 +2094,23 @@ class TestBuildForcedAttemptDiff:
     """Cover lines 5307, 5367-5368, 5379, 5444."""
 
     def test_no_candidates(self) -> None:
-        result = mod._build_forced_attempt_diff(
-            prompt="just some text without file index",
-            cwd=Path("/nonexistent"),
-        )
+        result = mod._build_forced_attempt_diff(cwd=Path("/nonexistent"))
         assert result is None
 
     def test_path_outside_case(self, tmp_path: Path) -> None:
         """Lines 5367-5368: path escapes cwd."""
-        prompt = "Available files\n../../etc/passwd.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
     def test_file_does_not_exist(self, tmp_path: Path) -> None:
-        prompt = "Available files\nnonexistent.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
     def test_marker_already_present(self, tmp_path: Path) -> None:
         """Line 5379: marker already in file → use alternate marker."""
         src = tmp_path / "buggy.py"
         src.write_text("# llmdebug-force-attempt\n")
-        prompt = "Available files\nbuggy.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         _target_rel, diff = result
         assert "force-attempt-2" in diff
@@ -2125,22 +2119,19 @@ class TestBuildForcedAttemptDiff:
         """Line 5307: skip test files, use first non-test .py."""
         (tmp_path / "test_foo.py").write_text("# test\n")
         (tmp_path / "buggy.py").write_text("code\n")
-        prompt = "Available files\ntest_foo.py\nbuggy.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "buggy.py"
 
     def test_only_test_files_falls_back(self, tmp_path: Path) -> None:
         """Lines around 5307: all .py files are test files → fallback to any .py."""
         (tmp_path / "test_main.py").write_text("# test\n")
-        prompt = "Available files\ntest_main.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "test_main.py"
 
     def test_no_py_files_returns_none(self, tmp_path: Path) -> None:
-        prompt = "Available files\nREADME.md\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
 
@@ -2171,20 +2162,6 @@ class TestFixHunkCounts:
         """)
         result = mod._fix_hunk_counts(diff)
         assert "@@ -1,1 +1,1 @@" in result
-
-
-class TestExtractFileIndexPaths:
-    """Cover _extract_file_index_paths edge cases."""
-
-    def test_stops_at_colon_line(self) -> None:
-        prompt = "Available files\nfoo.py\nbar.py\nSome section:\nmore stuff"
-        result = mod._extract_file_index_paths(prompt)
-        assert result == ["foo.py", "bar.py"]
-
-    def test_stops_at_pytest_output(self) -> None:
-        prompt = "Available files\nfoo.py\nPytest output here"
-        result = mod._extract_file_index_paths(prompt)
-        assert result == ["foo.py"]
 
 
 class TestResolveFullFileTarget:

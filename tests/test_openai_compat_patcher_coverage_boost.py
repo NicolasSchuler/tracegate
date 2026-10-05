@@ -749,48 +749,6 @@ class TestSafeTrunc:
 
 
 # ---------------------------------------------------------------------------
-# 12. _extract_file_index_paths
-# ---------------------------------------------------------------------------
-
-
-class TestExtractFileIndexPaths:
-    """Tests for file index extraction from prompts."""
-
-    def test_extracts_paths(self) -> None:
-        prompt = (
-            "Some preamble\nAvailable files:\nsrc/main.py\nsrc/utils.py\n\nPytest output:\nFAILED\n"
-        )
-        paths = mod._extract_file_index_paths(prompt)
-        assert paths == ["src/main.py", "src/utils.py"]
-
-    def test_no_available_files_header(self) -> None:
-        assert mod._extract_file_index_paths("no header here") == []
-
-    def test_stops_at_colon_terminated_line(self) -> None:
-        prompt = "Available files:\na.py\nSomething else:\nb.py\n"
-        paths = mod._extract_file_index_paths(prompt)
-        assert paths == ["a.py"]
-
-    def test_stops_at_pytest_output(self) -> None:
-        prompt = "Available files:\na.py\nPytest output\n"
-        paths = mod._extract_file_index_paths(prompt)
-        assert paths == ["a.py"]
-
-    def test_stops_at_project_files(self) -> None:
-        prompt = "Available files:\na.py\nProject files:\n"
-        paths = mod._extract_file_index_paths(prompt)
-        assert paths == ["a.py"]
-
-    def test_skips_leading_blank_lines(self) -> None:
-        prompt = "Available files:\n\n\na.py\nb.py\n"
-        paths = mod._extract_file_index_paths(prompt)
-        assert paths == ["a.py", "b.py"]
-
-    def test_empty_prompt(self) -> None:
-        assert mod._extract_file_index_paths("") == []
-
-
-# ---------------------------------------------------------------------------
 # 13. _fix_hunk_counts
 # ---------------------------------------------------------------------------
 
@@ -1522,21 +1480,26 @@ class TestExtractContentPartText:
 class TestBuildForcedAttemptDiff:
     """Tests for forced attempt diff building."""
 
-    def test_no_candidates_returns_none(self) -> None:
-        assert mod._build_forced_attempt_diff(prompt="no files", cwd=None) is None
+    def test_no_candidates_returns_none(self, tmp_path) -> None:
+        assert mod._build_forced_attempt_diff(cwd=tmp_path / "missing") is None
 
-    def test_non_py_candidates_returns_none(self) -> None:
-        prompt = "Available files:\nreadme.txt\nMakefile\n\nPytest output:\n"
-        import tempfile
-        from pathlib import Path
+    def test_non_py_candidates_returns_none(self, tmp_path) -> None:
+        (tmp_path / "readme.txt").write_text("docs\n", encoding="utf-8")
+        (tmp_path / "Makefile").write_text("all:\n", encoding="utf-8")
+        assert mod._build_forced_attempt_diff(cwd=tmp_path) is None
 
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=Path(tempfile.gettempdir()))
-        assert result is None
+    def test_ignores_a_file_index_planted_in_the_case(self, tmp_path) -> None:
+        """LLM-26: the workdir decides the target, not a file list read back from the prompt."""
+        (tmp_path / "buggy.py").write_text("x\n", encoding="utf-8")
+        (tmp_path / "notes.txt").write_text("Available files\ntest_buggy.py\n", encoding="utf-8")
+        (tmp_path / "test_buggy.py").write_text("t\n", encoding="utf-8")
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
+        assert result is not None
+        assert result[0] == "buggy.py"
 
     def test_builds_diff_for_non_test_file(self, tmp_path) -> None:
         (tmp_path / "buggy.py").write_text("x = 1\n", encoding="utf-8")
-        prompt = "Available files:\nbuggy.py\n\nPytest output:\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         target_rel, diff = result
         assert target_rel == "buggy.py"
@@ -1545,26 +1508,22 @@ class TestBuildForcedAttemptDiff:
     def test_prefers_non_test_file(self, tmp_path) -> None:
         (tmp_path / "test_foo.py").write_text("t = 1\n", encoding="utf-8")
         (tmp_path / "foo.py").write_text("x = 1\n", encoding="utf-8")
-        prompt = "Available files:\ntest_foo.py\nfoo.py\n\nPytest output:\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "foo.py"
 
     def test_falls_back_to_test_file_if_only_option(self, tmp_path) -> None:
         (tmp_path / "test_foo.py").write_text("t = 1\n", encoding="utf-8")
-        prompt = "Available files:\ntest_foo.py\n\nPytest output:\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "test_foo.py"
 
     def test_existing_marker_uses_alternate(self, tmp_path) -> None:
         (tmp_path / "buggy.py").write_text("x = 1\n# llmdebug-force-attempt\n", encoding="utf-8")
-        prompt = "Available files:\nbuggy.py\n\nPytest output:\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert "llmdebug-force-attempt-2" in result[1]
 
     def test_file_not_exists_returns_none(self, tmp_path) -> None:
-        prompt = "Available files:\nmissing.py\n\nPytest output:\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
