@@ -638,3 +638,32 @@ class TestErrorFallbacks:
         monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
         result = get_rca_status(out_dir=str(tmp_path), session_id="nonexistent")
         assert result is None
+
+
+def test_trim_replaces_the_store_atomically(tmp_path: Path, monkeypatch) -> None:
+    """RCA-18: readers take no lock, so the trim must never truncate the live file."""
+    import os
+
+    import llmdebug.rca_backend as backend
+
+    monkeypatch.setenv("LLMDEBUG_RCA_MAX_RECORDS", "2")
+    store = tmp_path / "rca_attempts.jsonl"
+    for attempt in ("a1", "a2"):
+        _append_record(store, dict(_record(attempt)))  # type: ignore[arg-type]
+    seen_at_swap: list[list[str]] = []
+    real_replace = os.replace
+
+    def _replace(src: object, dst: object) -> None:
+        # What a concurrent reader would see right before the swap: the complete old file.
+        seen_at_swap.append(Path(str(dst)).read_text(encoding="utf-8").splitlines())
+        real_replace(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(backend.os, "replace", _replace)
+    _append_record(store, dict(_record("a3")))  # type: ignore[arg-type]
+
+    assert [json.loads(line)["attempt_id"] for line in seen_at_swap[0]] == ["a1", "a2", "a3"]
+    assert [json.loads(line)["attempt_id"] for line in store.read_text().splitlines()] == [
+        "a2",
+        "a3",
+    ]
+    assert not (tmp_path / "rca_attempts.jsonl.tmp").exists()

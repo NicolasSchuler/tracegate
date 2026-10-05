@@ -156,9 +156,14 @@ def _append_record(path: Path, record: Mapping[str, Any]) -> None:
             return
 
         trimmed = lines[-max_records:]
+        # Readers take no lock, so never truncate in place: they see the old file or the
+        # new one, not a half-written one (RCA-18).
+        tmp_path = path.with_name(f"{path.name}.tmp")
         try:
-            path.write_text("\n".join(trimmed) + "\n", encoding="utf-8")
+            tmp_path.write_text("\n".join(trimmed) + "\n", encoding="utf-8")
+            os.replace(tmp_path, path)
         except OSError:
+            tmp_path.unlink(missing_ok=True)
             return
 
 
