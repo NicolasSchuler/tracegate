@@ -184,6 +184,8 @@ async def _http_get_json_async(
             status = int(response.status_code)
             raw_text = response.text
             http_version = str(getattr(response, "http_version", "") or "")
+    except ValueError as exc:
+        return None, {"error": "bad_request_url", "exc": f"{type(exc).__name__}: {exc}"}
     except Exception as exc:
         if http2_effective and _is_http2_protocol_error(exc):
             fallback_used = True

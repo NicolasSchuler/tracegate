@@ -2729,6 +2729,7 @@ async def _propose_patch_via_diff_async(
     seed: int | None,
     http2: bool,
     deadline_monotonic: float | None = None,
+    system_prompt_override: str | None = None,
     transport_max_retries: int = _DEFAULT_CHAT_COMPLETION_TRANSPORT_MAX_RETRIES,
     transport_retry_backoff_base_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_BASE_SEC,
     transport_retry_backoff_max_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_MAX_SEC,
@@ -2737,7 +2738,8 @@ async def _propose_patch_via_diff_async(
         {
             "role": "system",
             "content": (
-                "You fix failing tests by returning a single unified diff. "
+                system_prompt_override
+                or "You fix failing tests by returning a single unified diff. "
                 "Return ONLY the diff; no explanations. Do not use Markdown fences."
             ),
         },
@@ -2750,7 +2752,8 @@ async def _propose_patch_via_diff_async(
             {
                 "role": "system",
                 "content": (
-                    "You fix failing tests by returning a single unified diff. "
+                    system_prompt_override
+                    or "You fix failing tests by returning a single unified diff. "
                     "Return ONLY the diff; no explanations. Do not use Markdown fences. "
                     "Start your response with 'diff --git a/'."
                 ),
@@ -2831,6 +2834,7 @@ async def _propose_patch_via_edits_async(
     http2: bool,
     deadline_monotonic: float | None = None,
     allow_diff_fallback: bool = True,
+    system_prompt_override: str | None = None,
     transport_max_retries: int = _DEFAULT_CHAT_COMPLETION_TRANSPORT_MAX_RETRIES,
     transport_retry_backoff_base_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_BASE_SEC,
     transport_retry_backoff_max_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_MAX_SEC,
@@ -2839,7 +2843,8 @@ async def _propose_patch_via_edits_async(
         {
             "role": "system",
             "content": (
-                "Return only JSON with this schema: "
+                system_prompt_override
+                or "Return only JSON with this schema: "
                 '{"edits":[{"path":"relative/path.py","find":"exact old text","replace":"new text","count":1}]}. '
                 "No prose. No markdown. "
                 "Use only exact existing paths from the prompt's available file list. "
@@ -2903,6 +2908,7 @@ async def _propose_patch_via_edits_async(
             seed=seed,
             http2=http2,
             deadline_monotonic=deadline_monotonic,
+            system_prompt_override=system_prompt_override,
             transport_max_retries=transport_max_retries,
             transport_retry_backoff_base_sec=transport_retry_backoff_base_sec,
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
@@ -3073,6 +3079,7 @@ async def _propose_patch_via_full_file_async(
     seed: int | None,
     http2: bool,
     deadline_monotonic: float | None = None,
+    system_prompt_override: str | None = None,
     transport_max_retries: int = _DEFAULT_CHAT_COMPLETION_TRANSPORT_MAX_RETRIES,
     transport_retry_backoff_base_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_BASE_SEC,
     transport_retry_backoff_max_sec: float = _DEFAULT_CHAT_COMPLETION_RETRY_BACKOFF_MAX_SEC,
@@ -3110,6 +3117,7 @@ async def _propose_patch_via_full_file_async(
             seed=seed,
             http2=http2,
             deadline_monotonic=deadline_monotonic,
+            system_prompt_override=system_prompt_override,
             transport_max_retries=transport_max_retries,
             transport_retry_backoff_base_sec=transport_retry_backoff_base_sec,
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
@@ -3170,7 +3178,8 @@ async def _propose_patch_via_full_file_async(
             {
                 "role": "system",
                 "content": (
-                    f"You fix failing tests by returning the complete repaired contents of "
+                    system_prompt_override
+                    or f"You fix failing tests by returning the complete repaired contents of "
                     f"{target_rel}. Return ONLY the full contents of {target_rel}. "
                     "No prose. No markdown fences. Do not return a diff."
                 ),
@@ -3181,7 +3190,8 @@ async def _propose_patch_via_full_file_async(
             {
                 "role": "system",
                 "content": (
-                    f"Return ONLY the complete repaired contents of {target_rel}. "
+                    system_prompt_override
+                    or f"Return ONLY the complete repaired contents of {target_rel}. "
                     "Start directly with the file contents. "
                     "No prose. No markdown fences. Do not return a diff."
                 ),
