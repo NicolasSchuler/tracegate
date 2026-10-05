@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect as _inspect_module
+import linecache
 import os
 import platform
 import sys
@@ -197,33 +198,30 @@ def get_env_info(cfg: SnapshotConfig) -> dict[str, Any]:
     }
 
 
-def get_source_snippet(filename: str, lineno: int, ctx: int) -> dict[str, Any]:
-    """Extract source code around a line."""
+def get_source_snippet(
+    filename: str,
+    lineno: int,
+    ctx: int,
+    module_globals: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Extract source code around a line.
+
+    Reads through ``linecache``, the cache ``traceback`` already filled for this
+    exception (CAP-08): IPython cells and ``exec`` sources registered there, and
+    zipimport modules (via ``__loader__`` in *module_globals*) work, the snippet matches
+    the frame's ``code`` line, and a file is read once rather than once per frame.
+    """
     try:
-        if not filename or not os.path.exists(filename):
+        lines = linecache.getlines(filename, module_globals) if filename else []
+        if not lines:
             return {}
         start_line = max(lineno - ctx, 1)
         end_line = max(lineno + ctx, start_line)
-        snippet: list[dict[str, Any]] = []
-        last_line = 0
-        has_more_lines = False
-
-        # Stream file content and capture only the requested window.
-        with open(filename, encoding="utf-8", errors="replace") as f:
-            for line_no, line in enumerate(f, start=1):
-                last_line = line_no
-                if line_no < start_line:
-                    continue
-                if line_no > end_line:
-                    has_more_lines = True
-                    break
-                snippet.append({"lineno": line_no, "code": line.rstrip("\n")})
-
-        if last_line == 0:
-            return {}
-
-        actual_end = end_line if has_more_lines else min(end_line, last_line)
-        return {"start": start_line, "end": actual_end, "snippet": snippet}
+        snippet: list[dict[str, Any]] = [
+            {"lineno": line_no, "code": line.rstrip("\n")}
+            for line_no, line in enumerate(lines[start_line - 1 : end_line], start=start_line)
+        ]
+        return {"start": start_line, "end": min(end_line, len(lines)), "snippet": snippet}
     except Exception:
         return {}
 
@@ -402,7 +400,9 @@ def _serialize_frame(
             _warn(warnings, f"coroutine frame detection failed: {type(e).__name__}: {e}")
 
     if cfg.source_mode == "all" or (cfg.source_mode == "crash_only" and idx == total - 1):
-        frame_dict["source"] = get_source_snippet(ex_item.filename, lineno, cfg.source_context)
+        frame_dict["source"] = get_source_snippet(
+            ex_item.filename, lineno, cfg.source_context, frame.f_globals
+        )
 
     if cfg.locals_mode == "safe":
         _add_locals_safe(frame_dict, frame, cfg, effective_redactors)

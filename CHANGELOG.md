@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Source snippets come from `linecache` (CAP-08): `get_source_snippet` required `os.path.exists(filename)` and re-read the file for every frame, so IPython cells, `exec` code and zipimported modules had no source in snapshots. It now reads through `linecache` (the cache `traceback` filled for the same exception, with the frame's globals so zip loaders work), which also keeps the snippet consistent with the frame's `code` line.
 - CLI error paths exit non-zero (RCA-15): `llmdebug clean` exited 0 for a missing directory and when deletions failed, and `llmdebug git-context` printed "unavailable" to stdout with exit 0, which broke `--json` consumers. They now exit 1 with the message on stderr. A snapshot that another process already deleted counts as deleted in `clean`, not as a failure.
 - Git output is decoded as UTF-8 with replacement characters (RCA-14): `_run_git_command` used the locale encoding with strict errors, so a non-UTF-8 author name, file name or commit message raised `UnicodeDecodeError` past its error handlers; capture swallowed it, the CLI and MCP git-context paths crashed.
 - Jupyter (RCA-07, RCA-08): when magic registration failed, `install()` left `showtraceback` wrapped with `_installed=False`, so `uninstall()` did nothing and a retry wrapped it twice (tracebacks printed and captured twice); the original hook is now restored. Notebook HTML now escapes the crash `line` and the cell `execution_count` like every other value; a snapshot from a shared directory could inject script into the notebook's origin.
