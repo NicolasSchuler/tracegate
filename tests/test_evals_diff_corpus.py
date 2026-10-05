@@ -192,3 +192,17 @@ def test_truncated_response_is_not_applied(  # LLM-02
     assert result.diff is None
     assert result.meta is not None
     assert result.meta["error"] == "truncated_response"
+
+
+def test_failed_crlf_preparation_leaves_every_target_untouched(tmp_path: Path) -> None:  # LLM-09
+    root = _workdir(tmp_path, crlf=True)
+    before = {name: (root / name).read_bytes() for name in ("a.py", "b.py")}
+    (root / "b.py").chmod(0o444)
+    try:
+        ok, message = apply_diff(root, DIFF_A + DIFF_B)
+    finally:
+        (root / "b.py").chmod(0o644)
+
+    assert not ok
+    assert "CRLF" in message
+    assert {name: (root / name).read_bytes() for name in ("a.py", "b.py")} == before

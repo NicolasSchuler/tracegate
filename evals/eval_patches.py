@@ -112,12 +112,18 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     crlf_targets = _crlf_diff_targets(cwd, diff)
     if not crlf_targets:
         return _apply_validated_diff(cwd, diff)
-    for target in crlf_targets:
-        target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+    normalized: list[Path] = []
     try:
-        return _apply_validated_diff(cwd, diff.replace("\r\n", "\n"))
-    finally:
         for target in crlf_targets:
+            # Preparing one target can fail (a read-only file) after earlier ones were
+            # already rewritten, so the rollback has to cover those too (LLM-09).
+            target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+            normalized.append(target)
+        return _apply_validated_diff(cwd, diff.replace("\r\n", "\n"))
+    except OSError as exc:
+        return False, f"could not prepare CRLF diff targets: {type(exc).__name__}: {exc}"
+    finally:
+        for target in normalized:
             if target.is_file() and not target.is_symlink():
                 target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
 
