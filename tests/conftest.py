@@ -10,6 +10,14 @@ import pytest
 from llmdebug.output import get_latest_snapshot
 
 
+@pytest.fixture(autouse=True)
+def _mcp_root_covers_tmp_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """MCP tools confine ``out_dir`` to ``$LLMDEBUG_MCP_ROOT`` (RCA-02); tests use tmp dirs."""
+    monkeypatch.setenv("LLMDEBUG_MCP_ROOT", str(tmp_path_factory.getbasetemp()))
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register CLI options for live repair integration test overrides."""
     parser.addoption(

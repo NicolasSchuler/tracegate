@@ -15,8 +15,12 @@ Run with: llmdebug-mcp (stdio transport for IDE integration)
 
 from __future__ import annotations
 
+import functools
+import inspect
 import logging
 import sys
+from collections.abc import Callable
+from typing import ParamSpec
 
 # Guard import — mcp is optional
 try:
@@ -51,6 +55,7 @@ from .mcp_contract import (
 )
 from .mcp_diff_tools import handle_diff
 from .mcp_git_context import collect_git_evidence_refs, parse_max_commits
+from .mcp_paths import resolve_mcp_out_dir
 from .mcp_rca import (
     RCAAdvanceToolRequest,
     RCAAttemptRequest,
@@ -119,12 +124,40 @@ def _check_rate_limit(tool: str, response_format: str, evidence_schema: str) -> 
     )
 
 
+_P = ParamSpec("_P")
+
+
+def _confined(tool: Callable[_P, str]) -> Callable[_P, str]:
+    """Resolve the tool's ``out_dir`` inside the MCP root, or answer with an error (RCA-02)."""
+    signature = inspect.signature(tool)
+
+    @functools.wraps(tool)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        try:
+            bound.arguments["out_dir"] = resolve_mcp_out_dir(str(bound.arguments["out_dir"]))
+        except ValueError as exc:
+            return _render_tool_error(
+                tool=tool.__name__,
+                response_format=str(bound.arguments.get("response_format", "json")),
+                evidence_schema=str(bound.arguments.get("evidence_schema", "summary")),
+                with_rca=False,
+                code="INVALID_ARGUMENT",
+                message=str(exc),
+            )
+        return tool(*bound.args, **bound.kwargs)
+
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_diagnose(
     out_dir: str = ".llmdebug",
     detail: str = "context",
@@ -240,6 +273,7 @@ def llmdebug_diagnose(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_show(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -397,6 +431,7 @@ def llmdebug_show(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_list(
     out_dir: str = ".llmdebug",
     limit: int = 10,
@@ -427,6 +462,7 @@ def llmdebug_list(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_frame(
     index: int = 0,
     out_dir: str = ".llmdebug",
@@ -469,6 +505,7 @@ def llmdebug_frame(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_git_context(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -613,6 +650,7 @@ def llmdebug_git_context(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_diff(
     old_ref: str = "previous",
     new_ref: str = "latest",
@@ -655,6 +693,7 @@ def llmdebug_diff(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_rca_status(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -676,6 +715,7 @@ def llmdebug_rca_status(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_rca_history(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -697,6 +737,7 @@ def llmdebug_rca_history(
 
 
 @_mcp.tool()
+@_confined
 def llmdebug_rca_advance(
     action: str,
     out_dir: str = ".llmdebug",

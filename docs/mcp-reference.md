@@ -75,6 +75,13 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   parsing free-form error text.
 - Text mode is retained for interactive compatibility; JSON mode is the safer
   default for programmatic consumers.
+- **Path confinement:** every tool resolves `out_dir` against the MCP root,
+  `$LLMDEBUG_MCP_ROOT`, or the server's working directory when it is unset.
+  A relative `out_dir` is taken relative to the root. An `out_dir` that resolves
+  outside it, after following symlinks, returns `INVALID_ARGUMENT` before
+  anything is read or created. Snapshot paths and diff refs must also lie inside
+  `out_dir`, so they are confined too. Set `LLMDEBUG_MCP_ROOT` in the server's
+  environment (for example in `.mcp.json`) to serve a different tree.
 
 ## Parameter Glossary
 
