@@ -60,23 +60,8 @@ KEY_MAP: dict[str, str] = {
     "end": "_e",
     "snippet": "_snip",
     "lineno": "_ln",
-    # Array summary keys
-    "__array__": "_arr",
-    "__dataframe__": "_df",
-    "__series__": "_ser",
-    "__type__": "_typ",
-    "shape": "_sh",
-    "dtype": "_dt",
-    "head": "_hd",
-    "head_truncated": "_ht",
-    "device": "_dev",
-    "requires_grad": "_rg",
-    "anomalies": "_anom",
-    "stats": "_st",
-    "mean": "_mu",
-    "std": "_sd",
-    "min": "_mn",
-    "max": "_mx",
+    # No array/DataFrame summary keys: they only occur inside locals and args, which are
+    # never compacted, so those 16 entries could never apply (CAP-17).
     # Env keys
     "python": "_py",
     "executable": "_exe",

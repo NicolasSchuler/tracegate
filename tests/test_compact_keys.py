@@ -296,3 +296,10 @@ class TestIsCompactSnapshot:
         """If full-key structural keys are present alongside short ones, treat as full."""
         data = {"schema_version": 1, "frames": [], "_exc": {}}
         assert is_compact_snapshot(data) is False
+
+
+def test_every_key_map_entry_can_apply() -> None:
+    """CAP-17: entries for keys that only occur in user-data subtrees were dead."""
+    summary_only = {"__array__", "__dataframe__", "__series__", "shape", "dtype", "stats", "head"}
+
+    assert not summary_only & set(KEY_MAP)
