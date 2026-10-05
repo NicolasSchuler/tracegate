@@ -21,6 +21,11 @@ from typing import Any
 from baselines.case_information import build_baseline_case_context_payload
 from baselines.controller_packet import HYBRID_GUIDANCE_MODE_FIXED_V1
 from evals import _json as json
+from evals.adaptive_action_selection import (
+    HelperActionInputs,
+    HelperActionState,
+    select_helper_action,
+)
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -49,7 +54,6 @@ from evals.adaptive_online_policy import (
     ACTION_SNAPSHOT_LITE,
 )
 from evals.adaptive_progress import (
-    _adaptive_gate_should_invoke_helper,
     _adaptive_helper_outcome_for_attempt,
     _adaptive_pipeline_stage_before,
     _adaptive_pipeline_stage_for_outcome,
@@ -120,19 +124,11 @@ from evals.attempt_verification import (
     make_syntax_preflight_state,
 )
 from evals.decision_model.config import LITE_SNAPSHOT_SUPPLEMENT
-from evals.decision_model.runtime import (
-    AdviceRequest,
-    advise_for_attempt,
-    binding_of,
-    record_advice_state,
-)
-from evals.decision_model.state import DecisionStateInputs, redact_terms_for_unit
 from evals.eval_config import (
     _parse_adaptive_budget_policy_tiers,
     _parse_adaptive_online_action_score_biases,
 )
 from evals.eval_evidence import (
-    _coerce_context_request_payload,
     _collect_file_index_lines,
     _compute_evidence_fingerprint,
     _evidence_ids_from_items,
@@ -143,9 +139,7 @@ from evals.eval_evidence import (
     _xxh3_128_text,
     build_fallback_context_bundle,
     collect_text_context,
-    deny_fallback_for_restricted_action,
     evidence_chars_by_type,
-    execute_context_requests,
 )
 from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR, patcher_meta_truncated
 from evals.eval_patches import (
@@ -190,15 +184,12 @@ from evals.eval_prompts import (
     _apply_prompt_budget,
     _build_retry_history_section,
     _build_snapshot_prompt_text,
-    _format_frame_locals_section,
-    _format_snapshot_full_section,
     _format_snapshot_index_section,
     _format_snapshot_payload_section,
     _format_snapshot_section,
     _is_generic_snapshot_justification,
     _render_retry_packet,
     prune_snapshot_for_prompt,
-    render_stage_a_request_prompt,
 )
 from evals.eval_recording import (
     _build_base_record,
@@ -233,7 +224,6 @@ from evals.eval_types import (
     EVAL_RECORD_TYPE_ATTEMPT,
     EVAL_RECORD_TYPE_INFRA_EVENT,
     HELPER_FULL_SNAPSHOT_ACTIONS,
-    HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
@@ -259,12 +249,9 @@ from evals.eval_types import (
     PreGateResult,
     RunConditionInputs,
     RunResult,
-    StageAContextData,
     UnitExecutionOutcome,
     _default_helper_action,
     _empty_stage_a_context,
-    _filter_context_request_payload_for_action,
-    _helper_action_availability,
 )
 from evals.lambda_rlm_backend import (
     default_lambda_rlm_repo_dir,
@@ -323,6 +310,11 @@ from evals.run_condition_builder import (
     _resolve_run_condition_inputs,
 )
 from evals.stage_a_contract import StageARequestPayloadModel, normalize_stage_a_request_payload
+from evals.stage_a_execution import (
+    StageAInputs,
+    StageAState,
+    run_stage_a_requests,
+)
 from evals.token_counting import estimate_text_token_count, merge_llm_call_usage
 from evals.toon_llm_encoder import estimate_token_savings
 from evals.transport_failures import (
@@ -330,8 +322,6 @@ from evals.transport_failures import (
     _is_context_limit_http_error_message,
     _is_retryable_transport_http_status,
     _is_transport_runtime_error,
-    _request_context_failure_kind_from_meta,
-    _request_context_recovery_failure_kind_from_meta,
     _request_context_retry_counts_from_meta,
     _result_meta_dict,
     _result_with_meta,
@@ -1976,6 +1966,108 @@ def _run_one_condition_attempts(
         )
         return adaptive_progress_stop_candidate, adaptive_progress_stop_reason
 
+    def _record_terminal_attempt(
+        note: str, *, sync_syntax_preflight: bool = False, apply_error: str | None = None
+    ) -> bool:
+        """Score an attempt that ended before the test re-run; return whether to stop early.
+
+        The early exits (no patch, verifier rejection, the two syntax-preflight failures,
+        a failed apply) share this sequence (X-04). *sync_syntax_preflight* copies the
+        cycle's syntax-preflight counters into the metadata; *apply_error* records a
+        failed apply.
+        """
+        nonlocal adaptive_no_progress_token_sum, adaptive_no_progress_token_cap_hit
+        nonlocal cumulative_runtime_sec, previous_failure_context
+        _refresh_adaptive_progress_for_note(
+            note=note,
+            success=False,
+            signature_repeated=True,
+        )
+        (
+            adaptive_progress_stop_candidate_for_note,
+            adaptive_progress_stop_reason_for_note,
+            adaptive_no_progress_token_sum,
+            adaptive_no_progress_token_cap_hit,
+        ) = _apply_no_progress_token_cap_candidate(
+            is_adaptive_condition=is_adaptive_condition,
+            adaptive_progress_made=adaptive_progress_made,
+            adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
+            attempt_tokens_total=_nonnegative_int(attempt_metadata.get("tokens_total"), default=0),
+            adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
+            adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
+            adaptive_progress_stop_reason=adaptive_progress_stop_reason,
+        )
+        patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
+        patch_meta["adaptive_no_progress_token_cap"] = normalized_adaptive_no_progress_token_cap
+        patch_meta["adaptive_no_progress_token_cap_hit"] = adaptive_no_progress_token_cap_hit
+        adaptive_stop_triggered = _mark_adaptive_progress_stop(
+            attempt_metadata=attempt_metadata,
+            patch_meta=patch_meta,
+            is_adaptive_condition=is_adaptive_condition,
+            adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
+            adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
+            note=note,
+        )
+        if sync_syntax_preflight:
+            _sync_syntax_preflight_metadata(
+                attempt_metadata=attempt_metadata,
+                patch_meta=patch_meta,
+                enabled=normalized_syntax_preflight_enabled,
+                cycles_used=syntax_preflight_cycles_used,
+                failures=syntax_preflight_failures,
+                last_error_type=syntax_preflight_last_error_type,
+                last_error_msg=syntax_preflight_last_error_msg,
+                events=syntax_preflight_events,
+            )
+        if apply_error is not None:
+            syntax_state.apply_to_metadata(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
+            (attempt_dir / "apply_error.txt").write_text(apply_error, encoding="utf-8")
+        attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
+        cumulative_runtime_sec += attempt_wall_sec
+        pending_credit = _finalize_adaptive_policy_attempt(
+            note=note,
+            success=False,
+            attempt_wall_sec=attempt_wall_sec,
+            online_finalize_kwargs=online_finalize_kwargs,
+            budget_finalize_kwargs=budget_finalize_kwargs,
+        )
+        record = _build_attempt_outcome_record(
+            case=case,
+            condition=condition,
+            run_id=run_id,
+            attempt=attempt,
+            patcher_name=patcher_name,
+            run_metadata=effective_run_metadata,
+            attempt_metadata=attempt_metadata,
+            patcher=patcher_for_attempt,
+            patch_meta=patch_meta,
+            context_protocol=attempt_context_protocol,
+            success=False,
+            note=note,
+            before=current,
+            cumulative_runtime_sec=cumulative_runtime_sec,
+            attempt_wall_clock_sec=attempt_wall_sec,
+        )
+        _queue_pending_online_credit(pending_credit=pending_credit, record=record)
+        _append_record(record, defer_sink=pending_credit is not None)
+        _mark_scored_attempt_consumed()
+        _capture_attempt_history(
+            attempt=attempt,
+            note=note,
+            failure_signature=failure_signature,
+            record=record,
+            patch_meta=patch_meta,
+            retry_plan_value=retry_plan_text,
+            snapshot_for_history=snapshot,
+        )
+        previous_failure_context = _enrich_failure_context(
+            base=current_failure_context,
+            note=note,
+            patch_meta=patch_meta,
+            run=current,
+        )
+        return adaptive_stop_triggered
+
     default_context_protocol = (
         "monolithic" if is_adaptive_condition else normalized_context_protocol
     )
@@ -3529,242 +3621,92 @@ def _run_one_condition_attempts(
                 )
             )
 
-        if is_adaptive_condition:
-            last_helper_invalid_response = (
-                str(last_helper_decision_reason).strip() == "llm_invalid_response_no_helper"
-            )
-            if pregate_result.should_skip:
-                helper_decision_reason = "informativeness_pregate_skip"
-                online_policy_override_reason = "constraint_informativeness_pregate_skip"
-                helper_action_selected = ACTION_SKIP_HELPER
-                helper_action_executed = ACTION_SKIP_HELPER
-            elif helper_budget_exhausted:
-                helper_decision_reason = "helper_budget_exhausted"
-                online_policy_override_reason = "constraint_helper_budget_exhausted"
-                helper_action_selected = ACTION_SKIP_HELPER
-                helper_action_executed = ACTION_SKIP_HELPER
-            elif helper_saturation_guarded:
-                helper_decision_reason = "helper_saturation_guard"
-                online_policy_override_reason = "constraint_helper_saturation_guard"
-                helper_action_selected = ACTION_SKIP_HELPER
-                helper_action_executed = ACTION_SKIP_HELPER
-            elif adaptive_recovery_forced_action:
-                helper_decision_reason = adaptive_recovery_decision_reason
-                online_policy_override_reason = adaptive_recovery_override_reason
-                helper_action_selected = adaptive_recovery_forced_action
-                helper_action_executed = adaptive_recovery_forced_action
-                helper_should_consult = True
-            elif is_adaptive_gated:
-                helper_should_consult, helper_decision_reason = _adaptive_gate_should_invoke_helper(
-                    policy=normalized_adaptive_gate_policy,
-                    attempt=attempt,
-                    timed_out=bool(current.timed_out),
-                    signature_repeated=failure_signature_repeat,
-                    stagnation_streak=stagnation_streak,
-                    stagnation_window=normalized_adaptive_stagnation_window,
-                )
-                helper_action_selected = (
-                    ACTION_INVOKE_HELPER if helper_should_consult else ACTION_SKIP_HELPER
-                )
-                helper_action_executed = helper_action_selected
-            else:
-                helper_decision_reason = "llm_discretion_pending"
-                helper_available_actions, helper_unavailable_action_reasons = (
-                    _helper_action_availability(
-                        supports_context_request=supports_context_request,
-                        supports_strict_json_first=supports_strict_json_first,
-                        snapshot_available=snapshot is not None,
-                        context_compaction_mode=normalized_context_compaction_mode,
-                        supports_context_compaction=supports_context_compaction,
-                        context_compaction_calls_used=context_compaction_calls_used,
-                        context_compaction_max_calls=effective_context_compaction_max_calls,
-                        last_helper_invalid_response=last_helper_invalid_response,
-                    )
-                )
-                online_policy_eligible = bool(
-                    adaptive_online_policy_controller is not None
-                    and normalized_adaptive_online_policy_mode in {"shadow", "on"}
-                    and len(helper_available_actions) > 1
-                )
-                if online_policy_eligible and adaptive_online_policy_controller is not None:
-                    decide_kwargs: dict[str, Any] = {
-                        "feature_values": online_policy_features_raw,
-                        "default_action": helper_action_default,
-                        "available_actions": helper_available_actions,
-                        "unavailable_action_reasons": helper_unavailable_action_reasons,
-                    }
-                    # System-1 decision model: queried outside the controller lock, only when
-                    # the policy itself is consulted (layer-1 constraints already applied).
-                    decision_model_binding = binding_of(adaptive_online_policy_controller)
-                    decision_model_advice = None
-                    if decision_model_binding is not None:
-                        _emit_progress(
-                            "decision_model_query",
-                            _progress_payload(
-                                owner="harness",
-                                phase_label="harness: decision model",
-                                note="querying decision model",
-                                attempt=int(attempt),
-                                max_attempts=int(k),
-                            ),
-                        )
-                        redact_paths, redact_tokens = redact_terms_for_unit(
-                            workdirs=(str(Path(workdir).resolve()), str(workdir)),
-                            case_id=case.case_id,
-                            condition=condition.value,
-                            run_id=str(run_id),
-                        )
-                        decision_model_advice = advise_for_attempt(
-                            decision_model_binding,
-                            AdviceRequest(
-                                state_inputs=DecisionStateInputs(
-                                    stdout=current.stdout,
-                                    stderr=current.stderr,
-                                    timed_out=bool(current.timed_out),
-                                    snapshot=snapshot,
-                                    attempt=int(attempt),
-                                    max_attempts=int(k),
-                                    previous_failure_context=previous_failure_context,
-                                    retry_history_turns=tuple(retry_history_turns),
-                                    pregate=(
-                                        pregate_result if adaptive_informativeness_pregate else None
-                                    ),
-                                    helper_calls_remaining=(
-                                        None
-                                        if adaptive_budget_unlimited
-                                        else max(
-                                            0, effective_helper_budget_limit - helper_calls_used
-                                        )
-                                    ),
-                                    compaction_calls_remaining=(
-                                        max(
-                                            0,
-                                            effective_context_compaction_max_calls
-                                            - context_compaction_calls_used,
-                                        )
-                                        if normalized_context_compaction_mode != "off"
-                                        else 0
-                                    ),
-                                    failure_signature_repeat=bool(failure_signature_repeat),
-                                    last_helper_action=str(last_helper_action_executed or ""),
-                                    reveal_mode=normalized_adaptive_reveal_mode,
-                                    redact_paths=redact_paths,
-                                    redact_tokens=redact_tokens,
-                                ),
-                                available_actions=tuple(helper_available_actions),
-                                lite_snapshot_mode=adaptive_lite_snapshot_mode,
-                            ),
-                        )
-                        decide_kwargs["advice"] = decision_model_advice
-                    online_policy_decision = adaptive_online_policy_controller.decide(
-                        rng_key=f"helper|{case.case_id}|{condition.value}|{attempt}",
-                        **decide_kwargs,
-                    )
-                    record_advice_state(
-                        decision_model_binding,
-                        decision=online_policy_decision,
-                        advice=decision_model_advice,
-                        context={
-                            "run_id": str(run_id),
-                            "case_id": case.case_id,
-                            "condition": condition.value,
-                            "attempt": int(attempt),
-                        },
-                    )
-                    online_policy_features_scaled = dict(online_policy_decision.feature_values)
-                    online_policy_mode_for_attempt = online_policy_decision.mode
-                    online_policy_algo_for_attempt = online_policy_decision.algorithm
-                    helper_action_selected = str(
-                        online_policy_decision.selected_action or helper_action_default
-                    )
-                    helper_action_executed = str(
-                        online_policy_decision.applied_action or helper_action_default
-                    )
-                    if (
-                        online_policy_decision.applied_action
-                        != online_policy_decision.selected_action
-                    ):
-                        online_policy_override_reason = "shadow_mode_baseline"
-                elif normalized_adaptive_online_policy_mode == "off":
-                    online_policy_override_reason = "policy_off"
-                    helper_action_selected = helper_action_default
-                    helper_action_executed = helper_action_default
-                elif adaptive_online_policy_controller is None:
-                    online_policy_override_reason = "policy_controller_unavailable"
-                    helper_action_selected = helper_action_default
-                    helper_action_executed = helper_action_default
-                elif len(helper_available_actions) == 1:
-                    only_action = str(helper_available_actions[0])
-                    online_policy_override_reason = "constraint_single_feasible_action"
-                    helper_action_selected = only_action
-                    helper_action_executed = only_action
-                else:
-                    online_policy_override_reason = "not_eligible"
-                    helper_action_selected = helper_action_default
-                    helper_action_executed = helper_action_default
-                helper_should_consult = helper_action_executed in HELPER_STAGE_A_ACTIONS
-                if helper_action_executed == ACTION_SKIP_HELPER:
-                    helper_decision_reason = "online_policy_skip_helper"
-                elif helper_action_executed == ACTION_SNAPSHOT_LITE:
-                    helper_decision_reason = "policy_action_snapshot_lite"
-                elif helper_action_executed == ACTION_FRAME_LOCALS_LITE:
-                    helper_decision_reason = "policy_action_frame_locals_lite"
-                elif helper_action_executed == ACTION_SNAPSHOT_FULL_LITE:
-                    helper_decision_reason = "policy_action_snapshot_full_lite"
-                elif helper_action_executed == ACTION_COMPACT_THEN_PATCH:
-                    helper_decision_reason = "policy_action_compact_then_patch"
-            if adaptive_budget_topup_granted and not online_policy_override_reason:
-                online_policy_override_reason = "constraint_helper_budget_topup"
-
-            previous_note_for_override = (
-                str(previous_failure_context.get("note") or "")
-                if isinstance(previous_failure_context, dict)
-                else ""
-            )
-            previous_stagnation_signal = previous_note_for_override in {
-                "no_patch_proposed",
-                TRUNCATED_RESPONSE_ERROR,
-                "patcher_request_failed",
-                "forced_noop_patch",
-                "patch_verifier_rejected",
-                "syntax_preflight_failed",
-                "patch_apply_failed",
-                "tests_still_failing",
-                "retry_gate_no_new_evidence",
-                "hard_stop_no_progress",
-            }
-            policy_skip_signal = bool(
-                online_policy_decision is not None
-                and str(online_policy_decision.applied_action or "") not in HELPER_STAGE_A_ACTIONS
-            )
-            historical_skip_signal = last_helper_decision_reason in {
-                "online_policy_skip_helper",
-                "llm_declined_helper",
-                "llm_invalid_response_no_helper",
-                "llm_snapshot_request_denied_attempt1",
-                "policy_action_snapshot_lite",
-                "policy_action_frame_locals_lite",
-                "policy_action_snapshot_full_lite",
-                "policy_action_compact_then_patch",
-            }
-            if (
-                is_adaptive_llm_discretion
-                and (not helper_should_consult)
-                and failure_signature_repeat
-                and stagnation_streak > 0
-                and previous_stagnation_signal
-                and (policy_skip_signal or historical_skip_signal)
-                and (not pregate_result.should_skip)
-                and supports_context_request
-            ):
-                adaptive_stagnation_override_reason = "repeated_no_progress_after_stagnation_note"
-                if not helper_budget_exhausted and not helper_saturation_guarded:
-                    adaptive_stagnation_override_applied = True
-                    adaptive_force_helper_stage_a = True
-                    helper_action_executed = ACTION_INVOKE_HELPER
-                    helper_should_consult = True
-                    helper_decision_reason = "stagnation_override_force_helper"
-                    online_policy_override_reason = "constraint_stagnation_override_force_helper"
+        select_helper_action_state = select_helper_action(
+            HelperActionInputs(
+                _emit_progress=_emit_progress,
+                _progress_payload=_progress_payload,
+                adaptive_budget_topup_granted=adaptive_budget_topup_granted,
+                adaptive_budget_unlimited=adaptive_budget_unlimited,
+                adaptive_informativeness_pregate=adaptive_informativeness_pregate,
+                adaptive_lite_snapshot_mode=adaptive_lite_snapshot_mode,
+                adaptive_online_policy_controller=adaptive_online_policy_controller,
+                adaptive_recovery_decision_reason=adaptive_recovery_decision_reason,
+                adaptive_recovery_forced_action=adaptive_recovery_forced_action,
+                adaptive_recovery_override_reason=adaptive_recovery_override_reason,
+                attempt=attempt,
+                case=case,
+                condition=condition,
+                context_compaction_calls_used=context_compaction_calls_used,
+                current=current,
+                effective_context_compaction_max_calls=effective_context_compaction_max_calls,
+                effective_helper_budget_limit=effective_helper_budget_limit,
+                failure_signature_repeat=failure_signature_repeat,
+                helper_action_default=helper_action_default,
+                helper_budget_exhausted=helper_budget_exhausted,
+                helper_calls_used=helper_calls_used,
+                helper_saturation_guarded=helper_saturation_guarded,
+                is_adaptive_condition=is_adaptive_condition,
+                is_adaptive_gated=is_adaptive_gated,
+                is_adaptive_llm_discretion=is_adaptive_llm_discretion,
+                k=k,
+                last_helper_action_executed=last_helper_action_executed,
+                last_helper_decision_reason=last_helper_decision_reason,
+                normalized_adaptive_gate_policy=normalized_adaptive_gate_policy,
+                normalized_adaptive_online_policy_mode=normalized_adaptive_online_policy_mode,
+                normalized_adaptive_reveal_mode=normalized_adaptive_reveal_mode,
+                normalized_adaptive_stagnation_window=normalized_adaptive_stagnation_window,
+                normalized_context_compaction_mode=normalized_context_compaction_mode,
+                online_policy_features_raw=online_policy_features_raw,
+                pregate_result=pregate_result,
+                previous_failure_context=previous_failure_context,
+                retry_history_turns=retry_history_turns,
+                run_id=run_id,
+                snapshot=snapshot,
+                stagnation_streak=stagnation_streak,
+                supports_context_compaction=supports_context_compaction,
+                supports_context_request=supports_context_request,
+                supports_strict_json_first=supports_strict_json_first,
+                workdir=workdir,
+            ),
+            HelperActionState(
+                adaptive_force_helper_stage_a=adaptive_force_helper_stage_a,
+                adaptive_stagnation_override_applied=adaptive_stagnation_override_applied,
+                adaptive_stagnation_override_reason=adaptive_stagnation_override_reason,
+                helper_action_executed=helper_action_executed,
+                helper_action_selected=helper_action_selected,
+                helper_available_actions=helper_available_actions,
+                helper_decision_reason=helper_decision_reason,
+                helper_should_consult=helper_should_consult,
+                helper_unavailable_action_reasons=helper_unavailable_action_reasons,
+                online_policy_algo_for_attempt=online_policy_algo_for_attempt,
+                online_policy_decision=online_policy_decision,
+                online_policy_eligible=online_policy_eligible,
+                online_policy_features_scaled=online_policy_features_scaled,
+                online_policy_mode_for_attempt=online_policy_mode_for_attempt,
+                online_policy_override_reason=online_policy_override_reason,
+            ),
+        )
+        adaptive_force_helper_stage_a = select_helper_action_state.adaptive_force_helper_stage_a
+        adaptive_stagnation_override_applied = (
+            select_helper_action_state.adaptive_stagnation_override_applied
+        )
+        adaptive_stagnation_override_reason = (
+            select_helper_action_state.adaptive_stagnation_override_reason
+        )
+        helper_action_executed = select_helper_action_state.helper_action_executed
+        helper_action_selected = select_helper_action_state.helper_action_selected
+        helper_available_actions = select_helper_action_state.helper_available_actions
+        helper_decision_reason = select_helper_action_state.helper_decision_reason
+        helper_should_consult = select_helper_action_state.helper_should_consult
+        helper_unavailable_action_reasons = (
+            select_helper_action_state.helper_unavailable_action_reasons
+        )
+        online_policy_algo_for_attempt = select_helper_action_state.online_policy_algo_for_attempt
+        online_policy_decision = select_helper_action_state.online_policy_decision
+        online_policy_eligible = select_helper_action_state.online_policy_eligible
+        online_policy_features_scaled = select_helper_action_state.online_policy_features_scaled
+        online_policy_mode_for_attempt = select_helper_action_state.online_policy_mode_for_attempt
+        online_policy_override_reason = select_helper_action_state.online_policy_override_reason
 
         current_failure_context: dict[str, Any] = {
             "attempt": attempt,
@@ -3883,219 +3825,73 @@ def _run_one_condition_attempts(
                 if not run_stage_a and helper_action_executed == ACTION_SKIP_HELPER:
                     helper_decision_reason = "online_policy_skip_helper"
         helper_local_started_at = time.perf_counter() if run_stage_a else None
-        if run_stage_a:
-            stage_a_prompt = render_stage_a_request_prompt(
+        run_stage_a_requests_state = run_stage_a_requests(
+            StageAInputs(
+                _run_openai_operation_with_transport_recovery=_run_openai_operation_with_transport_recovery,
+                adaptive_budget_unlimited=adaptive_budget_unlimited,
+                adaptive_tep_controller=adaptive_tep_controller,
+                attempt=attempt,
+                attempt_dir=attempt_dir,
+                cumulative_runtime_sec=cumulative_runtime_sec,
+                current=current,
+                default_context_protocol=default_context_protocol,
+                effective_helper_budget_limit=effective_helper_budget_limit,
                 evidence=evidence,
+                file_index_lines=file_index_lines,
+                full_tep_enabled=full_tep_enabled,
+                helper_action_executed=helper_action_executed,
+                helper_budget_exhausted=helper_budget_exhausted,
+                helper_calls_used=helper_calls_used,
+                helper_saturation_guarded=helper_saturation_guarded,
+                is_adaptive_condition=is_adaptive_condition,
+                is_adaptive_gated=is_adaptive_gated,
+                is_adaptive_llm_discretion=is_adaptive_llm_discretion,
+                patcher_for_attempt=patcher_for_attempt,
+                pregate_result=pregate_result,
+                request_context_fn=request_context_fn,
+                run_stage_a=run_stage_a,
                 snapshot=snapshot,
-                helper_budget_total=(
-                    effective_helper_budget_limit
-                    if is_adaptive_condition and not adaptive_budget_unlimited
-                    else 0
-                ),
-                helper_budget_remaining=(
-                    max(0, effective_helper_budget_limit - helper_calls_used)
-                    if is_adaptive_condition and not adaptive_budget_unlimited
-                    else 0
-                ),
-                helper_action=helper_action_executed,
-                tep_actor_overrides=(
-                    adaptive_tep_controller.stage_a_actor_overrides() if full_tep_enabled else None
-                ),
-            )
-            if supports_context_request:
-                stage_a_request_invoked = True
-                if is_adaptive_condition:
-                    helper_invoked = True
-                if helper_action_executed == ACTION_RETRY_HELPER_STRICT_JSON:
-                    context_result = _run_openai_operation_with_transport_recovery(
-                        patcher_for_attempt=patcher_for_attempt,
-                        operation_name="request_context",
-                        invoke=lambda request_context_fn=request_context_fn,
-                        stage_a_prompt=stage_a_prompt,
-                        attempt_dir=attempt_dir,
-                        workdir=workdir: (
-                            request_context_fn(
-                                prompt=stage_a_prompt,
-                                context_dir=attempt_dir,
-                                cwd=workdir,
-                                strict_json_first=True,
-                            )
-                        ),
-                        classify_failure_kind=_request_context_recovery_failure_kind_from_meta,
-                        attempt=attempt,
-                        attempt_metadata=None,
-                        attempt_context_protocol=default_context_protocol,
-                        before=current,
-                        cumulative_runtime_sec_value=cumulative_runtime_sec,
-                    )
-                else:
-                    context_result = _run_openai_operation_with_transport_recovery(
-                        patcher_for_attempt=patcher_for_attempt,
-                        operation_name="request_context",
-                        invoke=lambda request_context_fn=request_context_fn,
-                        stage_a_prompt=stage_a_prompt,
-                        attempt_dir=attempt_dir,
-                        workdir=workdir: (
-                            request_context_fn(
-                                prompt=stage_a_prompt,
-                                context_dir=attempt_dir,
-                                cwd=workdir,
-                            )
-                        ),
-                        classify_failure_kind=_request_context_recovery_failure_kind_from_meta,
-                        attempt=attempt,
-                        attempt_metadata=None,
-                        attempt_context_protocol=default_context_protocol,
-                        before=current,
-                        cumulative_runtime_sec_value=cumulative_runtime_sec,
-                    )
-            else:
-                context_result = None
-            if context_result is not None:
-                if hasattr(context_result, "meta") and isinstance(context_result.meta, dict):
-                    stage_a_meta.update(context_result.meta)
-                request_candidate = (
-                    context_result.request_json if hasattr(context_result, "request_json") else None
-                )
-                request_payload = _coerce_context_request_payload(request_candidate)
-                if request_payload is not None:
-                    stage_a_request_payload = _filter_context_request_payload_for_action(
-                        action=helper_action_executed,
-                        request_payload=request_payload,
-                    )
-                if hasattr(context_result, "raw_response"):
-                    raw_candidate = context_result.raw_response
-                    if isinstance(raw_candidate, str):
-                        stage_a_raw_response = raw_candidate
-
-            if stage_a_request_payload is not None:
-                stage_a_need_snapshot = bool(stage_a_request_payload.get("need_snapshot"))
-                stage_a_snapshot_justification = str(
-                    stage_a_request_payload.get("snapshot_justification") or ""
-                )
-                stage_a_need_compact_context = bool(
-                    stage_a_request_payload.get("need_compact_context")
-                )
-                stage_a_compact_context_reason = str(
-                    stage_a_request_payload.get("compact_context_reason") or ""
-                )
-                _context_fulfillment_start = time.perf_counter()
-                stage_a_data = execute_context_requests(
-                    request_payload=stage_a_request_payload,
-                    root=workdir,
-                    snapshot=snapshot,
-                    file_index=file_index_lines,
-                    stdout=current.stdout,
-                    stderr=current.stderr,
-                    max_requests=stage_a_max_requests,
-                    max_total_chars=stage_a_max_chars,
-                )
-                stage_a_data = deny_fallback_for_restricted_action(
-                    stage_a_data,
-                    restricted=helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS,
-                )
-                _stage_a_context_fulfillment_sec = time.perf_counter() - _context_fulfillment_start
-                if is_adaptive_condition:
-                    helper_need_more_context = bool(
-                        stage_a_request_payload.get("need_more_context")
-                    )
-                    if is_adaptive_llm_discretion:
-                        helper_decision_reason = (
-                            "llm_requested_helper"
-                            if (helper_need_more_context or stage_a_need_snapshot)
-                            else "llm_declined_helper"
-                        )
-                    elif (
-                        is_adaptive_gated and not helper_should_consult and helper_need_more_context
-                    ):
-                        helper_should_consult = True
-                        helper_decision_reason = "gate_requested_helper"
-            else:
-                request_context_failure_kind = _request_context_failure_kind_from_meta(stage_a_meta)
-                stage_a_failure_reason = {
-                    "transport": "helper_transport_failed",
-                    "backend_unavailable": "helper_unavailable_backend",
-                    "compat_reasoning_only": "helper_compat_reasoning_only",
-                    "request_budget_exceeded": "helper_request_budget_exceeded",
-                    "invalid_payload": "helper_invalid_payload",
-                }.get(request_context_failure_kind, "invalid_or_missing_stage_a_response")
-                if is_adaptive_llm_discretion:
-                    if request_context_failure_kind in {"", "invalid_payload"}:
-                        helper_decision_reason = "llm_invalid_response_no_helper"
-                    stage_a_data = StageAContextData(
-                        blocks=[],
-                        text="",
-                        used_fallback=False,
-                        requests_count=0,
-                        chars_returned=0,
-                        request_success=False,
-                        request_payload=None,
-                        request_raw=stage_a_raw_response,
-                        reason=stage_a_failure_reason,
-                        evidence_items=[],
-                    )
-                else:
-                    stage_a_data = deny_fallback_for_restricted_action(
-                        build_fallback_context_bundle(
-                            root=workdir,
-                            snapshot=snapshot,
-                            stdout=current.stdout,
-                            stderr=current.stderr,
-                            max_total_chars=stage_a_max_chars,
-                            reason=stage_a_failure_reason,
-                            file_index_lines=file_index_lines,
-                            request_raw=stage_a_raw_response,
-                        ),
-                        restricted=helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS,
-                    )
-
-            if stage_a_data.request_payload is None:
-                stage_a_data = StageAContextData(
-                    blocks=stage_a_data.blocks,
-                    text=stage_a_data.text,
-                    used_fallback=stage_a_data.used_fallback,
-                    requests_count=stage_a_data.requests_count,
-                    chars_returned=stage_a_data.chars_returned,
-                    request_success=stage_a_data.request_success,
-                    request_payload=stage_a_request_payload,
-                    request_raw=stage_a_raw_response,
-                    reason=stage_a_data.reason,
-                    evidence_items=stage_a_data.evidence_items,
-                )
-        else:
-            if is_adaptive_llm_discretion:
-                if pregate_result.should_skip:
-                    pass  # Keep "informativeness_pregate_skip" from earlier
-                elif helper_budget_exhausted:
-                    helper_decision_reason = "helper_budget_exhausted"
-                elif helper_saturation_guarded:
-                    helper_decision_reason = "helper_saturation_guard"
-                elif helper_action_executed == ACTION_SNAPSHOT_LITE and snapshot is not None:
-                    snapshot_lite_context = _format_snapshot_index_section(
-                        stage_b_snapshot if stage_b_snapshot is not None else snapshot
-                    )
-                    helper_decision_reason = "policy_action_snapshot_lite"
-                elif helper_action_executed == ACTION_FRAME_LOCALS_LITE and snapshot is not None:
-                    snapshot_lite_context = _format_frame_locals_section(
-                        stage_b_snapshot if stage_b_snapshot is not None else snapshot
-                    )
-                    helper_decision_reason = "policy_action_frame_locals_lite"
-                elif helper_action_executed == ACTION_SNAPSHOT_FULL_LITE and snapshot is not None:
-                    snapshot_lite_context = _format_snapshot_full_section(
-                        stage_b_snapshot if stage_b_snapshot is not None else snapshot
-                    )
-                    helper_decision_reason = "policy_action_snapshot_full_lite"
-                elif helper_action_executed == ACTION_COMPACT_THEN_PATCH:
-                    helper_decision_reason = "policy_action_compact_then_patch"
-                    stage_a_need_compact_context = True
-                    stage_a_compact_context_reason = "policy_action"
-                elif not supports_context_request:
-                    helper_decision_reason = "request_context_unavailable"
-                elif helper_action_executed == ACTION_SKIP_HELPER:
-                    helper_decision_reason = "online_policy_skip_helper"
-                stage_a_data = _empty_stage_a_context(reason=helper_decision_reason)
-            elif is_adaptive_gated:
-                stage_a_data = _empty_stage_a_context(reason=helper_decision_reason)
+                stage_a_max_chars=stage_a_max_chars,
+                stage_a_max_requests=stage_a_max_requests,
+                stage_a_meta=stage_a_meta,
+                stage_a_raw_response=stage_a_raw_response,
+                stage_b_snapshot=stage_b_snapshot,
+                supports_context_request=supports_context_request,
+                workdir=workdir,
+            ),
+            StageAState(
+                _stage_a_context_fulfillment_sec=_stage_a_context_fulfillment_sec,
+                helper_decision_reason=helper_decision_reason,
+                helper_invoked=helper_invoked,
+                helper_need_more_context=helper_need_more_context,
+                helper_should_consult=helper_should_consult,
+                snapshot_lite_context=snapshot_lite_context,
+                stage_a_compact_context_reason=stage_a_compact_context_reason,
+                stage_a_data=stage_a_data,
+                stage_a_need_compact_context=stage_a_need_compact_context,
+                stage_a_need_snapshot=stage_a_need_snapshot,
+                stage_a_prompt=stage_a_prompt,
+                stage_a_request_invoked=stage_a_request_invoked,
+                stage_a_request_payload=stage_a_request_payload,
+                stage_a_snapshot_justification=stage_a_snapshot_justification,
+            ),
+        )
+        _stage_a_context_fulfillment_sec = (
+            run_stage_a_requests_state._stage_a_context_fulfillment_sec
+        )
+        helper_decision_reason = run_stage_a_requests_state.helper_decision_reason
+        helper_invoked = run_stage_a_requests_state.helper_invoked
+        helper_need_more_context = run_stage_a_requests_state.helper_need_more_context
+        helper_should_consult = run_stage_a_requests_state.helper_should_consult
+        snapshot_lite_context = run_stage_a_requests_state.snapshot_lite_context
+        stage_a_compact_context_reason = run_stage_a_requests_state.stage_a_compact_context_reason
+        stage_a_data = run_stage_a_requests_state.stage_a_data
+        stage_a_need_compact_context = run_stage_a_requests_state.stage_a_need_compact_context
+        stage_a_need_snapshot = run_stage_a_requests_state.stage_a_need_snapshot
+        stage_a_prompt = run_stage_a_requests_state.stage_a_prompt
+        stage_a_request_invoked = run_stage_a_requests_state.stage_a_request_invoked
+        stage_a_request_payload = run_stage_a_requests_state.stage_a_request_payload
+        stage_a_snapshot_justification = run_stage_a_requests_state.stage_a_snapshot_justification
         if helper_local_started_at is not None:
             helper_local_wall_sec = time.perf_counter() - helper_local_started_at
 
@@ -7048,95 +6844,8 @@ def _run_one_condition_attempts(
                     patch_meta["case_fail_fast_reason"] = "request_budget_exceeded"
                     attempt_metadata["case_fail_fast_triggered"] = True
                     attempt_metadata["case_fail_fast_reason"] = "request_budget_exceeded"
-                _refresh_adaptive_progress_for_note(
-                    note=no_diff_note,
-                    success=False,
-                    signature_repeated=True,
-                )
-                (
-                    adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason_for_note,
-                    adaptive_no_progress_token_sum,
-                    adaptive_no_progress_token_cap_hit,
-                ) = _apply_no_progress_token_cap_candidate(
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_made=adaptive_progress_made,
-                    adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
-                    attempt_tokens_total=_nonnegative_int(
-                        attempt_metadata.get("tokens_total"), default=0
-                    ),
-                    adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason,
-                )
-                patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
-                patch_meta["adaptive_no_progress_token_cap"] = (
-                    normalized_adaptive_no_progress_token_cap
-                )
-                patch_meta["adaptive_no_progress_token_cap_hit"] = (
-                    adaptive_no_progress_token_cap_hit
-                )
-                adaptive_stop_triggered = _mark_adaptive_progress_stop(
-                    attempt_metadata=attempt_metadata,
-                    patch_meta=patch_meta,
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
-                    note=no_diff_note,
-                )
-                _sync_syntax_preflight_metadata(
-                    attempt_metadata=attempt_metadata,
-                    patch_meta=patch_meta,
-                    enabled=normalized_syntax_preflight_enabled,
-                    cycles_used=syntax_preflight_cycles_used,
-                    failures=syntax_preflight_failures,
-                    last_error_type=syntax_preflight_last_error_type,
-                    last_error_msg=syntax_preflight_last_error_msg,
-                    events=syntax_preflight_events,
-                )
-                attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-                cumulative_runtime_sec += attempt_wall_sec
-                pending_credit = _finalize_adaptive_policy_attempt(
-                    note=no_diff_note,
-                    success=False,
-                    attempt_wall_sec=attempt_wall_sec,
-                    online_finalize_kwargs=online_finalize_kwargs,
-                    budget_finalize_kwargs=budget_finalize_kwargs,
-                )
-                record = _build_attempt_outcome_record(
-                    case=case,
-                    condition=condition,
-                    run_id=run_id,
-                    attempt=attempt,
-                    patcher_name=patcher_name,
-                    run_metadata=effective_run_metadata,
-                    attempt_metadata=attempt_metadata,
-                    patcher=patcher_for_attempt,
-                    patch_meta=patch_meta,
-                    context_protocol=attempt_context_protocol,
-                    success=False,
-                    note=no_diff_note,
-                    before=current,
-                    cumulative_runtime_sec=cumulative_runtime_sec,
-                    attempt_wall_clock_sec=attempt_wall_sec,
-                )
-                _queue_pending_online_credit(pending_credit=pending_credit, record=record)
-                _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
-                _capture_attempt_history(
-                    attempt=attempt,
-                    note=no_diff_note,
-                    failure_signature=failure_signature,
-                    record=record,
-                    patch_meta=patch_meta,
-                    retry_plan_value=retry_plan_text,
-                    snapshot_for_history=snapshot,
-                )
-                previous_failure_context = _enrich_failure_context(
-                    base=current_failure_context,
-                    note=no_diff_note,
-                    patch_meta=patch_meta,
-                    run=current,
+                adaptive_stop_triggered = _record_terminal_attempt(
+                    no_diff_note, sync_syntax_preflight=True
                 )
                 attempt_terminated_early = True
                 should_break_after_attempt = adaptive_stop_triggered or fail_fast_on_budget_exceeded
@@ -7495,88 +7204,8 @@ def _run_one_condition_attempts(
                 events=syntax_preflight_events,
             )
             if patch_verifier_enabled and patch_verifier_passed is False:
-                _refresh_adaptive_progress_for_note(
-                    note="patch_verifier_rejected",
-                    success=False,
-                    signature_repeated=True,
-                )
-                (
-                    adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason_for_note,
-                    adaptive_no_progress_token_sum,
-                    adaptive_no_progress_token_cap_hit,
-                ) = _apply_no_progress_token_cap_candidate(
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_made=adaptive_progress_made,
-                    adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
-                    attempt_tokens_total=_nonnegative_int(
-                        attempt_metadata.get("tokens_total"), default=0
-                    ),
-                    adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason,
-                )
-                patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
-                patch_meta["adaptive_no_progress_token_cap"] = (
-                    normalized_adaptive_no_progress_token_cap
-                )
-                patch_meta["adaptive_no_progress_token_cap_hit"] = (
-                    adaptive_no_progress_token_cap_hit
-                )
-                adaptive_stop_triggered = _mark_adaptive_progress_stop(
-                    attempt_metadata=attempt_metadata,
-                    patch_meta=patch_meta,
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
-                    note="patch_verifier_rejected",
-                )
-                attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-                cumulative_runtime_sec += attempt_wall_sec
-                pending_credit = _finalize_adaptive_policy_attempt(
-                    note="patch_verifier_rejected",
-                    success=False,
-                    attempt_wall_sec=attempt_wall_sec,
-                    online_finalize_kwargs=online_finalize_kwargs,
-                    budget_finalize_kwargs=budget_finalize_kwargs,
-                )
-                record = _build_attempt_outcome_record(
-                    case=case,
-                    condition=condition,
-                    run_id=run_id,
-                    attempt=attempt,
-                    patcher_name=patcher_name,
-                    run_metadata=effective_run_metadata,
-                    attempt_metadata=attempt_metadata,
-                    patcher=patcher_for_attempt,
-                    patch_meta=patch_meta,
-                    context_protocol=attempt_context_protocol,
-                    success=False,
-                    note="patch_verifier_rejected",
-                    before=current,
-                    cumulative_runtime_sec=cumulative_runtime_sec,
-                    attempt_wall_clock_sec=attempt_wall_sec,
-                )
-                _queue_pending_online_credit(pending_credit=pending_credit, record=record)
-                _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
-                _capture_attempt_history(
-                    attempt=attempt,
-                    note="patch_verifier_rejected",
-                    failure_signature=failure_signature,
-                    record=record,
-                    patch_meta=patch_meta,
-                    retry_plan_value=retry_plan_text,
-                    snapshot_for_history=snapshot,
-                )
-                previous_failure_context = _enrich_failure_context(
-                    base=current_failure_context,
-                    note="patch_verifier_rejected",
-                    patch_meta=patch_meta,
-                    run=current,
-                )
+                should_break_after_attempt = _record_terminal_attempt("patch_verifier_rejected")
                 attempt_terminated_early = True
-                should_break_after_attempt = adaptive_stop_triggered
                 break
 
             if normalized_patch_sanitize_enabled:
@@ -7622,88 +7251,8 @@ def _run_one_condition_attempts(
                             )
                         continue
 
-                    _refresh_adaptive_progress_for_note(
-                        note="syntax_preflight_failed",
-                        success=False,
-                        signature_repeated=True,
-                    )
-                    (
-                        adaptive_progress_stop_candidate_for_note,
-                        adaptive_progress_stop_reason_for_note,
-                        adaptive_no_progress_token_sum,
-                        adaptive_no_progress_token_cap_hit,
-                    ) = _apply_no_progress_token_cap_candidate(
-                        is_adaptive_condition=is_adaptive_condition,
-                        adaptive_progress_made=adaptive_progress_made,
-                        adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
-                        attempt_tokens_total=_nonnegative_int(
-                            attempt_metadata.get("tokens_total"), default=0
-                        ),
-                        adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
-                        adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
-                        adaptive_progress_stop_reason=adaptive_progress_stop_reason,
-                    )
-                    patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
-                    patch_meta["adaptive_no_progress_token_cap"] = (
-                        normalized_adaptive_no_progress_token_cap
-                    )
-                    patch_meta["adaptive_no_progress_token_cap_hit"] = (
-                        adaptive_no_progress_token_cap_hit
-                    )
-                    adaptive_stop_triggered = _mark_adaptive_progress_stop(
-                        attempt_metadata=attempt_metadata,
-                        patch_meta=patch_meta,
-                        is_adaptive_condition=is_adaptive_condition,
-                        adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
-                        adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
-                        note="syntax_preflight_failed",
-                    )
-                    attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-                    cumulative_runtime_sec += attempt_wall_sec
-                    pending_credit = _finalize_adaptive_policy_attempt(
-                        note="syntax_preflight_failed",
-                        success=False,
-                        attempt_wall_sec=attempt_wall_sec,
-                        online_finalize_kwargs=online_finalize_kwargs,
-                        budget_finalize_kwargs=budget_finalize_kwargs,
-                    )
-                    record = _build_attempt_outcome_record(
-                        case=case,
-                        condition=condition,
-                        run_id=run_id,
-                        attempt=attempt,
-                        patcher_name=patcher_name,
-                        run_metadata=effective_run_metadata,
-                        attempt_metadata=attempt_metadata,
-                        patcher=patcher_for_attempt,
-                        patch_meta=patch_meta,
-                        context_protocol=attempt_context_protocol,
-                        success=False,
-                        note="syntax_preflight_failed",
-                        before=current,
-                        cumulative_runtime_sec=cumulative_runtime_sec,
-                        attempt_wall_clock_sec=attempt_wall_sec,
-                    )
-                    _queue_pending_online_credit(pending_credit=pending_credit, record=record)
-                    _append_record(record, defer_sink=pending_credit is not None)
-                    _mark_scored_attempt_consumed()
-                    _capture_attempt_history(
-                        attempt=attempt,
-                        note="syntax_preflight_failed",
-                        failure_signature=failure_signature,
-                        record=record,
-                        patch_meta=patch_meta,
-                        retry_plan_value=retry_plan_text,
-                        snapshot_for_history=snapshot,
-                    )
-                    previous_failure_context = _enrich_failure_context(
-                        base=current_failure_context,
-                        note="syntax_preflight_failed",
-                        patch_meta=patch_meta,
-                        run=current,
-                    )
+                    should_break_after_attempt = _record_terminal_attempt("syntax_preflight_failed")
                     attempt_terminated_early = True
-                    should_break_after_attempt = adaptive_stop_triggered
                     break
 
             _emit_progress(
@@ -7747,92 +7296,10 @@ def _run_one_condition_attempts(
                 )
                 _sync_patch_diff_metadata(patch_meta=patch_meta, diff=applied_diff_for_preflight)
             if not apply_ok:
-                _refresh_adaptive_progress_for_note(
-                    note="patch_apply_failed",
-                    success=False,
-                    signature_repeated=True,
-                )
-                (
-                    adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason_for_note,
-                    adaptive_no_progress_token_sum,
-                    adaptive_no_progress_token_cap_hit,
-                ) = _apply_no_progress_token_cap_candidate(
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_made=adaptive_progress_made,
-                    adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
-                    attempt_tokens_total=_nonnegative_int(
-                        attempt_metadata.get("tokens_total"), default=0
-                    ),
-                    adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason,
-                )
-                patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
-                patch_meta["adaptive_no_progress_token_cap"] = (
-                    normalized_adaptive_no_progress_token_cap
-                )
-                patch_meta["adaptive_no_progress_token_cap_hit"] = (
-                    adaptive_no_progress_token_cap_hit
-                )
-                adaptive_stop_triggered = _mark_adaptive_progress_stop(
-                    attempt_metadata=attempt_metadata,
-                    patch_meta=patch_meta,
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
-                    note="patch_apply_failed",
-                )
-                syntax_state.apply_to_metadata(
-                    attempt_metadata=attempt_metadata, patch_meta=patch_meta
-                )
-                (attempt_dir / "apply_error.txt").write_text(apply_msg, encoding="utf-8")
-                attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-                cumulative_runtime_sec += attempt_wall_sec
-                pending_credit = _finalize_adaptive_policy_attempt(
-                    note="patch_apply_failed",
-                    success=False,
-                    attempt_wall_sec=attempt_wall_sec,
-                    online_finalize_kwargs=online_finalize_kwargs,
-                    budget_finalize_kwargs=budget_finalize_kwargs,
-                )
-                record = _build_attempt_outcome_record(
-                    case=case,
-                    condition=condition,
-                    run_id=run_id,
-                    attempt=attempt,
-                    patcher_name=patcher_name,
-                    run_metadata=effective_run_metadata,
-                    attempt_metadata=attempt_metadata,
-                    patcher=patcher_for_attempt,
-                    patch_meta=patch_meta,
-                    context_protocol=attempt_context_protocol,
-                    success=False,
-                    note="patch_apply_failed",
-                    before=current,
-                    cumulative_runtime_sec=cumulative_runtime_sec,
-                    attempt_wall_clock_sec=attempt_wall_sec,
-                )
-                _queue_pending_online_credit(pending_credit=pending_credit, record=record)
-                _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
-                _capture_attempt_history(
-                    attempt=attempt,
-                    note="patch_apply_failed",
-                    failure_signature=failure_signature,
-                    record=record,
-                    patch_meta=patch_meta,
-                    retry_plan_value=retry_plan_text,
-                    snapshot_for_history=snapshot,
-                )
-                previous_failure_context = _enrich_failure_context(
-                    base=current_failure_context,
-                    note="patch_apply_failed",
-                    patch_meta=patch_meta,
-                    run=current,
+                should_break_after_attempt = _record_terminal_attempt(
+                    "patch_apply_failed", apply_error=apply_msg
                 )
                 attempt_terminated_early = True
-                should_break_after_attempt = adaptive_stop_triggered
                 break
 
             _invalidate_file_catalog_cache()
@@ -7891,88 +7358,8 @@ def _run_one_condition_attempts(
                 syntax_state.apply_to_metadata(
                     attempt_metadata=attempt_metadata, patch_meta=patch_meta
                 )
-                _refresh_adaptive_progress_for_note(
-                    note="syntax_preflight_failed",
-                    success=False,
-                    signature_repeated=True,
-                )
-                (
-                    adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason_for_note,
-                    adaptive_no_progress_token_sum,
-                    adaptive_no_progress_token_cap_hit,
-                ) = _apply_no_progress_token_cap_candidate(
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_made=adaptive_progress_made,
-                    adaptive_no_progress_token_sum=adaptive_no_progress_token_sum,
-                    attempt_tokens_total=_nonnegative_int(
-                        attempt_metadata.get("tokens_total"), default=0
-                    ),
-                    adaptive_no_progress_token_cap=normalized_adaptive_no_progress_token_cap,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason,
-                )
-                patch_meta["adaptive_no_progress_token_sum"] = adaptive_no_progress_token_sum
-                patch_meta["adaptive_no_progress_token_cap"] = (
-                    normalized_adaptive_no_progress_token_cap
-                )
-                patch_meta["adaptive_no_progress_token_cap_hit"] = (
-                    adaptive_no_progress_token_cap_hit
-                )
-                adaptive_stop_triggered = _mark_adaptive_progress_stop(
-                    attempt_metadata=attempt_metadata,
-                    patch_meta=patch_meta,
-                    is_adaptive_condition=is_adaptive_condition,
-                    adaptive_progress_stop_candidate=adaptive_progress_stop_candidate_for_note,
-                    adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
-                    note="syntax_preflight_failed",
-                )
-                attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-                cumulative_runtime_sec += attempt_wall_sec
-                pending_credit = _finalize_adaptive_policy_attempt(
-                    note="syntax_preflight_failed",
-                    success=False,
-                    attempt_wall_sec=attempt_wall_sec,
-                    online_finalize_kwargs=online_finalize_kwargs,
-                    budget_finalize_kwargs=budget_finalize_kwargs,
-                )
-                record = _build_attempt_outcome_record(
-                    case=case,
-                    condition=condition,
-                    run_id=run_id,
-                    attempt=attempt,
-                    patcher_name=patcher_name,
-                    run_metadata=effective_run_metadata,
-                    attempt_metadata=attempt_metadata,
-                    patcher=patcher_for_attempt,
-                    patch_meta=patch_meta,
-                    context_protocol=attempt_context_protocol,
-                    success=False,
-                    note="syntax_preflight_failed",
-                    before=current,
-                    cumulative_runtime_sec=cumulative_runtime_sec,
-                    attempt_wall_clock_sec=attempt_wall_sec,
-                )
-                _queue_pending_online_credit(pending_credit=pending_credit, record=record)
-                _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
-                _capture_attempt_history(
-                    attempt=attempt,
-                    note="syntax_preflight_failed",
-                    failure_signature=failure_signature,
-                    record=record,
-                    patch_meta=patch_meta,
-                    retry_plan_value=retry_plan_text,
-                    snapshot_for_history=snapshot,
-                )
-                previous_failure_context = _enrich_failure_context(
-                    base=current_failure_context,
-                    note="syntax_preflight_failed",
-                    patch_meta=patch_meta,
-                    run=current,
-                )
+                should_break_after_attempt = _record_terminal_attempt("syntax_preflight_failed")
                 attempt_terminated_early = True
-                should_break_after_attempt = adaptive_stop_triggered
                 break
 
             syntax_preflight_events.append(

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from evals import eval_attempt_flow
+from evals import adaptive_progress, eval_attempt_flow
 
 
 def _make_run_result(**overrides: Any) -> Any:
@@ -57,7 +57,7 @@ def _make_case(tmp_path: Path, case_id: str = "cov3") -> Any:
 
 class TestAdaptiveGateShouldInvokeHelper:
     def test_timeout_invokes(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="balanced",
             attempt=1,
             timed_out=True,
@@ -68,7 +68,7 @@ class TestAdaptiveGateShouldInvokeHelper:
         assert s is True and r == "gate_timeout"
 
     def test_aggressive_invokes(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="aggressive",
             attempt=1,
             timed_out=False,
@@ -79,7 +79,7 @@ class TestAdaptiveGateShouldInvokeHelper:
         assert s is True and r == "gate_aggressive"
 
     def test_conservative_waiting(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="conservative",
             attempt=2,
             timed_out=False,
@@ -90,7 +90,7 @@ class TestAdaptiveGateShouldInvokeHelper:
         assert s is False and r == "gate_conservative_waiting"
 
     def test_conservative_invokes(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="conservative",
             attempt=5,
             timed_out=False,
@@ -101,7 +101,7 @@ class TestAdaptiveGateShouldInvokeHelper:
         assert s is True and r == "gate_conservative_repeated_signature"
 
     def test_balanced_waiting(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="balanced",
             attempt=1,
             timed_out=False,
@@ -112,7 +112,7 @@ class TestAdaptiveGateShouldInvokeHelper:
         assert s is False and r == "gate_balanced_waiting"
 
     def test_balanced_invokes(self) -> None:
-        s, r = eval_attempt_flow._adaptive_gate_should_invoke_helper(
+        s, r = adaptive_progress._adaptive_gate_should_invoke_helper(
             policy="balanced",
             attempt=3,
             timed_out=False,

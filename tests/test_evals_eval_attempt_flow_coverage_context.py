@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from evals import eval_attempt_flow
+from evals import eval_attempt_flow, eval_evidence, eval_types, transport_failures
 
 # ---------------------------------------------------------------------------
 # _adaptive_helper_outcome_for_attempt
@@ -266,11 +266,11 @@ class TestControllerRuntimeEvidenceInputs:
 
 class TestRequestContextFailureKind:
     def test_none_meta(self) -> None:
-        assert eval_attempt_flow._request_context_failure_kind_from_meta(None) == ""
+        assert transport_failures._request_context_failure_kind_from_meta(None) == ""
 
     def test_explicit_kind(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"request_context_failure_kind": "transport"}
             )
             == "transport"
@@ -278,7 +278,7 @@ class TestRequestContextFailureKind:
 
     def test_request_budget_exceeded(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"error": "request_budget_exceeded"}
             )
             == "request_budget_exceeded"
@@ -286,7 +286,7 @@ class TestRequestContextFailureKind:
 
     def test_backend_unavailable(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"request_context_backend_unavailable": True}
             )
             == "backend_unavailable"
@@ -294,7 +294,7 @@ class TestRequestContextFailureKind:
 
     def test_compat_reasoning_only(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"error": "openai_compat_reasoning_only"}
             )
             == "compat_reasoning_only"
@@ -302,7 +302,7 @@ class TestRequestContextFailureKind:
 
     def test_invalid_payload(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"error": "invalid_request_context_payload"}
             )
             == "invalid_payload"
@@ -310,13 +310,13 @@ class TestRequestContextFailureKind:
 
     def test_request_failed(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta({"error": "request_failed"})
+            transport_failures._request_context_failure_kind_from_meta({"error": "request_failed"})
             == "transport"
         )
 
     def test_http_502(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"error": "http_error", "status": 502}
             )
             == "backend_unavailable"
@@ -324,14 +324,14 @@ class TestRequestContextFailureKind:
 
     def test_http_400(self) -> None:
         assert (
-            eval_attempt_flow._request_context_failure_kind_from_meta(
+            transport_failures._request_context_failure_kind_from_meta(
                 {"error": "http_error", "status": 400}
             )
             == "transport"
         )
 
     def test_empty(self) -> None:
-        assert eval_attempt_flow._request_context_failure_kind_from_meta({}) == ""
+        assert transport_failures._request_context_failure_kind_from_meta({}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +341,11 @@ class TestRequestContextFailureKind:
 
 class TestRequestContextRecoveryFailureKind:
     def test_none(self) -> None:
-        assert eval_attempt_flow._request_context_recovery_failure_kind_from_meta(None) == ""
+        assert transport_failures._request_context_recovery_failure_kind_from_meta(None) == ""
 
     def test_request_failed(self) -> None:
         assert (
-            eval_attempt_flow._request_context_recovery_failure_kind_from_meta(
+            transport_failures._request_context_recovery_failure_kind_from_meta(
                 {"error": "request_failed"}
             )
             == "transport"
@@ -353,7 +353,7 @@ class TestRequestContextRecoveryFailureKind:
 
     def test_http_503(self) -> None:
         assert (
-            eval_attempt_flow._request_context_recovery_failure_kind_from_meta(
+            transport_failures._request_context_recovery_failure_kind_from_meta(
                 {"error": "http_error", "status": 503}
             )
             == "backend_unavailable"
@@ -361,14 +361,14 @@ class TestRequestContextRecoveryFailureKind:
 
     def test_http_429(self) -> None:
         assert (
-            eval_attempt_flow._request_context_recovery_failure_kind_from_meta(
+            transport_failures._request_context_recovery_failure_kind_from_meta(
                 {"error": "http_error", "status": 429}
             )
             == "transport"
         )
 
     def test_empty(self) -> None:
-        assert eval_attempt_flow._request_context_recovery_failure_kind_from_meta({}) == ""
+        assert transport_failures._request_context_recovery_failure_kind_from_meta({}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -378,43 +378,43 @@ class TestRequestContextRecoveryFailureKind:
 
 class TestCoerceContextRequestPayload:
     def test_non_dict(self) -> None:
-        assert eval_attempt_flow._coerce_context_request_payload("not_dict") is None
+        assert eval_evidence._coerce_context_request_payload("not_dict") is None
 
     def test_requests_non_list(self) -> None:
-        assert eval_attempt_flow._coerce_context_request_payload({"requests": "bad"}) is None
+        assert eval_evidence._coerce_context_request_payload({"requests": "bad"}) is None
 
     def test_file_request(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"need_more_context": True, "requests": [{"type": "file", "path": "f.py"}]}
         )
         assert r is not None and len(r["requests"]) == 1
 
     def test_frame_needs_int_index(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"requests": [{"type": "frame", "index": "bad"}]}
         )
         assert r is not None and len(r["requests"]) == 0
 
     def test_frame_rejects_bool(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"requests": [{"type": "frame", "index": True}]}
         )
         assert r is not None and len(r["requests"]) == 0
 
     def test_local_var(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"requests": [{"type": "local_var", "frame": 0, "name": "x"}]}
         )
         assert r is not None and len(r["requests"]) == 1
 
     def test_local_var_missing_name(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"requests": [{"type": "local_var", "frame": 0}]}
         )
         assert r is not None and len(r["requests"]) == 0
 
     def test_optional_fields(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {
                 "snapshot_justification": "need stack",
                 "diagnosis": "off by one",
@@ -428,17 +428,17 @@ class TestCoerceContextRequestPayload:
         assert r["missing_fact"] is None
 
     def test_missing_fact_string(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload({"missing_fact": "scope"})
+        r = eval_evidence._coerce_context_request_payload({"missing_fact": "scope"})
         assert r is not None and r["missing_fact"] == "scope"
 
     def test_non_dict_entry_filtered(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload(
+        r = eval_evidence._coerce_context_request_payload(
             {"requests": ["bad", {"type": "file", "path": "f.py"}]}
         )
         assert r is not None and len(r["requests"]) == 1
 
     def test_no_type_filtered(self) -> None:
-        r = eval_attempt_flow._coerce_context_request_payload({"requests": [{"path": "f.py"}]})
+        r = eval_evidence._coerce_context_request_payload({"requests": [{"path": "f.py"}]})
         assert r is not None and len(r["requests"]) == 0
 
 
@@ -450,7 +450,7 @@ class TestCoerceContextRequestPayload:
 class TestFilterContextRequestPayloadForAction:
     def test_none_returns_none(self) -> None:
         assert (
-            eval_attempt_flow._filter_context_request_payload_for_action(
+            eval_types._filter_context_request_payload_for_action(
                 action="invoke_helper", request_payload=None
             )
             is None
@@ -459,7 +459,7 @@ class TestFilterContextRequestPayloadForAction:
     def test_unrestricted_returns_as_is(self) -> None:
         p = {"need_more_context": True, "requests": [{"type": "file", "path": "f.py"}]}
         assert (
-            eval_attempt_flow._filter_context_request_payload_for_action(
+            eval_types._filter_context_request_payload_for_action(
                 action="invoke_helper", request_payload=p
             )
             is p
