@@ -1686,3 +1686,25 @@ def test_dat20_condefects_embeds_stdin_and_expected_output_as_strings() -> None:
     ]
     assert "system" not in calls
     assert repr(payload) in generated
+
+
+def test_both_validators_accept_a_native_repro_case(tmp_path: Path) -> None:
+    """DAT-06: importers and validate_cases apply one file contract."""
+    from evals.case_contract import validate_case_contract
+    from evals.importers.base import validate_generated_case
+
+    case_dir = tmp_path / "bip_demo"
+    (case_dir / "src").mkdir(parents=True)
+    (case_dir / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (case_dir / "oracle.patch").write_text(
+        "--- a/src/demo.py\n+++ b/src/demo.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n",
+        encoding="utf-8",
+    )
+    (case_dir / "case.json").write_text(
+        '{"repro_mode": "native_dataset_test", "category": "logic_error"}', encoding="utf-8"
+    )
+
+    assert validate_case_contract(case_dir) == (True, "ok")
+    files_ok, message = validate_generated_case(case_dir)
+    assert "missing required file" not in message
+    assert files_ok or "test_buggy.py" not in message

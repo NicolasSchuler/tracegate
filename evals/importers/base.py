@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from .. import _json as json
-from ..eval_patches import _build_diff_from_changes, _diff_lines, _extract_diff_paths
+from ..case_contract import NATIVE_REPRO_MODE as NATIVE_REPRO_MODE
+from ..case_contract import validate_case_contract
+from ..eval_patches import _build_diff_from_changes, _diff_lines
 from .determinism import is_deterministic as is_deterministic
 from .determinism import nondeterminism_reasons as nondeterminism_reasons
 
@@ -81,9 +83,6 @@ def existing_source_ids(output_dir: Path) -> set[str]:
     return found
 
 
-NATIVE_REPRO_MODE = "native_dataset_test"
-
-
 def validate_generated_case(
     case_dir: Path,
     *,
@@ -111,14 +110,10 @@ def validate_generated_case(
     if not isinstance(meta, dict):
         return False, "case.json is not a JSON object"
 
-    if meta.get("repro_mode") == NATIVE_REPRO_MODE:
-        oracle_text = (case_dir / "oracle.patch").read_text(encoding="utf-8")
-        required_files = tuple(_extract_diff_paths(oracle_text))
-    else:
-        required_files = ("buggy.py", "test_buggy.py")
-    for fname in required_files:
-        if not (case_dir / fname).exists():
-            return False, f"missing required file: {fname}"
+    # DAT-06: the same file contract validate_cases applies.
+    files_ok, files_message = validate_case_contract(case_dir)
+    if not files_ok:
+        return False, files_message
 
     from evals.eval_types import VALID_CATEGORIES, VALID_DIFFICULTIES, VALID_SNAPSHOT_DEPENDENCIES
 
