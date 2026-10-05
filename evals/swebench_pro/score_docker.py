@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import concurrent.futures
 import hashlib
+import logging
 import re
 import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,6 +32,8 @@ from .types import (
     ScoreInstanceResult,
     ScoreRunSummary,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_dockerhub_image_uri(
@@ -438,35 +441,44 @@ def _score_output(ctx: _EvalContext, output: dict[str, Any]) -> ScoreInstanceRes
 
 
 def _copy_log(src: Path, dst: Path) -> None:
-    """Copy a log file if it exists."""
+    """Copy a log file if it exists; a failed copy is logged, not raised (X-07)."""
     try:
         if src.exists():
             dst.write_text(
                 src.read_text(encoding="utf-8", errors="replace"),
                 encoding="utf-8",
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("could not copy scoring log %s -> %s: %s", src, dst, exc)
 
 
 def _cleanup_container(container: Any) -> None:
-    """Best-effort cleanup for a launched Docker container."""
+    """Best-effort cleanup for a launched Docker container.
+
+    Failures are logged (X-07): a container that can't be removed keeps running.
+    """
     try:
         container.stop(timeout=0)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("could not stop scoring container %s: %s", _container_label(container), exc)
     try:
         container.remove(force=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "could not remove scoring container %s: %s", _container_label(container), exc
+        )
+
+
+def _container_label(container: Any) -> str:
+    return str(getattr(container, "short_id", None) or getattr(container, "id", None) or "?")
 
 
 def _close_docker_client(client: Any) -> None:
-    """Best-effort cleanup for a Docker client."""
+    """Best-effort cleanup for a Docker client; a failed close is logged (X-07)."""
     try:
         client.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("could not close the Docker client: %s", exc)
 
 
 def _raise_if_scoring_errors(
