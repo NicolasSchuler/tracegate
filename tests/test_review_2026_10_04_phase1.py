@@ -969,3 +969,15 @@ def test_bas08_intervenor_stops_at_the_deadline_between_calls(
     assert calls == ["call_1"]
     # The precheck was clamped to the remaining budget, not given its own 30s.
     assert test_timeouts == [1]
+
+
+def test_att16_cleanup_keeps_a_diff_target_that_ends_in_orig(tmp_path: Path) -> None:
+    from evals.eval_patches import apply_diff
+
+    (tmp_path / "buggy.py").write_text("def f() -> int:\n    return 1\n", encoding="utf-8")
+    creates_fixture = "--- /dev/null\n+++ b/fixture.orig\n@@ -0,0 +1,1 @@\n+expected = 1\n"
+
+    ok, msg = apply_diff(tmp_path, creates_fixture)
+
+    assert ok, msg
+    assert (tmp_path / "fixture.orig").read_text(encoding="utf-8") == "expected = 1\n"

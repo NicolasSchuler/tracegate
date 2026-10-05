@@ -72,9 +72,16 @@ def _patch_leftovers(cwd: Path) -> set[Path]:
     }
 
 
-def _remove_new_patch_leftovers(cwd: Path, before: set[Path]) -> None:
-    """Delete ``.rej``/``.orig`` files that ``patch`` created (ATT-16)."""
+def _remove_new_patch_leftovers(cwd: Path, before: set[Path], *, diff: str) -> None:
+    """Delete ``.rej``/``.orig`` files that ``patch`` created (ATT-16).
+
+    A file the diff itself names is an intended target, not a tool artefact, even with
+    one of those suffixes, so cleanup leaves it alone.
+    """
+    intended = {(cwd / rel).resolve() for rel in _extract_diff_paths(diff)}
     for path in _patch_leftovers(cwd) - before:
+        if path.resolve() in intended:
+            continue
         path.unlink(missing_ok=True)
 
 
@@ -144,9 +151,9 @@ def _apply_validated_diff(cwd: Path, diff: str) -> tuple[bool, str]:
                 timeout=PATCH_APPLY_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
-            _remove_new_patch_leftovers(cwd, leftovers_before)
+            _remove_new_patch_leftovers(cwd, leftovers_before, diff=diff)
             return False, f"patch timed out after {PATCH_APPLY_TIMEOUT_SEC}s"
-        _remove_new_patch_leftovers(cwd, leftovers_before)
+        _remove_new_patch_leftovers(cwd, leftovers_before, diff=diff)
         if proc.returncode == 0:
             _remove_deleted_diff_targets(cwd=cwd, diff=diff)
             return True, ""
