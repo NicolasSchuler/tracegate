@@ -180,7 +180,8 @@ def _resolve_openai_context_window_for_run(
         return 0, info
 
     try:
-        probe_tokens_raw, probe_meta_raw = probe_context_window()
+        probe_result: Any = probe_context_window()
+        probe_tokens_raw, probe_meta_raw = probe_result
     except Exception as exc:
         info["openai_context_window_source"] = "auto_probe_failed"
         info["openai_context_window_probe_error"] = f"{type(exc).__name__}: {exc}"

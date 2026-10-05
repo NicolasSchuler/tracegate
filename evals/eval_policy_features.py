@@ -593,7 +593,7 @@ def _adaptive_budget_family_availability(
 def _adaptive_budget_union_change_flags(
     change_maps: Mapping[str, Mapping[str, bool]],
 ) -> dict[str, bool]:
-    merged = dict.fromkeys(ADAPTIVE_BUDGET_CONTROL_CHANGE_KEYS, False)
+    merged: dict[str, bool] = dict.fromkeys(ADAPTIVE_BUDGET_CONTROL_CHANGE_KEYS, False)
     for change_flags in change_maps.values():
         for key in ADAPTIVE_BUDGET_CONTROL_CHANGE_KEYS:
             merged[key] = bool(merged[key] or bool(change_flags.get(key)))

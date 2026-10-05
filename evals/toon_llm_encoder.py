@@ -108,16 +108,16 @@ def decode_for_llm(
         raise ValueError(msg)
 
     # Restore pre-serialized user-data keys from TOON encoding.
-    data = _restore_from_toon(data)
+    restored: dict[str, Any] = _restore_from_toon(data)
 
     if expand:
         from llmdebug.compact_keys import expand_keys
 
-        expanded = expand_keys(data)
+        expanded = expand_keys(restored)
         if isinstance(expanded, dict):
             return expanded
 
-    return data
+    return restored
 
 
 def estimate_token_savings(
@@ -278,7 +278,7 @@ def _try_toon_decode(encoded: str) -> dict[str, Any] | None:
     try:
         import toons  # pyright: ignore[reportMissingImports]
 
-        result = toons.loads(encoded)
+        result = toons.loads(encoded)  # pyright: ignore[reportAttributeAccessIssue]
         if isinstance(result, dict):
             return result
         return None

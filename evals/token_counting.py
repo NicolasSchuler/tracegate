@@ -81,8 +81,10 @@ def merge_llm_call_usage(base: Any, extra: Any) -> dict[str, Any]:
     merged["llm_call_count"] = int(merged.get("llm_call_count") or 1) + int(
         extra.get("llm_call_count") or 1
     )
-    base_usage = merged.get("usage") if isinstance(merged.get("usage"), dict) else {}
-    extra_usage = extra.get("usage") if isinstance(extra.get("usage"), dict) else {}
+    base_usage_raw = merged.get("usage")
+    extra_usage_raw = extra.get("usage")
+    base_usage = base_usage_raw if isinstance(base_usage_raw, dict) else {}
+    extra_usage = extra_usage_raw if isinstance(extra_usage_raw, dict) else {}
     if base_usage or extra_usage:
         merged["usage"] = {
             key: _usage_value(base_usage, key) + _usage_value(extra_usage, key)

@@ -197,7 +197,7 @@ def assemble_native_openai_attempt_prompt(
                 context_compaction_bundle=context_compaction_bundle,
                 attempt_dir=request.attempt_dir,
                 workdir=request.workdir,
-                normalized_context_compaction_target_chars=request.context_compaction_target_chars: context_compaction_fn(
+                normalized_context_compaction_target_chars=request.context_compaction_target_chars: context_compaction_fn(  # pyright: ignore[reportOptionalCall]
                     prompt=context_compaction_prompt_text,
                     context_text=context_compaction_bundle.text,
                     context_dir=request.attempt_dir,

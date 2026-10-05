@@ -91,14 +91,10 @@ def persist_adaptive_attempt_history(
         fallback_session_id=fallback_session_id,
     )
     record_meta = patch_meta if isinstance(patch_meta, dict) else {}
-    attempt_metadata = (
-        record.get("attempt_metadata") if isinstance(record.get("attempt_metadata"), dict) else {}
-    )
-    retry_summary = (
-        attempt_metadata.get("retry_summary")
-        if isinstance(attempt_metadata.get("retry_summary"), dict)
-        else {}
-    )
+    attempt_metadata_raw = record.get("attempt_metadata")
+    attempt_metadata = attempt_metadata_raw if isinstance(attempt_metadata_raw, dict) else {}
+    retry_summary_raw = attempt_metadata.get("retry_summary")
+    retry_summary = retry_summary_raw if isinstance(retry_summary_raw, dict) else {}
     note = str(record.get("note") or "").strip()
     success = bool(record.get("success"))
     hypothesis = str(retry_summary.get("hypothesis_tested") or "").strip()

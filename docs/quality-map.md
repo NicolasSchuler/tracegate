@@ -16,7 +16,7 @@ when deciding which commands to run before a PR.
 | `just type-coverage` | Public package type completeness | No | Informational snapshot of `pyright --verifytypes` |
 | `just type-coverage-strict` | Public package type completeness | Yes | Fails on regression vs `quality/type_coverage_baseline.json` |
 | `just lint-evals` | `evals/` Ruff lint + format check | Yes | Blocking eval-harness lint lane used by `just quality` |
-| `just typecheck-evals` | Bounded eval modules | No | Staged `pyright` pass in `basic` mode |
+| `just typecheck-evals` | `evals/` and `baselines/` minus holdouts | No | Staged `pyright` pass in `basic` mode |
 | `just test-evals-cov` | `evals/` line + branch coverage | No | Writes `coverage-evals.json`; informational in CI |
 | `just eval-coverage-no-regression` | Eval coverage ratchet | No | Compares the existing report with the committed baseline; informational in CI |
 
@@ -55,14 +55,12 @@ and staged coverage promotion remain separate.
 
 - `just lint-evals` runs `ruff check evals` and `ruff format --check evals`
 - `just typecheck-evals` runs `pyright -p pyrightconfig.evals.json`
-- the initial module set is:
-  - `evals/eval_config.py`
-  - `evals/eval_types.py`
-  - `evals/eval_summary.py`
-  - `evals/select_cases.py`
-  - `evals/validate_cases.py`
-  - `evals/stats.py`
-  - `evals/report_run_metrics.py`
+- it covers all of `evals/` and `baselines/`, except generated trees, the GPU
+  sidecar (`evals/docker/`), and holdouts that still have basic-mode errors:
+  `evals/eval_attempt_flow.py`, the four `analysis_*` modules that read the
+  untyped derived row, and the `rlm`/`lambda_rlm` adapters
+- `tests/test_quality_gate_contract.py` lets the holdout list shrink but not
+  grow, so new modules are type-checked by default
 - this pass uses `basic` mode and is currently surfaced in CI as
   informational (`continue-on-error: true`)
 - `just test-evals-cov` generates `coverage-evals.json`; the separate

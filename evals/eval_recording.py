@@ -16,7 +16,7 @@ from typing import Any
 
 from baselines.case_information import CASE_INFO_POLICY
 from baselines.openai_compat import normalize_compat_profile
-from evals.record_keys import KEY_PROMPT_CHARS_TOTAL
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL, AttemptRecord
 
 from . import _json as json
 from .adaptive_online_policy import ACTION_INVOKE_HELPER, ACTION_SKIP_HELPER
@@ -628,7 +628,7 @@ def _collect_dependency_versions(*, mode: str) -> dict[str, str]:
         out: dict[str, str] = {}
         for dist in importlib_metadata.distributions():
             try:
-                name = dist.metadata.get("Name")
+                name = dist.name
                 version = dist.version
             except Exception:
                 continue
@@ -697,7 +697,7 @@ def _build_base_record(
     attempt_metadata: dict[str, Any],
     model_metadata: dict[str, Any],
     context_protocol: str = "monolithic",
-) -> dict[str, Any]:
+) -> AttemptRecord:
     """Construct the skeleton JSONL record shared by every attempt."""
     return {
         "schema_version": EVAL_RECORD_SCHEMA_VERSION,

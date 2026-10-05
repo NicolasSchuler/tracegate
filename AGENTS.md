@@ -83,7 +83,7 @@ uv run pyright
 uv run pytest -x -q -m "not integration"
 ```
 
-`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode, a curated list of eval modules: core config/types/reporting, the run entrypoint and main flow with their extracted helper modules, `decision_model/`, and `swebench/`). This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
+`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode over all of `evals/` and `baselines/`, minus generated trees, the GPU sidecar, and a short list of holdouts that still have basic-mode errors: `eval_attempt_flow.py`, four `analysis_*` modules that read the untyped derived row, and the `rlm`/`lambda_rlm` adapters). New modules are checked by default; `tests/test_quality_gate_contract.py` lets the holdout list shrink but not grow. This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
 
 ### Full local quality pass
 ```bash

@@ -14,7 +14,16 @@ from evals.eval_prompts import _build_retry_summary, _render_retry_history_turn
 from evals.eval_recording import _build_base_record, _build_model_metadata, _empty_attempt_metadata
 from evals.eval_types import EVAL_RECORD_TYPE_INFRA_EVENT, CaseSpec, Condition, RunResult
 from evals.pytest_runner import _build_failure_signature_for_attempt, _timeout_fields
-from evals.record_keys import NOTE_INFRA_TRANSPORT_FAILURE, AttemptNote
+from evals.record_keys import NOTE_INFRA_TRANSPORT_FAILURE, AttemptNote, AttemptRecord
+
+
+def _set_timeout_fields(record: AttemptRecord, run: RunResult) -> None:
+    """Copy *run*'s timeout fields onto *record*, in the order ``_timeout_fields`` gives."""
+    fields = _timeout_fields(run)
+    if "timed_out" in fields:
+        record["timed_out"] = fields["timed_out"]
+    if "timeout_sec" in fields:
+        record["timeout_sec"] = fields["timeout_sec"]
 
 
 def _build_infra_event_record(
@@ -32,7 +41,7 @@ def _build_infra_event_record(
     before: RunResult,
     cumulative_runtime_sec: float,
     note: AttemptNote = NOTE_INFRA_TRANSPORT_FAILURE,
-) -> dict[str, Any]:
+) -> AttemptRecord:
     materialized_attempt_metadata = (
         dict(attempt_metadata)
         if isinstance(attempt_metadata, dict)
@@ -51,18 +60,14 @@ def _build_infra_event_record(
         context_protocol=context_protocol,
     )
     record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
-    record.update(
-        {
-            "success": False,
-            "before_returncode": before.returncode,
-            "before_duration_sec": before.duration_sec,
-            "cumulative_runtime_sec": cumulative_runtime_sec,
-            "attempt_wall_clock_sec": 0.0,
-            "note": note,
-            "patch_meta": dict(patch_meta),
-        }
-    )
-    record.update(_timeout_fields(before))
+    record["success"] = False
+    record["before_returncode"] = before.returncode
+    record["before_duration_sec"] = before.duration_sec
+    record["cumulative_runtime_sec"] = cumulative_runtime_sec
+    record["attempt_wall_clock_sec"] = 0.0
+    record["note"] = note
+    record["patch_meta"] = dict(patch_meta)
+    _set_timeout_fields(record, before)
     return record
 
 
@@ -100,12 +105,12 @@ def _build_attempt_outcome_record(
     patch_meta: dict[str, Any] | None,
     context_protocol: str,
     success: bool,
-    note: str,
+    note: AttemptNote,
     before: RunResult,
     cumulative_runtime_sec: float,
     after: RunResult | None = None,
     attempt_wall_clock_sec: float | None = None,
-) -> dict[str, Any]:
+) -> AttemptRecord:
     patch_meta_dict = patch_meta if isinstance(patch_meta, dict) else None
     retry_summary = _build_retry_summary(
         attempt=attempt,
@@ -159,26 +164,23 @@ def _build_attempt_outcome_record(
         else default_attempt_wall_clock_sec
     )
     measured_attempt_wall_clock_sec = max(0.0, measured_attempt_wall_clock_sec)
-    payload: dict[str, Any] = {
-        "success": success,
-        "before_returncode": before.returncode,
-        "before_duration_sec": before.duration_sec,
-        "cumulative_runtime_sec": cumulative_runtime_sec,
-        "attempt_wall_clock_sec": measured_attempt_wall_clock_sec,
-        "note": note,
-    }
+    record["success"] = success
+    record["before_returncode"] = before.returncode
+    record["before_duration_sec"] = before.duration_sec
+    record["cumulative_runtime_sec"] = cumulative_runtime_sec
+    record["attempt_wall_clock_sec"] = measured_attempt_wall_clock_sec
+    record["note"] = note
     if after is not None:
-        payload["after_returncode"] = after.returncode
-        payload["after_duration_sec"] = after.duration_sec
+        record["after_returncode"] = after.returncode
+        record["after_duration_sec"] = after.duration_sec
     if patch_meta_dict is not None:
-        payload["patch_meta"] = patch_meta_dict
-        payload["patch_touches_tests"] = bool(patch_meta_dict.get("patch_touches_tests"))
-        payload["patch_test_file_count"] = _nonnegative_int(
+        record["patch_meta"] = patch_meta_dict
+        record["patch_touches_tests"] = bool(patch_meta_dict.get("patch_touches_tests"))
+        record["patch_test_file_count"] = _nonnegative_int(
             patch_meta_dict.get("patch_test_file_count")
         )
-        payload["patch_file_count"] = _nonnegative_int(patch_meta_dict.get("patch_file_count"))
-    record.update(payload)
-    record.update(_timeout_fields(after if after is not None else before))
+        record["patch_file_count"] = _nonnegative_int(patch_meta_dict.get("patch_file_count"))
+    _set_timeout_fields(record, after if after is not None else before)
     return record
 
 

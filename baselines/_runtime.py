@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from baselines.adapter_base import BaselineConfig
 
@@ -130,6 +130,12 @@ class _RuntimeFeedbackMixin:
 
     Shared by the adapters that inherit it (X-04); the bodies moved unchanged.
     """
+
+    if TYPE_CHECKING:
+        # Provided by BaselineAdapter, which every host class also inherits.
+        name: str
+
+        def _emit_progress(self, event: str, payload: dict[str, Any] | None = None) -> None: ...
 
     def _emit_runtime_progress(
         self,

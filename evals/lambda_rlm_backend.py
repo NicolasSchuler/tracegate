@@ -296,12 +296,11 @@ def invoke_lambda_rlm_decomposition(
             item.id for item in controller_packet.evidence_bundle.items if item.id
         },
     )
+    usage_summary_raw = payload_raw.get("usage_summary")
     return LambdaRLMDecompositionResult(
         summary=parsed.summary,
         steps=parsed.steps,
-        usage_summary=payload_raw.get("usage_summary")
-        if isinstance(payload_raw.get("usage_summary"), dict)
-        else {},
+        usage_summary=usage_summary_raw if isinstance(usage_summary_raw, dict) else {},
         execution_time_sec=float(payload_raw.get("execution_time") or 0.0),
         raw_response=raw_response,
         root_model=str(payload_raw.get("root_model") or ""),

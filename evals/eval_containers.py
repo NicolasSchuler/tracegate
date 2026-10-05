@@ -42,7 +42,9 @@ def check_testcontainers_runtime_available() -> tuple[bool, str]:
     """
     try:
         import docker  # type: ignore[import-not-found]
-        from testcontainers.core.container import DockerContainer  # noqa: F401
+        from testcontainers.core.container import (  # noqa: F401  # pyright: ignore[reportMissingImports]
+            DockerContainer,
+        )
     except Exception as exc:
         return (
             False,
