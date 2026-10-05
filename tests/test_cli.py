@@ -516,6 +516,54 @@ class TestClean:
         ]
         assert len(remaining) == 0
 
+    def test_clean_all_keeps_the_lock_and_drops_index_rows(self, snapshot_dir: Path) -> None:
+        """RCA-21: --all deleted a lock another process may hold and left stale index rows."""
+        from llmdebug.state_db import count_rca_records, count_snapshot_records
+
+        lock = snapshot_dir / ".llmdebug.lock"
+        lock.touch()
+        assert count_snapshot_records(str(snapshot_dir)) > 0
+
+        result = CliRunner(mix_stderr=False).invoke(
+            main, ["clean", "--all", "--yes", "--dir", str(snapshot_dir)]
+        )
+
+        assert result.exit_code == 0
+        assert lock.exists()
+        assert count_snapshot_records(str(snapshot_dir)) == 0
+        assert (snapshot_dir / "llmdebug_state.sqlite3").exists()  # RCA history is kept
+        assert count_rca_records(str(snapshot_dir)) == 0
+
+    def test_clean_purge_state_deletes_the_database(self, snapshot_dir: Path) -> None:
+        (snapshot_dir / "rca_attempts.jsonl").write_text("{}\n", encoding="utf-8")
+
+        result = CliRunner(mix_stderr=False).invoke(
+            main, ["clean", "--all", "--purge-state", "--yes", "--dir", str(snapshot_dir)]
+        )
+
+        assert result.exit_code == 0
+        assert not list(snapshot_dir.glob("llmdebug_state.sqlite3*"))
+        assert not (snapshot_dir / "rca_attempts.jsonl").exists()
+
+    def test_clean_survives_a_file_vanishing_mid_run(
+        self, snapshot_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RCA-21: sorting called stat() on files another process had just deleted."""
+        import llmdebug.snapshot_index as snapshot_index
+
+        real = snapshot_index.snapshot_files
+
+        def _with_ghost(out_dir: object) -> list[Path]:
+            return [*real(out_dir), snapshot_dir / "ghost.json"]  # type: ignore[arg-type]
+
+        monkeypatch.setattr(snapshot_index, "snapshot_files", _with_ghost)
+        result = CliRunner(mix_stderr=False).invoke(
+            main, ["clean", "--keep", "1", "--yes", "--dir", str(snapshot_dir)]
+        )
+
+        assert result.exit_code == 0
+        assert "Deleted" in result.output
+
     def test_clean_confirmation(self, snapshot_dir: Path) -> None:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(

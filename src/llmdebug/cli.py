@@ -662,17 +662,40 @@ def export(
     click.echo(f"Exported {output_path}")
 
 
+# The state database (RCA history, snapshot index) and the JSONL RCA store.
+_STATE_FILE_NAMES = (
+    "llmdebug_state.sqlite3",
+    "llmdebug_state.sqlite3-wal",
+    "llmdebug_state.sqlite3-shm",
+    "rca_attempts.jsonl",
+    "rca_attempts.jsonl.bak",
+)
+
+
+def _mtime_or_zero(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:  # deleted since the directory was listed (RCA-21)
+        return 0.0
+
+
 def _compute_delete_list(
     out_path: Path,
     snapshot_files: list[Path],
     keep: int,
     delete_all: bool,
+    purge_state: bool = False,
 ) -> list[Path]:
     """Compute the list of files to delete without performing any I/O side effects."""
     to_delete: list[Path] = []
+    if purge_state:
+        to_delete.extend(
+            out_path / name for name in _STATE_FILE_NAMES if (out_path / name).exists()
+        )
     if delete_all:
-        to_delete = list(snapshot_files)
-        for name in ("latest.json", "latest.toon", ".llmdebug.lock"):
+        to_delete.extend(snapshot_files)
+        # Not .llmdebug.lock: another process may hold it (RCA-21).
+        for name in ("latest.json", "latest.toon"):
             extra = out_path / name
             if extra.exists():
                 to_delete.append(extra)
@@ -713,9 +736,15 @@ def _perform_deletions(to_delete: list[Path]) -> tuple[int, int]:
     help="Keep N most recent snapshots",
 )
 @click.option("--all", "delete_all", is_flag=True, help="Delete all snapshots")
+@click.option(
+    "--purge-state",
+    is_flag=True,
+    help="Also delete the state database and RCA history (llmdebug_state.sqlite3, "
+    "rca_attempts.jsonl).",
+)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
 @click.option("--dir", "out_dir", default=".llmdebug", help="Snapshot directory")
-def clean(keep: int, delete_all: bool, yes: bool, out_dir: str) -> None:
+def clean(keep: int, delete_all: bool, yes: bool, out_dir: str, purge_state: bool = False) -> None:
     """Remove old snapshots."""
     out_path = Path(out_dir)
     if not out_path.is_dir():
@@ -723,12 +752,11 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str) -> None:
         return
 
     from .snapshot_index import snapshot_files as _list_snapshot_files
+    from .state_db import remove_snapshot_records
 
-    snapshot_files = sorted(
-        _list_snapshot_files(out_path), key=lambda p: p.stat().st_mtime, reverse=True
-    )
+    snapshot_files = sorted(_list_snapshot_files(out_path), key=_mtime_or_zero, reverse=True)
 
-    to_delete = _compute_delete_list(out_path, snapshot_files, keep, delete_all)
+    to_delete = _compute_delete_list(out_path, snapshot_files, keep, delete_all, purge_state)
     if not to_delete:
         click.echo("Nothing to delete.")
         return
@@ -743,6 +771,12 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str) -> None:
         return
 
     deleted, failed = _perform_deletions(to_delete)
+    if not purge_state:
+        # Drop index rows of the deleted snapshots so listings don't trust stale rows.
+        removed_snapshots = set(snapshot_files) & set(to_delete)
+        remove_snapshot_records(
+            str(out_path), [str(path.resolve()) for path in removed_snapshots if not path.exists()]
+        )
     msg = f"Deleted {deleted} file(s)."
     if failed:
         msg += f" Failed to delete {failed} file(s)."

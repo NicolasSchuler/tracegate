@@ -96,7 +96,14 @@ Remove old snapshots, keeping only the most recent.
 
 ```bash
 llmdebug clean -k 5                     # Keep only 5 most recent snapshots
+llmdebug clean --all                    # Delete every snapshot, sidecar and latest.*
+llmdebug clean --all --purge-state      # ...and the state database and RCA history
 ```
+
+`clean` removes the deleted snapshots' rows from the snapshot index. It never
+deletes `.llmdebug.lock`, which another process may hold. The state database
+(`llmdebug_state.sqlite3`, holding the RCA history) and `rca_attempts.jsonl` are
+kept unless you pass `--purge-state`.
 
 ### export
 
