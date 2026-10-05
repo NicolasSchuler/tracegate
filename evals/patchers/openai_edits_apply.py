@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import os
 import re
+import time
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -213,6 +214,10 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
         if ch in {" ", "\t"}:
             while i < len(text) and text[i] in {" ", "\t"}:
                 i += 1
+            # Before a line break the newline piece absorbs the run: adjacent
+            # [ \t]+[ \t]* classes backtracked polynomially (LLM-12).
+            if i < len(text) and text[i] == "\n":
+                continue
             pieces.append(r"[ \t]+")
             continue
         if ch == "\n":
@@ -223,6 +228,10 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
         pieces.append(re.escape(ch))
         i += 1
     return re.compile("".join(pieces))
+
+
+_FUZZY_BLOCK_TIME_BUDGET_SEC = 2.0
+"""Wall-time cap on one fuzzy block search (LLM-12)."""
 
 
 def _apply_fuzzy_block_replacement(
@@ -262,15 +271,29 @@ def _apply_fuzzy_block_replacement(
     for chunk in line_chunks:
         cumulative_lengths.append(cumulative_lengths[-1] + len(chunk))
 
+    min_ratio = 0.96 if target_lines == 1 else 0.92
+    # LLM-12: a window whose ratio can't reach min_ratio - margin can be neither the
+    # accepted match nor within the ambiguity margin of one, so the cheap upper bounds
+    # (real_quick_ratio, quick_ratio) skip it without changing the outcome. The matcher
+    # caches the find block as its second sequence, and a wall-time cap makes a
+    # pathological file fail closed instead of burning CPU outside any deadline.
+    ambiguity_margin = 0.03
+    prune_below = min_ratio - ambiguity_margin
+    matcher = difflib.SequenceMatcher(None, "", find_block)
+    deadline = time.monotonic() + _FUZZY_BLOCK_TIME_BUDGET_SEC
     scored_windows: list[tuple[float, int, int]] = []
     for window_len in sorted(candidate_window_lengths):
         max_start = len(line_chunks) - window_len
         for start in range(max_start + 1):
+            if time.monotonic() > deadline:
+                return None
             raw_window = "".join(line_chunks[start : start + window_len]).strip()
             if not raw_window:
                 continue
-            ratio = difflib.SequenceMatcher(None, raw_window, find_block).ratio()
-            scored_windows.append((ratio, start, window_len))
+            matcher.set_seq1(raw_window)
+            if matcher.real_quick_ratio() < prune_below or matcher.quick_ratio() < prune_below:
+                continue
+            scored_windows.append((matcher.ratio(), start, window_len))
 
     if not scored_windows:
         return None
@@ -279,10 +302,9 @@ def _apply_fuzzy_block_replacement(
     best_ratio, best_start, best_len = scored_windows[0]
     second_ratio = scored_windows[1][0] if len(scored_windows) > 1 else 0.0
 
-    min_ratio = 0.96 if target_lines == 1 else 0.92
     if best_ratio < min_ratio:
         return None
-    if (best_ratio - second_ratio) < 0.03:
+    if (best_ratio - second_ratio) < ambiguity_margin:
         return None
 
     start_offset = cumulative_lengths[best_start]
