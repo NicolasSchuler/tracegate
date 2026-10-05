@@ -146,6 +146,21 @@ def _evidence_ids_from_items(items: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _evidence_ids_rendered_in_prompt(*, items: list[dict[str, Any]], prompt_text: str) -> list[str]:
+    """IDs of *items* whose evidence block survived into *prompt_text* (POL-11).
+
+    Evidence is selected before the prompt budget runs, and budgeting truncates or drops
+    whole sections, so the selected IDs are not the delivered ones. Each block starts with
+    the ``[<id>] kind:locator`` header written by :func:`_annotate_evidence_text`, so the
+    header is the marker of a block that is still there. An empty *prompt_text* means no
+    prompt was captured; then the selection is all there is to go on.
+    """
+    evidence_ids = _evidence_ids_from_items(items)
+    if not prompt_text:
+        return evidence_ids
+    return [evidence_id for evidence_id in evidence_ids if f"[{evidence_id}]" in prompt_text]
+
+
 def _coerce_payload_bool(value: Any) -> bool:
     return coerce_stage_a_bool(value)
 

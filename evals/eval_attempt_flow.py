@@ -131,6 +131,7 @@ from evals.eval_evidence import (
     _collect_file_index_lines,
     _compute_evidence_fingerprint,
     _evidence_ids_from_items,
+    _evidence_ids_rendered_in_prompt,
     _merge_evidence_items,
     _render_evidence_index,
     _render_evidence_items,
@@ -1215,13 +1216,18 @@ def _note_propose_prompt(
     attempt_metadata: dict[str, Any],
     attempt_dir: Path,
     record_prompt: str,
+    sent_prompts: list[str] | None = None,
 ) -> None:
     """Record a prompt that was actually sent for a patch (ATT-11).
 
     ``prompt.txt`` / ``prompt_xxh3_128`` describe the prompt before the syntax-retry and
     recovery cycles; the deciding call can differ. Every sent prompt's hash is kept, the
     last one is the final prompt, and with ``--record-prompt full`` it is written too.
+    *sent_prompts* collects the attempt's prompt texts, so the caller can tell what the
+    deciding call really contained (POL-11) whatever ``--record-prompt`` is set to.
     """
+    if sent_prompts is not None:
+        sent_prompts.append(prompt_text)
     digest = _xxh3_128_text(prompt_text)
     hashes = [str(item) for item in attempt_metadata.get("propose_prompt_xxh3_128s") or []]
     hashes.append(digest)
@@ -2809,6 +2815,8 @@ def _run_one_condition_attempts(
         )
         attempt_dir = context_dir_base / f"attempt_{attempt:02d}"
         attempt_dir.mkdir(parents=True, exist_ok=True)
+        # POL-11: every patch prompt this attempt sends, in order; the last one decided.
+        attempt_sent_prompts: list[str] = []
         if is_baseline_patcher:
             remove_adaptive_controller_sidecars(context_dir=attempt_dir)
             _write_baseline_case_context(attempt_dir, case)
@@ -6117,6 +6125,7 @@ def _run_one_condition_attempts(
                 attempt_metadata=attempt_metadata,
                 attempt_dir=attempt_dir,
                 record_prompt=record_prompt,
+                sent_prompts=attempt_sent_prompts,
             )
             propose_invoke_count = 0
             # ATT-12: a transport replay removes only what the failed call created.
@@ -6472,6 +6481,7 @@ def _run_one_condition_attempts(
                     attempt_metadata=attempt_metadata,
                     attempt_dir=attempt_dir,
                     record_prompt=record_prompt,
+                    sent_prompts=attempt_sent_prompts,
                 )
                 recovery_patch_start = time.perf_counter()
                 recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -6662,6 +6672,7 @@ def _run_one_condition_attempts(
                     attempt_metadata=attempt_metadata,
                     attempt_dir=attempt_dir,
                     record_prompt=record_prompt,
+                    sent_prompts=attempt_sent_prompts,
                 )
                 no_diff_recovery_start = time.perf_counter()
                 no_diff_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7009,6 +7020,7 @@ def _run_one_condition_attempts(
                             attempt_metadata=attempt_metadata,
                             attempt_dir=attempt_dir,
                             record_prompt=record_prompt,
+                            sent_prompts=attempt_sent_prompts,
                         )
                         verifier_recovery_start = time.perf_counter()
                         verifier_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7653,9 +7665,14 @@ def _run_one_condition_attempts(
         )
 
         if success:
+            # POL-11: the IDs that survived prompt budgeting in the deciding call, not the
+            # ones selected for it; a trimmed-out helper block earns no rescue bonus.
             _resolve_pending_online_credits_for_success(
                 success_attempt=attempt,
-                prompt_evidence_ids=_evidence_ids_from_items(bookkeeping_evidence_items_for_prompt),
+                prompt_evidence_ids=_evidence_ids_rendered_in_prompt(
+                    items=bookkeeping_evidence_items_for_prompt,
+                    prompt_text=attempt_sent_prompts[-1] if attempt_sent_prompts else "",
+                ),
             )
             break
         if adaptive_stop_triggered:

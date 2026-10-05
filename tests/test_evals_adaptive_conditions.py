@@ -1339,6 +1339,7 @@ class _AdaptiveDelayedCreditPatcher:
     patch_outcomes: tuple[str, ...] = ("no_diff", "fix")
     request_calls: int = 0
     patch_calls: int = 0
+    prompts: list[str] = field(default_factory=list)
 
     def request_context(self, *, prompt: str, context_dir, cwd) -> ContextRequestResult:
         del prompt, context_dir, cwd
@@ -1361,7 +1362,8 @@ class _AdaptiveDelayedCreditPatcher:
         )
 
     def propose_patch(self, *, prompt: str, context_dir, cwd) -> PatchResult:
-        del prompt, context_dir, cwd
+        del context_dir, cwd
+        self.prompts.append(prompt)
         self.patch_calls += 1
         outcome = self.patch_outcomes[min(self.patch_calls - 1, len(self.patch_outcomes) - 1)]
         if outcome == "no_diff":
@@ -6622,6 +6624,44 @@ def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent
 
     event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(event_lines) == 1
+
+
+def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_is_budgeted_out(
+    tmp_path, monkeypatch
+) -> None:
+    """POL-11: the helper's evidence is selected for the successful prompt but the prompt
+    budget trims the block out, so the rescue bonus is not earned (codex 3-1#2)."""
+    records, patcher, events_path = _run_adaptive_delayed_credit_case(
+        tmp_path,
+        monkeypatch,
+        patch_outcomes=("no_diff", "fix"),
+        adaptive_max_helper_calls=2,
+        k=2,
+        run_id="run-adaptive-delayed-credit-trimmed",
+        # Room for a few characters of the first block, so no `[id]` header survives.
+        extra_run_kwargs={"prompt_budget_evidence_chars": 12},
+    )
+
+    assert [bool(record["success"]) for record in records] == [False, True]
+    assert patcher.request_calls == 2
+    # The helper's evidence was still selected for the successful attempt's prompt.
+    assert set(records[0]["patch_meta"]["evidence_ids_new"]) & set(
+        records[1]["patch_meta"]["evidence_ids_reused"]
+    )
+    final_prompt = patcher.prompts[-1]
+    assert not any(
+        f"[{evidence_id}]" in final_prompt
+        for evidence_id in records[0]["patch_meta"]["evidence_ids_new"]
+    )
+    first_meta = records[0]["attempt_metadata"]
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
+
+    event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(event_lines) == 2
 
 
 def test_adaptive_llm_discretion_delayed_credit_sink_emits_resolved_case_end_metadata(
