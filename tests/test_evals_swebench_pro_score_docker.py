@@ -16,6 +16,13 @@ import pytest
 
 import evals.swebench_pro.score_docker as score_docker_mod
 from evals.swebench.types import PredictionRecord
+from evals.swebench_pro.io import (
+    ensure_run_layout,
+    instance_ids_path,
+    prediction_path,
+    write_instance_ids,
+    write_predictions,
+)
 from evals.swebench_pro.score_docker import (
     _EvalContext,
     _parse_selected_test_files,
@@ -1037,6 +1044,32 @@ class TestRunDockerScoring:
         assert item.error_count == 0
         assert item.accuracy == 1.0
         assert (run_dir / "docker_eval" / "baseline" / "eval_results.json").exists()
+
+    def test_rejects_a_population_reduced_in_both_arms(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """DAT-05: equal-but-incomplete prediction files are not a complete comparison."""
+        run_dir = tmp_path / "pro-run"
+        ensure_run_layout(run_dir, conditions=["baseline", "llmdebug"])
+        write_instance_ids(instance_ids_path(run_dir), ["inst-1", "inst-2"])
+        for condition in ("baseline", "llmdebug"):
+            write_predictions(
+                prediction_path(run_dir, condition),
+                [PredictionRecord("inst-1", "diff --git a/a.py b/a.py\n", "model")],
+            )
+        monkeypatch.setattr(
+            score_docker_mod, "_load_dataset_rows", lambda **_kwargs: pytest.fail("unreachable")
+        )
+
+        with pytest.raises(ValueError, match=r"differs from instance_ids\.txt"):
+            run_docker_scoring(
+                run_dir=run_dir,
+                conditions="baseline,llmdebug",
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+            )
 
 
 class TestReviewScoringIntegrity:

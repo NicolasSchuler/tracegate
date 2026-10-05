@@ -243,7 +243,10 @@ Available subcommands:
 - `generate-pro` — Produce paired predictions for each condition
 - `prepare-handoff` — Validate predictions and write handoff metadata
 - `score-docker` — Score predictions using pre-built DockerHub images and fail
-  the command when Docker/scorer infrastructure errors occur. A container that exits
+  the command when Docker/scorer infrastructure errors occur. It re-validates the paired
+  predictions against the run's `instance_ids.txt` when present, so a population reduced
+  in both arms (e.g. the same instance failed in both) can't be reported as a complete
+  comparison (DAT-05). A container that exits
   non-zero for any reason other than a patch that doesn't apply, a missing `output.json`,
   a wait timeout and an empty `fail_to_pass` list are infrastructure errors (DAT-04,
   DAT-09); a patch that doesn't apply under the official sequence (`git apply --verbose`,

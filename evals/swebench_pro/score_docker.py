@@ -15,6 +15,8 @@ from typing import Any
 
 from .. import _json as json
 from .io import (
+    instance_ids_path,
+    load_instance_ids,
     parse_paired_conditions,
     prediction_path,
     read_predictions,
@@ -622,9 +624,17 @@ def run_docker_scoring(
         raise RuntimeError(f"run directory does not exist: {run_dir}")
 
     condition_list = parse_paired_conditions(conditions)
+    # DAT-05: equality between the two prediction files is not enough. When the same
+    # selected instance is missing from both arms (e.g. both requests failed), the
+    # reduced population would be scored and reported as a complete comparison, so the
+    # selected manifest is required here too — `prepare-handoff` does not protect this
+    # entrypoint.
+    expected_ids_path = instance_ids_path(run_dir)
+    expected_ids = load_instance_ids(expected_ids_path) if expected_ids_path.exists() else None
     validate_paired_predictions(
         run_dir,
         conditions=condition_list,
+        expected_ids=expected_ids,
         require_files=True,
         require_nonempty=True,
     )
