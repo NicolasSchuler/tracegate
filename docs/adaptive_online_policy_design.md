@@ -66,7 +66,7 @@ here had drifted (8 actions, hint scales 0.25/0.5/0.25/0.5, event schema 3).
 | Helper materialization scale | 0.5 |
 | Budget `rho_budget_exceeded` | 0.5 |
 
-Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`, and so do `patcher_config` and the run settings fingerprint derived from it, so resuming a run recorded under an earlier generation is refused.
 <!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## Budget-policy extension (adaptive tooling only)

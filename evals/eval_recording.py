@@ -283,6 +283,11 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
     config: dict[str, Any] = {
         "patcher": str(args.patcher),
         "patcher_name": patcher_name,
+        # POL-01 / POL-24 / POL-06: the adaptive-policy behaviour generation. Two runs with
+        # identical CLI knobs but different policy defaults are different runs, so the
+        # version belongs in the config and in the settings fingerprint derived from it;
+        # resuming across a bump is refused instead of mixing the two.
+        "policy_defaults_version": POLICY_DEFAULTS_VERSION,
         "k": int(args.k),
         "transport_fail_fast_streak": int(
             getattr(args, "transport_fail_fast_streak", DEFAULT_TRANSPORT_FAIL_FAST_STREAK)
