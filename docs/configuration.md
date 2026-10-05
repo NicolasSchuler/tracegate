@@ -226,10 +226,14 @@ attribute or dict key whose name contains `password`, `passwd`, `passphrase`, `s
 `session`/`csrf`/`api` token, `authorization` or `cookie` (case-insensitive, `_`/`-`
 optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
 `locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
-treated as secrets, because they are too common in ordinary code. `llmdebug.PII_PATTERNS`
-also covers credentials in URLs and connection strings (`postgres://user:pw@host` becomes
-`postgres://[REDACTED]@host`) and secret-named keys inside text such as the `repr` of a
-nested dict. Source snippets and the frame `code` line are source code and are not redacted.
+treated as secrets, because they are too common in ordinary code. A two-item list or tuple
+whose first item is such a name (a header or form field like `("password", value)`) has its
+second item replaced. `llmdebug.PII_PATTERNS` also covers URL userinfo
+(`postgres://user:pw@host` and `https://TOKEN@host` become `…://[REDACTED]@host`) and
+secret-named keys inside text such as the `repr` of a nested dict, including escaped,
+`b''`-prefixed and truncated values. The patterns are bounded so redacting megabytes of
+captured output stays linear. Source snippets and the frame `code` line are source code and
+are not redacted.
 `dev`, no profile, or `redact=()` turn all of this off.
 
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a

@@ -16,17 +16,29 @@ SENSITIVE_NAMES = (
     r"|authorization|cookie"
 )
 
-# Built-in PII-focused patterns used by safer profiles and production paths.
+# A Python/JSON string literal with escapes and an optional b/r/u prefix; the closing quote is
+# optional so a value cut by truncation is still covered to its end.
+_QUOTED_VALUE = r"""[bru]{0,2}(?:'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)"""
+
+# Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
+# that can follow a match start is bounded, so redacting long text (captured stdout, big
+# tracebacks) stays linear.
 PII_PATTERNS: tuple[str, ...] = (
     r"(?i)password\s*[:=]\s*\S+",
     r"(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[:=]\s*\S+",
     r"(?i)bearer\s+\S+",
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
+    # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
+    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") before its "@" is
+    # redacted too, since it may be userinfo. Runs before the email pattern, which would
+    # otherwise take "TOKEN@github.com" together with the host.
+    r"(?<=://)[^\s/]{1,512}(?=@)|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)",
+    # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
+    r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
-    # Credentials in a URL or connection string: postgres://user:pw@host -> //[REDACTED]@host
-    r"(?<=://)[^\s/@:]*:[^\s/@]+(?=@)",
     # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
-    r"(?i)(?:" + SENSITIVE_NAMES + r")\w*['\"]?\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^\s,;}\])]+)",
+    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,40}['\"]?\s{0,10}[:=]\s{0,10}"
+    r"(?:" + _QUOTED_VALUE + r"|[^\s,;}\])]+)",
 )
 
 _VALID_PROFILES = {"dev", "ci", "prod"}

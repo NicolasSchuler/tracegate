@@ -83,6 +83,10 @@ def is_sensitive_name(name: str) -> bool:
     return SENSITIVE_NAME_PATTERN.search(name) is not None
 
 
+def _is_sensitive_pair_name(first: Any) -> bool:
+    return isinstance(first, str) and is_sensitive_name(first)
+
+
 def redact_text(text: str, redactors: list[Pattern[str]]) -> str:
     """Apply redaction patterns to text."""
     for rx in redactors:
@@ -123,16 +127,20 @@ def redact_jsonlike(
     This avoids the fragile serialize-then-regex-then-parse flow, where
     aggressive patterns can corrupt JSON structure. When any redactor is
     active, the whole value under a dict key with a sensitive name (see
-    :func:`is_sensitive_name`) is replaced, whatever its type.
+    :func:`is_sensitive_name`) is replaced, whatever its type, and so is the
+    second item of a ``[name, value]`` pair (a header or form field).
     """
     if isinstance(value, str):
         return redact_text(value, redactors)
-    if isinstance(value, tuple):
-        tuple_items = cast(tuple[Any, ...], value)
-        return [
+    if isinstance(value, (tuple, list)):
+        sequence = cast(list[Any] | tuple[Any, ...], value)
+        items: list[Any] = [
             redact_jsonlike(cast(JsonLike, item), redactors, redact_keys=redact_keys)
-            for item in tuple_items
+            for item in sequence
         ]
+        if redactors and len(items) == 2 and _is_sensitive_pair_name(sequence[0]):
+            items[1] = REDACTED
+        return items
     if isinstance(value, (set, frozenset)):
         ordered_items = sorted(
             cast(set[Any] | frozenset[Any], value), key=_stable_redaction_sort_key
@@ -141,8 +149,6 @@ def redact_jsonlike(
             redact_jsonlike(cast(JsonLike, item), redactors, redact_keys=redact_keys)
             for item in ordered_items
         ]
-    if isinstance(value, list):
-        return [redact_jsonlike(item, redactors, redact_keys=redact_keys) for item in value]
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():

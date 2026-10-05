@@ -645,14 +645,15 @@ def test_redact_jsonlike_nested_list():
 def test_redact_jsonlike_tuple_set_and_frozenset() -> None:
     redactors = compile_redactors(("secret",))
     data = {
-        "items_tuple": ("secret", "safe"),
+        # Three items: ("secret", value) would be a secret-named pair and redact "safe".
+        "items_tuple": ("secret", "safe", "more"),
         "items_set": {"safe", "secret"},
         "items_frozenset": frozenset({"secret", "safe"}),
     }
 
     result = redact_jsonlike(data, redactors)
 
-    assert result["items_tuple"] == ["[REDACTED]", "safe"]
+    assert result["items_tuple"] == ["[REDACTED]", "safe", "more"]
     assert sorted(result["items_set"]) == ["[REDACTED]", "safe"]
     assert sorted(result["items_frozenset"]) == ["[REDACTED]", "safe"]
 

@@ -7,6 +7,7 @@ verbatim. These tests go end-to-end through ``capture_exception``.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -187,7 +188,15 @@ def test_ordinary_names(name: str) -> None:
         ("redis://:pw@cache:6379/0", "redis://[REDACTED]@cache:6379/0"),
         ("see https://example.com:8080/a@b", "see https://example.com:8080/a@b"),
         ("https://host/path", "https://host/path"),
+        ("postgres://user:p@ss@db:5432/x", "postgres://[REDACTED]@db:5432/x"),
+        ("https://ghp_abc123@github.com/o/r", "https://[REDACTED]@github.com/o/r"),
+        ("https://medium.com/@user/post", "https://medium.com/@user/post"),
+        ("postgres://user:pw...[TRUNC]", "postgres://[REDACTED]...[TRUNC]"),
         ("{'password': 'a b', 'host': 'h'}", "{'[REDACTED], 'host': 'h'}"),
+        ("{'password': 'it\\'s \"x\" y', 'host': 'h'}", "{'[REDACTED], 'host': 'h'}"),
+        ("{'password': b'a b', 'n': 1}", "{'[REDACTED], 'n': 1}"),
+        ("{'api_key': 'abc...[TRUNC]", "{'[REDACTED]"),
+        ("mail bob@example.com now", "mail [REDACTED] now"),
         ('{"apiKey": "abc"}', '{"[REDACTED]}'),
         ("SECRET_KEY=xyz rest", "[REDACTED] rest"),
         ("tokens = [1]; key: 2", "tokens = [1]; key: 2"),
@@ -197,3 +206,37 @@ def test_text_patterns(text: str, expected: str) -> None:
     from llmdebug.redaction_policy import PII_PATTERNS
 
     assert redact_text(text, compile_redactors(PII_PATTERNS)) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["secret" * 100_000, "a." * 300_000, "://" + "a@" * 200_000, "password: '" + "x" * 500_000],
+)
+def test_text_patterns_stay_linear_on_long_input(text: str) -> None:
+    """Captured stdout can be megabytes; the quadratic patterns took minutes per capture."""
+    from llmdebug.redaction_policy import PII_PATTERNS
+
+    redactors = compile_redactors(PII_PATTERNS)
+    started = time.perf_counter()
+    redact_text(text, redactors)
+
+    assert time.perf_counter() - started < 2.0
+
+
+def test_secret_name_value_pairs(tmp_path: Path) -> None:
+    def boom() -> None:
+        form = [("username", "bob"), ("password", _S["password"])]  # noqa: F841
+        headers = [["Authorization", _S["api_key"]], ["Accept", "json"]]  # noqa: F841
+        raise ValueError("pairs")
+
+    try:
+        boom()
+    except ValueError as exc:
+        cfg = SnapshotConfig(out_dir=str(tmp_path), redaction_profile="ci", include_git=False)
+        capture_exception("pairs", exc, exc.__traceback__, cfg)
+    snapshot = get_latest_snapshot(str(tmp_path))
+    assert snapshot is not None
+
+    local_vars = snapshot["frames"][0]["locals"]
+    assert local_vars["form"] == [["username", "bob"], ["password", "[REDACTED]"]]
+    assert local_vars["headers"] == [["Authorization", "[REDACTED]"], ["Accept", "json"]]
