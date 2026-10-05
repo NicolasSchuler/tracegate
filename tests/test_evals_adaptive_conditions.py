@@ -5691,6 +5691,84 @@ def test_adaptive_online_policy_logging_failure_does_not_abort_attempt(
     assert attempt_meta["adaptive_online_update_reason"] == "event_logging_error:OSError"
 
 
+@dataclass
+class _FullTepNoDiffPatcher:
+    """An openai-shaped patcher with the TEP generation hooks, proposing no diff."""
+
+    name: str = "openai"
+    max_propose_sec: float = 10.0
+    max_tokens: int = 400
+    response_mode: str = "edits"
+
+    def propose_patch(self, *, prompt: str, context_dir, cwd, **_kwargs) -> PatchResult:
+        del prompt, context_dir, cwd
+        return PatchResult(diff=None, meta={"reason": "no_diff"})
+
+    def generate_text(self, **_kwargs):
+        raise AssertionError("the no-diff attempt must not reach the TEP text calls")
+
+    def generate_json(self, **_kwargs):
+        raise AssertionError("the no-diff attempt must not reach the TEP critic")
+
+
+def test_full_tep_save_failure_reaches_the_streamed_record(tmp_path, monkeypatch) -> None:
+    """ATT-17: a no-diff attempt skips the learning pass, so its own save must report.
+
+    The failure used to be attached to the returned record after the row had already
+    gone to `record_sink`, leaving the JSONL silent (codex 3-1#3).
+    """
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "workdir_full_tep_save"
+    context_dir = tmp_path / "context_full_tep_save"
+    shutil.copytree(case.path, workdir)
+
+    # The state path's parent is a file, so every save raises.
+    blocker = tmp_path / "tep_blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    state_path = blocker / "state" / "tep.json"
+
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "run_pytest",
+        lambda *args, **kwargs: run_eval.RunResult(
+            returncode=1,
+            duration_sec=0.01,
+            stdout="tests/test_buggy.py::test_f\nE   AssertionError: expected 2 got 1\n",
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
+    )
+
+    streamed: list[str] = []
+    records = run_eval.run_one_condition(
+        case=case,
+        condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
+        workdir=workdir,
+        context_dir_base=context_dir,
+        patcher=_FullTepNoDiffPatcher(),
+        k=1,
+        output_format="json_compact",
+        run_id="run-full-tep-save-failure",
+        include_files_context=False,
+        force_patch_attempt=False,
+        adaptive_tep_mode="full",
+        adaptive_tep_state_path=str(state_path),
+        record_sink=lambda record: streamed.append(json.dumps(record)),
+    )
+
+    assert len(records) == 1
+    assert records[0]["note"] == "no_patch_proposed"
+    assert len(streamed) == 1
+    streamed_record = json.loads(streamed[0])
+    save_error = streamed_record["attempt_metadata"]["adaptive_tep_save_error"]
+    assert save_error
+    assert streamed_record["patch_meta"]["adaptive_tep_save_error"] == save_error
+
+
 def test_adaptive_budget_policy_shadow_keeps_baseline_budget(tmp_path, monkeypatch) -> None:
     case = _make_case(tmp_path)
     workdir = tmp_path / "workdir_adaptive_budget_shadow"

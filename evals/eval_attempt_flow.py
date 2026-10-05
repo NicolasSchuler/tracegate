@@ -2053,6 +2053,9 @@ def _run_one_condition_attempts(
             (attempt_dir / "apply_error.txt").write_text(apply_error, encoding="utf-8")
         attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
         cumulative_runtime_sec += attempt_wall_sec
+        # ATT-17: an attempt that ends here never reaches the learning pass, so this is
+        # its only save; it has to happen before the record is streamed.
+        _save_adaptive_tep_state(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=False,
@@ -2453,6 +2456,22 @@ def _run_one_condition_attempts(
             validation_buffer_size=adaptive_tep_validation_buffer_size,
         )
     full_tep_enabled = adaptive_tep_controller is not None
+
+    def _save_adaptive_tep_state(
+        *, attempt_metadata: dict[str, Any], patch_meta: dict[str, Any]
+    ) -> str:
+        """Persist the TEP state and note a failed save on the attempt (ATT-17).
+
+        Every path that emits an attempt record calls this before building the record, so
+        the failure is in the serialized row. Attaching it afterwards only reaches the
+        in-memory copy: the row has already gone to ``record_sink``.
+        """
+        if adaptive_tep_controller is None:
+            return ""
+        save_error = adaptive_tep_controller.save()
+        attempt_metadata["adaptive_tep_save_error"] = save_error
+        patch_meta["adaptive_tep_save_error"] = save_error
+        return save_error
 
     def _bind_full_tep_generation_overrides(
         *,
@@ -7620,10 +7639,8 @@ def _run_one_condition_attempts(
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
-            # ATT-17: persist after every learning pass and record a failed save.
-            tep_save_error = adaptive_tep_controller.save()
-            attempt_metadata["adaptive_tep_save_error"] = tep_save_error
-            patch_meta["adaptive_tep_save_error"] = tep_save_error
+        # ATT-17: persist after every learning pass and record a failed save.
+        _save_adaptive_tep_state(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=success,
@@ -7689,9 +7706,13 @@ def _run_one_condition_attempts(
 
     _resolve_remaining_pending_online_credits()
     if adaptive_tep_controller is not None:
+        # ATT-17: a backstop for state the loop changed without emitting a record (a
+        # retry-gate block, say). Every attempt record already carries the result of its
+        # own save, so this can only add a failure the records have not reported; it
+        # reaches the returned list, not the streamed rows, which is why the per-attempt
+        # saves above are the ones that matter.
         tep_save_error = adaptive_tep_controller.save()
         if tep_save_error and records:
-            # ATT-17: the failure used to be swallowed; attach it to the case's last record.
             last_metadata = records[-1].get("attempt_metadata")
             if isinstance(last_metadata, dict):
                 last_metadata["adaptive_tep_save_error"] = tep_save_error
