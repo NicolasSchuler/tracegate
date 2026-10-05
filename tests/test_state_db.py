@@ -70,6 +70,7 @@ def _make_snapshot(**overrides: Any) -> dict[str, Any]:
 def _clear_wal_warnings() -> None:
     """Each test may see the one-time "could not enable WAL" warning again."""
     state_db._WAL_WARNED_PATHS.clear()
+    state_db._WAL_VERIFIED_PATHS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -837,6 +838,21 @@ class TestWalAndSchemaVersion:
 
         with open_state_db(tmp_path) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+    def test_journal_mode_is_not_queried_on_every_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The check costs ~0.2 ms; captures open the database three times each."""
+        state_db._WAL_VERIFIED_PATHS.clear()
+        calls: list[object] = []
+        real = state_db._journal_mode
+        monkeypatch.setattr(state_db, "_journal_mode", lambda conn: calls.append(1) or real(conn))
+
+        for _ in range(3):
+            with open_state_db(tmp_path):
+                pass
+
+        assert len(calls) <= 2  # created: read, switch, re-check once; then never again
 
     def test_failed_wal_switch_warns_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

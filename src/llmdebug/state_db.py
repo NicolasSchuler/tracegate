@@ -18,6 +18,7 @@ _BUSY_TIMEOUT_MS = 30_000
 _WAL_RETRY_ATTEMPTS = 8
 _WAL_BASE_SLEEP_SEC = 0.01
 _WAL_WARNED_PATHS: set[str] = set()
+_WAL_VERIFIED_PATHS: set[str] = set()
 
 
 def state_db_path(out_dir: str | Path) -> Path:
@@ -54,35 +55,42 @@ def _journal_mode(conn: sqlite3.Connection) -> str:
     return str(row[0]).lower() if row else ""
 
 
-def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path) -> None:
+def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path, created: bool) -> None:
     """Switch the database to WAL unless it already is, and check that it worked (RCA-16).
 
-    The journal mode is stored in the database, so reading it on every open is cheap.
-    A per-path "already done" cache used to survive the database being deleted and
-    recreated, and the result of the switch was never checked (filesystems without
-    shared memory stay in rollback mode).
+    The journal mode is stored in the database, so it is checked when this process first
+    opens the path and whenever the file was just created: the per-path "done" cache used
+    to survive the database being deleted and recreated in rollback mode. Reading the mode
+    on every open costs about 0.2 ms, three times per capture. The result of the switch is
+    checked (filesystems without shared memory stay in rollback mode).
     """
-    if _journal_mode(conn) == "wal":
-        return
-    _enable_wal_mode(conn)
-    mode = _journal_mode(conn)
     key = str(db_path)
-    if mode != "wal" and key not in _WAL_WARNED_PATHS:
-        _WAL_WARNED_PATHS.add(key)
-        emit_warning(
-            f"could not enable WAL mode for {db_path} (journal_mode={mode or '?'}); "
-            "concurrent llmdebug processes may block each other"
-        )
+    if key in _WAL_VERIFIED_PATHS and not created:
+        return
+    if _journal_mode(conn) != "wal":
+        _enable_wal_mode(conn)
+        mode = _journal_mode(conn)
+        if mode != "wal":
+            if key not in _WAL_WARNED_PATHS:
+                _WAL_WARNED_PATHS.add(key)
+                emit_warning(
+                    f"could not enable WAL mode for {db_path} (journal_mode={mode or '?'}); "
+                    "concurrent llmdebug processes may block each other"
+                )
+            return
+    _WAL_VERIFIED_PATHS.add(key)
 
 
-def _configure_connection(conn: sqlite3.Connection, *, db_path: Path) -> None:
+def _configure_connection(
+    conn: sqlite3.Connection, *, db_path: Path, created: bool = False
+) -> None:
     busy_timeout = read_env_int(
         "LLMDEBUG_DB_BUSY_TIMEOUT_MS",
         _BUSY_TIMEOUT_MS,
         minimum=0,
     )
     conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
-    _ensure_wal_mode(conn, db_path=db_path)
+    _ensure_wal_mode(conn, db_path=db_path, created=created)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA temp_store=MEMORY")
 
@@ -185,9 +193,10 @@ def open_state_db(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
     """Open the state DB connection with schema initialization."""
     path = state_db_path(out_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
+    created = not path.exists()
     conn = sqlite3.connect(path, timeout=30.0)
     try:
-        _configure_connection(conn, db_path=path)
+        _configure_connection(conn, db_path=path, created=created)
         _ensure_schema(conn)
         yield conn
         conn.commit()
