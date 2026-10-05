@@ -211,6 +211,20 @@ def add_policy_input_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def resolve_decision_model_api_key(
+    explicit_key: str = "",
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the sidecar bearer token from the flag or the environment (empty when unset).
+
+    Shared by the eval harness, the smoke command and the offline probe so every client
+    authenticates the same way against a gateway such as llama-swap.
+    """
+    env = os.environ if environ is None else environ
+    return str(explicit_key or "").strip() or env.get(DECISION_MODEL_API_KEY_ENV, "").strip()
+
+
 def resolve_decision_model_url(
     explicit_url: str,
     *,
@@ -266,9 +280,8 @@ def decision_model_settings_from_args(args: Any) -> DecisionModelSettings:
                     args, "adaptive_decision_model_timeout_sec", DEFAULT_DECISION_MODEL_TIMEOUT_SEC
                 )
             ),
-            api_key=(
-                str(_arg(args, "adaptive_decision_model_api_key", "")).strip()
-                or os.environ.get(DECISION_MODEL_API_KEY_ENV, "").strip()
+            api_key=resolve_decision_model_api_key(
+                str(_arg(args, "adaptive_decision_model_api_key", ""))
             ),
         ),
         log_state=str(_arg(args, "adaptive_decision_model_log_state", LOG_STATE_FULL)),

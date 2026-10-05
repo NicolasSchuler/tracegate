@@ -27,6 +27,7 @@ from .policy import (
     ADVICE_STATUS_MISSING,
     ADVICE_STATUS_OK,
     DecisionModelAdvice,
+    DecisionModelAdvisor,
     DecisionModelBinding,
     atomic_action_from_answers,
 )
@@ -229,6 +230,22 @@ def binding_of(controller: Any) -> DecisionModelBinding | None:
     return binding
 
 
+def advise_safely(advisor: DecisionModelAdvisor, request: AdviceRequest) -> DecisionModelAdvice:
+    """Query *advisor*; any exception becomes an ``error:<Type>`` status.
+
+    The client maps transport failures to statuses itself, but not every httpx error is a
+    ``TransportError`` (a corrupt compressed response raises ``DecodingError``), so every
+    caller that must survive one bad query goes through here.
+    """
+    try:
+        return advisor.advise(request)
+    except Exception as exc:  # the decision model must never break its caller
+        return DecisionModelAdvice(
+            status=f"error:{type(exc).__name__}",
+            error=str(exc)[:_ERROR_CHARS],
+        )
+
+
 def advise_for_attempt(
     binding: DecisionModelBinding,
     request: AdviceRequest,
@@ -236,13 +253,7 @@ def advise_for_attempt(
     """Query the advisor; any exception becomes an ``error:<Type>`` status."""
     if binding.advisor is None:
         return DecisionModelAdvice(status=ADVICE_STATUS_MISSING)
-    try:
-        return binding.advisor.advise(request)
-    except Exception as exc:  # the decision model must never break an attempt
-        return DecisionModelAdvice(
-            status=f"error:{type(exc).__name__}",
-            error=str(exc)[:_ERROR_CHARS],
-        )
+    return advise_safely(binding.advisor, request)
 
 
 def record_advice_state(
