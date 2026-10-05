@@ -111,6 +111,28 @@ def _baseline_openai_compat_settings_from_args(*, args: argparse.Namespace) -> d
     )
 
 
+def _baseline_generation_settings_from_args(*, args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve the shared baseline generation contract (D4, BAS-03/04/11).
+
+    One source for the values the adapters receive and for the values
+    ``patcher_config`` records, so changing the temperature, the completion cap or the
+    retry count can never leave the resume fingerprint untouched. The seed follows the
+    same ``--deterministic`` gate as native generation, where a seed without
+    deterministic mode drives policy exploration only and must not change sampling.
+    """
+    return {
+        "temperature": float(getattr(args, "openai_temperature", 0.0)),
+        "seed": (
+            getattr(args, "seed", None) if bool(getattr(args, "deterministic", False)) else None
+        ),
+        "max_completion_tokens": int(getattr(args, "openai_max_tokens", 2048)),
+        "transport_max_retries": int(getattr(args, "openai_transport_max_retries", 0)),
+        "transport_retry_backoff_sec": float(
+            getattr(args, "openai_transport_retry_backoff_base_sec", 1.0)
+        ),
+    }
+
+
 class _RunResultsLock:
     """File-based cross-process advisory lock for a results JSONL file."""
 
@@ -569,11 +591,28 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
             }
         )
     elif str(args.patcher) == "baseline":
+        # The adapters' own knobs, resolved exactly as make_patcher resolves them, so a
+        # changed cap, temperature, retry count, deadline or baseline-specific override
+        # changes the settings fingerprint and shows up in run metadata (BAS-03/04/11).
+        from evals.baseline_runtime import _baseline_extra_from_args
+
+        baseline_name = str(getattr(args, "baseline_name", "") or "").strip().lower()
+        baseline_process_timeout = getattr(args, "baseline_process_timeout_sec", None)
         config.update(
             {
-                "baseline_name": str(getattr(args, "baseline_name", "") or "").strip().lower(),
+                "baseline_name": baseline_name,
                 "baseline_repo_dir": str(getattr(args, "baseline_repo_dir", "") or "").strip(),
                 "baseline_python": str(getattr(args, "baseline_python", "") or "").strip(),
+                "baseline_generation": _baseline_generation_settings_from_args(args=args),
+                "baseline_api_timeout_sec": float(getattr(args, "openai_timeout_sec", 300.0)),
+                "baseline_process_timeout_sec": (
+                    float(baseline_process_timeout)
+                    if isinstance(baseline_process_timeout, (int, float))
+                    and float(baseline_process_timeout) > 0.0
+                    else float(getattr(args, "openai_timeout_sec", 300.0))
+                ),
+                "baseline_max_iterations": int(getattr(args, "baseline_max_iterations", None) or 2),
+                "baseline_extra": _baseline_extra_from_args(args=args, baseline_name=baseline_name),
             }
         )
     elif str(args.patcher) == "command":

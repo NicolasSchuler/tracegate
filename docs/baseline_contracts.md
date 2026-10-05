@@ -60,6 +60,12 @@ Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
 | LDB, TraceCoder | no | `TRACEGATE_BASELINE_*` environment variables; the upstream patches still hard-code their own sampling until they read them |
 
 Each record's `patch_meta.baseline_generation` holds the effective values and `enforced`.
+`run_metadata.patcher_config` records the resolved contract for the run as
+`baseline_generation` (plus `baseline_api_timeout_sec`, `baseline_process_timeout_sec`,
+`baseline_max_iterations` and the resolved `baseline_extra`), so changing any of them changes
+the run-settings fingerprint and resume refuses to append incomparable records. The seed
+follows `--deterministic` exactly like native generation: `--seed` alone drives policy
+exploration and leaves baseline sampling unseeded.
 `process_timeout_sec` is one wall-clock deadline per `run_repair` call: INTERVENOR stops
 iterating when it is reached (`error="deadline_exceeded"`), and every record carries
 `baseline_deadline_sec`, `baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.

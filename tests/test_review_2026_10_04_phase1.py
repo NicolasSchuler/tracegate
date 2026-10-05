@@ -741,3 +741,62 @@ def test_bas19_env_client_payloads_use_the_shared_compat_defaults(
     for payload in payloads:
         for key, value in expected.items():
             assert payload[key] == value, key
+
+
+def _baseline_run_args(*extra: str) -> Any:
+    from evals.eval_cli_args import build_parser
+
+    return build_parser().parse_args(
+        [
+            "--patcher",
+            "baseline",
+            "--baseline-name",
+            "tracecoder",
+            "--baseline-repo-dir",
+            "/repo",
+            *extra,
+        ]
+    )
+
+
+def test_bas03_baseline_generation_settings_change_the_resume_fingerprint() -> None:
+    """codex 1e#1: a changed baseline cap, temperature, retry count or deadline drifts."""
+    from evals.run_state import _build_run_settings_fingerprint
+
+    def _fingerprint(*extra: str) -> str:
+        return _build_run_settings_fingerprint(
+            args=_baseline_run_args(*extra), cases=[], conditions=[]
+        )
+
+    baseline = _fingerprint()
+    assert _fingerprint("--openai-temperature", "0.7") != baseline
+    assert _fingerprint("--openai-max-tokens", "4096") != baseline
+    assert _fingerprint("--openai-transport-max-retries", "2") != baseline
+    assert _fingerprint("--baseline-process-timeout-sec", "123") != baseline
+    assert _fingerprint("--baseline-max-iterations", "5") != baseline
+    # A baseline-specific generation override counts too (codex 1e#7).
+    assert _fingerprint("--baseline-tracecoder-analysis-max-tokens", "999") != baseline
+    assert _fingerprint() == baseline
+
+
+def test_bas03_baseline_seed_follows_the_deterministic_switch() -> None:
+    """codex 1e#12: a seed without --deterministic must not change baseline sampling."""
+    from evals.eval_cli_args import build_parser
+    from evals.eval_recording import _baseline_generation_settings_from_args
+    from evals.patcher_factory import make_patcher
+
+    assert (
+        _baseline_generation_settings_from_args(args=_baseline_run_args("--seed", "7"))["seed"]
+        is None
+    )
+    assert (
+        _baseline_generation_settings_from_args(
+            args=_baseline_run_args("--seed", "7", "--deterministic")
+        )["seed"]
+        == 7
+    )
+    # The native arm gates its request seed the same way.
+    native = make_patcher(
+        build_parser().parse_args(["--patcher", "openai", "--openai-model", "m", "--seed", "7"])
+    )
+    assert getattr(native, "seed", "missing") is None
