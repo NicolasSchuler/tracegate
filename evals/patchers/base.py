@@ -9,9 +9,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
 from .payload_types import ContextRequestPayload, PatcherMeta
 
@@ -373,3 +373,23 @@ class Patcher:
     async def apropose_patch(self, *, prompt: str, context_dir: Path, cwd: Path) -> PatchResult:
         """Async variant of ``propose_patch``; delegates to the sync implementation by default."""
         return self.propose_patch(prompt=prompt, context_dir=context_dir, cwd=cwd)
+
+
+_PatcherT = TypeVar("_PatcherT")
+
+
+def replace_patcher(patcher: _PatcherT, **changes: Any) -> _PatcherT:
+    """``dataclasses.replace`` for a patcher, keeping its progress callback (ORC-13).
+
+    The callback lives in a per-instance ``ContextVar`` that ``replace`` doesn't copy,
+    so a clone (a budget clamp or a response-mode switch) went silent and the
+    heartbeat display went blind during long model calls.
+    """
+    clone = replace(cast(Any, patcher), **changes)
+    current = getattr(patcher, "_current_progress_callback", None)
+    set_callback = getattr(clone, "set_progress_callback", None)
+    if callable(current) and callable(set_callback):
+        callback = current()
+        if callback is not None:
+            set_callback(callback)
+    return clone

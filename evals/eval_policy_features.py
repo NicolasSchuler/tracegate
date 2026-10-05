@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any
 
 from evals.coerce import nonnegative_int as _nonnegative_int
+from evals.patchers.base import replace_patcher
 
 from .adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
@@ -672,7 +673,7 @@ def _apply_adaptive_budget_profile_to_patcher(
         "response_mode": str(applied_profile.response_mode or ""),
     }
     try:
-        return replace(patcher, **override_kwargs), applied_profile, {}
+        return replace_patcher(patcher, **override_kwargs), applied_profile, {}
     except Exception as exc:
         error_text = f"{type(exc).__name__}: {exc}"
         reverted_profile = replace(

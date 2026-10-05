@@ -371,3 +371,20 @@ class TestSupportsStrictJsonFirstNonCallableAfterContextCheck:
         p = _OverridePatcher()
         p.request_context = 42  # type: ignore[assignment]  — not callable
         assert p.supports_strict_json_first() is False
+
+
+def test_replace_patcher_keeps_the_progress_callback() -> None:
+    """ORC-13: budget-clamped or mode-switched clones kept reporting progress."""
+    from evals.patchers.base import replace_patcher
+    from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+
+    events: list[str] = []
+    patcher = OpenAICompatPatcher(model="m", base_url="http://127.0.0.1:1/v1")
+    patcher.set_progress_callback(lambda event, _payload: events.append(event))
+
+    clone = replace_patcher(patcher, max_propose_sec=5.0)
+
+    assert clone is not patcher
+    assert clone.max_propose_sec == 5.0
+    clone._emit_progress("heartbeat")
+    assert events == ["heartbeat"]

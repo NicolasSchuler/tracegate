@@ -282,7 +282,7 @@ from evals.patch_relevance import (
 from evals.patcher_factory import (
     make_patcher,
 )
-from evals.patchers.base import Patcher
+from evals.patchers.base import Patcher, replace_patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import (
     is_percentile_feature_scaling_profile,
@@ -5743,7 +5743,9 @@ def _run_one_condition_attempts(
             current_mode = str(getattr(patcher_for_attempt, "response_mode", "")).strip()
             if target_mode and target_mode != current_mode:
                 try:
-                    patcher_for_attempt = replace(patcher_for_attempt, response_mode=target_mode)
+                    patcher_for_attempt = replace_patcher(
+                        patcher_for_attempt, response_mode=target_mode
+                    )
                     patch_meta["adaptive_openai_response_mode_override"] = target_mode
                 except Exception as exc:
                     patch_meta["adaptive_openai_response_mode_override_error"] = (

@@ -5,10 +5,10 @@ Also checks that a deterministic run's backend acknowledged the seed."""
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from evals.patchers.base import replace_patcher
 from evals.patchers.payload_types import as_patcher_meta
 
 
@@ -157,7 +157,7 @@ def _patcher_with_shared_attempt_budget(
         return patcher, remaining_budget_sec, clamped_max_propose_sec, False
 
     try:
-        clamped_patcher = replace(patcher, max_propose_sec=clamped_max_propose_sec)
+        clamped_patcher = replace_patcher(patcher, max_propose_sec=clamped_max_propose_sec)
     except Exception:
         return patcher, remaining_budget_sec, configured_max_propose_sec, False
     return clamped_patcher, remaining_budget_sec, clamped_max_propose_sec, True

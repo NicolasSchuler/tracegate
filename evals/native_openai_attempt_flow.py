@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from evals.patchers.base import replace_patcher
+
 from .eval_prompts import (
     _build_context_compaction_bundle,
     _should_invoke_context_compaction,
@@ -371,7 +373,7 @@ def maybe_autoswitch_openai_response_mode(
     if current_mode != "edits":
         return patcher_for_attempt, False
     try:
-        next_patcher = replace(patcher_for_attempt, response_mode="diff")
+        next_patcher = replace_patcher(patcher_for_attempt, response_mode="diff")
     except Exception as exc:
         patch_meta["openai_response_mode_autoswitch_error"] = f"{type(exc).__name__}: {exc}"
         return patcher_for_attempt, False
