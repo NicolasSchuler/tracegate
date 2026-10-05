@@ -385,10 +385,10 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] **RCA-22:** a single `RCAState` and an `RCAAttemptRecord` TypedDict. **RCA-23:** `TransitionInputs` and `GateRequest` objects. *(Also `TransitionStep` and `AttemptProgress`; the keyword form of `evaluate_gate` is deprecated, not removed. `handle_frame`/`handle_diff` stay on the arity ratchet because they mirror the MCP tool parameters.)*
 
 ### 4.4. MCP and persistence
-- [ ] **RCA-02:** root confinement per D11, and read-only tools never create files.
-- [ ] **RCA-09:** async tools using `anyio.to_thread`. **RCA-10, RCA-17:** error envelope and `limit` validation.
-- [ ] **RCA-11:** `PRAGMA user_version` with migrations. **RCA-16, RCA-18.**
-- [ ] **RCA-03:** index consistency check, and one `snapshot_index` module. **RCA-21:** `clean`.
+- [x] **RCA-02:** root confinement per D11, and read-only tools never create files. *(`llmdebug.mcp_paths` and a `_confined` decorator on all nine tools. State-DB reads return empty results without a database, the index is rebuilt only if it exists, and the JSONL migration runs on writes; reads merge pending JSONL rows in memory. Tests set `LLMDEBUG_MCP_ROOT` to pytest's basetemp.)*
+- [x] **RCA-09:** async tools using `anyio.to_thread`. **RCA-10, RCA-17:** error envelope and `limit` validation. *(RCA-09 uses `asyncio.to_thread`: FastMCP always runs on asyncio and `anyio` is not a declared dependency. `advance_rca_attempt` takes an in-process lock, since the loop no longer serializes RCA updates.)*
+- [x] **RCA-11:** `PRAGMA user_version` with migrations. **RCA-16, RCA-18.** *(RCA-16 reads the persistent journal mode on each open instead of caching per path, so a recreated database becomes WAL again. RCA-18 trims via a temp file and `os.replace`.)*
+- [x] **RCA-03:** index consistency check, and one `snapshot_index` module. **RCA-21:** `clean`. *(`llmdebug.snapshot_index` holds the shared snapshot-file rule, the index-row builder and `index_matches_disk` (row count vs. files on disk). The loader's private index/scan helpers stay in `_snapshot_loader`, because 55 tests reach into them. RCA-21 adds an opt-in `--purge-state`; `--all` keeps the RCA history.)*
 
 ### 4.5. Interfaces
 - [ ] **RCA-07, RCA-08:** Jupyter. **RCA-13:** dead Rich branch. **RCA-14:** git output encoding. **RCA-15:** exit codes. **RCA-19, RCA-20.**
