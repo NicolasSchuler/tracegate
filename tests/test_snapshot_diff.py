@@ -1162,3 +1162,19 @@ def test_has_structured_changes_touched_functions() -> None:
 
     result = _make_diff_result(touched_functions=("do_stuff",))
     assert _has_structured_changes(result) is True
+
+
+def test_mutating_a_result_does_not_leak_into_later_diffs() -> None:
+    """CAP-14: old_git/new_git were a shared module-level dict when a snapshot had no git."""
+    from llmdebug.snapshot_diff import diff_snapshots
+
+    snap = {"exception": {"type": "E", "message": "m"}, "frames": []}
+    first = diff_snapshots(snap, snap)
+    first.old_git["commit"] = "poisoned"
+    first.new_git["branch"] = "poisoned"
+
+    second = diff_snapshots(snap, snap)
+
+    assert second.old_git == {}
+    assert second.new_git == {}
+    assert second.old_git is not first.old_git
