@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -122,6 +123,24 @@ def snap_dir(tmp_path: Path) -> Path:
 
 
 class TestInstall:
+    def test_failed_magic_registration_restores_the_hook(self):
+        """RCA-07: the hook stayed wrapped with _installed=False, so a retry wrapped it twice."""
+        ip = _make_ipython()
+        original = ip.showtraceback
+
+        def _fail(_cls: Any) -> None:
+            raise RuntimeError("magics unavailable")
+
+        ip.register_magics = _fail
+        with pytest.raises(RuntimeError, match="magics unavailable"):
+            install(ip, out_dir="/tmp/test_llmdebug")
+
+        assert ip.showtraceback == original
+        del ip.register_magics  # back to the working class method
+        install(ip, out_dir="/tmp/test_llmdebug")
+        uninstall()
+        assert ip.showtraceback == original
+
     def test_install_wraps_showtraceback(self):
         ip = _make_ipython()
         original = ip.showtraceback
@@ -997,6 +1016,52 @@ class TestMagicListNotebookPath:
 
         # HTML branch was used — HTML was rendered with ValueError
         assert any("ValueError" in h for h in html_rendered)
+
+    def test_magic_list_escapes_the_line_value(self, snap_dir: Path) -> None:
+        """RCA-08: index rows from a shared directory are untrusted, line included."""
+        ip = _make_ipython(notebook=True)
+        magic = self._get_magic_instance(ip, str(snap_dir))
+        entries = [
+            {"exc_type": "E", "exc_message": "m", "file": "f.py", "line": _HOSTILE_HTML},
+        ]
+        html_rendered: list[str] = []
+
+        with (
+            patch("llmdebug._snapshot_loader.find_all_snapshots", return_value=entries),
+            patch("llmdebug.jupyter_plugin._is_notebook", return_value=True),
+            patch("IPython.display.HTML", lambda content: html_rendered.append(content)),
+            patch("IPython.display.display", lambda _obj: None),
+        ):
+            magic.llmdebug("list")
+
+        assert _HOSTILE_HTML not in html_rendered[0]
+        assert "&lt;img" in html_rendered[0]
+
+
+_HOSTILE_HTML = "<img src=x onerror=alert(1)>"
+
+
+class TestHtmlEscaping:
+    """RCA-08: snapshot values interpolated into notebook HTML must be escaped."""
+
+    def _hostile_snapshot(self) -> dict[str, Any]:
+        snapshot = copy.deepcopy(SAMPLE_SNAPSHOT)
+        snapshot["frames"][0]["line"] = _HOSTILE_HTML
+        snapshot["jupyter"]["execution_count"] = "<script>alert(2)</script>"
+        return snapshot
+
+    def test_banner_escapes_the_crash_line(self) -> None:
+        html = _format_snapshot_banner_html(self._hostile_snapshot())
+
+        assert _HOSTILE_HTML not in html
+        assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+    def test_full_view_escapes_line_and_execution_count(self) -> None:
+        html = _format_full_snapshot_html(self._hostile_snapshot())
+
+        assert _HOSTILE_HTML not in html
+        assert "<script>" not in html
+        assert "Cell In[&lt;script&gt;" in html
 
 
 # ---------------------------------------------------------------------------

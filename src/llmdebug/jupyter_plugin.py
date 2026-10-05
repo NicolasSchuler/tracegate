@@ -146,7 +146,7 @@ def _format_snapshot_banner_html(snapshot: dict[str, Any]) -> str:
     return (
         f'<div style="{_BANNER_CSS}">'
         f"<b>llmdebug</b> captured <b>{_esc(exc_type)}</b>"
-        f" at {_esc(str(crash_file))}:{crash_line}<br>"
+        f" at {_esc(str(crash_file))}:{_esc(str(crash_line))}<br>"
         f"<span style='color:#666'>{_esc(exc_msg)}</span><br>"
         f"<span style='color:#888; font-size:11px'>"
         f"Use <code>%llmdebug</code> to view full snapshot</span>"
@@ -191,7 +191,7 @@ def _html_crash_frame_parts(frames: list[Any], crash_idx: int) -> list[str]:
     parts: list[str] = [
         "<hr style='border:none;border-top:1px solid #eee;margin:8px 0'>",
         f"<p style='margin:4px 0'><b>Crash frame:</b> "
-        f"{_esc(file_name)}:{line} in <code>{_esc(func)}</code></p>",
+        f"{_esc(file_name)}:{_esc(str(line))} in <code>{_esc(func)}</code></p>",
     ]
     if code:
         parts.append(
@@ -226,7 +226,7 @@ def _html_jupyter_part(snapshot: dict[str, Any]) -> list[str]:
     ec = jupyter_ctx.get("execution_count", "?")
     return [
         "<hr style='border:none;border-top:1px solid #eee;margin:8px 0'>",
-        f"<p style='margin:4px 0;color:#888;font-size:11px'>Cell In[{ec}]</p>",
+        f"<p style='margin:4px 0;color:#888;font-size:11px'>Cell In[{_esc(str(ec))}]</p>",
     ]
 
 
@@ -475,7 +475,7 @@ def _register_magics(ipython: Any) -> None:
                         f"<tr><td>#{i}</td>"
                         f"<td>{_esc(exc_type)}</td>"
                         f"<td>{_esc(exc_message)}</td>"
-                        f"<td>{_esc(file_name)}:{line}</td></tr>"
+                        f"<td>{_esc(file_name)}:{_esc(str(line))}</td></tr>"
                     )
                 return (
                     "<table style='border-collapse:collapse;font-family:monospace;"
@@ -619,16 +619,19 @@ def install(
 
         # Save original and wrap showtraceback
         original: Callable[..., Any] = cast(Callable[..., Any], ipython.showtraceback)
-        _original_showtraceback = original
         ipython.showtraceback = _make_wrapped_showtraceback(original, cfg, limiter, ipython)
+        try:
+            _register_magics(ipython)
+        except BaseException:
+            # RCA-07: a wrapped hook with _installed=False survived uninstall() and was
+            # wrapped again by the next install(), printing and capturing twice.
+            ipython.showtraceback = original
+            raise
 
+        _original_showtraceback = original
         _cfg = cfg
         _limiter = limiter
         _ipython_ref = ipython
-
-        # Register magic commands
-        _register_magics(ipython)
-
         _installed = True
 
 
