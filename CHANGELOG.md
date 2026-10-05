@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Large set locals are cheap to capture (CAP-10): every element was `repr`'d and sorted before truncation (200,000 ints: 37 ms; strings: 160 ms). Sets of up to 1,000 elements keep their `repr` order; larger sets preview their smallest elements in natural order via `heapq.nsmallest` (1.5–5 ms), and only incomparable element types fall back to a bounded sample. Part of the snapshot schema `2.1` format.
 - Function arguments are serialized once per frame (CAP-09): `args` was built by a second serialization pass over values `locals` already held, recomputing array statistics and reprs. Arguments now reuse their serialized locals (a separate pass remains only with `redact_keys=True`); the `args` payload is unchanged, and a frame with two array arguments serializes about twice as fast.
 - Capture reads `frame.f_locals` once per frame (CAP-12): `extract_function_args` re-read it for every argument, and on Python 3.10–3.12 each read rebuilds the locals dict (`extract_function_args` is about 2× faster on 3.13 and much more on earlier versions).
 - Source snippets come from `linecache` (CAP-08): `get_source_snippet` required `os.path.exists(filename)` and re-read the file for every frame, so IPython cells, `exec` code and zipimported modules had no source in snapshots. It now reads through `linecache` (the cache `traceback` filled for the same exception, with the frame's globals so zip loaders work), which also keeps the snippet consistent with the frame's `code` line.
