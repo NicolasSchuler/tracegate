@@ -304,11 +304,15 @@ class DecisionModelRuntime:
             dtype=dtype,
             **quantization_kwargs(config.quantization, compute_dtype=dtype),
         )
+        systemone = joint_schema_model.systemone
+        started = time.perf_counter()
+        # Warm up before publishing the runtime: while the first forward pass compiles CUDA
+        # graphs and loads lazy kernels it holds the lock for far longer than a decision
+        # timeout, so /health must keep answering 503 until it is done.
+        self._forward(systemone, model, processor, dict(_WARMUP_REQUEST))
         self._model = model
         self._processor = processor
-        self._systemone = joint_schema_model.systemone
-        started = time.perf_counter()
-        self.answer(dict(_WARMUP_REQUEST))
+        self._systemone = systemone
         LOGGER.info(
             "ready: warm-up forward pass took %.0f ms (max_length=%d)",
             (time.perf_counter() - started) * 1000.0,
@@ -318,12 +322,23 @@ class DecisionModelRuntime:
     def answer(self, request: dict[str, Any]) -> dict[str, Any]:
         """Answer one SystemOne request body with one joint-schema forward pass."""
         systemone = self._systemone
-        if systemone is None or self._model is None:
+        model = self._model
+        if systemone is None or model is None:
             raise ModelNotReadyError("decision model is still loading")
+        return self._forward(systemone, model, self._processor, request)
+
+    def _forward(
+        self,
+        systemone: Any,
+        model: Any,
+        processor: Any,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """One serialized joint-schema forward pass."""
         with self._lock:
             return systemone(
-                self._model,
-                self._processor,
+                model,
+                processor,
                 request,
                 max_length=self._config.max_length,
             )

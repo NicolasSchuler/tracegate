@@ -429,3 +429,59 @@ def test_quantization_is_configurable_and_validated() -> None:
     assert server.quantization_kwargs("none", compute_dtype=None) == {}
     with pytest.raises(ValueError, match="CLEF_QUANTIZATION"):
         server.quantization_kwargs("q2", compute_dtype=None)
+
+
+def _stub_gpu_stack(monkeypatch: pytest.MonkeyPatch, *, snapshot_dir: Path, systemone: Any) -> None:
+    """Install torch / huggingface_hub / joint_schema_model stubs for DecisionModelRuntime.load."""
+
+    class _DType:
+        pass
+
+    torch_stub = ModuleType("torch")
+    torch_stub.dtype = _DType
+    torch_stub.bfloat16 = _DType()
+    hub_stub = ModuleType("huggingface_hub")
+    hub_stub.snapshot_download = lambda model_id, revision: str(snapshot_dir)
+    release_stub = ModuleType("joint_schema_model")
+    release_stub.systemone = systemone
+    release_stub.load_release_model = lambda path, **kwargs: ("model", "processor")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setitem(sys.modules, "torch", torch_stub)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub_stub)
+    monkeypatch.setitem(sys.modules, "joint_schema_model", release_stub)
+
+
+def test_health_stays_503_until_the_warmup_pass_finishes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Readiness must follow the warm-up pass, not the assignment of the loaded weights."""
+    warmup_running = threading.Event()
+    finish_warmup = threading.Event()
+    requests: list[str] = []
+
+    def systemone(model: Any, processor: Any, request: dict[str, Any], max_length: int) -> Any:
+        requests.append(str(request.get("model") or ""))
+        if str(request.get("model") or "") == "warmup":
+            warmup_running.set()
+            assert finish_warmup.wait(10)
+        return {"answers": {}}
+
+    _stub_gpu_stack(monkeypatch, snapshot_dir=tmp_path, systemone=systemone)
+    config = server.ServerConfig(device="cpu", dtype="bfloat16")
+    runtime = server.DecisionModelRuntime(config)
+    loader = threading.Thread(target=runtime.load, daemon=True)
+    loader.start()
+    assert warmup_running.wait(10)
+
+    assert runtime.ready is False
+    assert server.handle_health_request(config, ready=runtime.ready)[0] == 503
+    with pytest.raises(server.ModelNotReadyError):
+        runtime.answer({"model": "clef-flash"})
+
+    finish_warmup.set()
+    loader.join(timeout=10)
+    assert not loader.is_alive()
+    assert runtime.ready is True
+    assert server.handle_health_request(config, ready=runtime.ready)[0] == 200
+    assert runtime.answer({"model": "clef-flash"}) == {"answers": {}}
+    assert requests == ["warmup", "clef-flash"]
