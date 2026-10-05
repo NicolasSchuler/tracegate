@@ -232,13 +232,15 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Baseline construction still exposes adapter-specific compatibility controls.",
         {"_hybrid_sidecars_active": 8, "build_baseline_patcher": 12},
     ),
+    "evals/patchers/openai_transport.py": _FileArityDebt(
+        "Chat completions still take transport and compat controls separately (ChatRequestConfig).",
+        {"_chat_completion": 17, "_chat_completion_async": 17},
+    ),
     "evals/patchers/openai_compat_patcher.py": _FileArityDebt(
         "Provider compatibility helpers still mirror transport and response controls.",
         {
             "OpenAICompatPatcher.generate_json": 9,
             "OpenAICompatPatcher.generate_text": 7,
-            "_chat_completion": 17,
-            "_chat_completion_async": 17,
             "_compact_context_via_json": 17,
             "_compact_context_via_json_async": 17,
             "_propose_patch_via_diff": 17,
