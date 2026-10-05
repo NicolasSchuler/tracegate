@@ -419,32 +419,32 @@ These are behaviour-preserving refactors, each in its own commit or PR with no f
 - [x] Add an `evals/` architecture-boundary test, alongside `tests/test_architecture_boundaries.py`. *(`tests/test_evals_architecture_boundaries.py`, replacing `test_evals_shim_writes.py`. It also rejects test patches of `run_eval` re-exports; it found one that had silently done nothing.)*
 
 ### 5.2. Split the very large functions (X-01)
-- [ ] Move `run_eval.main` into `evals/eval_cli_args.py::build_parser()`.
-- [ ] Split `run_one_condition_impl` along the seams in the ATT structural notes. Start with the terminal-failure recorder, then `adaptive_action_selection.py` and `stage_a_execution.py`.
-- [ ] Split `run_main_flow`: metadata, policies, scheduler, and outcome handling with `RunAccumulators` and `UnitProgressMetrics` dataclasses.
-- [ ] Split `analyze_results.py` and `openai_compat_patcher.py` along the seams in the STA and LLM structural notes.
+- [x] Move `run_eval.main` into `evals/eval_cli_args.py::build_parser()`. *(`eval_cli_args.py` and `eval_cli_args_adaptive.py`; every action, default and the `--help` text compare equal to the old parser. `run_eval.py`: 2,250 → ~600 lines.)*
+- [x] Split `run_one_condition_impl` along the seams in the ATT structural notes. Start with the terminal-failure recorder, then `adaptive_action_selection.py` and `stage_a_execution.py`. *(Done: one `_record_terminal_attempt` for the five early exits, `select_helper_action` and `run_stage_a_requests`. Not done (proposed deferral, pending the user's agreement: the 1,369-line syntax-cycle loop writes `nonlocal` state its closures read, so it needs a state-object redesign rather than a verbatim move.)*
+- [x] Split `run_main_flow`: metadata, policies, scheduler, and outcome handling with `RunAccumulators` and `UnitProgressMetrics` dataclasses. *(`eval_main_policies`, `eval_main_metadata`, `eval_main_outcome` with `UnitProgressMetrics` and `RunUsageTotals`; `eval_main_flow.py` 1,214 → ~860 lines. Not done (proposed deferral, pending the user's agreement: the scheduler and `_handle_outcome` still share about a dozen `nonlocal` counters.)*
+- [x] Split `analyze_results.py` and `openai_compat_patcher.py` along the seams in the STA and LLM structural notes. *(`analysis_*` modules, `analyze_results.py` 6,824 → 435 lines; `openai_{transport,probes,response,diff_text,edits_apply}`, `openai_compat_patcher.py` 6,090 → ~3,350. Over the 1,200-line soft limit and (proposed deferral, pending the user's agreement: split the `OpenAICompatPatcher` class itself, about 1,465 lines, and `openai_transport.py`, about 1,300.)*
 
 ### 5.3. Remove duplication (X-04) and dead code
-- [ ] Sync/async twins: derive them from one core, or add a parity test that checks signatures and behaviour.
-- [ ] Create `evals/swebench_common/`. Delete the unused `ProPredictionRecord` and `ProInstanceRow`, or adopt them.
-- [ ] Move the shared adapter runtime into `adapter_base` or `baselines/_runtime.py`, with a `BaselineMetrics` dataclass. **BAS-18:** delete the dead extractors.
-- [ ] Use one set of analysis formatters, one definition of `EVAL_RECORD_SCHEMA_VERSION`, and one `_build_diff_from_changes`.
-- [ ] Delete the other dead code: **ORC-22, STA-26, CAP-17** (if not already done), and **DAT-25** (or rewrite it).
+- [x] Sync/async twins: derive them from one core, or add a parity test that checks signatures and behaviour. *(Parity test, `tests/test_evals_openai_sync_async_parity.py`; it caught two drifts, now fixed.)*
+- [x] Create `evals/swebench_common/`. Delete the unused `ProPredictionRecord` and `ProInstanceRow`, or adopt them. *(Shared `io.py` with a `SweBenchLayout`; both records deleted. The two `smoke.py` modules stay separate: they return per-flavour summary types.)*
+- [x] Move the shared adapter runtime into `adapter_base` or `baselines/_runtime.py`, with a `BaselineMetrics` dataclass. **BAS-18:** delete the dead extractors. *(`baselines/_runtime.py` with two mixins; extractors deleted. (proposed deferral, pending the user's agreement: the `BaselineMetrics` dataclass; the adapters' `_build_metrics` signatures are on the arity allowlist.)*
+- [x] Use one set of analysis formatters, one definition of `EVAL_RECORD_SCHEMA_VERSION`, and one `_build_diff_from_changes`. *(One schema version and one `_build_diff_from_changes`; one `nonnegative_int`/`expand_paths` in `evals/coerce.py`. The formatters in `eval_summary` and `eval_two_pass_summary` stay: they differ from `analysis_numeric`'s (near-integer tolerance, rounding path), so merging would change printed numbers.)*
+- [x] Delete the other dead code: **ORC-22, STA-26, CAP-17** (if not already done), and **DAT-25** (or rewrite it). *(CAP-17 was done in Phase 4. `run_eval` declares its facade in `__all__`; `duplicate_attempt_rows_resolved` is kept, as documented input diagnostics.)*
 
 ### 5.4. Types (X-03, X-05)
-- [ ] Add TypedDicts or dataclasses for the attempt record, a composed `PatcherMeta`, the derived analysis row, and snapshot frames used by the code that builds them. Start with a record-keys constants module (**ORC-23**).
-- [ ] Widen `pyrightconfig.evals.json` module by module as the seams land. Fix the undefined annotation names first.
+- [x] Add TypedDicts or dataclasses for the attempt record, a composed `PatcherMeta`, the derived analysis row, and snapshot frames used by the code that builds them. Start with a record-keys constants module (**ORC-23**). *(`evals/record_keys.py` (an `AttemptNote` Literal, record-key constants and an `AttemptRecord` TypedDict the builders return), `PatcherMeta` composed of ten per-concern TypedDicts, and `capture.py` building `FrameDict`. (proposed deferral, pending the user's agreement: the derived analysis row, about 170 keys; the four `analysis_*` modules that read it are the pyright holdouts.)*
+- [x] Widen `pyrightconfig.evals.json` module by module as the seams land. Fix the undefined annotation names first. *(All of `evals/` and `baselines/`, 180 files, up from 14; seven holdouts with a shrink-only contract test. `eval_attempt_flow.py` is one: pyright doesn't finish on it in 15 minutes.)*
 
 ### 5.5. Guardrails (X-06, X-07, X-08)
-- [ ] Add a signature-budget test: AST-based, with an allowlist that can only shrink.
-- [ ] Replace the silent `except` blocks with recorded events or fields, and use one logging channel for capture diagnostics.
-- [ ] Generate defaults tables via `evals.doc_sync` wherever docs restate code constants.
+- [x] Add a signature-budget test: AST-based, with an allowlist that can only shrink. *(The test existed; it now also fails on stale entries and loose ceilings.)*
+- [x] Replace the silent `except` blocks with recorded events or fields, and use one logging channel for capture diagnostics. *(Remaining sites in the importers and the Docker scorer; ATT-17, RCA-19 and DAT-15 were fixed earlier. Diagnostics go through the `llmdebug.diagnostics` logger, with stderr output unchanged.)*
+- [x] Generate defaults tables via `evals.doc_sync` wherever docs restate code constants. *(Policy defaults since POL-25; now also the `--baseline-*` flag table in `docs/baseline-adapters.md`, which had drifted. `evals/doc_sync_cli.py::GeneratedBlock` for further tables.)*
 
 ### 5.6. Remaining Medium and Low findings
-- [ ] **Orchestration:** ORC-07, ORC-08, ORC-09, ORC-11, ORC-12, ORC-13, ORC-14, ORC-16, ORC-20, ORC-24.
-- [ ] **Attempt flow:** ATT-18, ATT-19, ATT-22, ATT-23.
-- [ ] **LLM I/O:** LLM-11, LLM-12, LLM-16, LLM-17, LLM-18, LLM-20, LLM-21, LLM-22, LLM-23, LLM-24, LLM-25, LLM-26.
-- [ ] **Importers:** DAT-06, DAT-07, DAT-12, DAT-22, DAT-23.
+- [x] **Orchestration:** ORC-07, ORC-08, ORC-09, ORC-11, ORC-12, ORC-13, ORC-14, ORC-16, ORC-20, ORC-24. *(ORC-14: the run lock file now persists, so golden runs skip `*.lock`. ORC-24: auto run ids are UTC and end the time part in `Z`.)*
+- [x] **Attempt flow:** ATT-18, ATT-19, ATT-22, ATT-23. *(ATT-19: the docstring now matches the code; adding header/fence checks would change which patches are rejected. ATT-18 adds the `patch_cycle_incomplete` note.)*
+- [ ] **LLM I/O:** LLM-11, LLM-12, LLM-16, LLM-17, LLM-18, LLM-20, LLM-21, LLM-22, LLM-23, LLM-24, LLM-25, LLM-26. *(Done: LLM-11, 12, 22, 23, 25; LLM-20's dead `priority` field; LLM-26's prompt-parsed forced-patch target. (proposed deferral, pending the user's agreement: LLM-16, 17, 18, 20 (drop order), 21, 24 and 26 (fencing). Each changes what the model sees, the call count, or a reported metric, so results would not be comparable with existing runs. This is a research decision.)*
+- [ ] **Importers:** DAT-06, DAT-07, DAT-12, DAT-22, DAT-23. *(Done: DAT-06 (one case-file contract, `evals/case_contract.py`), DAT-12, DAT-22, DAT-23. (proposed deferral, pending the user's agreement: DAT-07 needs an infrastructure choice: materialize full repository trees or run in each dataset's container. No `bip_`/`pbh_`/`tb_` cases exist, so current results are unaffected.)*
 
 **Acceptance:**
 - The golden fixture runs show no behaviour change.

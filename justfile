@@ -110,7 +110,7 @@ type-coverage-strict:
 dependency-sync:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} python scripts/quality/check_dev_dependency_sync.py
 
-# Staged eval typing pass for a bounded subset of eval modules
+# Staged eval typing pass (basic mode) over evals/ and baselines/, minus listed holdouts
 typecheck-evals:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} pyright -p pyrightconfig.evals.json
 
