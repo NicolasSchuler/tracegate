@@ -1714,12 +1714,20 @@ def test_dat20_condefects_embeds_stdin_and_expected_output_as_strings() -> None:
     assert repr(payload) in generated
 
 
-def test_both_validators_accept_a_native_repro_case(tmp_path: Path) -> None:
-    """DAT-06: importers and validate_cases apply one file contract."""
-    from evals.case_contract import validate_case_contract
-    from evals.importers.base import validate_generated_case
+def test_both_validators_accept_a_native_repro_case(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DAT-06: the importers and the validate_cases CLI apply one file contract.
 
-    case_dir = tmp_path / "bip_demo"
+    Both assertions go through the public entry points, so reintroducing either
+    standalone validator (importers requiring ``buggy.py``, validate_cases requiring
+    ``test_buggy.py``) fails this test.
+    """
+    from evals.importers.base import validate_generated_case
+    from evals.validate_cases import main as validate_cases_main
+
+    cases_dir = tmp_path / "cases"
+    case_dir = cases_dir / "bip_demo"
     (case_dir / "src").mkdir(parents=True)
     (case_dir / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
     (case_dir / "oracle.patch").write_text(
@@ -1727,10 +1735,18 @@ def test_both_validators_accept_a_native_repro_case(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (case_dir / "case.json").write_text(
-        '{"repro_mode": "native_dataset_test", "category": "logic_error"}', encoding="utf-8"
+        json.dumps(
+            {
+                "repro_mode": "native_dataset_test",
+                "category": "data_shape_runtime",
+                "difficulty": "easy",
+                "snapshot_dependency": "none",
+                "expected_exception": "AssertionError",
+            }
+        ),
+        encoding="utf-8",
     )
 
-    assert validate_case_contract(case_dir) == (True, "ok")
-    files_ok, message = validate_generated_case(case_dir)
-    assert "missing required file" not in message
-    assert files_ok or "test_buggy.py" not in message
+    assert validate_generated_case(case_dir) == (True, "schema valid")
+    assert validate_cases_main(["--cases-dir", str(cases_dir), "--schema-only"]) == 0
+    assert "[PASS] bip_demo" in capsys.readouterr().out
