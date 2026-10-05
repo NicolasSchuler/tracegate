@@ -312,6 +312,7 @@ from evals.record_keys import (
     NOTE_NO_PATCH_NEEDED,
     NOTE_NO_PATCH_PROPOSED,
     NOTE_PATCH_APPLY_FAILED,
+    NOTE_PATCH_CYCLE_INCOMPLETE,
     NOTE_PATCH_VERIFIER_REJECTED,
     NOTE_PATCHER_REQUEST_FAILED,
     NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
@@ -7427,6 +7428,11 @@ def _run_one_condition_attempts(
                 break
             continue
         if not patch_applied_and_ready:
+            # ATT-18: the syntax cycle ended without a patch or a terminal note. That is
+            # unreachable today, but continuing without consuming the attempt would spin
+            # forever, so the attempt is scored as incomplete.
+            if _record_terminal_attempt(NOTE_PATCH_CYCLE_INCOMPLETE):
+                break
             continue
 
         # Re-run after patch, against the pristine test surface (ATT-01, D10).
