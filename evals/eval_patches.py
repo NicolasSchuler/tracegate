@@ -338,9 +338,11 @@ def _patch_sanitize_line_reasons(line: str) -> list[str]:
 def _run_patch_sanitization(*, diff: str) -> tuple[bool, dict[str, Any]]:
     """Scan added lines in a diff for malformed patch artifacts.
 
-    Returns (passed, details_dict) where *passed* is ``False`` when
-    suspicious markers (e.g. raw diff headers, markdown fences) are
-    found in added Python lines.
+    Returns (passed, details_dict) where *passed* is ``False`` when an added line in a
+    Python file has one of the artifacts ``_patch_sanitize_line_reasons`` checks for: a
+    backslash before ``Exception``, a literal ``\\n``/``\\t`` outside a string literal,
+    or an ``await`` line ending in ``",``. Raw diff headers and markdown fences inside
+    added lines are not checked (ATT-19).
     """
     current_file = ""
     current_new_lineno = 0
