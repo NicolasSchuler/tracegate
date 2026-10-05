@@ -1521,7 +1521,13 @@ When rows carry decision-model advice, `analyze_results` OPE also reports
 `decision_model_greedy`, `decision_model_stochastic` and `decision_model_atomic` targets (the
 atomic target re-applies the `evidence_atomic_v1` thresholds to logged aux answers when the run
 used another profile), and `shadow_corrected_samples` counts old shadow-mode rows whose behavior
-propensity was corrected to 1.0 at read time.
+propensity was corrected to 1.0 at read time. Those per-sample targets additionally report the
+behavior support of their probability mass (`behavior_supported_target_mass`,
+`unsupported_target_mass`, `unsupported_mass_samples`, `deterministic_behavior_samples`,
+`estimates_identifiable`) and set `support_warning="unsupported_target_mass"` when target mass
+sits on actions the behavior policy never could have taken; see
+`docs/adaptive_online_policy_design.md`. Bootstrap intervals are suppressed for estimators
+without behavior support (`ope_ci.ips`/`ope_ci.snips` are `null` rather than `[0, 0]`).
 
 ### Offline decision-model probe
 

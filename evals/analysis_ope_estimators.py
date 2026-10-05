@@ -333,20 +333,28 @@ def _ope_case_bootstrap(
     ips_draws = (weighted / n).tolist()
     snips_draws = (weighted[weight > 0] / weight[weight > 0]).tolist()
     dr_draws = (dr_sum / n).tolist()
+    # No sample carries importance weight: the point estimators report ips/snips as null with
+    # no_behavior_support, so the resampled zeros must not become a certain-looking [0, 0].
+    importance_weighted = bool((weight_arr > 0.0).any())
 
     def interval(draws: list[float]) -> list[float] | None:
         return list(percentile_interval(draws, 0.95)) if draws else None
 
+    ips_interval = interval(ips_draws) if importance_weighted else None
+    snips_interval = interval(snips_draws) if importance_weighted else None
+    dr_interval = interval(dr_draws) if dr_terms is not None else None
     return {
-        "available": True,
+        "available": any(
+            estimate is not None for estimate in (ips_interval, snips_interval, dr_interval)
+        ),
         "unit": "case",
         "n_cases": len(cases),
         "n_bootstrap": OPE_BOOTSTRAP_RESAMPLES,
         "method": BOOTSTRAP_METHOD,
         "seed": DEFAULT_BOOTSTRAP_SEED,
-        "ips": interval(ips_draws),
-        "snips": interval(snips_draws),
-        "dr": interval(dr_draws) if dr_terms is not None else None,
+        "ips": ips_interval,
+        "snips": snips_interval,
+        "dr": dr_interval,
     }
 
 

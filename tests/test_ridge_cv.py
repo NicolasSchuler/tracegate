@@ -424,3 +424,62 @@ def test_ope_estimates_carry_case_bootstrap_intervals() -> None:
         propensity_floor=0.01,
     )
     assert again["targets"]["always_a"]["ope_ci"] == ci  # seeded
+
+
+def test_zero_support_targets_report_no_ips_interval() -> None:
+    """An unsupported estimate must not become an apparently certain zero (codex 2-3#4)."""
+    from evals.analyze_results import _adaptive_ope_summary
+
+    samples = []
+    for case in range(12):
+        sample = _ope_sample("a", float(case), float(case % 3))
+        sample["case_key"] = f"run\x1fc{case}"
+        samples.append(sample)
+    summary = _adaptive_ope_summary(
+        samples=samples,
+        action_space={"a", "b"},
+        # No sample ever chose "b", so the deterministic target has no behavior support.
+        target_policies={"always_b": "b"},
+        min_action_support=2,
+        propensity_floor=0.01,
+    )
+    target = summary["targets"]["always_b"]
+
+    assert target["ips"] is None and target["snips"] is None
+    assert target["support_warning"] == "no_behavior_support"
+    ci = target["ope_ci"]
+    assert ci["ips"] is None
+    assert ci["snips"] is None
+    assert ci["available"] is (ci["dr"] is not None)
+
+
+def test_zero_support_stochastic_targets_report_no_ips_interval() -> None:
+    """Same for the per-sample (decision-model) targets (codex 2-3#4)."""
+    from evals.analyze_results import (
+        ADAPTIVE_OPE_RIDGE_ALPHA,
+        StochasticTargetOpeSettings,
+        _stochastic_target_ope,
+    )
+
+    samples = []
+    for case in range(12):
+        sample = _ope_sample("a", float(case), float(case % 3))
+        sample["case_key"] = f"run\x1fc{case}"
+        samples.append(sample)
+    target = _stochastic_target_ope(
+        samples=samples,
+        target_distributions=[{"a": 0.0, "b": 1.0} for _ in samples],
+        settings=StochasticTargetOpeSettings(
+            action_space={"a", "b"},
+            min_action_support=2,
+            ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
+            propensity_floor=0.01,
+        ),
+    )
+
+    assert target["ips"] is None and target["snips"] is None
+    assert target["support_warning"] == "no_behavior_support"
+    assert target["unsupported_target_mass"] == pytest.approx(1.0)
+    ci = target["ope_ci"]
+    assert ci["ips"] is None
+    assert ci["snips"] is None

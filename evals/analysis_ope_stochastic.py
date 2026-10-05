@@ -18,12 +18,14 @@ from evals.analysis_ope_estimators import (
 )
 from evals.analysis_ope_support import (
     _ONLINE_ACTION_RANK,
+    SUPPORT_WARNING_UNSUPPORTED_MASS,
     _action_counts_for_samples,
     _coerce_feature_values,
     _estimator_agreement_summary,
     _feature_scaling_profile_bucket,
     _sanitize_propensity,
     _support_warning_for_target,
+    _target_mass_support,
 )
 from evals.decision_model.policy import atomic_action_from_answers
 from evals.decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
@@ -259,6 +261,18 @@ def _stochastic_target_ope(
         _target_importance_weight(sample, distribution, propensity_floor=settings.propensity_floor)
         for sample, distribution in zip(samples, target_distributions, strict=True)
     ]
+    mass_support = _target_mass_support(
+        samples=samples,
+        target_distributions=target_distributions,
+        action_space=settings.action_space,
+    )
+    support_warning = _support_warning_for_target(
+        matched_samples=matched,
+        total_samples=total,
+        min_action_support=settings.min_action_support,
+    )
+    if not support_warning and total > 0 and not mass_support.identifiable:
+        support_warning = SUPPORT_WARNING_UNSUPPORTED_MASS
     result: dict[str, Any] = {
         "target_kind": "stochastic",
         "ips": ips,
@@ -268,11 +282,15 @@ def _stochastic_target_ope(
         "matched_samples": matched,
         "total_samples": total,
         "support_rate": ((matched / float(total)) if total > 0 else None),
-        "support_warning": _support_warning_for_target(
-            matched_samples=matched,
-            total_samples=total,
-            min_action_support=settings.min_action_support,
-        ),
+        "support_warning": support_warning,
+        # Behavior support of the target mass itself: support_rate alone reads as full support
+        # whenever the executed action keeps any target probability, which hides that the rest
+        # of a stochastic target's mass may have no behavior support at all.
+        "behavior_supported_target_mass": mass_support.supported_mass,
+        "unsupported_target_mass": mass_support.unsupported_mass,
+        "unsupported_mass_samples": mass_support.unsupported_samples,
+        "deterministic_behavior_samples": mass_support.deterministic_behavior_samples,
+        "estimates_identifiable": mass_support.identifiable if total > 0 else False,
         "dr_supported": dr is not None,
         "dr_reason": dr_reason if dr is None else "",
         "mean_action_probabilities": _mean_target_action_probabilities(target_distributions),

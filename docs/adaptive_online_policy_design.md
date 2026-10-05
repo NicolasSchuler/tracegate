@@ -372,6 +372,20 @@ before the first unit runs; an unhealthy sidecar stops the run with a clear erro
   `shadow_corrected_samples` counts old shadow rows whose propensity was corrected to 1.0.
   Meaningful estimates need a stochastic behavior policy, i.e. LinUCB `on` with the decision
   model in `shadow` role.
+- Each stochastic target therefore also reports how much of its probability mass the behavior
+  policy can identify: `behavior_supported_target_mass`, `unsupported_target_mass`,
+  `unsupported_mass_samples`, `deterministic_behavior_samples` and `estimates_identifiable`.
+  Mass counts as supported when the sample took that action, or when the sample's behavior was
+  stochastic (propensity < 1) and the action occurs somewhere in the data. When unsupported
+  mass remains, `support_warning` is `unsupported_target_mass`: `matched_samples` /
+  `support_rate` alone read as full support as soon as the executed action keeps any target
+  probability, so a deterministic shadow run with 10% of the target mass on the baseline action
+  used to report IPS = SNIPS = 0 with `support_rate` 1 and no warning at all. The point
+  estimates are kept (they estimate the supported part of the target), but they must not be
+  read as estimates of the full target policy.
+- Bootstrap intervals follow the point estimates: with no importance-weighted sample,
+  `ope_ci.ips` / `ope_ci.snips` are `null` instead of a seemingly certain `[0, 0]`, and
+  `ope_ci.available` is true only when at least one interval exists.
 
 ## Safety notes
 - `shadow` mode is the recommended first rollout for calibration.
