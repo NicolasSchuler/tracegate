@@ -1472,3 +1472,50 @@ def test_every_unit_builds_its_own_patcher(tmp_path, monkeypatch, jobs: str) -> 
     assert len(used) == 2
     assert len({id(p) for p in used}) == 2
     assert id(built[0]) not in {id(p) for p in used}
+
+
+def test_ctrl_c_in_a_parallel_run_reports_and_waits_for_in_flight_units(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """ORC-09: Ctrl-C stops scheduling and says how many units are still running."""
+    import threading
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    cases = [_make_case(repo_root, f"case_{name}") for name in "abc"]
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: cases)
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    slow_started = threading.Event()
+    finished: list[str] = []
+
+    def _run(*, case, condition, run_id, run_metadata, **_kwargs):
+        if case.case_id == "case_a":
+            slow_started.wait(timeout=5)
+            raise KeyboardInterrupt
+        slow_started.set()
+        threading.Event().wait(0.2)
+        finished.append(case.case_id)
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=True,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run)
+    with pytest.raises(KeyboardInterrupt):
+        _run_eval_main(
+            [
+                *("--run-id", "interrupted", "--patcher", "null"),
+                *("--conditions", "base_repair", "--k", "1", "--jobs", "2"),
+            ]
+        )
+
+    # The in-flight unit finished; the third unit was never scheduled.
+    assert finished == ["case_b"]
+    assert "waiting for 1 in-flight unit(s)" in capsys.readouterr().out
