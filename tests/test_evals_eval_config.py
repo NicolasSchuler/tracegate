@@ -574,6 +574,22 @@ class TestRedactCliArgv:
         assert result == tokens
         assert len(result) == 4
 
+    def test_container_env_values_redacted_keys_kept(self) -> None:
+        """ORC-20: --container-env values may be secrets; the key stays for provenance."""
+        tokens = ["--container-env", "HF_TOKEN=hf_secret", "--container-env=OTHER=x", "--jobs"]
+        assert eval_config._redact_cli_argv(tokens) == [
+            "--container-env",
+            f"HF_TOKEN={RUN_EVAL_LOCKFILE_REDACTED}",
+            f"--container-env=OTHER={RUN_EVAL_LOCKFILE_REDACTED}",
+            "--jobs",
+        ]
+
+    def test_container_env_redacted_in_resolved_args(self) -> None:
+        args = argparse.Namespace(container_env=["HF_TOKEN=hf_secret"], jobs=2)
+        resolved = eval_config._resolved_args_for_lockfile(args)
+        assert resolved["container_env"] == [f"HF_TOKEN={RUN_EVAL_LOCKFILE_REDACTED}"]
+        assert resolved["jobs"] == 2
+
     def test_space_separated_api_key_redacted(self) -> None:
         """Lines 337-339, 341-343: --openai-api-key VALUE."""
         tokens = ["--openai-api-key", "secret123", "--jobs", "2"]
