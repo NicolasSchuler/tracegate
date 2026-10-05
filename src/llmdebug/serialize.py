@@ -15,6 +15,9 @@ JsonLike = None | bool | int | float | str | dict[str, Any] | list[Any]
 MAX_ARRAY_ELEMENTS_FOR_HEAD = 1_000_000
 MAX_ARRAY_ELEMENTS_FOR_STATS = 2_000_000
 MAX_ARRAY_ELEMENTS_FOR_ANOMALIES = 2_000_000
+# orjson encodes ints only within the signed/unsigned 64-bit range and raises otherwise.
+JSON_INT_MIN = -(2**63)
+JSON_INT_MAX = 2**64 - 1
 
 
 @dataclass(frozen=True)
@@ -634,6 +637,13 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     return summary
 
 
+def _preview_cell(value: Any, cfg: SnapshotConfig) -> Any:
+    """Keep a pandas preview cell as-is unless it is an int orjson can't encode."""
+    if isinstance(value, int) and not JSON_INT_MIN <= value <= JSON_INT_MAX:
+        return safe_repr(value, cfg)
+    return value
+
+
 def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     """Summarize a pandas DataFrame."""
     summary: dict[str, Any] = {"__dataframe__": True}
@@ -687,7 +697,8 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
     try:
         head_rows = min(3, len(df))
-        summary["head"] = df.head(head_rows).values.tolist()
+        rows = cast(list[list[Any]], df.head(head_rows).values.tolist())
+        summary["head"] = [[_preview_cell(cell, cfg) for cell in row] for row in rows]
     except Exception as e:
         summary["head"] = f"<error: {type(e).__name__}>"
 
@@ -710,7 +721,8 @@ def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
         summary["dtype"] = str(series.dtype)
 
     try:
-        summary["head"] = series.head(5).tolist()
+        cells = cast(list[Any], series.head(5).tolist())
+        summary["head"] = [_preview_cell(cell, cfg) for cell in cells]
         if len(series) > 5:
             summary["head_truncated"] = True
     except Exception as e:
@@ -767,8 +779,10 @@ def _jsonlike_object(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
 
 def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
     """Convert arbitrary Python object to JSON-serializable form."""
-    if x is None or isinstance(x, (bool, int, float)):
+    if x is None or isinstance(x, (bool, float)):
         return x
+    if isinstance(x, int):
+        return x if JSON_INT_MIN <= x <= JSON_INT_MAX else safe_repr(x, cfg)
     if isinstance(x, str):
         return truncate_str(x, cfg.max_str)
     if depth >= 2:
