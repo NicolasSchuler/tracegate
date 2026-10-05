@@ -6,18 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from .rca_transitions import allowed_actions_for_state
+from .rca_types import RCAState
+
+__all__ = ["GateFeedback", "RCAState", "evaluate_gate", "normalize_gate_mode"]
 
 GateMode = Literal["off", "soft", "strict"]
-RCAState = Literal[
-    "captured",
-    "evidence_bound",
-    "hypothesized",
-    "planned",
-    "changed",
-    "verified",
-    "resolved",
-    "stalled",
-]
 GateSeverity = Literal["info", "warning", "error"]
 
 _VALID_GATE_MODES = {"off", "soft", "strict"}

@@ -2,27 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast, get_args
+from typing import Any, NamedTuple, cast, get_args
 
-RCAState = Literal[
-    "captured",
-    "evidence_bound",
-    "hypothesized",
-    "planned",
-    "changed",
-    "verified",
-    "resolved",
-    "stalled",
-]
-RCAAction = Literal[
-    "capture",
-    "bind_evidence",
-    "hypothesize",
-    "plan",
-    "change",
-    "verify",
-    "resolve",
-]
+from .rca_types import RCAAction, RCAState
+
+__all__ = ["RCAAction", "RCAState"]  # re-exported: defined once in rca_types (RCA-22)
 
 DEFAULT_STATE: RCAState = "captured"
 _VALID_STATES: frozenset[str] = frozenset(get_args(RCAState))
@@ -124,9 +108,18 @@ def merge_evidence_refs(
     return merged
 
 
-def resolve_previous_values(
-    previous: dict[str, Any] | None,
-) -> tuple[str, str, str, Any, Any, str]:
+class PreviousAttemptValues(NamedTuple):
+    """Carry-forward inputs read from the previous attempt record."""
+
+    state: str
+    hypothesis: str
+    experiment_plan: str
+    evidence_refs: list[Any]
+    verification_result: Any
+    change_summary: str
+
+
+def resolve_previous_values(previous: dict[str, Any] | None) -> PreviousAttemptValues:
     """Extract previous attempt values with stable defaults."""
     previous_state = str(previous.get("state")) if previous else DEFAULT_STATE
     previous_hypothesis = str(previous.get("hypothesis") or "") if previous else ""
@@ -142,13 +135,13 @@ def resolve_previous_values(
     previous_change_summary = (
         str(previous.get("proposed_change_summary") or "") if isinstance(previous, dict) else ""
     )
-    return (
-        previous_state,
-        previous_hypothesis,
-        previous_plan,
-        previous_refs,
-        previous_verification,
-        previous_change_summary,
+    return PreviousAttemptValues(
+        state=previous_state,
+        hypothesis=previous_hypothesis,
+        experiment_plan=previous_plan,
+        evidence_refs=previous_refs,
+        verification_result=previous_verification,
+        change_summary=previous_change_summary,
     )
 
 

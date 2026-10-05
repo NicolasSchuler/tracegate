@@ -24,7 +24,7 @@ from .rca_engine import build_rca_attempt_record
 from .rca_transitions import (
     DEFAULT_STATE,
 )
-from .rca_types import RCAAttemptRequest
+from .rca_types import RCAAttemptRecord, RCAAttemptRequest
 
 RCABackend = Literal["sqlite", "jsonl"]
 
@@ -79,7 +79,7 @@ def advance_rca_attempt(
     *,
     out_dir: str,
     request: RCAAttemptRequest,
-) -> dict[str, Any]:
+) -> RCAAttemptRecord:
     """Advance RCA state machine and persist attempt row."""
     now = _now_utc()
     previous = get_rca_status(out_dir=out_dir, session_id=request.session_id)

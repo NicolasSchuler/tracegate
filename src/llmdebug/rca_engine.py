@@ -21,7 +21,7 @@ from .rca_transitions import (
     resolve_previous_values,
     resolve_target_state,
 )
-from .rca_types import RCAAttemptRequest
+from .rca_types import RCAAttemptRecord, RCAAttemptRequest
 
 
 def build_rca_attempt_record(
@@ -30,7 +30,7 @@ def build_rca_attempt_record(
     attempt_id: str,
     request: RCAAttemptRequest,
     now: str,
-) -> dict[str, Any]:
+) -> RCAAttemptRecord:
     """Build a complete RCA attempt record by advancing the state machine.
 
     This is the core pure-function entry point for the RCA domain engine.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from .state_db import (
@@ -13,7 +14,7 @@ from .state_db import (
 )
 
 
-def store_rca_record(record: dict[str, Any], *, out_dir: str, max_records: int) -> None:
+def store_rca_record(record: Mapping[str, Any], *, out_dir: str, max_records: int) -> None:
     """Persist one RCA record to SQLite."""
     append_rca_record(out_dir, record, max_records=max_records)
 

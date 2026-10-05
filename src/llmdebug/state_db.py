@@ -4,7 +4,7 @@ from __future__ import annotations  # pragma: no cover
 
 import sqlite3  # pragma: no cover
 import time  # pragma: no cover
-from collections.abc import Iterator  # pragma: no cover
+from collections.abc import Iterator, Mapping  # pragma: no cover
 from contextlib import contextmanager  # pragma: no cover
 from pathlib import Path  # pragma: no cover
 from threading import Lock  # pragma: no cover
@@ -135,7 +135,7 @@ def count_rca_records(out_dir: str | Path) -> int:
     return int(row[0]) if row else 0
 
 
-def _require_text_field(record: dict[str, Any], key: str) -> str:
+def _require_text_field(record: Mapping[str, Any], key: str) -> str:
     raw_value = record.get(key)
     if raw_value is None:
         raise ValueError(f"RCA record missing required field: {key}")
@@ -145,7 +145,7 @@ def _require_text_field(record: dict[str, Any], key: str) -> str:
     return value
 
 
-def _rca_row(record: dict[str, Any]) -> tuple[str, str, str, str, str, str, str]:
+def _rca_row(record: Mapping[str, Any]) -> tuple[str, str, str, str, str, str, str]:
     payload = json.dumps(record, ensure_ascii=False, sort_keys=True)
     return (
         _require_text_field(record, "attempt_id"),
@@ -175,7 +175,7 @@ def _prune_rca_records(conn: sqlite3.Connection, *, max_records: int) -> None:
     )
 
 
-def append_rca_record(out_dir: str | Path, record: dict[str, Any], *, max_records: int) -> None:
+def append_rca_record(out_dir: str | Path, record: Mapping[str, Any], *, max_records: int) -> None:
     """Insert or replace one RCA record, then prune to the retention limit.
 
     Records are retained in ``updated_at DESC, rowid DESC`` order. Validation

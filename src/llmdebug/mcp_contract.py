@@ -5,6 +5,7 @@ These helpers keep tool response envelopes consistent across MCP adapters.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from . import _json as json
@@ -76,7 +77,7 @@ def default_evidence_fields() -> StableEvidencePayload:
     }
 
 
-def rca_view(rca_record: dict[str, Any]) -> dict[str, Any]:
+def rca_view(rca_record: Mapping[str, Any]) -> dict[str, Any]:
     """Project a full RCA record down to the stable MCP-facing subset."""
     return {
         "attempt_id": rca_record.get("attempt_id"),
@@ -94,7 +95,7 @@ def rca_view(rca_record: dict[str, Any]) -> dict[str, Any]:
 def build_text_response(
     body: str,
     *,
-    rca_record: dict[str, Any] | None = None,
+    rca_record: Mapping[str, Any] | None = None,
     structured_delta: dict[str, Any] | None = None,
     with_rca: bool = True,
 ) -> str:
@@ -125,7 +126,7 @@ def build_json_response(
     *,
     tool: str,
     body: str,
-    rca_record: dict[str, Any] | None,
+    rca_record: Mapping[str, Any] | None,
     structured_delta: dict[str, Any] | None,
     evidence_schema: str,
     with_rca: bool,
@@ -181,7 +182,7 @@ def render_tool_response(
     response_format: str,
     evidence_schema: str,
     with_rca: bool,
-    rca_record: dict[str, Any] | None = None,
+    rca_record: Mapping[str, Any] | None = None,
     structured_delta: dict[str, Any] | None = None,
     evidence_payload: StableEvidencePayload | dict[str, Any] | None = None,
     evidence_sections: list[dict[str, Any]] | None = None,

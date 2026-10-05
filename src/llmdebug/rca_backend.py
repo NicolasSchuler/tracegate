@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -138,7 +138,7 @@ def _latest_jsonl_record(path: Path, *, session_id: str | None = None) -> dict[s
     return None
 
 
-def _append_record(path: Path, record: dict[str, Any]) -> None:
+def _append_record(path: Path, record: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with _store_lock(path):
         with path.open("a", encoding="utf-8") as handle:
@@ -227,7 +227,7 @@ def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, 
     return _latest_jsonl_record(_store_path(out_dir), session_id=session_id)
 
 
-def persist_rca_record(*, out_dir: str, record: dict[str, Any]) -> None:
+def persist_rca_record(*, out_dir: str, record: Mapping[str, Any]) -> None:
     """Persist one RCA record using the configured backend."""
     if _backend() == "sqlite":
         ensure_sqlite_migration(out_dir)

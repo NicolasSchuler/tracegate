@@ -204,7 +204,7 @@ def advance_rca_attempt(
     *,
     out_dir: str,
     request: RCAAttemptRequest,
-) -> dict[str, Any]:
+) -> RCAAttemptRecord:
 ```
 
 **Parameters:**
@@ -214,7 +214,7 @@ def advance_rca_attempt(
 | `out_dir` | `str` | — | Snapshot output directory (e.g. `".llmdebug"`). |
 | `request` | `RCAAttemptRequest` | — | Grouped attempt inputs: `session_id`, `action`, `failure_signature`, `evidence_refs`, optional hypothesis/plan/change summary, verification result, and gate settings. |
 
-**Returns:** `dict[str, Any]` — the persisted attempt record containing:
+**Returns:** `RCAAttemptRecord` (a `TypedDict` in `llmdebug.rca_types`) — the persisted attempt record containing:
 
 ```python
 {
@@ -580,9 +580,11 @@ The gate system is designed for composition. To customize gate logic:
 
 ### Adding New States
 
-States and transitions are defined in `rca_transitions.py`:
+The `RCAState` and `RCAAction` literals and the `RCAAttemptRecord` TypedDict are
+defined once, in `rca_types.py` (`gates` and `rca_transitions` re-export them).
+Transitions are defined in `rca_transitions.py`:
 
-1. Add the new state to the `RCAState` literal type.
+1. Add the new state to the `RCAState` literal type in `rca_types.py`.
 2. If the state is reached by a new action, add the action to `RCAAction`
    and `_VALID_ACTIONS`, and map it in `_STATE_TRANSITIONS`.
 3. Update `allowed_actions_for_state()` to define which actions are valid

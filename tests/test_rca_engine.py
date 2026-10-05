@@ -167,3 +167,40 @@ def test_build_rca_attempt_record_strict_gate_retains_previous_state() -> None:
         "hypothesis_required",
         "illegal_transition",
     }
+
+
+def test_rca_state_literal_is_defined_once() -> None:
+    """RCA-22: gates and rca_transitions re-export the one definition in rca_types."""
+    from llmdebug import gates, rca_transitions, rca_types
+
+    assert gates.RCAState is rca_types.RCAState
+    assert rca_transitions.RCAState is rca_types.RCAState
+    assert rca_transitions.RCAAction is rca_types.RCAAction
+
+
+def test_attempt_record_matches_its_typed_dict() -> None:
+    """RCA-22: the engine's record and RCAAttemptRecord can't drift apart silently."""
+    from llmdebug.rca_types import RCAAttemptRecord
+
+    record = build_rca_attempt_record(
+        previous=None,
+        attempt_id="att-1",
+        request=RCAAttemptRequest(session_id="s", action="capture", failure_signature="sig"),
+        now="2026-03-01T12:00:00Z",
+    )
+
+    assert set(record) == set(RCAAttemptRecord.__annotations__)
+
+
+def test_previous_values_are_named() -> None:
+    from llmdebug.rca_transitions import resolve_previous_values
+
+    values = resolve_previous_values(
+        {"state": "planned", "hypothesis": "h", "evidence_refs": ["r"]}
+    )
+
+    assert values.state == "planned"
+    assert values.hypothesis == "h"
+    assert values.evidence_refs == ["r"]
+    assert values.verification_result is None
+    assert resolve_previous_values(None).state == "captured"
