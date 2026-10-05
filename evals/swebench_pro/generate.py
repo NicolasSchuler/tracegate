@@ -19,7 +19,9 @@ from evals.swebench.generation_meta import (
     transport_request_error_from_patch_meta,
 )
 from evals.swebench.prompt_policy import (
+    PROMPT_POLICY_FINGERPRINT_KEY,
     PromptInputs,
+    assert_resumable_prompt_policy,
     render_snapshot_section,
     require_snapshot_dir,
     snapshot_coverage,
@@ -102,6 +104,12 @@ def generate_pro_predictions(
     require_snapshot_dir(condition_list, prompt_inputs.snapshot_dir)
 
     run_dir = run_dir_for_id(safe_run_id, root=root)
+    if resume:
+        # The resumed predictions were generated under the stored policy; rewriting
+        # run_metadata.json with a different one would mislabel them (DAT-01/02).
+        assert_resumable_prompt_policy(
+            metadata_file=metadata_path(run_dir), prompt_inputs=prompt_inputs
+        )
     ensure_run_layout(run_dir, conditions=condition_list)
 
     rows_by_id = _load_dataset_rows(dataset_name=dataset_name, split=split)
@@ -155,6 +163,7 @@ def generate_pro_predictions(
         "max_instances": int(max_instances),
         "resume": bool(resume),
         "prompt_policy": prompt_inputs.to_metadata(),
+        PROMPT_POLICY_FINGERPRINT_KEY: prompt_inputs.fingerprint(),
         "snapshot_coverage": (
             snapshot_coverage(snapshot_dir=prompt_inputs.snapshot_dir, instance_ids=selected_ids)
             if CONDITION_LLMDEBUG in condition_list

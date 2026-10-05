@@ -99,7 +99,10 @@ python -m evals.swebench.cli prepare-scoring-smoke \
 `--snapshot-dir` is required whenever the `llmdebug` condition is requested: it
 holds one `<instance_id>.txt|.md|.json` llmdebug artifact per instance, and
 generation fails fast without it (DAT-03). `run_metadata.json` records
-`prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
+`prompt_policy`, `prompt_policy_fingerprint` and `snapshot_coverage` (hits, misses,
+missing instance IDs). `--resume` refuses a run whose stored `prompt_policy` differs
+from the requested flags (and refuses metadata without a recorded policy), because the
+resumed predictions were generated under the stored policy.
 Prompts carry only the issue text by default; `--include-hints` (Lite) and
 `--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
 which are not part of the official task (DAT-01, DAT-02). A request that fails is not saved
