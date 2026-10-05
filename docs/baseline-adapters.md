@@ -159,7 +159,6 @@ sidecars.
 |------|------|
 | [`baselines/ldb/adapter.py`](../baselines/ldb/adapter.py) | `LDBAdapter` — subprocess orchestration, result parsing |
 | [`baselines/ldb/case_converter.py`](../baselines/ldb/case_converter.py) | llmdebug case → LDB HumanEval-like row |
-| [`baselines/ldb/result_extractor.py`](../baselines/ldb/result_extractor.py) | LDB log output → repaired code extraction |
 | [`baselines/ldb/patches/`](../baselines/ldb/patches/) | Compatibility patches applied to pinned upstream checkout |
 
 ---
@@ -188,7 +187,6 @@ templates and two-agent architecture, with adapter-owned orchestration.
 | [`baselines/intervenor/adapter.py`](../baselines/intervenor/adapter.py) | `IntervenorAdapter` — teacher/learner loop, LLM calls, test execution |
 | [`baselines/intervenor/case_converter.py`](../baselines/intervenor/case_converter.py) | llmdebug case → INTERVENOR input |
 | [`baselines/intervenor/env_client.py`](../baselines/intervenor/env_client.py) | Isolated env shim for standalone runs |
-| [`baselines/intervenor/result_extractor.py`](../baselines/intervenor/result_extractor.py) | Result post-processing |
 
 ---
 
@@ -217,7 +215,6 @@ planning/repair flow with a swapped dataset/evaluation layer.
 |------|------|
 | [`baselines/tracecoder/adapter.py`](../baselines/tracecoder/adapter.py) | `TraceCoderAdapter` — subprocess orchestration, CSV result parsing |
 | [`baselines/tracecoder/case_converter.py`](../baselines/tracecoder/case_converter.py) | llmdebug case → TraceCoder dataset row |
-| [`baselines/tracecoder/result_extractor.py`](../baselines/tracecoder/result_extractor.py) | CSV output → repaired code extraction |
 | [`baselines/tracecoder/patches/`](../baselines/tracecoder/patches/) | Compatibility patches for llmdebug repair-seeded mode |
 
 **Failure interpretation:** When TraceCoder returns

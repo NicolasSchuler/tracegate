@@ -8,11 +8,8 @@ import pytest
 
 from baselines.adapter_base import BaselineResult
 from baselines.intervenor.adapter import IntervenorAdapter
-from baselines.intervenor.result_extractor import make_diff as intervenor_make_diff
 from baselines.ldb.adapter import LDBAdapter
-from baselines.ldb.result_extractor import make_diff as ldb_make_diff
 from baselines.tracecoder.adapter import TraceCoderAdapter
-from baselines.tracecoder.result_extractor import make_diff as tracecoder_make_diff
 from evals.eval_patches import apply_diff
 
 
@@ -50,23 +47,24 @@ def test_baseline_extract_diff_round_trips_without_trailing_newline(
 
 
 @pytest.mark.parametrize(
-    ("make_diff", "name"),
+    "adapter",
     [
-        pytest.param(intervenor_make_diff, "intervenor", id="intervenor"),
-        pytest.param(ldb_make_diff, "ldb", id="ldb"),
-        pytest.param(tracecoder_make_diff, "tracecoder", id="tracecoder"),
+        pytest.param(IntervenorAdapter(), id="intervenor"),
+        pytest.param(LDBAdapter(), id="ldb"),
+        pytest.param(TraceCoderAdapter(), id="tracecoder"),
     ],
 )
-def test_result_extractor_make_diff_preserves_missing_trailing_newline(
+def test_baseline_extract_diff_preserves_missing_trailing_newline_in_repair(
     tmp_path: Path,
-    make_diff,
-    name: str,
+    adapter: IntervenorAdapter | LDBAdapter | TraceCoderAdapter,
 ) -> None:
-    del name
-    original_path = tmp_path / "buggy.py"
-    original_path.write_text("print('before')\n", encoding="utf-8")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("print('before')\n", encoding="utf-8")
 
-    diff = make_diff(original_path, "print('after')")
+    diff = adapter.extract_diff(
+        case_dir, BaselineResult(repaired_code="print('after')", success=True)
+    )
 
     assert diff is not None
     assert "+print('after')\n\\ No newline at end of file\n" in diff

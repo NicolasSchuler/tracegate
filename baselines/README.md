@@ -389,14 +389,12 @@ baselines/
 ├── ldb/
 │   ├── adapter.py           # LDBAdapter(BaselineAdapter)
 │   ├── case_converter.py    # llmdebug case → LDB format
-│   ├── result_extractor.py  # LDB output → unified diff
 │   ├── patches/             # Compatibility patches for the pinned upstream checkout
 │   └── requirements-smoke.txt
 ├── intervenor/
 │   ├── adapter.py           # IntervenorAdapter(BaselineAdapter)
 │   ├── case_converter.py
 │   ├── env_client.py        # Isolated env shim for standalone runs
-│   ├── result_extractor.py
 │   └── requirements-smoke.txt
 ├── lambda_rlm/
 │   ├── adapter.py           # LambdaRLMAdapter(BaselineAdapter)
@@ -409,7 +407,6 @@ baselines/
 └── tracecoder/
     ├── adapter.py
     ├── case_converter.py
-    ├── result_extractor.py
     ├── patches/             # Compatibility patches for the pinned upstream checkout
     └── requirements-smoke.txt
 
