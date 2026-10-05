@@ -29,6 +29,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from baselines.openai_compat import (  # noqa: E402
+    EnvClientGenerationSettings,
     OpenAICompatRequestMeta,
     OpenAICompatResponseError,
     apply_compat_request_profile,
@@ -361,9 +362,7 @@ def _call_summary_from_clients(created_clients: list[object]) -> dict[str, Any]:
 
 def _install_tracking(
     *,
-    temperature: float | None,
-    top_p: float | None,
-    max_tokens: int | None,
+    generation: EnvClientGenerationSettings | None = None,
     compat_config,
     base_url: str,
 ) -> tuple[type[object], type[object], list[object]]:
@@ -371,6 +370,8 @@ def _install_tracking(
     import rlm.clients.openai as openai_mod  # type: ignore[import-not-found]
     import rlm.core.rlm as rlm_core_mod  # type: ignore[import-not-found]
     from rlm.logger import RLMLogger  # type: ignore[import-not-found]
+
+    settings = generation or EnvClientGenerationSettings()
 
     created_clients: list[object] = []
     original_get_client = clients_mod.get_client
@@ -380,6 +381,11 @@ def _install_tracking(
     class TrackingOpenAIClient(original_openai_client):  # type: ignore[misc,valid-type]
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(*args, **kwargs)
+            # D4 (BAS-11): the shared transport retry count, which upstream never sets.
+            for attribute in ("client", "async_client"):
+                existing = getattr(self, attribute, None)
+                if existing is not None:
+                    setattr(self, attribute, settings.apply_transport_retries(existing))
             self.model_input_chars: dict[str, int] = defaultdict(int)
             self.model_output_chars: dict[str, int] = defaultdict(int)
             self.model_char_calls: dict[str, int] = defaultdict(int)
@@ -450,12 +456,7 @@ def _install_tracking(
             }
             if self.client.base_url == prime_base_url:
                 base_request_kwargs["extra_body"] = {"usage": {"include": True}}
-            if temperature is not None:
-                base_request_kwargs["temperature"] = temperature
-            if top_p is not None:
-                base_request_kwargs["top_p"] = top_p
-            if max_tokens is not None:
-                base_request_kwargs["max_tokens"] = max_tokens
+            base_request_kwargs.update(settings.request_kwargs())
             request_kwargs, request_meta = apply_compat_request_profile(
                 base_request_kwargs,
                 compat_config=compat_config,
@@ -543,12 +544,7 @@ def _install_tracking(
             }
             if self.client.base_url == prime_base_url:
                 base_request_kwargs["extra_body"] = {"usage": {"include": True}}
-            if temperature is not None:
-                base_request_kwargs["temperature"] = temperature
-            if top_p is not None:
-                base_request_kwargs["top_p"] = top_p
-            if max_tokens is not None:
-                base_request_kwargs["max_tokens"] = max_tokens
+            base_request_kwargs.update(settings.request_kwargs())
             request_kwargs, request_meta = apply_compat_request_profile(
                 base_request_kwargs,
                 compat_config=compat_config,
@@ -687,15 +683,11 @@ def main(argv: list[str]) -> int:
         raise RuntimeError(f"rlm repo_dir not found: {repo_dir}")
     sys.path.insert(0, str(repo_dir))
 
-    temperature = float(payload["temperature"]) if payload.get("temperature") is not None else None
-    top_p = float(payload["top_p"]) if payload.get("top_p") is not None else None
-    max_tokens = int(payload["max_tokens"]) if payload.get("max_tokens") is not None else None
+    generation = EnvClientGenerationSettings.from_payload(cast(dict[str, Any], payload))
     compat_config = compat_config_from_extra(cast(dict[str, Any], payload))
     compat_base_url = _normalize_openai_base_url(str(payload.get("base_url") or ""))
     RLM, RLMLogger, created_clients = _install_tracking(
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
+        generation=generation,
         compat_config=compat_config,
         base_url=compat_base_url,
     )

@@ -48,6 +48,7 @@ from baselines.openai_compat import (
     OpenAICompatResponseError,
     apply_compat_request_profile,
     compat_config_from_extra,
+    compat_payload_fields,
     normalize_chat_completion_response,
     require_final_content,
     usage_include_extra_body,
@@ -953,15 +954,9 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
             "base_url": config.api_base_url,
             "api_key": config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
             "timeout_sec": config.api_timeout_sec,
-            "baseline_openai_compat_profile": str(
-                config.extra.get("baseline_openai_compat_profile") or "auto"
-            ),
-            "baseline_openai_allow_reasoning_fallback": bool(
-                config.extra.get("baseline_openai_allow_reasoning_fallback", False)
-            ),
-            "baseline_openai_enable_thinking": bool(
-                config.extra.get("baseline_openai_enable_thinking", False)
-            ),
+            # BAS-19: the resolved shared defaults, so the env client behaves like
+            # the in-process path for the same config.
+            **compat_payload_fields(compat_config_from_extra(config.extra)),
         }
         with tempfile.TemporaryDirectory(prefix="intervenor_client_") as tmpdir:
             tmp_path = Path(tmpdir)

@@ -56,7 +56,7 @@ Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
 | Adapter | Enforced | How |
 |---|---|---|
 | INTERVENOR | yes | request temperature, `max_tokens`, `seed`; client `max_retries` |
-| lambda-RLM, RLM | yes | env-client payload `temperature` and `max_tokens` |
+| lambda-RLM, RLM | yes | env-client payload `temperature`, `max_tokens`, `seed` and `transport_max_retries`, applied to the wrapped upstream client (`EnvClientGenerationSettings`) |
 | LDB, TraceCoder | no | `TRACEGATE_BASELINE_*` environment variables; the upstream patches still hard-code their own sampling until they read them |
 
 Each record's `patch_meta.baseline_generation` holds the effective values and `enforced`.

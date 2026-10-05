@@ -2325,3 +2325,74 @@ def test_env_client_key_never_reaches_candidate_subprocesses(
         assert secret not in child_env.values(), key
     # The env client's own environment no longer carries it either.
     assert ENV_CLIENT_API_KEY_ENV not in os.environ
+
+
+def test_env_client_applies_seed_and_transport_retries_to_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """codex 1e#6: the shared contract reaches the outbound request, not just the record."""
+    repo = _make_env_client_tracking_repo(tmp_path)
+    request_path = tmp_path / "request.json"
+    response_path = tmp_path / "response.json"
+    seen_requests: list[dict[str, object]] = []
+    created: list[object] = []
+
+    class _FakeChatCompletions:
+        def create(self, **kwargs: object) -> object:
+            seen_requests.append(dict(kwargs))
+            return types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="VALUE = 1\n"),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+
+    class _FakeChat:
+        def __init__(self) -> None:
+            self.completions = _FakeChatCompletions()
+
+    class _FakeOpenAIClient:
+        def __init__(self, **kwargs: object) -> None:
+            self.base_url = kwargs.get("base_url")
+            self.chat = _FakeChat()
+            created.append(self)
+
+    openai_module = types.ModuleType("openai")
+    openai_module.OpenAI = _FakeOpenAIClient
+    openai_module.AsyncOpenAI = _FakeOpenAIClient
+    monkeypatch.setitem(sys.modules, "openai", openai_module)
+    for module_name in list(sys.modules):
+        if module_name == "rlm" or module_name.startswith("rlm."):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+    request_path.write_text(
+        json.dumps(
+            {
+                "repo_dir": str(repo),
+                "workspace_dir": str(tmp_path),
+                "model": "test-model",
+                "api_key": "sk-test",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "prompt_context": "ctx",
+                "root_prompt": "root",
+                "temperature": 0.0,
+                "max_tokens": 321,
+                "seed": 4242,
+                "transport_max_retries": 6,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "buggy.py").write_text("VALUE = 0\n", encoding="utf-8")
+
+    exit_code = env_client.main(["env_client.py", str(request_path), str(response_path)])
+
+    assert exit_code == 0
+    assert seen_requests
+    assert seen_requests[0]["seed"] == 4242
+    assert seen_requests[0]["max_tokens"] == 321
+    assert seen_requests[0]["temperature"] == 0.0
+    assert created
+    assert all(getattr(client, "max_retries", None) == 6 for client in created)

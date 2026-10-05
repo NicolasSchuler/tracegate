@@ -38,7 +38,12 @@ from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
-from baselines.openai_compat import env_client_subprocess_env, scrub_secret
+from baselines.openai_compat import (
+    compat_config_from_extra,
+    compat_payload_fields,
+    env_client_subprocess_env,
+    scrub_secret,
+)
 from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
 from llmdebug import _json as json
 
@@ -835,15 +840,9 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
             "model": str(config.model or ""),
             "base_url": str(config.api_base_url or ""),
             "api_timeout_sec": float(config.api_timeout_sec or 0.0),
-            "baseline_openai_compat_profile": str(
-                config.extra.get("baseline_openai_compat_profile") or "auto"
-            ),
-            "baseline_openai_allow_reasoning_fallback": bool(
-                config.extra.get("baseline_openai_allow_reasoning_fallback", False)
-            ),
-            "baseline_openai_enable_thinking": bool(
-                config.extra.get("baseline_openai_enable_thinking", False)
-            ),
+            # BAS-19: the resolved shared defaults, so the env client behaves like
+            # the in-process path for the same config.
+            **compat_payload_fields(compat_config_from_extra(config.extra)),
             "prompt_context": prompt_context,
             "root_prompt": root_prompt,
             "workspace_dir": str(work_dir),
@@ -867,6 +866,9 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
             payload["temperature"] = float(config.generation.temperature)
         if config.generation.max_completion_tokens is not None:
             payload["max_tokens"] = int(config.generation.max_completion_tokens)
+        if config.generation.seed is not None:
+            payload["seed"] = int(config.generation.seed)
+        payload["transport_max_retries"] = int(config.generation.transport_max_retries)
         for source_key, target_key in (
             ("baseline_rlm_temperature", "temperature"),
             ("baseline_rlm_top_p", "top_p"),

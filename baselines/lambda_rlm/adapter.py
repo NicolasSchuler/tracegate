@@ -36,7 +36,12 @@ from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
-from baselines.openai_compat import env_client_subprocess_env, scrub_secret
+from baselines.openai_compat import (
+    compat_config_from_extra,
+    compat_payload_fields,
+    env_client_subprocess_env,
+    scrub_secret,
+)
 from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
 from llmdebug import _json as json
 
@@ -664,15 +669,9 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
             "prompt": prompt,
             "base_url": str(config.api_base_url or ""),
             "api_timeout_sec": float(config.api_timeout_sec or 0.0),
-            "baseline_openai_compat_profile": str(
-                config.extra.get("baseline_openai_compat_profile") or "auto"
-            ),
-            "baseline_openai_allow_reasoning_fallback": bool(
-                config.extra.get("baseline_openai_allow_reasoning_fallback", False)
-            ),
-            "baseline_openai_enable_thinking": bool(
-                config.extra.get("baseline_openai_enable_thinking", False)
-            ),
+            # BAS-19: the resolved shared defaults, so the env client behaves like
+            # the in-process path for the same config.
+            **compat_payload_fields(compat_config_from_extra(config.extra)),
             "context_window_chars": int(
                 config.extra.get("baseline_lambda_context_window_chars") or 100_000
             ),
@@ -689,6 +688,9 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
             payload["temperature"] = float(config.generation.temperature)
         if config.generation.max_completion_tokens is not None:
             payload["max_tokens"] = int(config.generation.max_completion_tokens)
+        if config.generation.seed is not None:
+            payload["seed"] = int(config.generation.seed)
+        payload["transport_max_retries"] = int(config.generation.transport_max_retries)
         for key in (
             "baseline_lambda_temperature",
             "baseline_lambda_top_p",

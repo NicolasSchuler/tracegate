@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from evals import _json as json
 from evals import eval_attempt_flow, run_eval
 from evals.eval_types import Condition
 from evals.patchers.base import PatchResult
@@ -640,3 +641,103 @@ def test_llm02_truncated_answer_has_its_own_attempt_note(
 
     assert [r["note"] for r in records] == [note]
     assert records[0]["success"] is False
+
+
+def test_d4_both_rlm_payloads_carry_the_seed_and_retry_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#6: lambda-RLM and RLM forward the seed and retry count, not just sampling."""
+    import subprocess
+
+    from baselines.adapter_base import BaselineConfig, BaselineGenerationSettings
+    from baselines.lambda_rlm.adapter import LambdaRLMAdapter
+    from baselines.rlm.adapter import RLMAdapter
+
+    config = BaselineConfig(
+        repo_dir=tmp_path,
+        python_executable=tmp_path / "python",
+        model="test-model",
+        api_base_url="http://127.0.0.1:1234",
+        api_key="sk-test",
+        process_timeout_sec=30,
+        generation=BaselineGenerationSettings(
+            temperature=0.0, seed=4242, max_completion_tokens=321, transport_max_retries=6
+        ),
+    )
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("baselines.rlm.adapter.subprocess.run", _fake_run)
+    monkeypatch.setattr("baselines.lambda_rlm.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    LambdaRLMAdapter()._invoke_lambda(prompt="ask", config=config, timeout_sec=30)
+
+    assert len(payloads) == 2
+    for payload in payloads:
+        assert payload["seed"] == 4242
+        assert payload["max_tokens"] == 321
+        assert payload["temperature"] == 0.0
+        assert payload["transport_max_retries"] == 6
+
+
+def test_bas19_env_client_payloads_use_the_shared_compat_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#11: the env-client path can't disagree with the in-process defaults."""
+    import subprocess
+
+    from baselines.adapter_base import BaselineConfig
+    from baselines.intervenor.adapter import IntervenorAdapter
+    from baselines.lambda_rlm.adapter import LambdaRLMAdapter
+    from baselines.openai_compat import compat_config_from_extra, compat_payload_fields
+    from baselines.rlm.adapter import RLMAdapter
+
+    config = BaselineConfig(repo_dir=tmp_path, model="test-model", process_timeout_sec=30)
+    expected = compat_payload_fields(compat_config_from_extra(config.extra))
+    assert expected["baseline_openai_enable_thinking"] is True
+    assert expected["baseline_openai_allow_reasoning_fallback"] is True
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    for module in ("rlm", "lambda_rlm", "intervenor"):
+        monkeypatch.setattr(f"baselines.{module}.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    LambdaRLMAdapter()._invoke_lambda(prompt="ask", config=config, timeout_sec=30)
+    IntervenorAdapter()._generate_text_via_env_python(
+        python_executable=tmp_path / "python",
+        model="test-model",
+        prompt="ask",
+        max_tokens=512,
+        config=config,
+    )
+
+    assert len(payloads) == 3
+    for payload in payloads:
+        for key, value in expected.items():
+            assert payload[key] == value, key

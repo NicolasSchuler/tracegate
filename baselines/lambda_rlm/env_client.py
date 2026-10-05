@@ -25,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from baselines.openai_compat import (  # noqa: E402
+    EnvClientGenerationSettings,
     OpenAICompatRequestMeta,
     OpenAICompatResponseError,
     apply_compat_request_profile,
@@ -72,12 +73,15 @@ def _prompt_char_count(prompt: str | list[dict[str, Any]]) -> int:
 def _install_tracking(
     repo_dir: Path,
     *,
+    generation: EnvClientGenerationSettings | None = None,
     compat_config,
     base_url: str,
 ) -> tuple[type[object], list[object]]:
     import rlm.clients as clients_mod  # type: ignore[import-not-found]
     import rlm.clients.openai as openai_mod  # type: ignore[import-not-found]
     import rlm.lambda_rlm as lambda_mod  # type: ignore[import-not-found]
+
+    settings = generation or EnvClientGenerationSettings()
 
     created_clients: list[object] = []
     original_get_client = clients_mod.get_client
@@ -86,6 +90,11 @@ def _install_tracking(
     class TrackingOpenAIClient(original_openai_client):  # type: ignore[misc,valid-type]
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(*args, **kwargs)
+            # D4 (BAS-11): the shared transport retry count, which upstream never sets.
+            for attribute in ("client", "async_client"):
+                existing = getattr(self, attribute, None)
+                if existing is not None:
+                    setattr(self, attribute, settings.apply_transport_retries(existing))
             self.model_input_chars: dict[str, int] = defaultdict(int)
             self.model_output_chars: dict[str, int] = defaultdict(int)
             self.model_char_calls: dict[str, int] = defaultdict(int)
@@ -130,6 +139,8 @@ def _install_tracking(
                     for key, value in getattr(self, "_completion_kwargs", {}).items()
                     if key != "stream"
                 },
+                # D4: the shared contract wins over whatever upstream kwargs carry.
+                **settings.request_kwargs(),
             }
             request_kwargs, request_meta = apply_compat_request_profile(
                 base_request_kwargs,
@@ -454,8 +465,10 @@ def main(argv: list[str]) -> int:
     base_url = str(payload.get("base_url") or "")
     if base_url and not base_url.endswith("/v1"):
         base_url = f"{base_url.rstrip('/')}/v1"
+    generation = EnvClientGenerationSettings.from_payload(cast(dict[str, Any], payload))
     LambdaRLM, created_clients = _install_tracking(
         repo_dir,
+        generation=generation,
         compat_config=compat_config,
         base_url=base_url,
     )
