@@ -882,3 +882,10 @@ class TestWalAndSchemaVersion:
 
         with pytest.raises(RuntimeError, match="schema version 99 is newer"):
             count_rca_records(tmp_path)
+
+
+def test_count_snapshot_records_without_a_database_creates_nothing(tmp_path: Path) -> None:
+    from llmdebug.state_db import count_snapshot_records
+
+    assert count_snapshot_records(tmp_path / "missing") == 0
+    assert not (tmp_path / "missing").exists()

@@ -18,6 +18,7 @@ def test_reload_core_modules_executes_module_level_code() -> None:
     import llmdebug.output as output_module
     import llmdebug.redaction_policy as redaction_policy_module
     import llmdebug.serialize as serialize_module
+    import llmdebug.snapshot_index as snapshot_index_module
     import llmdebug.state_db as state_db_module
 
     importlib.reload(json_module)
@@ -33,6 +34,7 @@ def test_reload_core_modules_executes_module_level_code() -> None:
     importlib.reload(git_context_module)
     importlib.reload(state_db_module)
     importlib.reload(warnings_module)
+    importlib.reload(snapshot_index_module)
 
     assert capture_module.capture_exception
     assert cli_module.main
@@ -45,5 +47,6 @@ def test_reload_core_modules_executes_module_level_code() -> None:
     assert output_module.write_bundle
     assert state_db_module.state_db_path
     assert warnings_module.emit_warning
+    assert snapshot_index_module.snapshot_files
     assert serialize_module.serialize_locals
     assert git_context_module.get_git_context
