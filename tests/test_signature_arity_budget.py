@@ -79,7 +79,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "TEP research plumbing has not yet been grouped into phase request objects.",
         {
             "AdaptiveTepController.__init__": 8,
-            "AdaptiveTepController.record_free_phase": 8,
             "_render_critic_prompt": 7,
         },
     ),
