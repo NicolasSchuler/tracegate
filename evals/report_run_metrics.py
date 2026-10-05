@@ -1222,18 +1222,6 @@ def _compute_token_estimate_diagnostics(
     return {"per_condition": per_condition}
 
 
-def _failure_reason(*, error: str, status: str, note: str, overflow: bool) -> str:
-    if overflow:
-        return "http_error:context_exceeded"
-    if error and status:
-        return f"{error}:{status}"
-    if error:
-        return error
-    if note:
-        return f"note:{note}"
-    return "unknown"
-
-
 def _baseline_meta_from_record(record: dict[str, Any]) -> dict[str, Any]:
     patch_meta = record.get("patch_meta")
     if not isinstance(patch_meta, dict):

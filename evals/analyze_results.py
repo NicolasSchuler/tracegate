@@ -224,7 +224,6 @@ from evals.analysis_usage import (  # noqa: F401  # noqa: E402, F401
     _token_breakdown_sum,
     _token_usage,
     _token_usage_breakdown,
-    _tokens_used,
 )
 from evals.coerce import expand_paths as _expand_paths  # noqa: F401 (re-exported)
 from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION  # noqa: F401 (re-exported)

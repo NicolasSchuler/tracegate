@@ -171,12 +171,6 @@ def _add_condefects_arguments(parser: argparse.ArgumentParser) -> None:
     _add_common_import_arguments(parser)
 
 
-def _add_mutmut_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--target", required=True, help="Python module/package to mutate.")
-    parser.add_argument("--max-cases", type=int, default=30)
-    _add_common_import_arguments(parser)
-
-
 def _add_quixbugs_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo-path", required=True, help="Path to cloned QuixBugs repo.")
     parser.add_argument(
@@ -271,21 +265,6 @@ _COMMAND_SPECS: tuple[CommandSpec, ...] = (
         ),
     ),
     CommandSpec(
-        name="mutmut",
-        help="Generate cases from mutmut mutations.",
-        add_arguments=_add_mutmut_arguments,
-        handler=_build_importer_handler(
-            module_path="evals.importers.mutmut_generator",
-            function_name="import_mutmut",
-            kwargs_builder=lambda args: {
-                "target": args.target,
-                "max_cases": args.max_cases,
-                "validate": args.validate,
-                "dry_run": args.dry_run,
-            },
-        ),
-    ),
-    CommandSpec(
         name="quixbugs",
         help="Import from QuixBugs (local clone).",
         add_arguments=_add_quixbugs_arguments,
@@ -342,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point: import external dataset cases into the llmdebug framework.
 
     Dispatches to one of: ``debugbench``, ``pyresbugs``, ``humanevalpack``,
-    ``condefects``, ``mutmut``, ``quixbugs``, ``prepare-top3``, or
+    ``condefects``, ``quixbugs``, ``prepare-top3``, or
     ``materialize-top3``.  Accepts ``--output-dir``, ``--validate``,
     ``--dry-run``, and execution-backend flags shared across importers.
 

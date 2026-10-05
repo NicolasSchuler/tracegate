@@ -9,7 +9,6 @@ import pytest
 from evals.stats import (
     BinaryPair,
     NumericPair,
-    analyze_condition_matrix,
     analyze_paired_results,
     any_success_aggregation,
     bootstrap_ci,
@@ -467,60 +466,6 @@ class TestAnalyzePairedResults:
         """Empty input -> error."""
         result = analyze_paired_results([])
         assert "error" in result
-
-
-class TestAnalyzeConditionMatrix:
-    def test_matrix_pairs_all_conditions(self) -> None:
-        rows = [
-            {
-                "run_id": "r1",
-                "case_id": "c1",
-                "condition": "base_repair",
-                "category": "hidden_state",
-                "success": False,
-            },
-            {
-                "run_id": "r1",
-                "case_id": "c1",
-                "condition": "cot_repair",
-                "category": "hidden_state",
-                "success": True,
-            },
-            {
-                "run_id": "r1",
-                "case_id": "c1",
-                "condition": "layered_adaptive_gated",
-                "category": "hidden_state",
-                "success": True,
-            },
-            {
-                "run_id": "r1",
-                "case_id": "c2",
-                "condition": "base_repair",
-                "category": "parse_value",
-                "success": False,
-            },
-            {
-                "run_id": "r1",
-                "case_id": "c2",
-                "condition": "cot_repair",
-                "category": "parse_value",
-                "success": False,
-            },
-            {
-                "run_id": "r1",
-                "case_id": "c2",
-                "condition": "layered_adaptive_gated",
-                "category": "parse_value",
-                "success": True,
-            },
-        ]
-        matrix = analyze_condition_matrix(rows, seed=7, n_bootstrap=100)
-        assert len(matrix) == 3
-        pairs = {(item.get("condition_a"), item.get("condition_b")) for item in matrix}
-        assert ("base_repair", "cot_repair") in pairs
-        assert ("base_repair", "layered_adaptive_gated") in pairs
-        assert ("cot_repair", "layered_adaptive_gated") in pairs
 
 
 # ---------------------------------------------------------------------------

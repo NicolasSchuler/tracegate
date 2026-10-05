@@ -21,7 +21,6 @@ from evals.report_run_metrics import (
     _cohens_kappa_magnitude,
     _compute_category_stats,
     _conclusion_line,
-    _failure_reason,
     _fmt_float,
     _fmt_pct,
     _fmt_pct_signed,
@@ -172,35 +171,6 @@ class TestCohensKappaMagnitude:
 
     def test_negative_slight(self) -> None:
         assert _cohens_kappa_magnitude(-0.1) == "slight"
-
-
-# ── _failure_reason (lines 854-863) ─────────────────────────────────────
-
-
-class TestFailureReason:
-    def test_overflow(self) -> None:
-        assert (
-            _failure_reason(error="", status="", note="", overflow=True)
-            == "http_error:context_exceeded"
-        )
-
-    def test_error_and_status(self) -> None:
-        assert (
-            _failure_reason(error="http_error", status="429", note="", overflow=False)
-            == "http_error:429"
-        )
-
-    def test_error_only(self) -> None:
-        assert _failure_reason(error="timeout", status="", note="", overflow=False) == "timeout"
-
-    def test_note_only(self) -> None:
-        assert (
-            _failure_reason(error="", status="", note="something", overflow=False)
-            == "note:something"
-        )
-
-    def test_unknown(self) -> None:
-        assert _failure_reason(error="", status="", note="", overflow=False) == "unknown"
 
 
 # ── _baseline_llm_call_count fallbacks (lines 903-915) ──────────────────

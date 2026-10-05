@@ -528,7 +528,6 @@ Returns:
 | `condefects_importer.py` | ConDefects |
 | `debugbench_importer.py` | DebugBench |
 | `humanevalpack_importer.py` | HumanEval-Pack |
-| `mutmut_generator.py` | Mutation testing (MutMut) |
 | `pybughive_importer.py` | PyBugHive |
 | `pyresbugs_importer.py` | PyResBugs |
 | `trickybugs_importer.py` | TrickyBugs |

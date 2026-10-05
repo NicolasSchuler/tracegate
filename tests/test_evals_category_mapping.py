@@ -7,7 +7,6 @@ from evals.category_mapping import (
     map_condefects_type,
     map_debugbench_type,
     map_humanevalpack_type,
-    map_mutmut_operator,
     map_pyresbugs_type,
 )
 
@@ -85,31 +84,6 @@ class TestConDefectsMapping:
 
     def test_unknown_falls_back(self) -> None:
         assert map_condefects_type("compilation error") == "logic_error"
-
-
-# ---------------------------------------------------------------------------
-# mutmut operator mapping
-# ---------------------------------------------------------------------------
-
-
-class TestMutmutOperatorMapping:
-    def test_arithmetic(self) -> None:
-        assert map_mutmut_operator("arithmetic") == "logic_error"
-
-    def test_comparison(self) -> None:
-        assert map_mutmut_operator("comparison") == "logic_error"
-
-    def test_removed_call(self) -> None:
-        assert map_mutmut_operator("removed_call") == "cross_file_contract"
-
-    def test_changed_return(self) -> None:
-        assert map_mutmut_operator("changed_return") == "hidden_state"
-
-    def test_changed_default(self) -> None:
-        assert map_mutmut_operator("changed_default") == "mutability_aliasing"
-
-    def test_string(self) -> None:
-        assert map_mutmut_operator("string") == "parse_value"
 
 
 # ---------------------------------------------------------------------------

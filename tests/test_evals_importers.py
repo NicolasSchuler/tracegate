@@ -1549,7 +1549,6 @@ _IMPORTERS = (
     "condefects_importer",
     "debugbench_importer",
     "humanevalpack_importer",
-    "mutmut_generator",
     "pybughive_importer",
     "pyresbugs_importer",
     "quixbugs_importer",
