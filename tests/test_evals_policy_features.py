@@ -171,8 +171,10 @@ class TestNonnegativeInt:
     def test_string_returns_default(self) -> None:
         assert _nonnegative_int("abc", default=4) == 4
 
-    def test_negative_default_clamps(self) -> None:
-        assert _nonnegative_int(None, default=-2) == 0
+    def test_negative_default_passes_through(self) -> None:
+        # The shared evals.coerce helper only clamps coerced values, not the
+        # fallback default, which is returned verbatim.
+        assert _nonnegative_int(None, default=-2) == -2
 
     def test_numeric_string(self) -> None:
         assert _nonnegative_int("10") == 10

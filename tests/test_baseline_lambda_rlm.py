@@ -9,9 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from baselines._runtime import _CommandOutcome
 from baselines.adapter_base import BaselineCaseContext, BaselineConfig
 from baselines.lambda_rlm import env_client
-from baselines.lambda_rlm.adapter import LambdaRLMAdapter, _CommandOutcome
+from baselines.lambda_rlm.adapter import LambdaRLMAdapter
 from baselines.lambda_rlm.case_converter import convert_case
 from baselines.openai_compat import BaselineOpenAICompatConfig, OpenAICompatResponseError
 from llmdebug import _json as json

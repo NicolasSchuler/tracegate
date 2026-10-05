@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import evals.eval_main_policies as policies_mod
 from evals import run_eval as run_eval_mod
 from evals.eval_types import (
     ADAPTIVE_REWARD_MATERIALIZATION_SCALE_DEFAULT,
@@ -398,7 +399,7 @@ class TestOnlinePolicyConfigError:
         def bad_normalize(**kw):
             raise ValueError("bad online policy config")
 
-        monkeypatch.setattr(flow_mod.OnlinePolicyConfig, "normalize", bad_normalize)
+        monkeypatch.setattr(policies_mod.OnlinePolicyConfig, "normalize", bad_normalize)
 
         from evals.eval_main_flow import run_main_flow
 
@@ -447,7 +448,7 @@ class TestBudgetPolicyConfigError:
         mock_online_config = MagicMock()
         mock_online_config.mode = "off"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -456,7 +457,7 @@ class TestBudgetPolicyConfigError:
         def bad_budget_normalize(**kw):
             raise ValueError("bad budget config")
 
-        monkeypatch.setattr(flow_mod.BudgetPolicyConfig, "normalize", bad_budget_normalize)
+        monkeypatch.setattr(policies_mod.BudgetPolicyConfig, "normalize", bad_budget_normalize)
 
         from evals.eval_main_flow import run_main_flow
 
@@ -489,14 +490,14 @@ class TestFinallyCleanup:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
         mock_ctrl = MagicMock(load_error=None)
         mock_ctrl.close.side_effect = RuntimeError("close failed")
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveOnlinePolicyController", lambda cfg: mock_ctrl
+            "evals.eval_main_policies.AdaptiveOnlinePolicyController", lambda cfg: mock_ctrl
         )
 
         assert flow_mod.run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[]) == 0
@@ -521,14 +522,14 @@ class TestFinallyCleanup:
         mock_budget_config = MagicMock()
         mock_budget_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget_config),
         )
         mock_ctrl = MagicMock(load_error=None)
         mock_ctrl.close.side_effect = RuntimeError("budget close boom")
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveBudgetPolicyController", lambda cfg: mock_ctrl
+            "evals.eval_main_policies.AdaptiveBudgetPolicyController", lambda cfg: mock_ctrl
         )
 
         assert flow_mod.run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[]) == 0
@@ -627,14 +628,14 @@ class TestFullRunLoopAllResumed:
         mock_online = MagicMock()
         mock_online.mode = "off"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online),
         )
         mock_budget = MagicMock()
         mock_budget.mode = "off"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget),
         )
@@ -715,14 +716,14 @@ class TestFullRunLoopAllResumed:
         mock_online = MagicMock()
         mock_online.mode = "off"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online),
         )
         mock_budget = MagicMock()
         mock_budget.mode = "off"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget),
         )
@@ -816,14 +817,14 @@ class TestFullRunLoopAllResumed:
         mock_online = MagicMock()
         mock_online.mode = "off"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online),
         )
         mock_budget = MagicMock()
         mock_budget.mode = "off"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget),
         )
@@ -954,14 +955,14 @@ def _wire_full_flow(
     mock_online = MagicMock()
     mock_online.mode = "off"
     monkeypatch.setattr(
-        flow_mod.OnlinePolicyConfig,
+        policies_mod.OnlinePolicyConfig,
         "normalize",
         staticmethod(lambda **kw: mock_online),
     )
     mock_budget = MagicMock()
     mock_budget.mode = "off"
     monkeypatch.setattr(
-        flow_mod.BudgetPolicyConfig,
+        policies_mod.BudgetPolicyConfig,
         "normalize",
         staticmethod(lambda **kw: mock_budget),
     )
@@ -979,6 +980,12 @@ def _wire_full_flow(
     )
     monkeypatch.setattr(
         "evals.eval_main_flow.replace",
+        lambda obj, **kw: obj,
+    )
+    # eval_main_policies derives per-condition budget configs with dataclasses.replace,
+    # which the MagicMock configs above are not.
+    monkeypatch.setattr(
+        "evals.eval_main_policies.replace",
         lambda obj, **kw: obj,
     )
 
@@ -1115,7 +1122,7 @@ class TestCleanupWithActiveControllers:
 
         # remaining=1 so we don't exit early, but unit is resumed so
         # pending_units ends up empty after the loop
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1126,7 +1133,7 @@ class TestCleanupWithActiveControllers:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -1135,14 +1142,14 @@ class TestCleanupWithActiveControllers:
         mock_online_ctrl.load_error = None
         mock_online_ctrl.close = MagicMock()
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveOnlinePolicyController",
+            "evals.eval_main_policies.AdaptiveOnlinePolicyController",
             lambda cfg: mock_online_ctrl,
         )
 
         mock_budget_config = MagicMock()
         mock_budget_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget_config),
         )
@@ -1151,7 +1158,7 @@ class TestCleanupWithActiveControllers:
         mock_budget_ctrl.load_error = None
         mock_budget_ctrl.close = MagicMock()
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveBudgetPolicyController",
+            "evals.eval_main_policies.AdaptiveBudgetPolicyController",
             lambda cfg: mock_budget_ctrl,
         )
 
@@ -1171,7 +1178,7 @@ class TestCleanupWithActiveControllers:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1182,7 +1189,7 @@ class TestCleanupWithActiveControllers:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -1191,7 +1198,7 @@ class TestCleanupWithActiveControllers:
         mock_online_ctrl.load_error = None
         mock_online_ctrl.close.side_effect = RuntimeError("close boom")
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveOnlinePolicyController",
+            "evals.eval_main_policies.AdaptiveOnlinePolicyController",
             lambda cfg: mock_online_ctrl,
         )
 
@@ -1199,7 +1206,7 @@ class TestCleanupWithActiveControllers:
         mock_budget_config = MagicMock()
         mock_budget_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget_config),
         )
@@ -1208,7 +1215,7 @@ class TestCleanupWithActiveControllers:
         mock_budget_ctrl.load_error = None
         mock_budget_ctrl.close.side_effect = RuntimeError("budget close boom")
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveBudgetPolicyController",
+            "evals.eval_main_policies.AdaptiveBudgetPolicyController",
             lambda cfg: mock_budget_ctrl,
         )
 
@@ -1637,7 +1644,7 @@ class TestPolicyControllerLoadError:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1647,7 +1654,7 @@ class TestPolicyControllerLoadError:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -1656,7 +1663,7 @@ class TestPolicyControllerLoadError:
         mock_ctrl.load_error = "corrupt state file"
         mock_ctrl.close = MagicMock()
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveOnlinePolicyController",
+            "evals.eval_main_policies.AdaptiveOnlinePolicyController",
             lambda cfg: mock_ctrl,
         )
 
@@ -1680,7 +1687,7 @@ class TestPolicyControllerLoadError:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1690,7 +1697,7 @@ class TestPolicyControllerLoadError:
         mock_budget_config = MagicMock()
         mock_budget_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget_config),
         )
@@ -1699,7 +1706,7 @@ class TestPolicyControllerLoadError:
         mock_ctrl.load_error = "bad budget state"
         mock_ctrl.close = MagicMock()
         monkeypatch.setattr(
-            "evals.eval_main_flow.AdaptiveBudgetPolicyController",
+            "evals.eval_main_policies.AdaptiveBudgetPolicyController",
             lambda cfg: mock_ctrl,
         )
 
@@ -1887,7 +1894,7 @@ class TestBuildRunMetadata:
 
         # Mock _build_run_metadata
         monkeypatch.setattr(
-            "evals.eval_main_flow._build_run_metadata",
+            "evals.eval_main_metadata._build_run_metadata",
             lambda **kw: {"run_id": "test", "patcher_config": {}},
         )
 
@@ -1983,7 +1990,7 @@ class TestOnlinePolicyControllerCreationError:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1993,7 +2000,7 @@ class TestOnlinePolicyControllerCreationError:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -2001,7 +2008,7 @@ class TestOnlinePolicyControllerCreationError:
         def _bad_ctrl(cfg):
             raise RuntimeError("controller init failed")
 
-        monkeypatch.setattr("evals.eval_main_flow.AdaptiveOnlinePolicyController", _bad_ctrl)
+        monkeypatch.setattr("evals.eval_main_policies.AdaptiveOnlinePolicyController", _bad_ctrl)
 
         from evals.eval_main_flow import run_main_flow
 
@@ -2024,7 +2031,7 @@ class TestBudgetPolicyControllerCreationError:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -2034,7 +2041,7 @@ class TestBudgetPolicyControllerCreationError:
         mock_budget_config = MagicMock()
         mock_budget_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.BudgetPolicyConfig,
+            policies_mod.BudgetPolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_budget_config),
         )
@@ -2042,7 +2049,7 @@ class TestBudgetPolicyControllerCreationError:
         def _bad_ctrl(cfg):
             raise RuntimeError("budget ctrl init failed")
 
-        monkeypatch.setattr("evals.eval_main_flow.AdaptiveBudgetPolicyController", _bad_ctrl)
+        monkeypatch.setattr("evals.eval_main_policies.AdaptiveBudgetPolicyController", _bad_ctrl)
 
         from evals.eval_main_flow import run_main_flow
 
@@ -2223,11 +2230,11 @@ class TestBaselineConfigExtended:
 
         # Mock _baseline_patch_inventory to return patches
         monkeypatch.setattr(
-            "evals.eval_main_flow._baseline_patch_inventory",
+            "evals.eval_main_metadata._baseline_patch_inventory",
             lambda name: ["patch1.diff", "patch2.diff"],
         )
         monkeypatch.setattr(
-            "evals.eval_main_flow._baseline_extra_from_args",
+            "evals.eval_main_metadata._baseline_extra_from_args",
             lambda args, baseline_name: {"extra_key": "extra_val"},
         )
 
@@ -2301,7 +2308,7 @@ class TestTokenUsageUnavailable:
         )
         # Force token usage state to "unavailable"
         monkeypatch.setattr(
-            "evals.eval_main_flow._record_token_usage_state",
+            "evals.eval_main_outcome._record_token_usage_state",
             lambda **kw: "unavailable",
         )
 
@@ -2326,7 +2333,7 @@ class TestDecisionModelBinding:
 
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -2335,7 +2342,7 @@ class TestDecisionModelBinding:
         mock_online_config = MagicMock()
         mock_online_config.mode = "on"
         monkeypatch.setattr(
-            flow_mod.OnlinePolicyConfig,
+            policies_mod.OnlinePolicyConfig,
             "normalize",
             staticmethod(lambda **kw: mock_online_config),
         )
@@ -2347,7 +2354,7 @@ class TestDecisionModelBinding:
             controller.load_error = None
             return controller
 
-        monkeypatch.setattr("evals.eval_main_flow.AdaptiveOnlinePolicyController", _controller)
+        monkeypatch.setattr("evals.eval_main_policies.AdaptiveOnlinePolicyController", _controller)
         args = _make_args()
         args.adaptive_decision_model_role = "shadow"
 
