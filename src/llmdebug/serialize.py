@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import re
 from dataclasses import dataclass
@@ -44,18 +45,20 @@ class LocalsSerializationBundle:
     truncated_keys: int
 
 
-_last_redactor_patterns: tuple[str | Pattern[str], ...] | None = None
-_last_redactor_result: list[Pattern[str]] = []
-
-
 def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[Pattern[str]]:
-    """Compile regex patterns for redaction."""
-    global _last_redactor_patterns, _last_redactor_result
-    normalized_patterns = patterns or ()
-    if normalized_patterns is _last_redactor_patterns:
-        return _last_redactor_result
+    """Compile regex patterns for redaction; invalid patterns are reported and skipped."""
+    # A fresh list per call: callers may mutate it without touching the shared cache.
+    return list(_compile_redactors_cached(tuple(patterns or ())))
+
+
+# lru_cache keeps its bookkeeping consistent across threads (threading.excepthook can capture
+# concurrently); the former one-slot cache stored patterns and result in two statements (CAP-07).
+@functools.lru_cache(maxsize=32)
+def _compile_redactors_cached(
+    patterns: tuple[str | Pattern[str], ...],
+) -> tuple[Pattern[str], ...]:
     compiled: list[Pattern[str]] = []
-    for p in normalized_patterns:
+    for p in patterns:
         if isinstance(p, str):
             try:
                 compiled.append(re.compile(p))
@@ -65,9 +68,7 @@ def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[P
                 sys.stderr.write(f"llmdebug: invalid redaction pattern {p!r}: {e}\n")
         else:
             compiled.append(p)
-    _last_redactor_patterns = normalized_patterns
-    _last_redactor_result = compiled
-    return compiled
+    return tuple(compiled)
 
 
 REDACTED = "[REDACTED]"

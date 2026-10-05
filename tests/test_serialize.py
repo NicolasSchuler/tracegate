@@ -363,6 +363,56 @@ def test_compile_redactors_treats_unresolved_patterns_as_empty() -> None:
     assert compile_redactors(None) == []
 
 
+def test_compile_redactors_results_are_independent_lists() -> None:
+    """CAP-07: a caller mutating its list must not change what the next caller gets."""
+    first = compile_redactors(("alpha",))
+    first.clear()
+
+    assert [rx.pattern for rx in compile_redactors(("alpha",))] == ["alpha"]
+
+
+def test_compile_redactors_alternating_configs() -> None:
+    a, b = ("a1", "a2"), ("b1",)
+    for _ in range(3):
+        assert [rx.pattern for rx in compile_redactors(a)] == ["a1", "a2"]
+        assert [rx.pattern for rx in compile_redactors(b)] == ["b1"]
+
+
+def test_compile_redactors_skips_invalid_patterns(capsys: pytest.CaptureFixture[str]) -> None:
+    compiled = compile_redactors(("ok", "(unclosed"))
+
+    assert [rx.pattern for rx in compiled] == ["ok"]
+    assert "invalid redaction pattern '(unclosed'" in capsys.readouterr().err
+
+
+def test_compile_redactors_is_consistent_across_threads() -> None:
+    """CAP-07: concurrent captures with different configs each get their own patterns."""
+    import threading
+
+    configs = [tuple(f"t{i}_{j}" for j in range(3)) for i in range(6)]
+    mismatches: list[int] = []
+
+    def worker(index: int) -> None:
+        mine = configs[index]
+        for _ in range(500):
+            if [rx.pattern for rx in compile_redactors(mine)] != list(mine):
+                mismatches.append(index)
+                return
+
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(len(configs))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous)
+
+    assert mismatches == []
+
+
 def test_redact_text_basic():
     """Test direct redact_text function with simple pattern."""
     redactors = compile_redactors(("password",))
