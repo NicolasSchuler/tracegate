@@ -104,7 +104,10 @@ Prompts carry only the issue text by default; `--include-hints` (Lite) and
 `--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
 which are not part of the official task (DAT-01, DAT-02). A request that fails is not saved
 as an empty patch: the instance stays missing, `prepare-handoff` refuses the unequal paired
-sets, and `--resume` retries it (DAT-08).
+sets, and `--resume` retries it (DAT-08). That covers both a raised error and the transport
+outages the patcher reports by *returning* an empty result with a `request_failed` /
+`http_error` meta; a deterministic model-side refusal (context limit, reasoning-only answer)
+stays an empty prediction.
 
 Local Docker convenience wrapper:
 

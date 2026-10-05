@@ -15,7 +15,11 @@ from typing import Any
 from evals.patchers import OpenAICompatPatcher
 
 from .. import _json as json
-from .generation_meta import append_generation_meta, generation_meta_from_patch_meta
+from .generation_meta import (
+    append_generation_meta,
+    generation_meta_from_patch_meta,
+    transport_request_error_from_patch_meta,
+)
 from .io import (
     ensure_run_layout,
     instance_ids_path,
@@ -464,6 +468,11 @@ def _propose_prediction(
     is_empty = not bool(patch.strip())
     if is_empty:
         patch = ""
+    if request_error is None and is_empty:
+        # DAT-08: an exhausted timeout or HTTP outage is *returned* by the patcher, so
+        # without this the failure would be persisted as an empty prediction and skipped
+        # by --resume. A usable diff is kept even when an earlier stage failed.
+        request_error = transport_request_error_from_patch_meta(patch_meta)
 
     return ProposalOutcome(
         record=PredictionRecord(
@@ -517,6 +526,11 @@ async def _propose_prediction_async(
     is_empty = not bool(patch.strip())
     if is_empty:
         patch = ""
+    if request_error is None and is_empty:
+        # DAT-08: an exhausted timeout or HTTP outage is *returned* by the patcher, so
+        # without this the failure would be persisted as an empty prediction and skipped
+        # by --resume. A usable diff is kept even when an earlier stage failed.
+        request_error = transport_request_error_from_patch_meta(patch_meta)
 
     return ProposalOutcome(
         record=PredictionRecord(
