@@ -84,4 +84,3 @@ def get_expected_env_client_compatibility(key: str) -> str:
     if not label:
         raise KeyError(f"baseline {key!r} does not declare an env-client compatibility target")
     return f"{label}@{repo.commit}"
-

@@ -171,3 +171,42 @@ def test_seam_list_matches_what_run_eval_reads() -> None:
     seams_body = seams_body[: seams_body.index("\n\n\n")]
     read = set(re.findall(r"=\s*([A-Za-z_]+),\n", seams_body)) | {"run_main_flow"}
     assert read == _RUN_EVAL_SEAMS
+
+
+# The harness drives the baselines, so it may import them; the reverse would close a cycle.
+# compare_results is a CLI over eval results that nothing imports.
+_BASELINE_MODULES_ALLOWED_TO_IMPORT_EVALS = frozenset({"baselines.compare_results"})
+
+
+def _baseline_modules() -> list[Path]:
+    root = _REPO / "baselines"
+    return sorted(
+        path
+        for path in root.rglob("*.py")
+        if not {"repos", "envs", "stubs"}.intersection(path.relative_to(root).parts)
+    )
+
+
+def test_baselines_do_not_import_the_harness() -> None:
+    offenders = {
+        _module_name(path): sorted(
+            name for name in _imported_modules(path) if name.split(".")[0] == "evals"
+        )
+        for path in _baseline_modules()
+        if _module_name(path) not in _BASELINE_MODULES_ALLOWED_TO_IMPORT_EVALS
+    }
+    offenders = {module: names for module, names in offenders.items() if names}
+    assert not offenders, f"baselines importing evals: {offenders}"
+
+
+def test_only_analysis_api_imports_analyze_results_internals() -> None:
+    offenders: list[str] = []
+    for path in [*_harness_modules(), *_baseline_modules()]:
+        if path.name in {"analyze_results.py", "analysis_api.py"}:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("analyze_results"):
+                private = [alias.name for alias in node.names if alias.name.startswith("_")]
+                if private:
+                    offenders.append(f"{_module_name(path)}: {private}")
+    assert not offenders, "import these from evals.analysis_api instead:\n" + "\n".join(offenders)

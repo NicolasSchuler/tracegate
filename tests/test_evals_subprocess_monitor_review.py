@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import time
 
-from evals.subprocess_monitor import DRAIN_GRACE_SEC, run_monitored_subprocess
+from baselines.subprocess_monitor import DRAIN_GRACE_SEC, run_monitored_subprocess
 
 _SPAWN_GRANDCHILD = (
     "import subprocess, sys, time\n"

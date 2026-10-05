@@ -43,6 +43,7 @@ except ModuleNotFoundError:
     _toml_loader = None
 
 from baselines.openai_compat import COMPAT_PROFILE_CHOICES
+from baselines.subprocess_monitor import run_monitored_subprocess
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -87,7 +88,6 @@ from evals.policy_feature_scaling import (
     scale_feature_mapping,
 )
 from evals.progress_output import RunProgressSummary, build_progress_palette
-from evals.subprocess_monitor import run_monitored_subprocess
 
 if TYPE_CHECKING:
     from evals.patchers.payload_types import ContextRequestPayload

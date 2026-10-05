@@ -15,6 +15,7 @@ from baselines.adapter_base import (
     BaselineConfig,
     BaselineResult,
 )
+from baselines.subprocess_monitor import MonitoredSubprocessResult
 from baselines.tracecoder.adapter import TraceCoderAdapter
 from baselines.tracecoder.case_converter import (
     _build_prompt,
@@ -23,7 +24,6 @@ from baselines.tracecoder.case_converter import (
     convert_case,
 )
 from baselines.tracecoder.result_extractor import make_diff
-from evals.subprocess_monitor import MonitoredSubprocessResult
 
 _TRACECODER_METRICS_PATCH = (
     Path(__file__).resolve().parents[1]

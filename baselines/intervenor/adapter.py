@@ -31,6 +31,13 @@ from baselines.adapter_base import (
 )
 from baselines.case_schemas import IntervenorCaseInput
 from baselines.contracts import BaselineContract
+from baselines.controller_packet import (
+    HYBRID_GUIDANCE_MODE_FAIR_V1,
+    HYBRID_GUIDANCE_MODE_FIXED_V1,
+    ControllerPacketV1,
+    parse_controller_packet,
+    render_hybrid_controller_guidance,
+)
 from baselines.openai_compat import (
     OpenAICompatResponseError,
     apply_compat_request_profile,
@@ -40,13 +47,6 @@ from baselines.openai_compat import (
     usage_include_extra_body,
 )
 from baselines.pins import get_pinned_repo_commit
-from evals.adaptive_controller_packet import (
-    HYBRID_GUIDANCE_MODE_FAIR_V1,
-    HYBRID_GUIDANCE_MODE_FIXED_V1,
-    ControllerPacketV1,
-    parse_controller_packet,
-    render_hybrid_controller_guidance,
-)
 
 from .case_converter import convert_case
 

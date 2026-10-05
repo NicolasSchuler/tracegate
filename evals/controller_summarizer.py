@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .adaptive_controller_packet import ControllerPacketV1
+    from baselines.controller_packet import ControllerPacketV1
 
 _MAX_SUMMARY_CHARS = 220
 

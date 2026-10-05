@@ -1327,12 +1327,12 @@ class TestEvalSummaryCoverage:
 
         monkeypatch.setattr(
             eval_summary,
-            "_load_and_group_records",
+            "load_and_group_records",
             lambda *a, **kw: ({"run": [{"schema_version": 5}]}, {}),
         )
         monkeypatch.setattr(
             eval_summary,
-            "_derive_case_condition_rows",
+            "derive_case_condition_rows",
             lambda _: [],
         )
         results = tmp_path / "test.jsonl"

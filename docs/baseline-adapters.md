@@ -322,8 +322,9 @@ the case-schema validation layer (`_HARNESS_INJECTED_PREFIXES` in
 Adapters that consume sidecar data (all five currently do for controller
 guidance) call `parse_controller_packet()` and the shared hybrid guidance
 renderer from
-[`evals/adaptive_controller_packet.py`](../evals/adaptive_controller_packet.py)
-to fold the controller state into their prompts.
+[`baselines/controller_packet.py`](../baselines/controller_packet.py)
+to fold the controller state into their prompts. The harness builds the packets in
+[`evals/adaptive_controller_packet.py`](../evals/adaptive_controller_packet.py).
 
 Three hybrid guidance modes are supported:
 

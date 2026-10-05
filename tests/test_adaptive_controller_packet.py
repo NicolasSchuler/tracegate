@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evals import adaptive_controller_packet as controller_packets
-from evals.adaptive_controller_packet import (
-    build_adaptive_controller_sidecars,
+from baselines import controller_packet as controller_contract
+from baselines.controller_packet import (
     hybrid_guidance_metadata,
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
+from evals import adaptive_controller_packet as controller_packets
+from evals.adaptive_controller_packet import build_adaptive_controller_sidecars
 from evals.adaptive_history import PersistentHistoryBundle, PersistentHistoryLesson
 
 
@@ -434,7 +435,7 @@ def test_build_adaptive_controller_sidecars_merges_persistent_history_and_extern
 # ---------------------------------------------------------------------------
 # Imports for dataclass types used in the coverage-gap tests below
 # ---------------------------------------------------------------------------
-from evals.adaptive_controller_packet import (  # noqa: E402
+from baselines.controller_packet import (  # noqa: E402
     AdaptiveControllerStateV2,
     ASTContextV1,
     ControllerPacketV1,
@@ -575,19 +576,19 @@ def _make_packet(
 
 class TestTruncateSmallMaxChars:
     def test_max_chars_zero_returns_empty(self) -> None:
-        assert controller_packets._truncate("hello", max_chars=0) == ""
+        assert controller_contract._truncate("hello", max_chars=0) == ""
 
     def test_max_chars_one_returns_single_char(self) -> None:
-        assert controller_packets._truncate("hello", max_chars=1) == "h"
+        assert controller_contract._truncate("hello", max_chars=1) == "h"
 
     def test_max_chars_three_returns_three_chars(self) -> None:
-        assert controller_packets._truncate("hello world", max_chars=3) == "hel"
+        assert controller_contract._truncate("hello world", max_chars=3) == "hel"
 
     def test_max_chars_two_returns_two_chars(self) -> None:
-        assert controller_packets._truncate("abcdef", max_chars=2) == "ab"
+        assert controller_contract._truncate("abcdef", max_chars=2) == "ab"
 
     def test_short_text_within_limit(self) -> None:
-        assert controller_packets._truncate("hi", max_chars=3) == "hi"
+        assert controller_contract._truncate("hi", max_chars=3) == "hi"
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +670,7 @@ class TestParseRepoHistorySkipsNonDict:
                 {"commit": "abc", "summary": "good commit"},
             ],
         }
-        result = controller_packets._parse_repo_history(raw)
+        result = controller_contract._parse_repo_history(raw)
         assert result is not None
         assert len(result.recent_commits) == 1
         assert result.recent_commits[0].summary == "good commit"
@@ -682,14 +683,14 @@ class TestParseRepoHistorySkipsNonDict:
 
 class TestParseHistoryLessonsEdgeCases:
     def test_non_dict_row_skipped(self) -> None:
-        result = controller_packets._parse_history_lessons(
+        result = controller_contract._parse_history_lessons(
             ["not-a-dict", 42, {"lesson": "real", "source": "s"}]
         )
         assert len(result) == 1
         assert result[0].lesson == "real"
 
     def test_empty_lesson_skipped(self) -> None:
-        result = controller_packets._parse_history_lessons(
+        result = controller_contract._parse_history_lessons(
             [{"lesson": "", "source": "s"}, {"lesson": "  ", "source": "s2"}]
         )
         assert len(result) == 0
@@ -702,7 +703,7 @@ class TestParseHistoryLessonsEdgeCases:
 
 class TestParseEvidenceItemsEmptyId:
     def test_empty_id_skipped(self) -> None:
-        result = controller_packets._parse_evidence_items(
+        result = controller_contract._parse_evidence_items(
             [
                 {"id": "", "kind": "frame"},
                 {"id": "  ", "kind": "frame"},

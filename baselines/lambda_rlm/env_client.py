@@ -392,9 +392,7 @@ def _call_summary_from_clients(created_clients: list[object]) -> dict[str, Any]:
                     "finish_reason": str(raw_record.get("finish_reason") or ""),
                     "input_chars": int(raw_record.get("input_chars") or 0),
                     "output_chars": int(raw_record.get("output_chars") or 0),
-                    "compat_profile_applied": str(
-                        raw_record.get("compat_profile_applied") or ""
-                    ),
+                    "compat_profile_applied": str(raw_record.get("compat_profile_applied") or ""),
                     "enable_thinking": bool(raw_record.get("enable_thinking", False)),
                     "content_present": bool(raw_record.get("content_present", False)),
                     "reasoning_present": bool(raw_record.get("reasoning_present", False)),
@@ -424,9 +422,7 @@ def _call_summary_from_clients(created_clients: list[object]) -> dict[str, Any]:
                     empty_reasoning_only_call_count += 1
         raw_events = getattr(client, "compat_recovery_events", None)
         if isinstance(raw_events, list):
-            compat_recovery_events.extend(
-                event for event in raw_events if isinstance(event, dict)
-            )
+            compat_recovery_events.extend(event for event in raw_events if isinstance(event, dict))
     return {
         "call_records": call_records,
         "call_finish_reason_counts": dict(sorted(finish_reason_counts.items())),

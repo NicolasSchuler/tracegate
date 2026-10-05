@@ -23,16 +23,16 @@ from pathlib import Path
 from typing import Any
 
 from . import _json as json
-from .analyze_results import (
+from .analysis_api import (
     ADAPTIVE_BUDGET_ACTIONS,
     ADAPTIVE_ONLINE_ACTIONS,
-    _adaptive_ope_samples,
-    _case_success_rates,
-    _derive_case_condition_rows,
-    _expand_paths,
-    _load_and_group_records,
-    _matched_uplift,
-    _run_statistical_analysis,
+    adaptive_ope_samples,
+    case_success_rates,
+    derive_case_condition_rows,
+    expand_paths,
+    load_and_group_records,
+    matched_uplift,
+    run_statistical_analysis,
 )
 from .eval_types import (
     EVAL_RECORD_SCHEMA_VERSION,
@@ -53,7 +53,7 @@ _EXAMPLE_LIMIT = 10
 def load_records(paths: Iterable[str]) -> list[dict[str, Any]]:
     """Every JSON object line of *paths*, including telemetry rows."""
     records: list[dict[str, Any]] = []
-    for src in _expand_paths(list(paths)):
+    for src in expand_paths(list(paths)):
         try:
             text = Path(src).read_text(encoding="utf-8")
         except OSError:
@@ -155,7 +155,7 @@ def headline_comparison(
         }
 
     case_rates = {
-        condition: _case_success_rates(condition_rows)
+        condition: case_success_rates(condition_rows)
         for condition, condition_rows in by_condition.items()
     }
     a_stats = conditions.get(condition_a)
@@ -168,7 +168,7 @@ def headline_comparison(
         "condition_b": condition_b,
         "conditions": conditions,
         "uplift_legacy_unmatched": uplift_legacy,
-        "uplift_corrected_matched": _matched_uplift(case_rates, condition_a, condition_b),
+        "uplift_corrected_matched": matched_uplift(case_rates, condition_a, condition_b),
     }
 
     paired: dict[tuple[str, str], dict[str, bool]] = defaultdict(dict)
@@ -203,7 +203,7 @@ def headline_comparison(
                 )["approximate_power"],
             }
         )
-    stats = _run_statistical_analysis(
+    stats = run_statistical_analysis(
         rows, aggregation="majority_vote", pair_a=condition_a, pair_b=condition_b
     )
     pairwise = [entry for entry in stats.get("pairwise", []) if "error" not in entry]
@@ -318,7 +318,7 @@ def data_audits(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> di
         ("adaptive_budget", ADAPTIVE_BUDGET_ACTIONS),
     ):
         valid_actions = {str(action) for action in actions}
-        for sample in _adaptive_ope_samples(
+        for sample in adaptive_ope_samples(
             records=attempts, prefix=prefix, valid_actions=valid_actions
         ):
             shadow += bool(sample.get("propensity_shadow_corrected"))
@@ -530,8 +530,8 @@ def build_report(
     paths: list[str], *, condition_a: str, condition_b: str, swebench_dirs: list[Path]
 ) -> dict[str, Any]:
     records = load_records(paths)
-    grouped, _input_errors = _load_and_group_records(paths)
-    rows = _derive_case_condition_rows(grouped)
+    grouped, _input_errors = load_and_group_records(paths)
+    rows = derive_case_condition_rows(grouped)
     return {
         "records": len(records),
         "rows": len(rows),

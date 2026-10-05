@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from baselines.subprocess_monitor import run_monitored_subprocess
 from evals.adaptive_progress import _adaptive_optional_bool, _adaptive_optional_int
 from evals.eval_config import get_active_execution_config
 from evals.eval_containers import _EvalContainerPool
@@ -26,7 +27,6 @@ from evals.eval_types import (
 )
 from evals.oracle_integrity import clear_junit_reports, consume_junit_counts, junit_report_name
 from evals.run_context import RunContext
-from evals.subprocess_monitor import run_monitored_subprocess
 from llmdebug._hashing import xxh64_hexdigest_text
 
 # Prepended to the pytest subprocess's PYTHONPATH so cases import this checkout's llmdebug.

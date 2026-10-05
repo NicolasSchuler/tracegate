@@ -998,13 +998,13 @@ def test_sta21_report_uses_and_prints_the_requested_ope_settings(
     ]
     jsonl.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     seen: dict[str, object] = {}
-    original = rrm._summarize_bucket
+    original = rrm.summarize_bucket
 
     def _spy(rows, **kwargs):
         seen.update(kwargs)
         return original(rows, **kwargs)
 
-    monkeypatch.setattr(rrm, "_summarize_bucket", _spy)
+    monkeypatch.setattr(rrm, "summarize_bucket", _spy)
 
     rc = main(
         [

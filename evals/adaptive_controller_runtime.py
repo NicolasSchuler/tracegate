@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from baselines.controller_packet import parse_controller_packet
+
 from .adaptive_controller_packet import (
     build_adaptive_controller_sidecars,
-    parse_controller_packet,
     write_adaptive_controller_sidecars,
 )
 from .controller_summarizer import build_controller_strategy_summary

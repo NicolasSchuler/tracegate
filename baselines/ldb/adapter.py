@@ -31,12 +31,12 @@ from baselines.adapter_base import (
 )
 from baselines.case_schemas import LDBCaseInput
 from baselines.contracts import BaselineContract
-from baselines.pins import get_pinned_repo_commit
-from evals.adaptive_controller_packet import (
+from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
-from evals.subprocess_monitor import run_monitored_subprocess
+from baselines.pins import get_pinned_repo_commit
+from baselines.subprocess_monitor import run_monitored_subprocess
 
 from .case_converter import convert_case
 

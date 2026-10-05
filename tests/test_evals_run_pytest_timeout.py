@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 import pytest
 
+from baselines.subprocess_monitor import MonitoredSubprocessResult
 from evals import eval_attempt_flow, pytest_runner, run_eval
 from evals.patchers.base import PatchResult
 from evals.run_context import RunContext
-from evals.subprocess_monitor import MonitoredSubprocessResult
 
 
 def test_run_pytest_timeout_returns_structured_result(tmp_path, monkeypatch) -> None:

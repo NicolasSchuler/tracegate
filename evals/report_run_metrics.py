@@ -19,14 +19,14 @@ import polars as pl
 from scipy import stats
 from sklearn.metrics import cohen_kappa_score
 
-from evals.analyze_results import (
+from evals.analysis_api import (
     ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
     ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
-    _derive_case_condition_rows,
-    _is_external_baseline_condition,
-    _load_and_group_records,
-    _records_by_case_condition,
-    _summarize_bucket,
+    derive_case_condition_rows,
+    is_external_baseline_condition,
+    load_and_group_records,
+    records_by_case_condition,
+    summarize_bucket,
 )
 from evals.case_outcome import case_outcomes
 from evals.eval_types import normalize_condition_name
@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        grouped, input_errors = _load_and_group_records(expanded, strict_input=args.strict_input)
+        grouped, input_errors = load_and_group_records(expanded, strict_input=args.strict_input)
     except ValueError as exc:
         print(f"Input error: {exc}")
         return 2
@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_input_errors(input_errors)
         return 1
 
-    rows = _derive_case_condition_rows(grouped)
+    rows = derive_case_condition_rows(grouped)
     if not rows:
         print("No valid case-condition rows found.")
         return 1
@@ -188,8 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     run_context["ope_settings"] = ope_settings
-    condition_summary = _summarize_bucket(
-        rows, records_by_case_condition=_records_by_case_condition(grouped), **ope_settings
+    condition_summary = summarize_bucket(
+        rows, records_by_case_condition=records_by_case_condition(grouped), **ope_settings
     )
     primary_rows = _filter_rows_by_snapshot_dependency(rows, primary_slice)
     required_rows = _filter_rows_by_snapshot_dependency(rows, {"required"})
@@ -1030,7 +1030,7 @@ def _compute_failure_diagnostics(
             terminal_reason_counts[condition][reason] = (
                 int(terminal_reason_counts[condition].get(reason, 0)) + 1
             )
-        if _is_external_baseline_condition(condition):
+        if is_external_baseline_condition(condition):
             usage_stats = terminal_usage_stats[condition]
             usage_state = _baseline_terminal_usage_state(record)
             if usage_state == "available":
@@ -1737,7 +1737,7 @@ def _baseline_diagnostic_lines(
 ) -> list[str]:
     lines: list[str] = []
     for condition in sorted(condition_summary):
-        if not _is_external_baseline_condition(condition):
+        if not is_external_baseline_condition(condition):
             continue
         stats = condition_summary.get(condition)
         if not isinstance(stats, dict):

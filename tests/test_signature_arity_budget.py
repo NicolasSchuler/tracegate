@@ -267,7 +267,7 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Run-condition assembly still receives separate subsystem configs.",
         {"build_run_condition_inputs": 12},
     ),
-    "evals/subprocess_monitor.py": _FileArityDebt(
+    "baselines/subprocess_monitor.py": _FileArityDebt(
         "Subprocess monitoring still exposes independent resource and callback controls.",
         {"run_monitored_subprocess": 10},
     ),

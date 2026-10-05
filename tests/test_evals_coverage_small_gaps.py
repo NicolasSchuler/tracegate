@@ -43,7 +43,7 @@ class TestAdaptiveControllerPacketGaps:
 
     def test_render_compact_guidance_decomposition_skips_non_dict_steps(self) -> None:
         """Line 278: non-dict step in decomposition list triggers continue."""
-        from evals.adaptive_controller_packet import (
+        from baselines.controller_packet import (
             AdaptiveControllerStateV2,
             ControllerPacketV1,
             EvidenceBundleV1,
@@ -135,7 +135,7 @@ class TestAdaptiveControllerPacketGaps:
 
     def test_parse_evidence_items_skips_non_dict_rows(self) -> None:
         """Line 425: non-dict row in evidence items triggers continue."""
-        from evals.adaptive_controller_packet import _parse_evidence_items
+        from baselines.controller_packet import _parse_evidence_items
 
         items = _parse_evidence_items(
             [
@@ -199,7 +199,8 @@ class TestAdaptiveControllerPacketGaps:
 
     def test_build_history_lessons_deduplicates(self) -> None:
         """Line 998: duplicate lessons (same source+lesson) are skipped."""
-        from evals.adaptive_controller_packet import HistoryLessonV1, _build_history_lessons
+        from baselines.controller_packet import HistoryLessonV1
+        from evals.adaptive_controller_packet import _build_history_lessons
 
         persistent = [
             HistoryLessonV1(source="attempt_history", attempt=1, lesson="fix the index"),
@@ -1083,7 +1084,7 @@ class TestSubprocessMonitorGaps:
         The _emit function is nested; we test the module behavior by calling
         run_monitored_subprocess with progress_callback=None.
         """
-        from evals.subprocess_monitor import run_monitored_subprocess
+        from baselines.subprocess_monitor import run_monitored_subprocess
 
         result = run_monitored_subprocess(
             cmd=["echo", "hello"],
@@ -1356,7 +1357,7 @@ class TestAdaptiveControllerPacketBranchCoverage:
 
     def test_parse_evidence_items_empty_id_skipped(self) -> None:
         """Branch: empty evidence id → continue."""
-        from evals.adaptive_controller_packet import _parse_evidence_items
+        from baselines.controller_packet import _parse_evidence_items
 
         items = _parse_evidence_items(
             [

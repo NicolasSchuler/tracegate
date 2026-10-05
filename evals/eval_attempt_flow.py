@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from baselines.case_information import build_baseline_case_context_payload
+from baselines.controller_packet import HYBRID_GUIDANCE_MODE_FIXED_V1
 from evals import _json as json
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
@@ -31,10 +32,7 @@ from evals.adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCHITECTURES,
     BUDGET_POLICY_FAMILIES,
 )
-from evals.adaptive_controller_packet import (
-    HYBRID_GUIDANCE_MODE_FIXED_V1,
-    remove_adaptive_controller_sidecars,
-)
+from evals.adaptive_controller_packet import remove_adaptive_controller_sidecars
 from evals.adaptive_controller_runtime import (
     ControllerRuntimeInputs,
     prepare_controller_runtime,

@@ -1,4 +1,4 @@
-"""Tests for evals.subprocess_monitor — monitored subprocess execution."""
+"""Tests for baselines.subprocess_monitor — monitored subprocess execution."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from evals.subprocess_monitor import (
+from baselines.subprocess_monitor import (
     MonitoredSubprocessResult,
     run_monitored_subprocess,
     sanitize_progress_excerpt,
@@ -272,7 +272,7 @@ class TestRunMonitoredSubprocess:
                 pass
 
         monkeypatch.setattr(
-            "evals.subprocess_monitor.subprocess.Popen",
+            "baselines.subprocess_monitor.subprocess.Popen",
             FakePopen,
         )
         with pytest.raises(RuntimeError, match="subprocess pipes unavailable"):
@@ -317,7 +317,7 @@ class TestRunMonitoredSubprocess:
                     self.stderr = mock_stderr
 
         monkeypatch.setattr(
-            "evals.subprocess_monitor.subprocess.Popen",
+            "baselines.subprocess_monitor.subprocess.Popen",
             _BadClosePopen,
         )
         result = run_monitored_subprocess(
@@ -386,7 +386,7 @@ class TestRunMonitoredSubprocess:
                 pass
 
         monkeypatch.setattr(
-            "evals.subprocess_monitor.subprocess.Popen",
+            "baselines.subprocess_monitor.subprocess.Popen",
             _PostLoopNullPopen,
         )
         result = run_monitored_subprocess(

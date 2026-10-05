@@ -362,6 +362,10 @@ python -m baselines.compare_results \
 
 See [EXPERIMENTS.md](EXPERIMENTS.md) for the full experiment protocol,
 statistical analysis plan, and paper reporting guidelines.
+Dependencies run one way: `evals/` imports `baselines/`, and no baseline module imports `evals/`
+(`compare_results.py`, a CLI over eval results, is the one exception;
+`tests/test_evals_architecture_boundaries.py` enforces this).
+
 For the harness-level callgraph and baseline routing diagram, see
 [../docs/eval_baseline_callgraph.md](../docs/eval_baseline_callgraph.md).
 
@@ -373,6 +377,8 @@ baselines/
 ├── case_schemas.py          # Typed BaseCaseInput + per-adapter subclasses
 ├── extra_configs.py         # Typed extra-config schemas per adapter
 ├── compare_results.py       # Cross-baseline statistical comparison
+├── controller_packet.py     # Adaptive-controller packet contract (parsed by hybrid baselines)
+├── subprocess_monitor.py    # Monitored subprocess runner shared with the harness's pytest runner
 ├── normalize_repos.py       # Normalize cloned repos after setup
 ├── verify_repos.py          # Sanity-check the pinned repository checkouts
 ├── setup_repos.sh           # Clone + pin external repos

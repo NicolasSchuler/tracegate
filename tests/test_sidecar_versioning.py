@@ -9,11 +9,8 @@ from typing import Any
 
 import pytest
 
-from evals.adaptive_controller_packet import (
-    _SCHEMA_VERSION,
-    parse_controller_packet,
-    write_adaptive_controller_sidecars,
-)
+from baselines.controller_packet import _SCHEMA_VERSION, parse_controller_packet
+from evals.adaptive_controller_packet import write_adaptive_controller_sidecars
 
 
 class TestWriteSidecarsInjectsVersion:
@@ -92,14 +89,14 @@ class TestParseControllerPacketVersionWarning:
 
     def test_no_warning_on_matching_version(self, caplog: pytest.LogCaptureFixture) -> None:
         packet = self._make_minimal_packet(schema_version=_SCHEMA_VERSION)
-        with caplog.at_level(logging.WARNING, logger="evals.adaptive_controller_packet"):
+        with caplog.at_level(logging.WARNING, logger="baselines.controller_packet"):
             result = parse_controller_packet(packet)
         assert result is not None
         assert "best-effort" not in caplog.text
 
     def test_warning_on_mismatched_version(self, caplog: pytest.LogCaptureFixture) -> None:
         packet = self._make_minimal_packet(schema_version="v999")
-        with caplog.at_level(logging.WARNING, logger="evals.adaptive_controller_packet"):
+        with caplog.at_level(logging.WARNING, logger="baselines.controller_packet"):
             result = parse_controller_packet(packet)
         # Should still parse (best-effort) but emit a warning.
         assert result is not None
@@ -108,7 +105,7 @@ class TestParseControllerPacketVersionWarning:
 
     def test_no_warning_when_version_empty(self, caplog: pytest.LogCaptureFixture) -> None:
         packet = self._make_minimal_packet(schema_version="")
-        with caplog.at_level(logging.WARNING, logger="evals.adaptive_controller_packet"):
+        with caplog.at_level(logging.WARNING, logger="baselines.controller_packet"):
             result = parse_controller_packet(packet)
         # Empty version is not a mismatch — it's simply absent.
         assert result is not None

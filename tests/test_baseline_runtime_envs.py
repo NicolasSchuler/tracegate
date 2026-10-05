@@ -1228,7 +1228,7 @@ def test_ldb_adapter_uses_configured_python_executable(
         )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    from evals.subprocess_monitor import MonitoredSubprocessResult
+    from baselines.subprocess_monitor import MonitoredSubprocessResult
 
     def _fake_monitored_run(
         *,
