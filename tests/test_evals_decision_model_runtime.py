@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from evals.decision_model import runtime, schema
-from evals.decision_model.client import SystemOneClient
+from evals.decision_model.client import CircuitBreakerConfig, SystemOneClient
 from evals.decision_model.config import (
     DecisionModelClientConfig,
     DecisionModelPolicyConfig,
@@ -217,12 +217,18 @@ def test_revision_is_not_cached_while_the_sidecar_is_loading() -> None:
         return httpx.Response(200, json=_answers_for(json.loads(request.content)))
 
     settings = _settings()
+    now = [0.0]
     advisor = runtime.SystemOneAdvisor(
-        settings, client=SystemOneClient(settings.client, transport=httpx.MockTransport(handler))
+        settings,
+        client=SystemOneClient(settings.client, transport=httpx.MockTransport(handler)),
+        clock=lambda: now[0],
     )
 
     assert advisor.advise(_request()).revision == ""
     state["loading"] = False
+    # Failed lookups are rate-limited, so the retry only happens after the cooldown.
+    assert advisor.advise(_request()).revision == ""
+    now[0] += runtime.DECISION_MODEL_REVISION_RETRY_SEC + 1.0
     assert advisor.advise(_request()).revision == "rev-late"
 
 
@@ -275,3 +281,33 @@ def test_malformed_noul_answers_become_invalid_responses(noul: Any) -> None:
     assert advice.status == runtime.STATUS_INVALID_RESPONSE
     assert advice.atomic_action == ""
     assert "noul probability" in advice.error
+
+
+def test_an_open_breaker_stops_the_blocking_revision_lookup() -> None:
+    """An unresponsive sidecar must not cost one /health per decision (codex m1#6)."""
+    health_calls: list[float] = []
+    now = [0.0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            health_calls.append(now[0])
+            return httpx.Response(503, json={"status": "loading"})
+        return httpx.Response(500, text="sidecar is wedged")
+
+    settings = _settings()
+    client = SystemOneClient(
+        settings.client,
+        transport=httpx.MockTransport(handler),
+        breaker=CircuitBreakerConfig(failure_threshold=1, cooldown_sec=600.0),
+        clock=lambda: now[0],
+    )
+    advisor = runtime.SystemOneAdvisor(settings, client=client, clock=lambda: now[0])
+
+    statuses: list[str] = []
+    for _ in range(3):
+        statuses.append(advisor.advise(_request()).status)
+        # Past the revision cooldown but well inside the breaker's cooldown.
+        now[0] += runtime.DECISION_MODEL_REVISION_RETRY_SEC + 1.0
+
+    assert statuses == ["http_500", "circuit_open", "circuit_open"]
+    assert len(health_calls) == 1

@@ -88,6 +88,11 @@ class SystemOneClient:
         """Endpoint configuration."""
         return self._config
 
+    @property
+    def circuit_open(self) -> bool:
+        """Whether queries are short-circuited right now (cooldown after repeated failures)."""
+        return self._circuit_open()
+
     def close(self) -> None:
         """Release pooled connections."""
         self._client.close()

@@ -9,7 +9,8 @@ status that the controller handles per role.
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,8 @@ DECISION_MODEL_STATES_FILENAME = "decision_model_states.jsonl"
 # The preflight may hit a cold llama-swap entry, which holds the request until the model has
 # loaded instead of answering 503 like the PyTorch sidecar; give it time to finish.
 DECISION_MODEL_PREFLIGHT_TIMEOUT_SEC = 300.0
+# Cooldown between ``/health`` lookups of the served revision after a failed one.
+DECISION_MODEL_REVISION_RETRY_SEC = 30.0
 STATUS_INVALID_REQUEST = "invalid_request"
 STATUS_INVALID_RESPONSE = "invalid_response"
 _ERROR_CHARS = 200
@@ -79,11 +82,14 @@ class SystemOneAdvisor:
         settings: DecisionModelSettings,
         *,
         client: SystemOneClient | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._profile = get_profile(settings.policy.profile)
         self._client = client or SystemOneClient(settings.client)
         self._revision: str | None = None
+        self._clock = clock
+        self._revision_retry_at = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -103,14 +109,22 @@ class SystemOneAdvisor:
         """Model revision from ``/health``; cached only once the sidecar reports healthy.
 
         The sidecar answers 503 while the model loads, so a failed lookup is retried later
-        instead of pinning an empty revision for the whole run.
+        instead of pinning an empty revision for the whole run.  Retries are rate-limited and
+        skipped entirely while the query circuit breaker is open: an unresponsive sidecar used
+        to get one blocking ``/health`` per decision (each up to the full timeout, under this
+        shared lock) although the decision itself returned ``circuit_open`` immediately.
         """
         with self._lock:
-            if self._revision is None:
-                result = self._client.health()
-                if not result.ok or not result.body:
-                    return ""
-                self._revision = str(result.body.get("revision") or "")
+            if self._revision is not None:
+                return self._revision
+            now = self._clock()
+            if now < self._revision_retry_at or self._client.circuit_open:
+                return ""
+            result = self._client.health()
+            if not result.ok or not result.body:
+                self._revision_retry_at = now + DECISION_MODEL_REVISION_RETRY_SEC
+                return ""
+            self._revision = str(result.body.get("revision") or "")
             return self._revision
 
     def advise(self, request: AdviceRequest) -> DecisionModelAdvice:
