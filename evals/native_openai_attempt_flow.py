@@ -278,27 +278,8 @@ def assemble_native_openai_attempt_prompt(
             if request.run_plan_patch is not None
             else lambda _prompt: (None, None, {}),
         }
-        optional_compat_kwargs = {
-            "plan_on_first_attempt",
-            "tep_equilibrium_check",
-            "tep_equilibrium_max_iterations",
-            "tep_equilibrium_similarity_threshold",
-        }
-        while True:
-            try:
-                return maybe_run_retry_plan_then_patch(**kwargs)
-            except TypeError as exc:
-                message = str(exc)
-                if "unexpected keyword argument" not in message:
-                    raise
-                removed = False
-                for key in optional_compat_kwargs:
-                    if key in kwargs and f"'{key}'" in message:
-                        kwargs.pop(key, None)
-                        removed = True
-                        break
-                if not removed:
-                    raise
+        # ATT-22: no TypeError-message parsing; the callee takes every one of these.
+        return maybe_run_retry_plan_then_patch(**kwargs)
 
     retry_plan = _call_retry_plan()
     retry_plan = replace(

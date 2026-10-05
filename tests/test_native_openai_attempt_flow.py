@@ -123,6 +123,9 @@ def test_assemble_native_openai_attempt_prompt_compacts_context_and_reuses_updat
         include_stage_a_evidence_index,
         stage_a_index_reason,
         run_plan_patch,
+        tep_equilibrium_check,
+        tep_equilibrium_max_iterations,
+        tep_equilibrium_similarity_threshold,
     ):
         del enabled, plan_on_first_attempt, attempt, attempt_prompt_budget, is_delta_retry
         del run_plan_patch
@@ -374,6 +377,9 @@ def test_assemble_handles_compaction_exception(tmp_path: Path, monkeypatch) -> N
         include_stage_a_evidence_index,
         stage_a_index_reason,
         run_plan_patch,
+        tep_equilibrium_check,
+        tep_equilibrium_max_iterations,
+        tep_equilibrium_similarity_threshold,
     ):
         del enabled, plan_on_first_attempt, attempt, prompt_inputs
         del attempt_prompt_budget, is_delta_retry, run_plan_patch
@@ -470,6 +476,9 @@ def test_assemble_compaction_returns_none(tmp_path: Path, monkeypatch) -> None:
         include_stage_a_evidence_index,
         stage_a_index_reason,
         run_plan_patch,
+        tep_equilibrium_check,
+        tep_equilibrium_max_iterations,
+        tep_equilibrium_similarity_threshold,
     ):
         del enabled, plan_on_first_attempt, attempt, prompt_inputs
         del attempt_prompt_budget, is_delta_retry, run_plan_patch
@@ -561,6 +570,9 @@ def test_assemble_compaction_empty_text_uses_meta_error(tmp_path: Path, monkeypa
         include_stage_a_evidence_index,
         stage_a_index_reason,
         run_plan_patch,
+        tep_equilibrium_check,
+        tep_equilibrium_max_iterations,
+        tep_equilibrium_similarity_threshold,
     ):
         del enabled, plan_on_first_attempt, attempt, prompt_inputs
         del attempt_prompt_budget, is_delta_retry, run_plan_patch
@@ -655,6 +667,9 @@ def test_assemble_compaction_result_no_meta_attr(tmp_path: Path, monkeypatch) ->
         include_stage_a_evidence_index,
         stage_a_index_reason,
         run_plan_patch,
+        tep_equilibrium_check,
+        tep_equilibrium_max_iterations,
+        tep_equilibrium_similarity_threshold,
     ):
         del enabled, plan_on_first_attempt, attempt, prompt_inputs
         del attempt_prompt_budget, is_delta_retry, run_plan_patch

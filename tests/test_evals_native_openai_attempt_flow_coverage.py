@@ -141,6 +141,10 @@ class TestCompactionEmptyTextWithErrorAlreadySet:
             include_stage_a_evidence_index,
             stage_a_index_reason,
             run_plan_patch,
+            plan_on_first_attempt,
+            tep_equilibrium_check,
+            tep_equilibrium_max_iterations,
+            tep_equilibrium_similarity_threshold,
         ):  # type: ignore[no-untyped-def]
             retry_calls.append(1)
             return RetryPlanResult(
@@ -223,6 +227,10 @@ class TestCompactionEmptyTextWithErrorAlreadySet:
             include_stage_a_evidence_index,
             stage_a_index_reason,
             run_plan_patch,
+            plan_on_first_attempt,
+            tep_equilibrium_check,
+            tep_equilibrium_max_iterations,
+            tep_equilibrium_similarity_threshold,
         ):  # type: ignore[no-untyped-def]
             return RetryPlanResult(
                 prompt="final prompt",
