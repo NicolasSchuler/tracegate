@@ -199,13 +199,18 @@ def test_baselines_do_not_import_the_harness() -> None:
     assert not offenders, f"baselines importing evals: {offenders}"
 
 
+def _is_analysis_module(name: str) -> bool:
+    stem = name.rsplit(".", 1)[-1]
+    return stem == "analyze_results" or stem.startswith("analysis_")
+
+
 def test_only_analysis_api_imports_analyze_results_internals() -> None:
     offenders: list[str] = []
     for path in [*_harness_modules(), *_baseline_modules()]:
-        if path.name in {"analyze_results.py", "analysis_api.py"}:
+        if _is_analysis_module(_module_name(path)):
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("analyze_results"):
+            if isinstance(node, ast.ImportFrom) and _is_analysis_module(node.module or ""):
                 private = [alias.name for alias in node.names if alias.name.startswith("_")]
                 if private:
                     offenders.append(f"{_module_name(path)}: {private}")

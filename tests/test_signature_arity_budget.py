@@ -82,7 +82,7 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
             "_render_critic_prompt": 7,
         },
     ),
-    "evals/analyze_results.py": _FileArityDebt(
+    "evals/analysis_ope_estimators.py": _FileArityDebt(
         "The OPE analysis helper directly exposes its statistical inputs.",
         {"_deterministic_target_ope": 7},
     ),
