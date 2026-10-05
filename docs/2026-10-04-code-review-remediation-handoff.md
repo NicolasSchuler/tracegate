@@ -394,7 +394,7 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] **RCA-07, RCA-08:** Jupyter. **RCA-13:** dead Rich branch. **RCA-14:** git output encoding. **RCA-15:** exit codes. **RCA-19, RCA-20.** *(RCA-13: `tests/test_cli.py:1909` (`test_show_rich_frame_without_source`) goes through `show --full` into `_print_frame_rich` and was kept with a corrected docstring; only the edge-case test that drove the dead branch was deleted. RCA-15: `git-context` "unavailable" also moves to stderr with exit 1, for `--json` consumers; "No frames in snapshot." stays exit 0.)*
 
 ### 4.6. Hot-path performance
-- [ ] **CAP-09, CAP-10, CAP-12, CAP-13, CAP-08** (use `linecache`), **CAP-15, CAP-21.**
+- [x] **CAP-09, CAP-10, CAP-12, CAP-13, CAP-08** (use `linecache`), **CAP-15, CAP-21.** *(CAP-10 keeps the repr order up to 1,000 elements and uses natural-order `heapq.nsmallest` above that; it stays deterministic, unlike a capped iteration-order scan. CAP-15 needed two follow-ups: a single-connection index window, and no disk count when over the limit. The RCA-16 per-open journal-mode query cost about 0.2 ms × 3 per capture and now runs on creation and first open only. Minimal-config capture went 2.62 → 2.27 ms against the Phase 4.6 baseline, same session.)*
 
 ### 4.7. Remaining
 - [ ] **CAP-05, CAP-11, CAP-14, CAP-16, CAP-17, CAP-23.**

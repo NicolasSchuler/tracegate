@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Snapshot retention only deletes its own snapshot files: the indexed cleanup unlinked whatever path an index row named, so a poisoned or foreign `llmdebug_state.sqlite3` in a shared directory could delete files elsewhere. Rows that don't name a snapshot file directly inside the output directory (or name a symlink) are now dropped from the index, not deleted.
 - Capture no longer calls `len()` on arbitrary objects (CAP-21): `locals_meta` recorded `len` for anything that had one, so a lazy ORM query set (e.g. a Django `QuerySet`) ran its query during capture. `len` is now recorded for built-in containers, arrays and pandas objects only.
 - Snapshot retention no longer scans the directory on every capture (CAP-15): while under `max_snapshots` the indexed path returned "nothing to do" and every write fell through to a full `iterdir()` + `stat()` scan. One index query now returns the row count and the newest `max_snapshots + 1` rows; while the count matches the snapshot files on disk, the index decides, and only a missing or incomplete index falls back to the scan (about 20% less retention time at 40 snapshots, more for larger directories).
 - DataFrame previews are bounded (CAP-13): the `head` preview included every column although `columns` was cut to `max_items` (a 400-column frame with `max_items=5` produced 1,200 cells), and cell strings were not truncated. The preview now covers the listed columns only and truncates strings to `max_str`.

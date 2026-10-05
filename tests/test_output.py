@@ -2,6 +2,8 @@
 
 import re
 
+import pytest
+
 from llmdebug import _json as json
 from llmdebug.config import SnapshotConfig
 from llmdebug.output import get_latest_snapshot, write_bundle
@@ -574,3 +576,34 @@ def test_retention_falls_back_when_the_index_window_fails(tmp_path, monkeypatch)
 
     remaining = [p for p in tmp_path.glob("*.json") if p.name != "latest.json"]
     assert len(remaining) == 2
+
+
+@pytest.mark.parametrize("kind", ["outside", "symlink", "not_a_snapshot"])
+def test_retention_never_deletes_paths_a_poisoned_index_names(tmp_path, kind):
+    """An index row pointing outside out_dir (or at a symlink/non-snapshot) is dropped, not deleted."""
+    from llmdebug.state_db import upsert_snapshot_record
+
+    out_dir = tmp_path / "snaps"
+    victim_dir = tmp_path / "elsewhere"
+    victim_dir.mkdir()
+    victim = victim_dir / "precious.json"
+    victim.write_text("{}", encoding="utf-8")
+    cfg = SnapshotConfig(out_dir=str(out_dir), max_snapshots=50)
+    write_bundle({"name": "first", "frames": []}, cfg)
+    if kind == "outside":
+        target = victim
+    elif kind == "symlink":
+        target = out_dir / "link.json"
+        target.symlink_to(victim)
+    else:
+        target = out_dir / "notes.txt"
+        target.write_text("keep", encoding="utf-8")
+    upsert_snapshot_record(str(out_dir), {"path": str(target), "mtime": 0.0, "name": "evil"})
+
+    from llmdebug.output import _cleanup_old_snapshots
+
+    _cleanup_old_snapshots(out_dir, max_snapshots=1)
+
+    assert victim.read_text(encoding="utf-8") == "{}"
+    assert target.exists()
+    assert str(target) not in {row["path"] for row in list_snapshot_records(str(out_dir))}

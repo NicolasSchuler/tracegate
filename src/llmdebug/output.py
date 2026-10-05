@@ -20,7 +20,7 @@ from ._debug_session import normalize_snapshot_view
 from ._hashing import xxh64_hexdigest_text
 from ._warnings import emit_warning
 from .config import SnapshotConfig
-from .snapshot_index import index_entry_from_payload, snapshot_files
+from .snapshot_index import index_entry_from_payload, is_snapshot_name, snapshot_files
 from .state_db import (
     list_snapshot_records,
     remove_snapshot_records,
@@ -156,11 +156,28 @@ def _cleanup_indexed_snapshots(
     deleted_snapshot_paths: list[str] = []
     for record in indexed[max_snapshots:]:
         record_path = str(record["path"])
+        # The index is data in a shared directory: a row may only delete one of our
+        # snapshot files, never an arbitrary path it names. Foreign rows are dropped.
+        if not _is_own_snapshot_file(out_dir, Path(record_path)):
+            deleted_snapshot_paths.append(record_path)
+            continue
         if _delete_snapshot_artifacts(Path(record_path)):
             deleted_snapshot_paths.append(record_path)
 
     _remove_deleted_snapshot_records(out_dir, deleted_snapshot_paths)
     return True
+
+
+def _is_own_snapshot_file(out_dir: Path, path: Path) -> bool:
+    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink)."""
+    try:
+        return (
+            is_snapshot_name(path.name)
+            and not path.is_symlink()
+            and path.resolve().parent == out_dir.resolve()
+        )
+    except OSError:
+        return False
 
 
 def _cleanup_filesystem_snapshots(out_dir: Path, max_snapshots: int) -> None:
