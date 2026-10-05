@@ -157,7 +157,7 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - Pyright runs in `strict` mode for `src/llmdebug`.
 - Prefer precise type annotations on new or changed APIs.
 - Naming conventions: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
-- Treat function signatures with more than 6 explicit named parameters (excluding `self`/`cls` and variadics) as a readability smell. Prefer grouped `*Config`, `*Inputs`, `*Request`, or `*State` objects and add or update a signature-budget regression test when you refactor those seams.
+- Treat function signatures with more than 6 explicit named parameters (excluding `self`/`cls` and variadics) as a readability smell. Prefer grouped `*Config`, `*Inputs`, `*Request`, or `*State` objects. `tests/test_signature_arity_budget.py` enforces this with a shrink-only allowlist: new or wider signatures fail, and so does an entry left behind after you narrow or remove a signature, so lower or delete it in the same patch.
 - Keep patches focused and local; prefer adapters or helper seams over broad refactors.
 
 ## Testing & Quality Expectations
