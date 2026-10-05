@@ -49,6 +49,7 @@ from baselines.openai_compat import (
     BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
     BASELINE_OPENAI_ENABLE_THINKING_DEFAULT,
 )
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL
 
 from .base import ContextRequestResult, Patcher, PatchResult
 from .openai_compat_patcher import (
@@ -367,7 +368,7 @@ def _normalize_baseline_metrics(raw: Any) -> dict[str, Any] | None:
         "reported_tokens_completion",
         "reported_tokens_total",
         "reported_tokens_reasoning",
-        "prompt_chars_total",
+        KEY_PROMPT_CHARS_TOTAL,
         "completion_chars_total",
         "chars_input",
         "chars_output",
@@ -439,7 +440,7 @@ def _normalize_baseline_metrics(raw: Any) -> dict[str, Any] | None:
 def _exact_baseline_char_totals(metrics: dict[str, Any] | None) -> tuple[int, int] | None:
     if not isinstance(metrics, dict):
         return None
-    prompt_chars = metrics.get("prompt_chars_total")
+    prompt_chars = metrics.get(KEY_PROMPT_CHARS_TOTAL)
     if not isinstance(prompt_chars, int):
         prompt_chars = metrics.get("chars_input")
     if not isinstance(prompt_chars, int):
@@ -915,7 +916,7 @@ class BaselinePatcher(Patcher):
             exact_char_totals = _exact_baseline_char_totals(baseline_metrics)
             if exact_char_totals is not None:
                 prompt_chars_total, completion_chars_total = exact_char_totals
-                meta["prompt_chars_total"] = prompt_chars_total
+                meta[KEY_PROMPT_CHARS_TOTAL] = prompt_chars_total
                 meta["completion_chars_total"] = completion_chars_total
                 meta["chars_input"] = prompt_chars_total
                 meta["chars_output"] = completion_chars_total

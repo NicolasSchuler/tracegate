@@ -14,6 +14,7 @@ from evals.eval_prompts import _build_retry_summary, _render_retry_history_turn
 from evals.eval_recording import _build_base_record, _build_model_metadata, _empty_attempt_metadata
 from evals.eval_types import EVAL_RECORD_TYPE_INFRA_EVENT, CaseSpec, Condition, RunResult
 from evals.pytest_runner import _build_failure_signature_for_attempt, _timeout_fields
+from evals.record_keys import NOTE_INFRA_TRANSPORT_FAILURE, AttemptNote
 
 
 def _build_infra_event_record(
@@ -30,7 +31,7 @@ def _build_infra_event_record(
     context_protocol: str,
     before: RunResult,
     cumulative_runtime_sec: float,
-    note: str = "infra_transport_failure",
+    note: AttemptNote = NOTE_INFRA_TRANSPORT_FAILURE,
 ) -> dict[str, Any]:
     materialized_attempt_metadata = (
         dict(attempt_metadata)

@@ -15,6 +15,7 @@ from evals.eval_types import (
     PATCHER_CONTEXT_LIMIT_ERROR_MARKERS,
     RETRYABLE_HTTP_STATUS_CODES,
 )
+from evals.record_keys import KEY_INFRA_RESUME_ELIGIBLE
 
 
 def _single_line_error(raw: str, *, max_chars: int = 240) -> str:
@@ -422,4 +423,4 @@ def _record_is_infra_resume_eligible(record: Mapping[str, Any]) -> bool:
     patch_meta = record.get("patch_meta")
     if not isinstance(patch_meta, Mapping):
         return False
-    return bool(patch_meta.get("infra_resume_eligible"))
+    return bool(patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE))

@@ -28,6 +28,16 @@ from evals.decision_model.runtime import (
 from evals.decision_model.state import DecisionStateInputs, redact_terms_for_unit
 from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR
 from evals.eval_types import HELPER_STAGE_A_ACTIONS, _helper_action_availability
+from evals.record_keys import (
+    NOTE_FORCED_NOOP_PATCH,
+    NOTE_NO_PATCH_PROPOSED,
+    NOTE_PATCH_APPLY_FAILED,
+    NOTE_PATCH_VERIFIER_REJECTED,
+    NOTE_PATCHER_REQUEST_FAILED,
+    NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
+    NOTE_SYNTAX_PREFLIGHT_FAILED,
+    NOTE_TESTS_STILL_FAILING,
+)
 
 
 @dataclass(frozen=True)
@@ -354,15 +364,15 @@ def select_helper_action(inputs: HelperActionInputs, state: HelperActionState) -
             else ""
         )
         previous_stagnation_signal = previous_note_for_override in {
-            "no_patch_proposed",
+            NOTE_NO_PATCH_PROPOSED,
             TRUNCATED_RESPONSE_ERROR,
-            "patcher_request_failed",
-            "forced_noop_patch",
-            "patch_verifier_rejected",
-            "syntax_preflight_failed",
-            "patch_apply_failed",
-            "tests_still_failing",
-            "retry_gate_no_new_evidence",
+            NOTE_PATCHER_REQUEST_FAILED,
+            NOTE_FORCED_NOOP_PATCH,
+            NOTE_PATCH_VERIFIER_REJECTED,
+            NOTE_SYNTAX_PREFLIGHT_FAILED,
+            NOTE_PATCH_APPLY_FAILED,
+            NOTE_TESTS_STILL_FAILING,
+            NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
             "hard_stop_no_progress",
         }
         policy_skip_signal = bool(
