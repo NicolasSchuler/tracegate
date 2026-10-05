@@ -197,6 +197,8 @@ def test_ordinary_names(name: str) -> None:
         ("{'password': b'a b', 'n': 1}", "{'[REDACTED], 'n': 1}"),
         ("{'api_key': 'abc...[TRUNC]", "{'[REDACTED]"),
         ("mail bob@example.com now", "mail [REDACTED] now"),
+        ("https://" + "u" * 600 + ":pw@host/x", "https://[REDACTED]/x"),
+        ("password" + "_" * 100 + "x" + " " * 30 + "= hunter2", "[REDACTED]"),
         ('{"apiKey": "abc"}', '{"[REDACTED]}'),
         ("SECRET_KEY=xyz rest", "[REDACTED] rest"),
         ("tokens = [1]; key: 2", "tokens = [1]; key: 2"),

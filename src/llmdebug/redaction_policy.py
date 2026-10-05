@@ -30,14 +30,18 @@ PII_PATTERNS: tuple[str, ...] = (
     # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
     # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
     # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") before its "@" is
-    # redacted too, since it may be userinfo. Runs before the email pattern, which would
-    # otherwise take "TOKEN@github.com" together with the host.
-    r"(?<=://)[^\s/]{1,512}(?=@)|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)",
+    # redacted too, since it may be userinfo, and so is an authority longer than any real
+    # host (fail closed). Runs before the email pattern, which would otherwise take
+    # "TOKEN@github.com" together with the host.
+    r"(?<=://)[^\s/]{1,512}(?=@)|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)"
+    r"|(?<=://)[^\s/]{513,}",
     # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
     r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
     # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
-    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,40}['\"]?\s{0,10}[:=]\s{0,10}"
+    # The name suffix is bounded because it overlaps later names; whitespace can't, so the
+    # separator padding is unbounded without becoming quadratic.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,128}['\"]?\s*[:=]\s*"
     r"(?:" + _QUOTED_VALUE + r"|[^\s,;}\])]+)",
 )
 
