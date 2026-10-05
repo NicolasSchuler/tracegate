@@ -426,20 +426,40 @@ def list_snapshot_records(
         return []
     with open_state_db(out_dir) as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
-    out: list[dict[str, Any]] = []
-    for path, mtime, name, exc_type, exc_message, file_name, line in rows:
-        out.append(
-            {
-                "path": str(path),
-                "mtime": float(mtime),
-                "name": str(name),
-                "exc_type": str(exc_type),
-                "exc_message": str(exc_message),
-                "file": str(file_name),
-                "line": str(line),
-            }
-        )
-    return out
+    return _snapshot_rows(rows)
+
+
+def _snapshot_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": str(path),
+            "mtime": float(mtime),
+            "name": str(name),
+            "exc_type": str(exc_type),
+            "exc_message": str(exc_message),
+            "file": str(file_name),
+            "line": str(line),
+        }
+        for path, mtime, name, exc_type, exc_message, file_name, line in rows
+    ]
+
+
+def snapshot_index_window(out_dir: str | Path, *, limit: int) -> tuple[int, list[dict[str, Any]]]:
+    """Return the number of index rows and the newest *limit* rows, from one connection.
+
+    Retention runs on every capture; one connection instead of two keeps the healthy-index
+    check cheaper than the filesystem scan it replaces (CAP-15).
+    """
+    if not state_db_exists(out_dir):
+        return 0, []
+    with open_state_db(out_dir) as conn:
+        count_row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
+        rows = conn.execute(
+            "SELECT path, mtime, name, exc_type, exc_message, file, line FROM snapshots "
+            "ORDER BY mtime DESC, path DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return (int(count_row[0]) if count_row else 0), _snapshot_rows(rows)
 
 
 def replace_snapshot_records(out_dir: str | Path, records: list[dict[str, Any]]) -> None:

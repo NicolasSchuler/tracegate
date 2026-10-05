@@ -21,7 +21,12 @@ from ._hashing import xxh64_hexdigest_text
 from ._warnings import emit_warning
 from .config import SnapshotConfig
 from .snapshot_index import index_entry_from_payload, snapshot_files
-from .state_db import list_snapshot_records, remove_snapshot_records, upsert_snapshot_record
+from .state_db import (
+    list_snapshot_records,
+    remove_snapshot_records,
+    snapshot_index_window,
+    upsert_snapshot_record,
+)
 
 
 @contextmanager
@@ -183,21 +188,29 @@ def _cleanup_filesystem_snapshots(out_dir: Path, max_snapshots: int) -> None:
 def _cleanup_old_snapshots(out_dir: Path, max_snapshots: int) -> None:
     """Remove old snapshots beyond the limit.
 
-    Prefers the DB snapshot index (O(1) indexed query) over filesystem
-    scanning.  Falls back to iterdir() + stat() if the index is empty or
-    unavailable.
+    While the snapshot index covers every file on disk, it answers "over the limit?" with
+    a ``LIMIT max_snapshots + 1`` query and the cleanup uses its ordering. Only a missing,
+    incomplete or unreadable index falls back to ``iterdir()`` + ``stat()``; that used to
+    happen on every write while under the limit (CAP-15).
     """
     if max_snapshots <= 0:
         return  # Unlimited
 
-    # Try the indexed path first — avoids O(n) stat() calls on every write.
     try:
-        indexed = list_snapshot_records(str(out_dir))
+        indexed_count, newest = snapshot_index_window(str(out_dir), limit=max_snapshots + 1)
+        index_healthy = indexed_count == len(snapshot_files(out_dir))
     except Exception:
-        indexed = []
+        index_healthy, newest = False, []
 
-    if indexed and _cleanup_indexed_snapshots(out_dir, indexed, max_snapshots):
+    if index_healthy and len(newest) <= max_snapshots:
         return
+    if index_healthy:
+        try:
+            indexed = list_snapshot_records(str(out_dir))
+        except Exception:
+            indexed = []
+        if indexed and _cleanup_indexed_snapshots(out_dir, indexed, max_snapshots):
+            return
 
     _cleanup_filesystem_snapshots(out_dir, max_snapshots)
 

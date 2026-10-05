@@ -518,3 +518,59 @@ def test_short_names_keep_their_file_name(tmp_path):
     json_path = write_bundle({"name": "test_mod.py_test_case", "frames": []}, cfg)
 
     assert "_test_mod.py_test_case_" in json_path.name
+
+
+def test_retention_under_the_limit_does_not_stat_every_file(tmp_path, monkeypatch):
+    """CAP-15: below max_snapshots every write fell back to a full iterdir() + stat() scan."""
+    import llmdebug.output as output_module
+
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=50)
+    for i in range(5):
+        write_bundle({"name": f"s{i}", "frames": []}, cfg)
+
+    scans: list[object] = []
+    monkeypatch.setattr(
+        output_module, "_cleanup_filesystem_snapshots", lambda *args: scans.append(args)
+    )
+    write_bundle({"name": "under_limit", "frames": []}, cfg)
+
+    assert scans == []
+
+
+def test_retention_over_the_limit_uses_the_index(tmp_path):
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=3)
+    for i in range(6):
+        write_bundle({"name": f"s{i}", "traceback": "tb", "frames": []}, cfg)
+
+    remaining = [p for p in tmp_path.glob("*.json") if p.name != "latest.json"]
+    assert len(remaining) == 3
+    assert len(list_snapshot_records(str(tmp_path))) == 3
+
+
+def test_retention_falls_back_to_a_scan_when_the_index_is_incomplete(tmp_path, monkeypatch):
+    import llmdebug.output as output_module
+
+    monkeypatch.setattr(output_module, "upsert_snapshot_record", lambda *_args: None)
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=2)
+    for i in range(4):
+        write_bundle({"name": f"s{i}", "frames": []}, cfg)
+
+    remaining = [p for p in tmp_path.glob("*.json") if p.name != "latest.json"]
+    assert len(remaining) == 2
+
+
+def test_retention_falls_back_when_the_index_window_fails(tmp_path, monkeypatch):
+    import llmdebug.output as output_module
+
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=0)
+    for i in range(4):
+        write_bundle({"name": f"s{i}", "frames": []}, cfg)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr(output_module, "snapshot_index_window", _boom)
+    output_module._cleanup_old_snapshots(tmp_path, max_snapshots=2)
+
+    remaining = [p for p in tmp_path.glob("*.json") if p.name != "latest.json"]
+    assert len(remaining) == 2
