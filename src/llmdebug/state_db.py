@@ -382,6 +382,15 @@ def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
         conn.executemany("DELETE FROM snapshots WHERE path = ?", [(path,) for path in paths])
 
 
+def count_snapshot_records(out_dir: str | Path) -> int:
+    """Return the number of snapshot index rows (0 without a database)."""
+    if not state_db_exists(out_dir):
+        return 0
+    with open_state_db(out_dir) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
+    return int(row[0]) if row else 0
+
+
 def list_snapshot_records(
     out_dir: str | Path,
     *,

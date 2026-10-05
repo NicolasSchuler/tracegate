@@ -722,17 +722,10 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str) -> None:
         click.echo(f"Directory not found: {out_dir}", err=True)
         return
 
+    from .snapshot_index import snapshot_files as _list_snapshot_files
+
     snapshot_files = sorted(
-        (
-            p
-            for p in out_path.iterdir()
-            if p.is_file()
-            and p.suffix in {".json", ".toon"}
-            and not p.name.startswith("latest")
-            and not p.name.endswith(".tmp")
-        ),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+        _list_snapshot_files(out_path), key=lambda p: p.stat().st_mtime, reverse=True
     )
 
     to_delete = _compute_delete_list(out_path, snapshot_files, keep, delete_all)

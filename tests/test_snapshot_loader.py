@@ -31,6 +31,8 @@ def test_find_all_snapshots_skips_invalid_index_mtime(
     bad_path = tmp_path / "bad.json"
     bad_path.write_text("{}", encoding="utf-8")
 
+    # The fake rows stand for a complete index (RCA-03 checks completeness separately).
+    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -78,6 +80,8 @@ def test_find_all_snapshots_filters_search_matches_from_index(
     valueerror_path = tmp_path / "valueerror.json"
     valueerror_path.write_text("{}", encoding="utf-8")
 
+    # The fake rows stand for a complete index (RCA-03 checks completeness separately).
+    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -746,3 +750,32 @@ def test_load_snapshot_raw_trust_path_skips_validation(tmp_path: Path) -> None:
     # With _trust_path=True, validation is skipped and load succeeds
     result = load_snapshot_raw(path=str(snap), out_dir=str(out_dir), _trust_path=True)
     assert isinstance(result, dict)
+
+
+def test_partially_populated_index_does_not_hide_snapshots(tmp_path: Path) -> None:
+    """RCA-03: 3 files on disk and 1 indexed row returned 1 snapshot, forever."""
+    import os
+    import time
+
+    from llmdebug.config import SnapshotConfig
+    from llmdebug.output import write_bundle
+    from llmdebug.state_db import count_snapshot_records, list_snapshot_records
+
+    cfg = SnapshotConfig(out_dir=str(tmp_path), output_format="json")
+    paths = []
+    for index, name in enumerate(("oldest", "middle", "newest")):
+        path = write_bundle({"name": name, "exception": {"type": "E"}, "frames": []}, cfg)
+        os.utime(path, (time.time() + index, time.time() + index))
+        paths.append(path)
+    # Best-effort index writes failed for the two newest files (e.g. xdist contention).
+    from llmdebug.state_db import remove_snapshot_records
+
+    remove_snapshot_records(str(tmp_path), [str(p.resolve()) for p in paths[1:]])
+    assert len(list_snapshot_records(str(tmp_path))) == 1
+
+    newest = snapshot_loader.find_all_snapshots(str(tmp_path), limit=1)
+    everything = snapshot_loader.find_all_snapshots(str(tmp_path))
+
+    assert [entry["name"] for entry in newest] == ["newest"]
+    assert len(everything) == 3
+    assert count_snapshot_records(str(tmp_path)) == 3  # the rescan repaired the index
