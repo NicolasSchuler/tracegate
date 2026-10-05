@@ -7,11 +7,36 @@ depending on the rest of the llmdebug package runtime.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
+
+ENV_CLIENT_API_KEY_ENV = "TRACEGATE_ENV_CLIENT_API_KEY"
+"""Where the env clients get the API key: the environment, never their request file (LLM-25)."""
+
+
+def env_client_subprocess_env(api_key: str) -> dict[str, str]:
+    """The environment for an env-client subprocess, carrying *api_key*."""
+    env = os.environ.copy()
+    if api_key:
+        env[ENV_CLIENT_API_KEY_ENV] = api_key
+    return env
+
+
+def env_client_api_key(payload: Mapping[str, Any]) -> str:
+    """The API key inside an env client; a request file's ``api_key`` still wins."""
+    return str(payload.get("api_key") or os.environ.get(ENV_CLIENT_API_KEY_ENV) or "sk-placeholder")
+
+
+def scrub_secret(text: str, secret: str) -> str:
+    """*text* with every occurrence of *secret* redacted (child stderr can echo it)."""
+    if not secret or len(secret) < 4:
+        return text
+    return text.replace(secret, "***REDACTED***")
+
 
 COMPAT_PROFILE_CHOICES: tuple[str, ...] = (
     "auto",

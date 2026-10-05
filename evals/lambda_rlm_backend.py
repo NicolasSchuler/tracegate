@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import tempfile
@@ -11,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from baselines.openai_compat import env_client_subprocess_env, scrub_secret
 
 from . import _json as json
 from .runtime_resolution import OPENAI_API_KEY_ENV_FALLBACKS, resolve_openai_api_key_from_env
@@ -261,7 +262,6 @@ def invoke_lambda_rlm_decomposition(
         "model": str(model or ""),
         "prompt": prompt,
         "base_url": str(base_url or ""),
-        "api_key": effective_api_key,
         "context_window_chars": max(1, int(context_window_chars)),
     }
     with tempfile.TemporaryDirectory(prefix="lambda_rlm_") as tmpdir:
@@ -280,10 +280,11 @@ def invoke_lambda_rlm_decomposition(
             text=True,
             timeout=max(1, int(timeout_sec)),
             cwd=str(repo_dir),
-            env=os.environ.copy(),
+            env=env_client_subprocess_env(effective_api_key),
         )
         if completed.returncode != 0:
             detail = completed.stderr[-1200:] if completed.stderr else completed.stdout[-1200:]
+            detail = scrub_secret(detail, effective_api_key)
             raise RuntimeError(f"lambda-RLM env client failed: {detail}")
         payload_raw = json.loads(response_path.read_text(encoding="utf-8"))
     if not isinstance(payload_raw, dict):
