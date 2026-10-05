@@ -14,13 +14,18 @@ import ast
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
+from baselines._runtime import (
+    _parse_float,
+    _parse_int,
+    _parse_optional_bool,
+    _resolve_repo_commit,
+)
 from baselines.adapter_base import (
     BaselineAdapter,
     BaselineCaseContext,
@@ -54,20 +59,6 @@ _API_ERROR_PATTERN = re.compile(
 )
 _UPSTREAM_LOCAL_MODELS = frozenset({"starcoder", "codellama"})
 _UPSTREAM_GPT_MODEL_RE = re.compile(r"gpt-4[a-z0-9.-]*|gpt-3\.5-turbo[a-z0-9.-]*")
-
-
-def _resolve_repo_commit(repo: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
-        return ""
-    return result.stdout.strip()
 
 
 def _resolve_upstream_model_selector(requested_model: str | None) -> tuple[str, str | None]:
@@ -111,33 +102,6 @@ def _has_llmdebug_dataset_support(repo: Path) -> bool:
         and "super().__init__(model_name)" in model_text
         and 'dataset_type in ["HumanEval", "MBPP", "llmdebug"]' in py_generate_text
     )
-
-
-def _parse_float(raw: object) -> float | None:
-    try:
-        return float(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_int(raw: object) -> int | None:
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_optional_bool(raw: object) -> bool | None:
-    if isinstance(raw, bool):
-        return raw
-    text = str(raw or "").strip().lower()
-    if not text:
-        return None
-    if text in {"1", "true", "yes"}:
-        return True
-    if text in {"0", "false", "no"}:
-        return False
-    return None
 
 
 def _coerce_subprocess_text(raw: str | bytes | None) -> str:

@@ -11,7 +11,6 @@ import ast
 import csv
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
@@ -19,6 +18,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from baselines._runtime import (
+    _parse_float,
+    _parse_int,
+    _parse_optional_bool,
+    _resolve_repo_commit,
+)
 from baselines.adapter_base import (
     BaselineAdapter,
     BaselineCaseContext,
@@ -48,20 +53,6 @@ _TRACECODER_FAILURE_FEEDBACK_TAIL_MAX_CHARS_ENV = "TRACECODER_FAILURE_FEEDBACK_T
 _TRACECODER_INSTRUMENTATION_OUTPUT_MAX_LINES_ENV = "TRACECODER_INSTRUMENTATION_OUTPUT_MAX_LINES"
 _TRACECODER_INSTRUMENTATION_OUTPUT_MAX_CHARS_ENV = "TRACECODER_INSTRUMENTATION_OUTPUT_MAX_CHARS"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _resolve_repo_commit(repo: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
-        return ""
-    return result.stdout.strip()
 
 
 def _has_llmdebug_support(repo: Path) -> bool:
@@ -124,33 +115,6 @@ def _parse_json_field(raw: object) -> object:
         return json.loads(text)
     except json.JSONDecodeError:
         return raw
-
-
-def _parse_optional_bool(raw: object) -> bool | None:
-    if isinstance(raw, bool):
-        return raw
-    text = str(raw or "").strip().lower()
-    if not text:
-        return None
-    if text in {"1", "true", "yes"}:
-        return True
-    if text in {"0", "false", "no"}:
-        return False
-    return None
-
-
-def _parse_int(raw: object) -> int | None:
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_float(raw: object) -> float | None:
-    try:
-        return float(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
 
 
 def _read_metrics_sidecar(path: Path) -> dict[str, Any] | None:
