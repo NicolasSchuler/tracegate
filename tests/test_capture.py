@@ -1947,3 +1947,48 @@ def test_frame_locals_are_read_once_per_frame(helper_name: str) -> None:
     helper({}, _CountingFrame(), SnapshotConfig(include_args=True), [])
 
     assert _CountingFrame.reads == 1
+
+
+def _frame_with_args():
+    import numpy as np
+
+    def target(arr, mapping, *rest, flag=True, **extra):
+        local_only = [1, 2]  # noqa: F841 - a local that isn't an argument
+        return sys._getframe()
+
+    return target(np.arange(6.0), {"k": 1}, 3, 4, flag=False, opt="x")
+
+
+def test_arguments_are_serialized_once(monkeypatch) -> None:
+    """CAP-09: args were serialized a second time although locals already held them."""
+    import llmdebug.capture as capture_module
+    import llmdebug.serialize as serialize_module
+
+    frame = _frame_with_args()
+    calls: list[str] = []
+    real = serialize_module._serialize_local_value
+    monkeypatch.setattr(
+        serialize_module,
+        "_serialize_local_value",
+        lambda value, cfg: calls.append(type(value).__name__) or real(value, cfg),
+    )
+    frame_dict: dict = {}
+    capture_module._add_locals_safe(frame_dict, frame, SnapshotConfig(include_args=True), [])
+
+    assert len(calls) == len(frame.f_locals)  # one serialization per local, args included
+    assert set(frame_dict["args"]) == {"arr", "mapping", "rest", "flag", "extra"}
+
+
+@pytest.mark.parametrize("redact_keys", [False, True])
+def test_shared_argument_serialization_matches_a_separate_pass(redact_keys: bool) -> None:
+    import llmdebug.capture as capture_module
+    from llmdebug.serialize import compile_redactors, serialize_locals_bundle
+
+    frame = _frame_with_args()
+    cfg = SnapshotConfig(include_args=True, redact=("secret",), redact_keys=redact_keys)
+    redactors = compile_redactors(cfg.redact)
+    frame_dict: dict = {}
+    capture_module._add_locals_safe(frame_dict, frame, cfg, redactors)
+
+    _, arg_values = capture_module.extract_function_args(frame) or ([], {})
+    assert frame_dict["args"] == serialize_locals_bundle(arg_values, cfg, redactors).values

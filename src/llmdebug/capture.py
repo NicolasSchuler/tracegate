@@ -338,9 +338,34 @@ def _add_locals_safe(
         arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
-            args_bundle = serialize_locals_bundle(arg_values, cfg, effective_redactors)
-            frame_dict["args"] = args_bundle.values
+            frame_dict["args"] = _serialized_args(
+                arg_values, locals_bundle.values, cfg, effective_redactors
+            )
             frame_dict["arg_names"] = arg_names
+
+
+def _serialized_args(
+    arg_values: dict[str, Any],
+    serialized_locals: dict[str, Any],
+    cfg: SnapshotConfig,
+    redactors: list[Pattern[str]],
+) -> dict[str, Any]:
+    """Serialize the arguments, reusing their already serialized locals (CAP-09).
+
+    Arguments are locals, so serializing them again doubled the array statistics and
+    reprs per frame. Only arguments outside the locals' ``max_items`` window are
+    serialized here. With ``redact_keys`` the locals are keyed by redacted names, so
+    the arguments get their own pass.
+    """
+    if cfg.redact_keys:
+        return serialize_locals_bundle(arg_values, cfg, redactors).values
+    names = list(arg_values)[: cfg.max_items]
+    missing = {name: arg_values[name] for name in names if name not in serialized_locals}
+    extra = serialize_locals_bundle(missing, cfg, redactors).values if missing else {}
+    return {
+        name: serialized_locals[name] if name in serialized_locals else extra[name]
+        for name in names
+    }
 
 
 def _add_locals_meta(
