@@ -37,7 +37,6 @@ from evals.analysis_attempt_metrics import (  # noqa: F401
 from evals.analysis_numeric import (  # noqa: F401
     _as_float_or_none,
     _as_int,
-    _expand_paths,
     _fmt_num,
     _fmt_num_with_ci,
     _fmt_percent,
@@ -227,6 +226,7 @@ from evals.analysis_usage import (  # noqa: F401  # noqa: E402, F401
     _token_usage_breakdown,
     _tokens_used,
 )
+from evals.coerce import expand_paths as _expand_paths  # noqa: F401 (re-exported)
 from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION  # noqa: F401 (re-exported)
 
 from . import _json as json

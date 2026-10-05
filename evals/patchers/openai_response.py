@@ -7,17 +7,10 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from evals import _json as json
+from evals.coerce import nonnegative_int as _nonnegative_int
 from evals.patchers.openai_diff_text import _strip_think
 from evals.patchers.payload_types import PatcherMeta, UsagePayload
 from evals.stage_a_contract import coerce_stage_a_bool
-
-
-def _nonnegative_int(value: Any, *, default: int = 0) -> int:
-    try:
-        coerced = int(value)
-    except (TypeError, ValueError):
-        return int(default)
-    return max(0, coerced)
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:

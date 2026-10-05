@@ -6,6 +6,8 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
+from evals.coerce import nonnegative_int as _nonnegative_int
+
 from . import linucb_core as core
 from .adaptive_online_policy import (
     ACTION_SKIP_HELPER,
@@ -43,13 +45,6 @@ from .eval_types import (
     AdaptiveProgressState,
     PendingAdaptiveOnlineCredit,
 )
-
-
-def _nonnegative_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return max(0, int(default))
 
 
 def _adaptive_optional_int(value: Any) -> int | None:

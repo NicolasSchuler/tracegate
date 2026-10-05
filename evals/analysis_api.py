@@ -7,7 +7,6 @@ so the analysis modules can change without touching their consumers (X-02).
 
 from __future__ import annotations
 
-from evals.analysis_numeric import _expand_paths as expand_paths
 from evals.analysis_numeric import _fmt_num_with_ci as fmt_num_with_ci
 from evals.analysis_ope import _adaptive_ope_samples as adaptive_ope_samples
 from evals.analysis_ope_support import (
@@ -26,6 +25,7 @@ from evals.analysis_rows import _matched_uplift as matched_uplift
 from evals.analysis_rows import _records_by_case_condition as records_by_case_condition
 from evals.analysis_summary import _summarize_bucket as summarize_bucket
 from evals.analysis_usage import _is_external_baseline_condition as is_external_baseline_condition
+from evals.coerce import expand_paths
 
 __all__ = [
     "ADAPTIVE_BUDGET_ACTIONS",
