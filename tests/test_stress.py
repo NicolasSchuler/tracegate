@@ -24,7 +24,6 @@ from llmdebug.serialize import (
     to_jsonlike,
 )
 from llmdebug.state_db import (
-    _WAL_INITIALIZED_PATHS,
     append_rca_record,
     fetch_latest_rca_record,
     list_snapshot_records,
@@ -57,11 +56,6 @@ def _make_snapshot_file(out_dir: Path, index: int) -> Path:
 
 def _cfg(tmp_path: Path, **overrides: Any) -> SnapshotConfig:
     return SnapshotConfig(out_dir=str(tmp_path), **overrides)
-
-
-def _reset_wal_cache() -> None:
-    """Clear the WAL-mode init cache so each test gets fresh state."""
-    _WAL_INITIALIZED_PATHS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +93,6 @@ def test_cleanup_keeps_max_snapshots_filesystem(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_cleanup_keeps_max_snapshots_indexed(tmp_path: Path) -> None:
     """Cleanup via DB index path with 1 000+ indexed records."""
-    _reset_wal_cache()
     total = 1_100
     max_keep = 30
 
@@ -144,7 +137,6 @@ def test_cleanup_keeps_max_snapshots_indexed(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_concurrent_write_bundle(tmp_path: Path) -> None:
     """10 threads writing snapshots simultaneously — no corruption."""
-    _reset_wal_cache()
     n_threads = 12
     writes_per_thread = 8
     cfg = _cfg(tmp_path, max_snapshots=0)  # unlimited — no cleanup race
@@ -280,7 +272,6 @@ def test_large_numpy_array_serialization() -> None:
 @pytest.mark.slow
 def test_sqlite_concurrent_writes(tmp_path: Path) -> None:
     """Multiple threads writing RCA records concurrently via WAL mode."""
-    _reset_wal_cache()
     n_threads = 10
     records_per_thread = 20
     now = "2025-01-01T00:00:00Z"
@@ -323,7 +314,6 @@ def test_sqlite_concurrent_writes(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_sqlite_concurrent_read_write(tmp_path: Path) -> None:
     """Readers and writers hitting the DB simultaneously."""
-    _reset_wal_cache()
     now = "2025-06-01T00:00:00Z"
 
     # Seed some records.
@@ -385,7 +375,6 @@ def test_sqlite_concurrent_read_write(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_sqlite_wal_journal_mode(tmp_path: Path) -> None:
     """Verify WAL mode is actually set on the database."""
-    _reset_wal_cache()
     with open_state_db(str(tmp_path)) as conn:
         mode = conn.execute("PRAGMA journal_mode").fetchone()
     assert mode is not None
@@ -486,7 +475,6 @@ def test_rate_limiter_many_signatures_cleanup() -> None:
 @pytest.mark.slow
 def test_snapshot_index_concurrent_upserts(tmp_path: Path) -> None:
     """Concurrent upsert_snapshot_record calls don't lose data."""
-    _reset_wal_cache()
     n_threads = 8
     records_per_thread = 25
 
@@ -529,7 +517,6 @@ def test_snapshot_index_concurrent_upserts(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_write_bundle_with_cleanup_concurrent(tmp_path: Path) -> None:
     """Concurrent write_bundle calls with cleanup enabled."""
-    _reset_wal_cache()
     max_snaps = 20
     n_threads = 6
     writes_per_thread = 10

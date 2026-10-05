@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -66,9 +67,9 @@ def _make_snapshot(**overrides: Any) -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def _clear_wal_cache() -> None:
-    """Ensure each test starts with a clean WAL-initialized set."""
-    state_db._WAL_INITIALIZED_PATHS.clear()
+def _clear_wal_warnings() -> None:
+    """Each test may see the one-time "could not enable WAL" warning again."""
+    state_db._WAL_WARNED_PATHS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +159,7 @@ class TestEnableWalMode:
 
 
 # ---------------------------------------------------------------------------
-# _configure_wal_mode_once  (line 48) — tested via open_state_db
+# _ensure_wal_mode — tested via open_state_db and TestWalAndSchemaVersion
 # _configure_connection  (line 57) — tested via open_state_db
 # _ensure_schema  (line 69)
 # ---------------------------------------------------------------------------
@@ -819,3 +820,65 @@ class TestReplaceSnapshotRecords:
         replace_snapshot_records(tmp_path, new_records)
         results = list_snapshot_records(tmp_path)
         assert len(results) == 5
+
+
+# ---------------------------------------------------------------------------
+# RCA-16: WAL mode is verified on every open; RCA-11: versioned schema
+# ---------------------------------------------------------------------------
+
+
+class TestWalAndSchemaVersion:
+    def test_recreated_database_is_switched_to_wal_again(self, tmp_path: Path) -> None:
+        """RCA-16: a per-path "WAL done" cache survived deleting the database."""
+        with open_state_db(tmp_path):
+            pass
+        for db_file in tmp_path.glob("llmdebug_state.sqlite3*"):
+            db_file.unlink()
+
+        with open_state_db(tmp_path) as conn:
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+    def test_failed_wal_switch_warns_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(state_db, "_enable_wal_mode", lambda _conn, **_kwargs: None)
+
+        for _ in range(2):
+            with open_state_db(tmp_path):
+                pass
+
+        assert capsys.readouterr().err.count("could not enable WAL mode") == 1
+
+    def test_new_database_records_the_schema_version(self, tmp_path: Path) -> None:
+        with open_state_db(tmp_path) as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        assert version == state_db.STATE_DB_SCHEMA_VERSION == 1
+
+    def test_unversioned_database_from_an_earlier_release_is_upgraded(self, tmp_path: Path) -> None:
+        """RCA-11: databases created before versioning have user_version 0 and keep their rows."""
+        db = state_db_path(tmp_path)
+        conn = sqlite3.connect(db)
+        state_db._create_schema_v1(conn)
+        conn.execute(
+            "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("/s.json", 1.0, "n", "E", "m", "f.py", "1"),
+        )
+        conn.commit()
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        conn.close()
+
+        rows = list_snapshot_records(tmp_path)
+
+        assert [row["path"] for row in rows] == ["/s.json"]
+        with closing(sqlite3.connect(db)) as check:
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+
+    def test_newer_schema_is_refused(self, tmp_path: Path) -> None:
+        with open_state_db(tmp_path):
+            pass
+        with closing(sqlite3.connect(state_db_path(tmp_path))) as conn:
+            conn.execute("PRAGMA user_version = 99")
+
+        with pytest.raises(RuntimeError, match="schema version 99 is newer"):
+            count_rca_records(tmp_path)

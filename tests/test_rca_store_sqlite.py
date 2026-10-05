@@ -173,7 +173,7 @@ def test_configure_connection_invalid_busy_timeout_falls_back(
             self.commands.append(sql)
 
     monkeypatch.setenv("LLMDEBUG_DB_BUSY_TIMEOUT_MS", "nope")
-    monkeypatch.setattr(state_db, "_configure_wal_mode_once", lambda _conn, *, db_path: None)
+    monkeypatch.setattr(state_db, "_ensure_wal_mode", lambda _conn, *, db_path: None)
 
     conn = _Conn()
     state_db._configure_connection(conn, db_path=tmp_path / "llmdebug_state.sqlite3")
@@ -412,16 +412,19 @@ def test_decode_payload_rows_skips_malformed_json(tmp_path: Path) -> None:
     assert result is None
 
 
-def test_wal_initialized_paths_idempotent(tmp_path: Path) -> None:
-    """Opening the same DB twice should not re-run WAL init."""
-    state_db._WAL_INITIALIZED_PATHS.discard(str(state_db.state_db_path(tmp_path).resolve()))
-    with state_db.open_state_db(str(tmp_path)) as _conn1:
+def test_reopening_a_wal_database_does_not_switch_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The journal mode is read on open; an already-WAL database isn't switched again."""
+    with state_db.open_state_db(str(tmp_path)):
         pass
-    with state_db.open_state_db(str(tmp_path)) as _conn2:
+    calls: list[object] = []
+    monkeypatch.setattr(state_db, "_enable_wal_mode", lambda conn, **_kw: calls.append(conn))
+
+    with state_db.open_state_db(str(tmp_path)):
         pass
-    # Key assertion: WAL init key is present in the set
-    key = str(state_db.state_db_path(tmp_path).resolve())
-    assert key in state_db._WAL_INITIALIZED_PATHS
+
+    assert calls == []
 
 
 def test_prune_rca_records_respects_max(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,21 +4,20 @@ from __future__ import annotations  # pragma: no cover
 
 import sqlite3  # pragma: no cover
 import time  # pragma: no cover
-from collections.abc import Iterator, Mapping  # pragma: no cover
+from collections.abc import Callable, Iterator, Mapping  # pragma: no cover
 from contextlib import contextmanager  # pragma: no cover
 from pathlib import Path  # pragma: no cover
-from threading import Lock  # pragma: no cover
 from typing import Any, cast  # pragma: no cover
 
 from . import _json as json  # pragma: no cover
 from ._coerce import read_env_int  # pragma: no cover
+from ._warnings import emit_warning  # pragma: no cover
 
 STATE_DB_FILENAME = "llmdebug_state.sqlite3"  # pragma: no cover
 _BUSY_TIMEOUT_MS = 30_000  # pragma: no cover
 _WAL_RETRY_ATTEMPTS = 8  # pragma: no cover
 _WAL_BASE_SLEEP_SEC = 0.01  # pragma: no cover
-_WAL_INIT_LOCK = Lock()  # pragma: no cover
-_WAL_INITIALIZED_PATHS: set[str] = set()  # pragma: no cover
+_WAL_WARNED_PATHS: set[str] = set()  # pragma: no cover
 
 
 def state_db_path(out_dir: str | Path) -> Path:
@@ -50,13 +49,30 @@ def _enable_wal_mode(
                 time.sleep(base_sleep_sec * float(attempt + 1))
 
 
-def _configure_wal_mode_once(conn: sqlite3.Connection, *, db_path: Path) -> None:
-    key = str(db_path.resolve())
-    with _WAL_INIT_LOCK:
-        if key in _WAL_INITIALIZED_PATHS:
-            return
-        _enable_wal_mode(conn)
-        _WAL_INITIALIZED_PATHS.add(key)
+def _journal_mode(conn: sqlite3.Connection) -> str:
+    row = conn.execute("PRAGMA journal_mode").fetchone()
+    return str(row[0]).lower() if row else ""
+
+
+def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path) -> None:
+    """Switch the database to WAL unless it already is, and check that it worked (RCA-16).
+
+    The journal mode is stored in the database, so reading it on every open is cheap.
+    A per-path "already done" cache used to survive the database being deleted and
+    recreated, and the result of the switch was never checked (filesystems without
+    shared memory stay in rollback mode).
+    """
+    if _journal_mode(conn) == "wal":
+        return
+    _enable_wal_mode(conn)
+    mode = _journal_mode(conn)
+    key = str(db_path)
+    if mode != "wal" and key not in _WAL_WARNED_PATHS:
+        _WAL_WARNED_PATHS.add(key)
+        emit_warning(
+            f"could not enable WAL mode for {db_path} (journal_mode={mode or '?'}); "
+            "concurrent llmdebug processes may block each other"
+        )
 
 
 def _configure_connection(conn: sqlite3.Connection, *, db_path: Path) -> None:
@@ -66,12 +82,17 @@ def _configure_connection(conn: sqlite3.Connection, *, db_path: Path) -> None:
         minimum=0,
     )
     conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
-    _configure_wal_mode_once(conn, db_path=db_path)
+    _ensure_wal_mode(conn, db_path=db_path)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA temp_store=MEMORY")
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
+def _create_schema_v1(conn: sqlite3.Connection) -> None:
+    """Version 1: the tables and indexes as they existed before versioning (RCA-11).
+
+    ``IF NOT EXISTS`` keeps this a no-op on databases created by earlier releases,
+    which all have ``user_version`` 0.
+    """
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS rca_attempts (
@@ -116,6 +137,47 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             ON snapshots(mtime DESC)
         """
     )
+
+
+# Index i upgrades a database from user_version i to i + 1. Append new migrations; never
+# edit a released one.
+_SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_create_schema_v1,)
+STATE_DB_SCHEMA_VERSION = len(_SCHEMA_MIGRATIONS)
+
+
+def _schema_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("PRAGMA user_version").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Bring the schema to ``STATE_DB_SCHEMA_VERSION`` via ``PRAGMA user_version`` (RCA-11).
+
+    Migrations run in one ``BEGIN IMMEDIATE`` transaction and the version is re-read under
+    that write lock, so concurrent openers apply each step once.
+
+    Raises:
+        RuntimeError: If the database was written by a newer llmdebug with a schema this
+            version doesn't know.
+    """
+    version = _schema_version(conn)
+    if version == STATE_DB_SCHEMA_VERSION:
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        version = _schema_version(conn)
+        if version > STATE_DB_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"state database schema version {version} is newer than this llmdebug "
+                f"supports ({STATE_DB_SCHEMA_VERSION}); upgrade llmdebug"
+            )
+        for migrate in _SCHEMA_MIGRATIONS[version:]:
+            migrate(conn)
+        conn.execute(f"PRAGMA user_version = {STATE_DB_SCHEMA_VERSION:d}")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
 
 
 @contextmanager

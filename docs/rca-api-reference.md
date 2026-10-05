@@ -546,6 +546,15 @@ CREATE INDEX idx_rca_attempts_updated
 The full attempt record is stored as JSON in `payload_json`. Top-level
 columns are extracted for efficient querying and indexing.
 
+The database (`<out_dir>/llmdebug_state.sqlite3`, shared with the snapshot
+index) records its schema version in `PRAGMA user_version`, currently `1`.
+Opening it applies any missing migrations in one `BEGIN IMMEDIATE`
+transaction; databases from releases before versioning have version `0` and
+upgrade in place. A database with a newer version than the installed
+llmdebug supports raises `RuntimeError` instead of being written to. Each open
+also checks that the database is in WAL mode, switches it if not, and prints
+one warning if the filesystem doesn't allow WAL.
+
 ### Record Limits
 
 Control maximum retained records via `LLMDEBUG_RCA_MAX_RECORDS` (default:
