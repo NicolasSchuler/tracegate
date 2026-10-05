@@ -26,9 +26,35 @@ def env_client_subprocess_env(api_key: str) -> dict[str, str]:
     return env
 
 
+def consume_env_client_api_key() -> str:
+    """Read the env-client API key and remove it from this process' environment.
+
+    Env clients run model code and (RLM) candidate code in subprocesses that inherit
+    ``os.environ``, so the key must not outlive the client's own use of it.
+    """
+    return str(os.environ.pop(ENV_CLIENT_API_KEY_ENV, "") or "")
+
+
+def candidate_subprocess_env() -> dict[str, str]:
+    """``os.environ`` for model-written candidate code, without the env-client key.
+
+    Belt and braces next to :func:`consume_env_client_api_key`: a candidate that prints
+    its environment must not be able to leak the key into model-visible output or into
+    persisted artifacts.
+    """
+    env = os.environ.copy()
+    env.pop(ENV_CLIENT_API_KEY_ENV, None)
+    return env
+
+
 def env_client_api_key(payload: Mapping[str, Any]) -> str:
-    """The API key inside an env client; a request file's ``api_key`` still wins."""
-    return str(payload.get("api_key") or os.environ.get(ENV_CLIENT_API_KEY_ENV) or "sk-placeholder")
+    """The API key inside an env client; a request file's ``api_key`` still wins.
+
+    Consumes :data:`ENV_CLIENT_API_KEY_ENV` either way, so the key is gone from the
+    environment before any model or candidate subprocess is started.
+    """
+    from_env = consume_env_client_api_key()
+    return str(payload.get("api_key") or from_env or "sk-placeholder")
 
 
 def scrub_secret(text: str, secret: str) -> str:

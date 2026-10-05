@@ -66,6 +66,15 @@ iterating when it is reached (`error="deadline_exceeded"`), and every record car
 TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
 (BAS-12).
 
+## Credentials in the env clients (LLM-25)
+
+The lambda-RLM and RLM env clients receive the API key in `TRACEGATE_ENV_CLIENT_API_KEY`,
+never in their request file. `baselines.openai_compat.env_client_api_key` *consumes* that
+variable: it is removed from the env client's own environment as it is read, and candidate
+subprocesses (the import smoke test and `run_case_tests`) are started from
+`candidate_subprocess_env()`, so model-written code can never print the key into
+model-visible output or into persisted artifacts.
+
 ## Retry context (BAS-02, decision D4)
 
 `BaselinePatcher.propose_patch` ignores the harness repair prompt, so each harness attempt used

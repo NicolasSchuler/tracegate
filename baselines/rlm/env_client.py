@@ -15,7 +15,6 @@ update both constants and re-run ``setup_repos.sh`` smoke checks.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -34,6 +33,7 @@ from baselines.openai_compat import (  # noqa: E402
     OpenAICompatResponseError,
     apply_compat_request_profile,
     build_request_validation_retry_plan,
+    candidate_subprocess_env,
     compat_config_from_extra,
     env_client_api_key,
     normalize_chat_completion_response,
@@ -184,7 +184,7 @@ def _import_smoke_failure(*, python_executable: str, workspace_dir: Path) -> str
             text=True,
             cwd=str(workspace_dir),
             timeout=10,
-            env=os.environ.copy(),
+            env=candidate_subprocess_env(),
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -787,7 +787,7 @@ def main(argv: list[str]) -> int:
                 text=True,
                 cwd=str(workspace_dir),
                 timeout=test_timeout_sec,
-                env=os.environ.copy(),
+                env=candidate_subprocess_env(),
             )
             duration_sec = time.perf_counter() - started_at
             last_test_result = {
