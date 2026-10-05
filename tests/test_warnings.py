@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import pytest
 
-from llmdebug._warnings import emit_warning
+from llmdebug._warnings import LOGGER_NAME, emit_warning
+from llmdebug.capture import _warn
 
 
 def test_emit_warning_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
@@ -39,3 +41,50 @@ def test_emit_warning_special_characters(capsys: pytest.CaptureFixture[str]) -> 
 def test_emit_warning_returns_none(capsys: pytest.CaptureFixture[str]) -> None:
     result = emit_warning("check return value")
     assert result is None
+
+
+def test_warnings_go_through_the_diagnostics_logger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """X-07: one configurable channel; raising its level silences stderr output."""
+    diagnostics = logging.getLogger(LOGGER_NAME)
+    previous = diagnostics.level
+    diagnostics.setLevel(logging.ERROR)
+    try:
+        emit_warning("hidden")
+    finally:
+        diagnostics.setLevel(previous)
+    assert capsys.readouterr().err == ""
+
+
+def test_diagnostics_do_not_reach_the_root_logger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """log_capture records root-logger output into snapshots; llmdebug's own must stay out."""
+    seen: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    root_handler = _Collect()
+    logging.getLogger().addHandler(root_handler)
+    try:
+        emit_warning("not for the root logger")
+    finally:
+        logging.getLogger().removeHandler(root_handler)
+    assert seen == []
+    assert capsys.readouterr().err == "llmdebug: warning: not for the root logger\n"
+
+
+def test_capture_warnings_are_logged_at_debug(capsys: pytest.CaptureFixture[str]) -> None:
+    diagnostics = logging.getLogger(LOGGER_NAME)
+    previous = diagnostics.level
+    buffer: list[str] = []
+    diagnostics.setLevel(logging.DEBUG)
+    try:
+        _warn(buffer, "locals count failed")
+    finally:
+        diagnostics.setLevel(previous)
+    assert buffer == ["locals count failed"]
+    assert capsys.readouterr().err == "llmdebug: debug: capture: locals count failed\n"

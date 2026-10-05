@@ -149,6 +149,25 @@ print(snap['exception']['type'] if snap else 'INVALID')
 "
 ```
 
+### Silencing or Redirecting `llmdebug: warning:` Messages
+
+llmdebug's own diagnostics (lock timeouts, unreadable snapshots, index refresh
+failures) go through the `llmdebug.diagnostics` logger, which writes
+`llmdebug: warning: <message>` to stderr by default. Configure that logger to
+change this:
+
+```python
+import logging
+
+logging.getLogger("llmdebug.diagnostics").setLevel(logging.ERROR)  # silence warnings
+logging.getLogger("llmdebug.diagnostics").setLevel(logging.DEBUG)  # also show capture warnings
+```
+
+The logger doesn't propagate to the root logger, so these messages never end up in
+a snapshot's captured logs. Problems during capture itself are also stored in the
+snapshot's `_capture_warnings` field; at `DEBUG` level they are logged as
+`llmdebug: debug: capture: <message>` too.
+
 ### Pytest Plugin Not Activating
 
 **Symptoms**: Tests fail but no `.llmdebug/` directory is created.
