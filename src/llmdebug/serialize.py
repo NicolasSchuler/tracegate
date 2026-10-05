@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import functools
 import heapq
 import inspect
@@ -883,12 +884,42 @@ def _local_type_name(value: Any) -> str:
     return f"{type(value).__module__}.{type(value).__name__}"
 
 
-def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
-    entry: dict[str, Any] = {"type": _local_type_name(value)}
+# Types whose len() is known to be cheap and side-effect free. Calling len() on arbitrary
+# objects ran user code: a lazy ORM query set executes its query (CAP-21).
+_SAFE_LEN_TYPES = (
+    str,
+    bytes,
+    bytearray,
+    list,
+    tuple,
+    dict,
+    set,
+    frozenset,
+    range,
+    collections.deque,
+)
+
+
+def _safe_len(value: Any) -> int | None:
+    """``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
     try:
-        entry["len"] = len(value)  # type: ignore[arg-type]
+        if (
+            isinstance(value, _SAFE_LEN_TYPES)
+            or is_array_like(value)
+            or is_dataframe(value)
+            or is_series(value)
+        ):
+            return len(cast(Any, value))
     except Exception:  # nosec B110 — safe serialization fallback
         pass
+    return None
+
+
+def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = {"type": _local_type_name(value)}
+    length = _safe_len(value)
+    if length is not None:
+        entry["len"] = length
     try:
         if (is_array_like(value) or is_dataframe(value) or is_series(value)) and hasattr(
             value, "shape"

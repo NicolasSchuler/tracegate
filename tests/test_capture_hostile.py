@@ -312,3 +312,21 @@ def test_very_long_local_names(tmp_path: Path) -> None:
     snapshot = _capture(tmp_path, namespace["boom"])
 
     assert _crash_locals(snapshot)[long_name] == 1
+
+
+@pytest.mark.parametrize("locals_mode", ["safe", "meta"])
+def test_capture_does_not_call_len_on_arbitrary_objects(tmp_path: Path, locals_mode: str) -> None:
+    """CAP-21: len() on a lazy ORM query set executes the query."""
+    lazy = _Lazy()
+
+    def boom() -> None:
+        query = lazy  # noqa: F841 - captured local
+        rows = [1, 2, 3]  # noqa: F841 - captured local
+        raise ValueError("lazy")
+
+    snapshot = _capture(tmp_path, boom, locals_mode=locals_mode)
+
+    meta = snapshot["frames"][0]["locals_meta"]
+    assert lazy.len_calls == 0
+    assert "len" not in meta["query"]
+    assert meta["rows"]["len"] == 3
