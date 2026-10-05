@@ -376,9 +376,9 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] Add a hostile-object fixture suite run end-to-end through `capture_exception`: broken `__str__`, `__repr__`, `__len__` and `__getattr__`; `2**70`; 300-character names; recursive containers; lazy objects. *(`tests/test_capture_hostile.py`. It found one more abort: a `__getattribute__` raising a non-`AttributeError` escapes `hasattr`/`isinstance`, so `to_jsonlike` is now a per-value guard. Lazy-object `len()` calls are left for CAP-21 in 4.6.)*
 
 ### 4.2. Redaction
-- [ ] **CAP-20:** emit plain `str` keys. This is a prerequisite for key-aware matching, and since it changes the payload format, document it in `docs/configuration.md` and the changelog.
-- [ ] **CAP-03:** redact values of variables with sensitive names (local names and dict keys), plus connection strings.
-- [ ] **CAP-06:** refuse or mark redacted exports that redact nothing. **CAP-07:** atomic redactor cache.
+- [x] **CAP-20:** emit plain `str` keys. This is a prerequisite for key-aware matching, and since it changes the payload format, document it in `docs/configuration.md` and the changelog. *(Debug-session schema `2.1`; eval run metadata records `llmdebug_snapshot_schema_version`, which is also in the settings fingerprint, because snapshot conditions quote dict locals in prompts.)*
+- [x] **CAP-03:** redact values of variables with sensitive names (local names and dict keys), plus connection strings. *(Applies whenever any redaction pattern is active, so no new config knob; bare `key`/`token` are not sensitive. A security review of the first commit found a ReDoS, escaped-quote and URL-userinfo gaps, fixed in a follow-up commit that also bounds the pre-existing quadratic email pattern. No eval case is affected.)*
+- [x] **CAP-06:** refuse or mark redacted exports that redact nothing. **CAP-07:** atomic redactor cache. *(CAP-06 refuses: `ValueError` in the API, a usage error in the CLI. CAP-07 uses `lru_cache`; the race doesn't reproduce under the GIL, so the thread test documents the invariant.)*
 
 ### 4.3. RCA state machine
 - [ ] **RCA-01, RCA-04, RCA-06, RCA-12, RCA-05.**
