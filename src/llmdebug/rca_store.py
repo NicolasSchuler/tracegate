@@ -23,9 +23,10 @@ def store_rca_records_bulk(
     *,
     out_dir: str,
     max_records: int,
+    keep_existing: bool = False,
 ) -> None:
-    """Persist multiple RCA records to SQLite."""
-    append_rca_records_bulk(out_dir, records, max_records=max_records)
+    """Persist multiple RCA records to SQLite (``keep_existing``: stored rows win)."""
+    append_rca_records_bulk(out_dir, records, max_records=max_records, keep_existing=keep_existing)
 
 
 def has_any_records(*, out_dir: str) -> bool:

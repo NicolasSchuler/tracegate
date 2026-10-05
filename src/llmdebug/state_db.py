@@ -200,15 +200,21 @@ def append_rca_records_bulk(
     records: list[dict[str, Any]],
     *,
     max_records: int,
+    keep_existing: bool = False,
 ) -> None:
-    """Insert or replace multiple RCA records, then prune by recency."""
+    """Insert multiple RCA records, then prune by recency.
+
+    A record whose ``attempt_id`` is already stored replaces it, or is skipped with
+    ``keep_existing=True`` (a merge where the stored row wins).
+    """
     if not records:
         return
     rows = [_rca_row(record) for record in records]
+    conflict = "IGNORE" if keep_existing else "REPLACE"
     with open_state_db(out_dir) as conn:
         conn.executemany(
-            """
-            INSERT OR REPLACE INTO rca_attempts(
+            f"""
+            INSERT OR {conflict} INTO rca_attempts(
                 attempt_id, session_id, updated_at, created_at, failure_signature, state, payload_json
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
