@@ -6422,7 +6422,12 @@ def _build_failure_signature_for_attempt(*, run: RunResult, snapshot: dict[str, 
     try:
         from llmdebug.rca_state import build_failure_signature
 
-        return build_failure_signature(snapshot, stdout=run.stdout, stderr=run.stderr)
+        # Raw (pre-RCA-12) signatures: failure_signature_repeat drives snapshot reveal,
+        # stagnation features and the no-progress stop, so normalizing them would change
+        # adaptive results versus earlier runs. Switching is a research decision.
+        return build_failure_signature(
+            snapshot, stdout=run.stdout, stderr=run.stderr, normalize=False
+        )
     except Exception as e:
         sys.stderr.write(
             f"llmdebug eval: build_failure_signature failed, using text fallback: "

@@ -328,6 +328,7 @@ def build_failure_signature(
     *,
     stdout: str = "",
     stderr: str = "",
+    normalize: bool = True,
 ) -> str:
 ```
 
@@ -335,17 +336,24 @@ def build_failure_signature(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `snapshot` | `dict \| None` | — | Parsed snapshot dict. Preferred source — uses exception type, crash frame location, and pytest nodeid. |
-| `stdout` | `str` | `""` | Fallback: raw stdout text (used when snapshot is `None`). |
-| `stderr` | `str` | `""` | Fallback: raw stderr text (used when snapshot is `None`). |
+| `snapshot` | `dict \| None` | — | Parsed snapshot dict. Preferred source — uses exception type and message, crash frame location, and pytest nodeid. |
+| `stdout` | `str` | `""` | Fallback: raw stdout text (used when snapshot is `None`); its last three non-empty lines are hashed. |
+| `stderr` | `str` | `""` | Fallback: raw stderr text (used when snapshot is `None`), preferred over `stdout`. |
+| `normalize` | `bool` | `True` | Replace run-specific values in the message or output tail before hashing: UUIDs, `0x…` addresses, absolute paths (such as `tmp_path`), hex ids of 12+ characters, and numbers become `<uuid>`, `<addr>`, `<path>`, `<hex>` and `<n>`. `False` gives the raw signature used before this option existed. |
 
 **Returns:** A string of the form `"ExceptionType:hexdigest"` (snapshot) or
-`"TextFailure:hexdigest"` (text fallback). The hex digest is a truncated
-SHA-256 (16 chars) of the canonicalized failure data.
+`"TextFailure:hexdigest"` (text fallback). The hex digest is the first 16
+characters of an xxh64 hash of the canonicalized failure data.
 
-**Signature stability:** Two calls with the same exception type, crash
-location, and nodeid produce the same signature. This is how repeat
-detection and stall detection work.
+**Signature stability:** Two calls with the same exception type, normalized
+message, crash location (file, line, function), and nodeid produce the same
+signature. This is how repeat detection and stall detection work. Without
+normalization, a message that embeds a memory address, a `tmp_path` or a
+count made every attempt look new, so stall detection rarely fired. The
+crash line is still part of the signature, so an edit that moves the
+failing line starts a new signature. The eval harness passes
+`normalize=False` to keep its adaptive conditions comparable with earlier
+runs.
 
 ---
 

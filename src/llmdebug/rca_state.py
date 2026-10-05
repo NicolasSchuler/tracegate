@@ -42,9 +42,12 @@ def build_failure_signature(
     *,
     stdout: str = "",
     stderr: str = "",
+    normalize: bool = True,
 ) -> str:
     """Build a stable failure signature from snapshot (preferred) or textual output."""
-    return _rca_identity.build_failure_signature(snapshot, stdout=stdout, stderr=stderr)
+    return _rca_identity.build_failure_signature(
+        snapshot, stdout=stdout, stderr=stderr, normalize=normalize
+    )
 
 
 def derive_session_id(

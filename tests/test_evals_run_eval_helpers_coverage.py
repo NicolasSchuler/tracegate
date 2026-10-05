@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1154,10 +1155,13 @@ class TestBudgetAndSnapshotHelpers:
         assert snap is None
         assert "RuntimeError" in err
 
-        monkeypatch.setattr(
-            "llmdebug.rca_state.build_failure_signature",
-            lambda snapshot, stdout, stderr: "sig-123",
-        )
+        seen_kwargs: dict[str, Any] = {}
+
+        def _fake_signature(snapshot: Any, **kwargs: Any) -> str:
+            seen_kwargs.update(kwargs)
+            return "sig-123"
+
+        monkeypatch.setattr("llmdebug.rca_state.build_failure_signature", _fake_signature)
         signature = run_eval._build_failure_signature_for_attempt(
             run=run_eval.RunResult(
                 returncode=1,
@@ -1170,8 +1174,10 @@ class TestBudgetAndSnapshotHelpers:
             snapshot=fake_snapshot,
         )
         assert signature == "sig-123"
+        # RCA-12: the harness pins raw signatures for comparability with earlier runs.
+        assert seen_kwargs["normalize"] is False
 
-        def _raise_signature(snapshot, stdout, stderr):
+        def _raise_signature(snapshot, **_kwargs):
             raise RuntimeError("oops")
 
         monkeypatch.setattr("llmdebug.rca_state.build_failure_signature", _raise_signature)
