@@ -158,7 +158,7 @@ def _print_selected_frame(
     if console:
         _print_frame_rich(frame, index, is_crash, console)
         return
-    _print_frame(frame, index, is_crash, console)
+    _print_frame(frame, index, is_crash)
 
 
 def _print_remaining_frames_hint(snapshot: dict[str, Any], console: Any) -> None:
@@ -234,75 +234,18 @@ def _print_frame(
     frame: dict[str, Any],
     index: int,
     is_crash: bool,
-    console: Any,
     *,
     show_locals: bool = True,
 ) -> None:
-    """Print a single stack frame (combined source+locals panel for ``show``)."""
-    if not console:
-        rendered = format_frame_text(
-            frame, index, is_crash, show_locals=show_locals, crash_tag=False
-        )
-        lines = rendered.splitlines()
-        if not lines:
-            return
-        prefix = ">>> " if is_crash else "    "
-        click.echo(f"{prefix}{lines[0]}")
-        for line in lines[1:]:
-            click.echo(f"    {line}")
+    """Print a single stack frame as plain text; Rich output is ``_print_frame_rich``."""
+    rendered = format_frame_text(frame, index, is_crash, show_locals=show_locals, crash_tag=False)
+    lines = rendered.splitlines()
+    if not lines:
         return
-
-    file_rel = frame_file_label(frame)
-    line = frame.get("line", "?")
-    func = frame.get("function", "?")
-    location = f"{file_rel}:{line} in {func}"
-
-    source_raw = frame.get("source")
-    source = cast(dict[str, Any], source_raw) if isinstance(source_raw, dict) else {}
-    source_text = build_source_text(source, frame.get("line", 0)) if source else ""
-
-    locals_dict = frame.get("locals", {})
-    locals_meta_raw = frame.get("locals_meta")
-    locals_meta = cast(dict[str, Any], locals_meta_raw) if isinstance(locals_meta_raw, dict) else {}
-
-    if console:
-        border = "red" if is_crash else "dim"
-        title = f"{'[CRASH] ' if is_crash else ''}Frame #{index}: {location}"
-
-        parts: list[Any] = []
-
-        # Source snippet
-        if source_text:
-            parts.append(Text(source_text))
-
-        # Locals table
-        if show_locals and isinstance(locals_dict, dict) and locals_dict:
-            ld = cast(dict[str, Any], locals_dict)
-            lm = locals_meta
-            table = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
-            table.add_column("Variable", style="cyan", no_wrap=True)
-            table.add_column("Type", style="dim")
-            table.add_column("Value")
-
-            for k, v in ld.items():
-                # Skip pytest internal variables
-                if k.startswith("@py_"):
-                    continue
-                name, type_str, val_str = format_local_value(k, v, lm.get(k))
-                table.add_row(name, type_str, val_str)
-
-            parts.append(table)
-
-        # Print first available part as panel
-        for i, part in enumerate(parts):
-            if i > 0:
-                console.print()
-            console.print(Panel(part, title=title, border_style=border))
-            return
-
-        if not parts:
-            code = frame.get("code", "")
-            console.print(Panel(Text(f"  {code}"), title=title, border_style=border))
+    prefix = ">>> " if is_crash else "    "
+    click.echo(f"{prefix}{lines[0]}")
+    for line in lines[1:]:
+        click.echo(f"    {line}")
 
 
 def _print_frame_rich(

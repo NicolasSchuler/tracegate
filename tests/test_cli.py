@@ -1362,7 +1362,7 @@ class TestPrintFrameEmptyText:
         from llmdebug.cli import _print_frame
 
         monkeypatch.setattr("llmdebug._cli_display.format_frame_text", lambda *a, **kw: "")
-        _print_frame({}, 0, False, None)
+        _print_frame({}, 0, False)
 
 
 class TestPrintFrameRichPyLocals:
@@ -2000,7 +2000,7 @@ class TestShowRichRendering:
     def test_show_rich_frame_without_source(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Cover _print_frame Rich path when frame has no source (line 427+ fallback)."""
+        """`show --full` with Rich renders a frame without source (via _print_frame_rich)."""
         from io import StringIO
 
         from rich.console import Console

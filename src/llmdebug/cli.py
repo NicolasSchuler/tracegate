@@ -813,7 +813,7 @@ def frames(snapshot_ref: str | None, index: int | None, out_dir: str) -> None:
         if console:
             _print_frame_rich(frame_d, index, index == crash_idx, console)
         else:
-            _print_frame(frame_d, index, index == crash_idx, console)
+            _print_frame(frame_d, index, index == crash_idx)
     else:
         for i, frame_item in enumerate(frame_list):
             if not isinstance(frame_item, dict):
@@ -823,7 +823,7 @@ def frames(snapshot_ref: str | None, index: int | None, out_dir: str) -> None:
                 _print_frame_rich(frame_d, i, i == crash_idx, console)
                 console.print()
             else:
-                _print_frame(frame_d, i, i == crash_idx, console)
+                _print_frame(frame_d, i, i == crash_idx)
                 click.echo()
 
 

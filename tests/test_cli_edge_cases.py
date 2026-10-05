@@ -390,27 +390,6 @@ def test_print_frame_rich_with_and_without_source(monkeypatch: pytest.MonkeyPatc
     assert len(console.items) >= 2
 
 
-def test_print_frame_console_branch_with_locals_and_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(_cli_display, "HAS_RICH", True)
-    console = _FakeConsole()
-    frame = {
-        "file": "app.py",
-        "line": 42,
-        "function": "run",
-        "source": {"start": 41, "end": 43, "snippet": [{"lineno": 42, "code": "x = 1"}]},
-        "locals": {"value": 1, "@py_internal": "skip"},
-        "locals_meta": {"value": {"type": "builtins.int"}},
-    }
-    cli._print_frame(frame, 0, True, console, show_locals=True)
-
-    frame_no_parts = {"file": "app.py", "line": 43, "function": "run", "code": "return x"}
-    cli._print_frame(frame_no_parts, 1, False, console, show_locals=True)
-
-    assert len(console.items) >= 2
-
-
 def test_print_diff_rich_covers_change_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli_display, "HAS_RICH", True)
     console = _FakeConsole()
