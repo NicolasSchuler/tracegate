@@ -82,6 +82,10 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   anything is read or created. Snapshot paths and diff refs must also lie inside
   `out_dir`, so they are confined too. Set `LLMDEBUG_MCP_ROOT` in the server's
   environment (for example in `.mcp.json`) to serve a different tree.
+- **Concurrency:** tools are registered as async and run their work in a
+  worker thread, so a slow git call, a SQLite busy wait or a file lock doesn't
+  block other calls or the protocol heartbeat. RCA advances within one server
+  process are serialized.
 - **Read-only calls create nothing:** `llmdebug_list`, `llmdebug_git_context`,
   `llmdebug_rca_status`, `llmdebug_rca_history`, and `llmdebug_diagnose`,
   `llmdebug_show`, `llmdebug_frame` and `llmdebug_diff` without `with_rca`

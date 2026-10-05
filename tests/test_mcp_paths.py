@@ -131,3 +131,42 @@ def test_read_only_tools_do_not_create_the_state_database(root: Path, tool_name:
     getattr(mcp_server, tool_name)(out_dir=".llmdebug", **_READ_ONLY_CALLS[tool_name])
 
     assert _tree(out_dir) == before
+
+
+def test_tools_do_not_block_the_event_loop(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RCA-09: sync tools ran on the event loop; a slow git call stalled every other call."""
+    import time
+
+    from llmdebug.config import SnapshotConfig
+    from llmdebug.output import write_bundle
+
+    write_bundle(
+        {"name": "snap", "exception": {"type": "E", "message": "m"}, "frames": []},
+        SnapshotConfig(out_dir=str(root / ".llmdebug"), output_format="json"),
+    )
+
+    def _slow_git(*_args: object, **_kwargs: object) -> None:
+        time.sleep(0.6)
+
+    monkeypatch.setattr(mcp_server, "get_enhanced_git_context", _slow_git)
+
+    async def scenario() -> float:
+        call = asyncio.create_task(
+            mcp_server._mcp.call_tool("llmdebug_git_context", {"out_dir": ".llmdebug"})
+        )
+        started = time.perf_counter()
+        await asyncio.sleep(0.05)  # a heartbeat; the tool starts while it waits
+        heartbeat = time.perf_counter() - started
+        await call
+        return heartbeat
+
+    assert asyncio.run(scenario()) < 0.3
+
+
+def test_tools_are_registered_as_async() -> None:
+    tools = asyncio.run(mcp_server._mcp.list_tools())
+    registered = {tool.name for tool in tools}
+    manager = mcp_server._mcp._tool_manager
+
+    assert set(_TOOL_NAMES) <= registered
+    assert all(manager.get_tool(name).is_async for name in _TOOL_NAMES)

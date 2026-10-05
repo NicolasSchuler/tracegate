@@ -15,6 +15,7 @@ Run with: llmdebug-mcp (stdio transport for IDE integration)
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 import logging
@@ -151,13 +152,29 @@ def _confined(tool: Callable[_P, str]) -> Callable[_P, str]:
     return wrapper
 
 
+def _tool(fn: Callable[_P, str]) -> Callable[_P, str]:
+    """Register *fn* with FastMCP as an async tool that runs in a worker thread (RCA-09).
+
+    FastMCP calls synchronous tools on the event loop, so git calls, the SQLite busy
+    timeout and file locks stalled every other call and the protocol heartbeat. The
+    module keeps the synchronous (confined) function for direct callers.
+    """
+    confined = _confined(fn)
+
+    @functools.wraps(confined)
+    async def run_in_worker_thread(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        return await asyncio.to_thread(confined, *args, **kwargs)
+
+    _mcp.tool()(run_in_worker_thread)
+    return confined
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_diagnose(
     out_dir: str = ".llmdebug",
     detail: str = "context",
@@ -272,8 +289,7 @@ def llmdebug_diagnose(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_show(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -430,8 +446,7 @@ def llmdebug_show(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_list(
     out_dir: str = ".llmdebug",
     limit: int = 10,
@@ -461,8 +476,7 @@ def llmdebug_list(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_frame(
     index: int = 0,
     out_dir: str = ".llmdebug",
@@ -504,8 +518,7 @@ def llmdebug_frame(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_git_context(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -660,8 +673,7 @@ def llmdebug_git_context(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_diff(
     old_ref: str = "previous",
     new_ref: str = "latest",
@@ -703,8 +715,7 @@ def llmdebug_diff(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_rca_status(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -725,8 +736,7 @@ def llmdebug_rca_status(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_rca_history(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -747,8 +757,7 @@ def llmdebug_rca_history(
     )
 
 
-@_mcp.tool()
-@_confined
+@_tool
 def llmdebug_rca_advance(
     action: str,
     out_dir: str = ".llmdebug",
