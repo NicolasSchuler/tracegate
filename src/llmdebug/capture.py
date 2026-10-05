@@ -531,8 +531,8 @@ def capture_exception(
         cfg: Snapshot configuration controlling redaction, frame depth,
             locals serialization, and output format.
         extra: Optional dict of additional context merged into the snapshot
-            envelope.  Keys ``"_trace"`` and ``"_eval"`` are reserved and
-            split into their own top-level payloads.
+            envelope.  Keys ``"trace"`` and ``"eval"`` (alias ``"eval_outcome"``)
+            are reserved and split into their own top-level payloads.
     """
     cfg = resolve_snapshot_config(cfg)
     warnings: list[str] = []

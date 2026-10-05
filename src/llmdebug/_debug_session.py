@@ -18,13 +18,16 @@ def split_extra_context(
     """Split capture extra payload into context, trace, and eval sections.
 
     Three-way split: "trace" is the optional trace/diagnostic payload,
-    "eval" is the eval-outcome overlay, and the remainder is generic context.
+    "eval" (or its alias "eval_outcome") is the eval-outcome overlay, and the
+    remainder is generic context. When both "eval" and "eval_outcome" are
+    given, "eval" wins and "eval_outcome" stays in the context.
     """
     if not extra:
         return {}, None, None
     context = dict(extra)
     trace_payload = context.pop("trace", None)
-    eval_payload = context.pop("eval", context.pop("eval_outcome", None))
+    eval_key = "eval" if "eval" in context else "eval_outcome"
+    eval_payload = context.pop(eval_key, None)
     return context, trace_payload, eval_payload
 
 

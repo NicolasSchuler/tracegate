@@ -39,6 +39,23 @@ def test_split_extra_context_extracts_trace_and_eval() -> None:
     assert "eval_outcome" in extra
 
 
+def test_split_extra_context_keeps_eval_outcome_when_eval_is_present() -> None:
+    """CAP-19: "eval" wins, and "eval_outcome" stays in the context instead of vanishing."""
+    extra: dict[str, Any] = {"eval": {"status": "passed"}, "eval_outcome": {"status": "failed"}}
+
+    context, _, eval_payload = split_extra_context(extra)
+
+    assert eval_payload == {"status": "passed"}
+    assert context == {"eval_outcome": {"status": "failed"}}
+
+
+def test_split_extra_context_keeps_explicit_none_eval() -> None:
+    context, _, eval_payload = split_extra_context({"eval": None, "eval_outcome": {"x": 1}})
+
+    assert eval_payload is None
+    assert context == {"eval_outcome": {"x": 1}}
+
+
 def test_build_debug_session_minimal() -> None:
     payload = build_debug_session(
         name="unit_test",
