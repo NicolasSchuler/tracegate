@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- DataFrame previews are bounded (CAP-13): the `head` preview included every column although `columns` was cut to `max_items` (a 400-column frame with `max_items=5` produced 1,200 cells), and cell strings were not truncated. The preview now covers the listed columns only and truncates strings to `max_str`.
 - Large set locals are cheap to capture (CAP-10): every element was `repr`'d and sorted before truncation (200,000 ints: 37 ms; strings: 160 ms). Sets of up to 1,000 elements keep their `repr` order; larger sets preview their smallest elements in natural order via `heapq.nsmallest` (1.5–5 ms), and only incomparable element types fall back to a bounded sample. Part of the snapshot schema `2.1` format.
 - Function arguments are serialized once per frame (CAP-09): `args` was built by a second serialization pass over values `locals` already held, recomputing array statistics and reprs. Arguments now reuse their serialized locals (a separate pass remains only with `redact_keys=True`); the `args` payload is unchanged, and a frame with two array arguments serializes about twice as fast.
 - Capture reads `frame.f_locals` once per frame (CAP-12): `extract_function_args` re-read it for every argument, and on Python 3.10–3.12 each read rebuilds the locals dict (`extract_function_args` is about 2× faster on 3.13 and much more on earlier versions).

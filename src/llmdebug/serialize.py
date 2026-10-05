@@ -666,7 +666,9 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
 
 def _preview_cell(value: Any, cfg: SnapshotConfig) -> Any:
-    """Keep a pandas preview cell as-is unless it is an int orjson can't encode."""
+    """A pandas preview cell, bounded like any other value (CAP-01, CAP-13)."""
+    if isinstance(value, str):
+        return truncate_str(value, cfg.max_str)
     if isinstance(value, int) and not JSON_INT_MIN <= value <= JSON_INT_MAX:
         return safe_repr(value, cfg)
     return value
@@ -732,7 +734,9 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
 
 def _dataframe_head(df: Any, cfg: SnapshotConfig) -> list[list[Any]]:
-    rows = cast(list[list[Any]], df.head(min(3, len(df))).values.tolist())
+    # Only the columns listed in "columns" (max_items), not every column (CAP-13).
+    head = df.iloc[: min(3, len(df)), : cfg.max_items]
+    rows = cast(list[list[Any]], head.values.tolist())
     return [[_preview_cell(cell, cfg) for cell in row] for row in rows]
 
 

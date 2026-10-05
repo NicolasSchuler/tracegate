@@ -1411,3 +1411,17 @@ def test_large_mixed_sets_fall_back_to_a_bounded_sample(cfg):
 
     assert len(result) == cfg.max_items + 1
     assert result[-1] == "...[TRUNC]"
+
+
+def test_dataframe_preview_respects_max_items_and_max_str():
+    """CAP-13: a 400-column frame with max_items=5 previewed 1,200 cells, strings untruncated."""
+    pd = pytest.importorskip("pandas")
+    cfg = SnapshotConfig(max_items=5, max_str=40)
+    frame = pd.DataFrame({f"c{i}": ["x" * 500] * 4 for i in range(400)})
+
+    summary = to_jsonlike(frame, cfg)
+
+    assert len(summary["columns"]) == 5
+    assert len(summary["head"]) == 3
+    assert all(len(row) == 5 for row in summary["head"])
+    assert all(len(cell) <= 40 and cell.endswith("...[TRUNC]") for cell in summary["head"][0])
