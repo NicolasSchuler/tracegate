@@ -23,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
 from .case_loading import load_cases
+from .doc_sync_cli import GENERATED_CLI_BLOCKS
 from .doc_sync_policy import stale_policy_defaults_docs, write_policy_defaults_blocks
 from .eval_types import CaseSpec
 
@@ -341,6 +342,11 @@ def run_checks() -> list[str]:
         f"Policy defaults block in {doc} is out of date. Run `python -m evals.doc_sync --write`."
         for doc in stale_policy_defaults_docs()
     )
+    errors.extend(
+        f"{block.name} block in {doc} is out of date. Run `python -m evals.doc_sync --write`."
+        for block in GENERATED_CLI_BLOCKS
+        for doc in block.stale_docs()
+    )
 
     changelog_text = CHANGELOG_PATH.read_text(encoding="utf-8")
     tagged_versions = get_git_tag_versions()
@@ -373,6 +379,9 @@ def main(argv: list[str] | None = None) -> int:
         print(message)
         for doc in write_policy_defaults_blocks():
             print(f"Updated {doc} policy defaults block.")
+        for block in GENERATED_CLI_BLOCKS:
+            for doc in block.write():
+                print(f"Updated {doc} {block.name} block.")
         return 0
 
     errors = run_checks()
