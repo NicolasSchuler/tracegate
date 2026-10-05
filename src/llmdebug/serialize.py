@@ -722,13 +722,16 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
         pass
 
     try:
-        head_rows = min(3, len(df))
-        rows = cast(list[list[Any]], df.head(head_rows).values.tolist())
-        summary["head"] = [[_preview_cell(cell, cfg) for cell in row] for row in rows]
+        summary["head"] = _dataframe_head(df, cfg)
     except Exception as e:
         summary["head"] = f"<error: {type(e).__name__}>"
 
     return summary
+
+
+def _dataframe_head(df: Any, cfg: SnapshotConfig) -> list[list[Any]]:
+    rows = cast(list[list[Any]], df.head(min(3, len(df))).values.tolist())
+    return [[_preview_cell(cell, cfg) for cell in row] for row in rows]
 
 
 def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
