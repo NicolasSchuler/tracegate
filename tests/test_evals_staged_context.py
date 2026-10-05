@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.base import ContextRequestResult, PatchPlanResult, PatchResult
 
 
@@ -398,7 +398,7 @@ def test_run_one_condition_non_adaptive_staged_request_is_forced_to_monolithic(
     shutil.copytree(case.path, workdir)
     patcher = _RetryNoDiffPatcher()
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         del cwd, python_args, condition, timeout_sec, output_format
         return run_eval.RunResult(
             returncode=1,
@@ -407,7 +407,7 @@ def test_run_one_condition_non_adaptive_staged_request_is_forced_to_monolithic(
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -444,7 +444,7 @@ def test_non_adaptive_native_prompt_keeps_pytest_but_excludes_snapshot_and_stage
     patcher = _CapturePromptNoContextPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -454,7 +454,7 @@ def test_non_adaptive_native_prompt_keeps_pytest_but_excludes_snapshot_and_stage
         ),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (
             {
@@ -500,7 +500,7 @@ def test_run_one_condition_retry_plan_then_patch_injects_plan_on_retries(
     context_dir = tmp_path / "context_plan_then_patch"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         del cwd, python_args, condition, timeout_sec, output_format
         return run_eval.RunResult(
             returncode=1,
@@ -510,7 +510,7 @@ def test_run_one_condition_retry_plan_then_patch_injects_plan_on_retries(
         )
 
     patcher = _PlanThenPatchPatcher()
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -562,7 +562,7 @@ def test_run_one_condition_reuses_file_catalog_when_fs_is_unchanged(tmp_path, mo
             file_index_lines=file_index_lines,
         )
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         del cwd, python_args, condition, timeout_sec, output_format
         return run_eval.RunResult(
             returncode=1,
@@ -571,9 +571,9 @@ def test_run_one_condition_reuses_file_catalog_when_fs_is_unchanged(tmp_path, mo
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "_collect_file_index_lines", _counted_collect_index)
-    monkeypatch.setattr(run_eval, "collect_text_context", _counted_collect_context)
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "_collect_file_index_lines", _counted_collect_index)
+    monkeypatch.setattr(eval_attempt_flow, "collect_text_context", _counted_collect_context)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -632,7 +632,7 @@ def test_run_one_condition_invalidates_cached_file_catalog_after_apply_success(
         calls["index"] += 1
         return real_collect_index(root)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         del cwd, python_args, condition, timeout_sec, output_format
         return run_eval.RunResult(
             returncode=1,
@@ -641,9 +641,9 @@ def test_run_one_condition_invalidates_cached_file_catalog_after_apply_success(
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "_collect_file_index_lines", _counted_collect_index)
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, "ok"))
+    monkeypatch.setattr(eval_attempt_flow, "_collect_file_index_lines", _counted_collect_index)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, "ok"))
 
     records = run_eval.run_one_condition(
         case=case,

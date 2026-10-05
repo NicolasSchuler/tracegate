@@ -22,6 +22,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from evals import (
+    baseline_runtime,
+    case_loading,
+    eval_config,
+    eval_containers,
+    eval_recording,
+    run_state,
+)
 from evals.eval_types import ConfigResolutionState
 from llmdebug import _json as json
 
@@ -878,7 +886,7 @@ class TestValidationHelpers:
         from evals.eval_main_setup import MainFlowCliError
 
         monkeypatch.setattr(
-            run_eval, "load_cases", lambda _: (_ for _ in ()).throw(ValueError("bad case"))
+            case_loading, "load_cases", lambda _: (_ for _ in ()).throw(ValueError("bad case"))
         )
         ns = _make_minimal_args()
         with pytest.raises(MainFlowCliError, match="Invalid case metadata"):
@@ -930,7 +938,7 @@ class TestValidationHelpers:
                 tags=[],
             ),
         ]
-        monkeypatch.setattr(run_eval, "load_cases", lambda _: cases)
+        monkeypatch.setattr(case_loading, "load_cases", lambda _: cases)
         ns = _make_minimal_args()
         ns.category = ["logic_error"]
         result = eval_main_setup._load_filtered_cases(ns)
@@ -955,7 +963,7 @@ class TestValidationHelpers:
                 tags=[],
             ),
         ]
-        monkeypatch.setattr(run_eval, "load_cases", lambda _: cases)
+        monkeypatch.setattr(case_loading, "load_cases", lambda _: cases)
         ns = _make_minimal_args()
         ns.difficulty = ["easy"]
         with pytest.raises(MainFlowCliError, match="No cases"):
@@ -978,7 +986,7 @@ class TestValidationHelpers:
                 tags=[],
             ),
         ]
-        monkeypatch.setattr(run_eval, "load_cases", lambda _: cases)
+        monkeypatch.setattr(case_loading, "load_cases", lambda _: cases)
         ns = _make_minimal_args()
         ns.snapshot_dependency = ["optional"]
         with pytest.raises(eval_main_setup.MainFlowCliError, match="No cases"):
@@ -1002,20 +1010,11 @@ class TestValidationHelpers:
                 bug_source="imported",
             ),
         ]
-        monkeypatch.setattr(run_eval, "load_cases", lambda _: cases)
+        monkeypatch.setattr(case_loading, "load_cases", lambda _: cases)
         ns = _make_minimal_args()
         ns.bug_source = ["hand_crafted"]
         with pytest.raises(eval_main_setup.MainFlowCliError, match="No cases"):
             eval_main_setup._load_filtered_cases(ns)
-
-    def test_main_setup_legacy_bridge_reflects_run_eval_monkeypatch(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from evals import eval_main_setup, run_eval
-
-        sentinel = object()
-        monkeypatch.setattr(run_eval, "load_cases", lambda *_args, **_kwargs: sentinel)
-        assert eval_main_setup.legacy.load_cases(Path(".")) is sentinel
 
 
 class TestMainSetupValidation:
@@ -1139,7 +1138,7 @@ class TestMainSetupValidation:
             "_normalize_adaptive_controller_lambda_rlm_settings",
             lambda **_kw: None,
         )
-        monkeypatch.setattr(run_eval, "_REPO_ROOT", tmp_path / "repo")
+        monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", tmp_path / "repo")
         args = _make_full_setup_args()
         args.patcher = "baseline"
         args.baseline = ""
@@ -1178,7 +1177,7 @@ class TestMainSetupValidation:
         monkeypatch.setattr(
             eval_main_setup,
             "_load_filtered_cases",
-            lambda _: [MagicMock(case_id="c1")],
+            lambda _args, _seams=None: [MagicMock(case_id="c1")],
         )
         monkeypatch.setattr(
             eval_main_setup,
@@ -1234,7 +1233,7 @@ class TestMainSetupValidation:
         monkeypatch.setattr(
             eval_main_setup,
             "_load_filtered_cases",
-            lambda _: [MagicMock(case_id="c1")],
+            lambda _args, _seams=None: [MagicMock(case_id="c1")],
         )
         monkeypatch.setattr(
             eval_main_setup,
@@ -1288,7 +1287,7 @@ class TestMainSetupValidation:
         monkeypatch.setattr(
             eval_main_setup,
             "_load_filtered_cases",
-            lambda _: [MagicMock(case_id="c1")],
+            lambda _args, _seams=None: [MagicMock(case_id="c1")],
         )
         monkeypatch.setattr(
             eval_main_setup,
@@ -1515,19 +1514,19 @@ class TestMainResumeCoverage:
             startup_warnings=[],
         )
 
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: (_ for _ in ()).throw(OSError("write failed")),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(MagicMock(), None, None))),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_load_existing_run_state",
             lambda **_kw: (set(), None, "", 0, None),
         )
@@ -1569,14 +1568,14 @@ class TestMainResumeCoverage:
             startup_warnings=[],
         )
 
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: tmp_path / "lock",
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(None, "lock error message", None))),
         )
@@ -1619,25 +1618,25 @@ class TestMainResumeCoverage:
 
         trailing_issue = MagicMock()
         trailing_issue.line_no = 5
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: tmp_path / "lock",
         )
         lock_mock = MagicMock()
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(lock_mock, None, None))),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_load_existing_run_state",
             lambda **_kw: (set(), None, "", 0, trailing_issue),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_repair_trailing_results_tail",
             lambda **_kw: (_ for _ in ()).throw(OSError("repair failed")),
         )
@@ -1679,19 +1678,19 @@ class TestMainResumeCoverage:
         )
 
         lock_mock = MagicMock()
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: tmp_path / "lock",
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(lock_mock, None, None))),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_load_existing_run_state",
             lambda **_kw: ({("c1", "base_repair")}, None, "", 5, None),
         )
@@ -1732,29 +1731,29 @@ class TestMainResumeCoverage:
             startup_warnings=[],
         )
 
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: tmp_path / "lock",
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(MagicMock(), None, None))),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_load_existing_run_state",
             lambda **_kw: (set(), None, "", 0, None),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_containers,
             "check_testcontainers_runtime_available",
             lambda: (True, "ok"),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_containers,
             "cleanup_stale_eval_containers",
             lambda **_kw: (0, 0, "docker not available"),
         )
@@ -1796,29 +1795,29 @@ class TestMainResumeCoverage:
             startup_warnings=[],
         )
 
-        monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
+        monkeypatch.setattr(run_state, "_build_run_settings_fingerprint", lambda **_kw: "fp123")
         monkeypatch.setattr(
-            run_eval,
+            eval_config,
             "_write_resolved_run_config_lockfile",
             lambda **_kw: tmp_path / "lock",
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_recording,
             "_RunResultsLock",
             MagicMock(acquire=MagicMock(return_value=(MagicMock(), None, None))),
         )
         monkeypatch.setattr(
-            run_eval,
+            run_state,
             "_load_existing_run_state",
             lambda **_kw: (set(), None, "", 0, None),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_containers,
             "check_testcontainers_runtime_available",
             lambda: (True, "ok"),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_containers,
             "cleanup_stale_eval_containers",
             lambda **_kw: (2, 0, None),
         )
@@ -1828,16 +1827,6 @@ class TestMainResumeCoverage:
         _result = prepare_main_resume(setup=setup, args=args, argv_tokens=[])
         captured = capsys.readouterr().out
         assert "removed=2" in captured
-
-    def test_main_resume_legacy_bridge_reflects_run_eval_monkeypatch(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from evals import eval_main_resume, run_eval
-
-        monkeypatch.setattr(
-            run_eval, "_build_run_settings_fingerprint", lambda **_kwargs: "sentinel"
-        )
-        assert eval_main_resume.legacy._build_run_settings_fingerprint() == "sentinel"
 
 
 # ---------------------------------------------------------------------------

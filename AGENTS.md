@@ -25,9 +25,11 @@
   - Interfaces and contracts: `cli.py`, `mcp_server.py`, `mcp_snapshot_tools.py`, `mcp_diff_tools.py`, `mcp_git_context.py`, `mcp_rca.py`, `mcp_contract.py`, `mcp_types.py`, `pytest_plugin.py`, `jupyter_plugin.py`, `middleware.py`.
   - Runtime integrations and support: `hooks.py`, `redaction_policy.py`, `git_context.py`, `coverage_context.py`, `async_context.py`, `log_capture.py`, `_rate_limiter.py`, `_warnings.py`.
 - `evals/`: benchmark and analysis harness.
-  - Runners and summaries: `run_eval.py`, `eval_main_flow.py`, `eval_main_setup.py`, `eval_main_resume.py`, `eval_attempt_flow.py`, `eval_attempt_support.py`, `analyze_results.py`, `eval_summary.py`, `eval_two_pass_summary.py`, `report_run_metrics.py`, `select_cases.py`, `validate_cases.py`.
+  - Runners and summaries: `run_eval.py`, `eval_main_flow.py`, `eval_main_setup.py`, `eval_main_resume.py`, `eval_attempt_flow.py`, `analyze_results.py`, `eval_summary.py`, `eval_two_pass_summary.py`, `report_run_metrics.py`, `select_cases.py`, `validate_cases.py`.
   - Adaptive controller, policy, and contracts: `adaptive_online_policy.py`, `adaptive_policy_records.py`, `adaptive_budget_online_policy.py`, `adaptive_controller_packet.py`, `adaptive_controller_runtime.py`, `adaptive_history.py`, `bootstrap_policy_state.py`, `controller_summarizer.py`, `eval_policy_budget.py`, `eval_policy_features.py`, `eval_policy_online.py`, `policy_feature_scaling.py`, `stage_a_contract.py`.
   - System-1 decision-model advice: `decision_model/` (`config.py`, `schema.py`, `state.py`, `policy.py`, `client.py`, `runtime.py`, `probe.py`); its GPU sidecar lives in `docker/decision_model/`.
+  - Run state and collaborators: `run_context.py` (execution config, run settings, container pool), `eval_seams.py` (repo root, case loading, patcher factory, resume state), `pytest_runner.py`, `case_loading.py`, `patcher_factory.py`, `baseline_runtime.py`, `run_state.py`.
+  - Attempt helpers: `attempt_usage.py`, `attempt_records.py`, `attempt_proposal.py`, `adaptive_progress.py`, `transport_failures.py`, `patch_relevance.py`.
   - Runtime/evidence/patching support: `eval_config.py`, `eval_evidence.py`, `eval_patches.py`, `eval_patch_constants.py`, `attempt_metadata.py`, `attempt_verification.py`, `run_condition_builder.py`, `runtime_resolution.py`, `lambda_rlm_backend.py`, `token_counting.py`, `native_openai_attempt_flow.py`, `native_stage_b_flow.py`.
   - Support packages: `patchers/`, `importers/`, `swebench/`, `swebench_pro/`, `configs/`, `docker/`, `cases/`.
 - `tests/`: pytest suite for package behavior, RCA flows, MCP tools, eval harnesses, quality-contract checks, and SWE-Bench helpers.
@@ -81,7 +83,7 @@ uv run pyright
 uv run pytest -x -q -m "not integration"
 ```
 
-`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode, a curated list of eval modules: core config/types/reporting, `decision_model/`, and `swebench/`). This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
+`just typecheck-evals` runs pyright with `pyrightconfig.evals.json` (basic mode, a curated list of eval modules: core config/types/reporting, the run entrypoint and main flow with their extracted helper modules, `decision_model/`, and `swebench/`). This is informational in CI (`continue-on-error: true`), not blocking. The two-config setup is a staged typing strategy: `pyrightconfig.json` enforces strict mode on `src/llmdebug/` (the shipped package), while `pyrightconfig.evals.json` uses basic mode for gradually adopting types in the eval harness. Since JSON files don't support comments, this rationale lives here rather than in the configs.
 
 ### Full local quality pass
 ```bash
@@ -179,7 +181,8 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - Use `evals/EXPERIMENTS.md` and the dated notes under `docs/` for exploratory context, but treat the README/runbook/config docs as the maintained operational source of truth.
 - The main eval conditions are `base_repair`, `cot_repair`, `layered_adaptive_gated`, `layered_adaptive_llm`, `ldb`, `intervenor`, `tracecoder`, `lambda_rlm`, and `rlm`.
 - Keep eval orchestration, patcher backends, importer logic, adaptive-policy logic, and SWE-Bench tooling loosely coupled; these pieces are reused across multiple flows.
-- When extracting logic out of `evals/run_eval.py`, preserve its compatibility seams unless you update every downstream consumer in the same patch. In particular, `validate_cases.py`, importer utilities, and several tests still import or monkeypatch `run_eval`-level symbols such as `apply_diff` and the lambda-RLM invocation path.
+- `evals/run_eval.py` is the CLI entrypoint and a re-export facade; no other `evals/` module may import it (`tests/test_evals_architecture_boundaries.py`). Put new logic in the module that owns it.
+- Monkeypatch where a name is used. Run-level collaborators (`_REPO_ROOT`, `load_cases`, `make_patcher`, `run_one_condition`, resume and lock functions) can still be patched on `run_eval`, which passes them to the flows as `EvalSeams`; flow internals called directly read the owning modules through `default_eval_seams()`. Attempt-level collaborators (`run_pytest`, `apply_diff`, `read_latest_snapshot`, `collect_text_context`, ...) are patched on `evals.eval_attempt_flow`. Per-run state (execution config, `--deterministic`/`--seed`, the container pool) travels in `RunContext`, never in module globals.
 - `evals/README.md` contains an auto-generated case inventory block; refresh it with `python -m evals.doc_sync --write` when case metadata changes.
 
 ### Policy-controlled evidence selection (design rationale)
@@ -189,7 +192,7 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
   2. **Policy action selection**: a rule-based gate or a LinUCB/Thompson contextual bandit picks one of 10 actions constraining which *types* of evidence the Stage-A LLM may request. An optional System-1 decision model (`--adaptive-decision-model-role`) can advise or make this choice, but only over the feasible actions and after layer 1.
   3. **Request filtering**: any LLM requests outside the allowed types are silently discarded before execution.
 - This is a distinct contribution vs the baseline conditions (`ldb`, `intervenor`, `tracecoder`, `lambda_rlm`, `rlm`), where either the harness or the LLM has unconstrained control over evidence. The policy-controlled approach treats evidence selection as a *resource allocation* problem optimized via online learning.
-- When editing adaptive policy code (`adaptive_online_policy.py`, `adaptive_policy_records.py`, `decision_model/`, `adaptive_budget_online_policy.py`, `policy_feature_scaling.py`, `eval_attempt_flow.py`, `eval_policy_features.py`, `eval_policy_online.py`, and `run_eval.py` compatibility seams), preserve this 3-layer enforcement architecture. Do not bypass the policy by letting the LLM directly control evidence selection.
+- When editing adaptive policy code (`adaptive_online_policy.py`, `adaptive_policy_records.py`, `decision_model/`, `adaptive_budget_online_policy.py`, `policy_feature_scaling.py`, `eval_attempt_flow.py`, `eval_policy_features.py`, `eval_policy_online.py`, and the `run_eval.py` facade), preserve this 3-layer enforcement architecture. Do not bypass the policy by letting the LLM directly control evidence selection.
 
 - SWE-Bench Lite support lives under `evals/swebench/` and uses a local/Docker paired workflow for generation, validation, and official scoring. Follow `evals/README.md` and `docs/local_docker_eval_runbook.md`.
 - SWE-Bench Pro support lives under `evals/swebench_pro/` — a contamination-free, multi-language benchmark (731 instances). Uses Docker-based scoring against pre-built DockerHub images. CLI: `python -m evals.swebench_pro.cli <subcommand>`. See `evals/README.md`.

@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.eval_types import Condition
 from evals.patchers.base import ContextRequestResult, PatchPlanResult, PatchResult
 
@@ -117,7 +117,7 @@ class _CapturePromptPatcher:
 
 def _stub_pytest(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -127,7 +127,7 @@ def _stub_pytest(monkeypatch) -> None:  # type: ignore[no-untyped-def]
         ),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )

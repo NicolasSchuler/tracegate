@@ -50,6 +50,20 @@ from evals.adaptive_online_policy import (
     ACTION_SNAPSHOT_FULL_LITE,
     ACTION_SNAPSHOT_LITE,
 )
+from evals.adaptive_progress import (
+    _adaptive_gate_should_invoke_helper,
+    _adaptive_helper_outcome_for_attempt,
+    _adaptive_pipeline_stage_before,
+    _adaptive_pipeline_stage_for_outcome,
+    _adaptive_prompt_budget_for_attempt,
+    _adaptive_should_stop_for_no_progress,
+    _apply_no_progress_token_cap_candidate,
+    _mark_adaptive_progress_stop,
+    _openai_preflight_total_char_cap,
+    _recompute_adaptive_progress_for_attempt_outcome,
+    _sync_adaptive_progress_metadata,
+    _traceback_informativeness_pre_gate,
+)
 from evals.adaptive_tep import (
     AdaptiveTepController,
     run_post_attempt_learning,
@@ -64,7 +78,44 @@ from evals.attempt_metadata import (
     SyntaxPreflightMetadata,
     build_attempt_metadata_request,
 )
+from evals.attempt_proposal import (
+    _ensure_deterministic_seed_ack,
+    _measure_attempt_wall_clock_sec,
+    _plan_patch_with_snapshot_context,
+    _propose_patch_with_snapshot_context,
+    _remaining_attempt_propose_budget_sec,
+)
+from evals.attempt_records import (
+    _append_retry_history_turn_if_enabled,
+    _build_attempt_outcome_record,
+    _build_infra_event_record,
+    _build_structured_previous_attempt_diff,
+    _finalize_breakdowns,
+)
+from evals.attempt_usage import (
+    _aggregate_attempt_llm_usage,
+    _apply_usage_totals_to_patch_meta,
+    _combine_reasoning_usage_segments,
+    _completion_chars_from_response,
+    _format_progress_token_usage,
+    _llm_call_count_from_meta,
+    _nonnegative_int,
+    _patch_attempt_char_deltas,
+    _prompt_chars_for_llm_calls,
+    _reasoning_usage_segment_from_meta,
+    _record_token_usage_state,
+    _summarize_context_compaction_meta,
+    _summarize_recovery_usage_meta,
+    _sync_attempt_prompt_char_metadata,
+    _sync_attempt_usage_metadata,
+    _usage_token_counts_from_patch_meta,
+)
 from evals.attempt_verification import (
+    _sync_patch_diff_metadata,
+    _sync_patch_sanitize_metadata,
+    _sync_patch_verifier_metadata,
+    _sync_patch_verifier_recovery_metadata,
+    _sync_syntax_preflight_metadata,
     apply_diff_with_optional_recovery,
     evaluate_patch_sanitize,
     evaluate_syntax_preflight,
@@ -78,90 +129,13 @@ from evals.decision_model.runtime import (
     record_advice_state,
 )
 from evals.decision_model.state import DecisionStateInputs, redact_terms_for_unit
-from evals.eval_attempt_support import (
-    _adaptive_gate_should_invoke_helper,
-    _adaptive_helper_outcome_for_attempt,
-    _adaptive_pipeline_stage_before,
-    _adaptive_pipeline_stage_for_outcome,
-    _adaptive_prompt_budget_for_attempt,
-    _adaptive_should_stop_for_no_progress,
-    _aggregate_attempt_llm_usage,
-    _append_retry_history_turn_if_enabled,
-    _apply_no_progress_token_cap_candidate,
-    _apply_usage_totals_to_patch_meta,
-    _build_attempt_outcome_record,
-    _build_failure_signature_for_attempt,
-    _build_infra_event_record,
-    _build_structured_previous_attempt_diff,
-    _classify_patcher_request_failure,
-    _collect_file_index_lines,
-    _combine_reasoning_usage_segments,
-    _completion_chars_from_response,
-    _effective_patch_verifier_scope,
-    _enrich_failure_context,
-    _ensure_deterministic_seed_ack,
-    _finalize_breakdowns,
-    _format_duration_precise,
-    _format_progress_token_usage,
-    _is_context_limit_http_error_message,
-    _is_retryable_transport_http_status,
-    _is_snapshot_condition,
-    _is_transport_runtime_error,
-    _llm_call_count_from_meta,
-    _mark_adaptive_progress_stop,
-    _measure_attempt_wall_clock_sec,
-    _nonnegative_int,
-    _normalized_progress_verbosity,
-    _openai_preflight_total_char_cap,
-    _patch_attempt_char_deltas,
-    _plan_patch_with_snapshot_context,
-    _progress_is_enabled,
-    _progress_print,
-    _prompt_chars_for_llm_calls,
-    _propose_patch_with_snapshot_context,
-    _reasoning_usage_segment_from_meta,
-    _recompute_adaptive_progress_for_attempt_outcome,
-    _record_token_usage_state,
-    _remaining_attempt_propose_budget_sec,
-    _request_context_failure_kind_from_meta,
-    _request_context_recovery_failure_kind_from_meta,
-    _request_context_retry_counts_from_meta,
-    _resolve_run_condition_inputs,
-    _result_meta_dict,
-    _result_with_meta,
-    _score_patch_relevance,
-    _summarize_context_compaction_meta,
-    _summarize_recovery_usage_meta,
-    _sync_adaptive_progress_metadata,
-    _sync_attempt_prompt_char_metadata,
-    _sync_attempt_usage_metadata,
-    _sync_patch_diff_metadata,
-    _sync_patch_sanitize_metadata,
-    _sync_patch_verifier_metadata,
-    _sync_patch_verifier_recovery_metadata,
-    _sync_patcher_request_failure_metadata,
-    _sync_syntax_preflight_metadata,
-    _timeout_fields,
-    _traceback_informativeness_pre_gate,
-    _transport_recovery_failure_kind_from_meta,
-    _truncate_snapshot_for_artifact,
-    _usage_token_counts_from_patch_meta,
-    _write_run_outputs,
-    apply_diff,
-    collect_text_context,
-    default_lambda_rlm_repo_dir,
-    invoke_lambda_rlm_decomposition,
-    make_patcher,
-    read_latest_snapshot,
-    run_one_condition,
-    run_pytest,
-)
 from evals.eval_config import (
     _parse_adaptive_budget_policy_tiers,
     _parse_adaptive_online_action_score_biases,
 )
 from evals.eval_evidence import (
     _coerce_context_request_payload,
+    _collect_file_index_lines,
     _compute_evidence_fingerprint,
     _evidence_ids_from_items,
     _merge_evidence_items,
@@ -170,6 +144,7 @@ from evals.eval_evidence import (
     _strip_eval_only_case_artifacts,
     _xxh3_128_text,
     build_fallback_context_bundle,
+    collect_text_context,
     deny_fallback_for_restricted_action,
     evidence_chars_by_type,
     execute_context_requests,
@@ -180,6 +155,7 @@ from evals.eval_patches import (
     _is_forced_noop_marker_diff,
     _render_patch_verifier_recovery_feedback,
     _restore_diff_target_files,
+    apply_diff,
     patch_apply_mode,
 )
 from evals.eval_policy_budget import (
@@ -292,6 +268,10 @@ from evals.eval_types import (
     _filter_context_request_payload_for_action,
     _helper_action_availability,
 )
+from evals.lambda_rlm_backend import (
+    default_lambda_rlm_repo_dir,
+    invoke_lambda_rlm_decomposition,
+)
 from evals.native_openai_attempt_flow import (
     NativeOpenAIAttemptPromptRequest,
     assemble_native_openai_attempt_prompt,
@@ -311,6 +291,13 @@ from evals.native_stage_b_flow import (
     _tep_jaccard_similarity as _tep_jaccard_similarity,
 )
 from evals.oracle_integrity import restore_test_surface, run_succeeded, with_junit_report
+from evals.patch_relevance import (
+    _effective_patch_verifier_scope,
+    _score_patch_relevance,
+)
+from evals.patcher_factory import (
+    make_patcher,
+)
 from evals.patchers.base import Patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import (
@@ -318,9 +305,41 @@ from evals.policy_feature_scaling import (
     normalize_feature_scaling_profile,
     scale_feature_mapping,
 )
+from evals.progress_display import (
+    _format_duration_precise,
+    _normalized_progress_verbosity,
+    _progress_is_enabled,
+    _progress_print,
+)
+from evals.pytest_runner import (
+    _build_failure_signature_for_attempt,
+    _enrich_failure_context,
+    _is_snapshot_condition,
+    _timeout_fields,
+    _truncate_snapshot_for_artifact,
+    _write_run_outputs,
+    read_latest_snapshot,
+    run_pytest,
+)
+from evals.run_condition_builder import (
+    _resolve_run_condition_inputs,
+)
 from evals.stage_a_contract import StageARequestPayloadModel, normalize_stage_a_request_payload
 from evals.token_counting import estimate_text_token_count, merge_llm_call_usage
 from evals.toon_llm_encoder import estimate_token_savings
+from evals.transport_failures import (
+    _classify_patcher_request_failure,
+    _is_context_limit_http_error_message,
+    _is_retryable_transport_http_status,
+    _is_transport_runtime_error,
+    _request_context_failure_kind_from_meta,
+    _request_context_recovery_failure_kind_from_meta,
+    _request_context_retry_counts_from_meta,
+    _result_meta_dict,
+    _result_with_meta,
+    _sync_patcher_request_failure_metadata,
+    _transport_recovery_failure_kind_from_meta,
+)
 
 # Preserve the historical eval_attempt_flow helper surface for downstream imports.
 _COMPAT_HELPER_EXPORTS = (
@@ -568,35 +587,6 @@ def _update_aux_signals_from_attempt(
     budget_kwargs["aux_evidence_novelty_ratio"] = evidence_novelty
 
 
-def _call_run_pytest_compat(
-    cwd,
-    python_args,
-    condition,
-    timeout_sec,
-    output_format,
-    *,
-    progress_update=None,
-    progress_phase_label: str = "",
-):
-    try:
-        return run_pytest(
-            cwd,
-            python_args,
-            condition,
-            timeout_sec,
-            output_format,
-            progress_update=progress_update,
-            progress_phase_label=progress_phase_label,
-        )
-    except TypeError as exc:
-        message = str(exc)
-        if "unexpected keyword argument" not in message or (
-            "progress_update" not in message and "progress_phase_label" not in message
-        ):
-            raise
-    return run_pytest(cwd, python_args, condition, timeout_sec, output_format)
-
-
 def _normalize_prompt_order_mode(value: str) -> str:
     normalized = str(value or "current").strip().lower()
     return normalized if normalized in PROMPT_ORDER_MODES else "current"
@@ -760,6 +750,11 @@ def execute_eval_unit_impl(
     and streams JSONL records.  Called from ``main`` via thread-pool.
     """
     run_inputs = inputs.run_condition
+    # X-02: run_eval passes its seams in; direct callers get this module's own flow.
+    make_unit_patcher = inputs.seams.make_patcher if inputs.seams is not None else make_patcher
+    run_one_condition = (
+        inputs.seams.run_one_condition if inputs.seams is not None else run_one_condition_impl
+    )
     patcher_args = inputs.patcher_args
     patcher_override = inputs.patcher_override
     keep_workdirs = bool(inputs.keep_workdirs)
@@ -1125,7 +1120,9 @@ def execute_eval_unit_impl(
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
         )
 
-        patcher = patcher_override if patcher_override is not None else make_patcher(patcher_args)
+        patcher = (
+            patcher_override if patcher_override is not None else make_unit_patcher(patcher_args)
+        )
         unit_patcher = patcher
         _update_progress_state("run_one_condition")
         if hasattr(patcher, "set_progress_callback"):
@@ -2548,7 +2545,7 @@ def _run_one_condition_attempts(
             max_attempts=int(k),
         ),
     )
-    current = _call_run_pytest_compat(
+    current = run_pytest(
         workdir,
         case.python_args,
         condition,
@@ -2556,6 +2553,7 @@ def _run_one_condition_attempts(
         output_format,
         progress_update=_emit_progress,
         progress_phase_label="pytest: initial before",
+        run_context=resolved_inputs.run_context,
     )
     cumulative_runtime_sec = current.duration_sec
     if current.returncode == 0:
@@ -8036,7 +8034,7 @@ def _run_one_condition_attempts(
                 max_attempts=int(k),
             ),
         )
-        after = _call_run_pytest_compat(
+        after = run_pytest(
             workdir,
             with_junit_report(case.python_args),
             condition,
@@ -8044,6 +8042,7 @@ def _run_one_condition_attempts(
             output_format,
             progress_update=_emit_progress,
             progress_phase_label="pytest: after patch",
+            run_context=resolved_inputs.run_context,
         )
         _write_run_outputs(
             attempt_dir,

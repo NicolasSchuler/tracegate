@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from evals import run_eval
+from evals import baseline_runtime, run_eval
 from evals.eval_types import (
     EVAL_RECORD_TYPE_ATTEMPT,
     EVAL_RECORD_TYPE_INFRA_EVENT,
@@ -2126,7 +2126,9 @@ class TestResolveExternalBaselineRuntimeRequirements:
         expected_python.chmod(0o755)
 
         monkeypatch.setattr(run_eval, "_REPO_ROOT", isolated_root)
-        monkeypatch.setattr(run_eval, "_default_baseline_repo_dir", lambda _name: repo_dir)
+
+        monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", isolated_root)
+        monkeypatch.setattr(baseline_runtime, "_default_baseline_repo_dir", lambda _name: repo_dir)
 
         resolved_repo, resolved_python = run_eval._resolve_external_baseline_runtime_requirements(
             baseline_name="ldb",

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.eval_types import Condition
 from evals.patchers.base import PatchResult
 
@@ -126,12 +126,12 @@ def parsed_cli_defaults(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Parse ``run_eval`` CLI defaults without running an eval."""
     captured: dict[str, Any] = {}
 
-    def _capture(*, parser: Any, args: Any, argv_tokens: Any) -> int:
-        del parser, argv_tokens
+    def _capture(*, parser: Any, args: Any, argv_tokens: Any, seams: Any) -> int:
+        del parser, argv_tokens, seams
         captured.update(vars(args))
         return 0
 
-    monkeypatch.setattr("evals.eval_main_flow.run_main_flow", _capture)
+    monkeypatch.setattr(run_eval, "run_main_flow", _capture)
     assert run_eval.main([]) == 0
     return captured
 
@@ -175,7 +175,7 @@ def test_att10_relaxed_application_is_recorded(
         (cwd / "buggy.py").write_text("def f() -> int:\n    return 2\n", encoding="utf-8")
         return True, RELAXED_APPLY_MESSAGE
 
-    monkeypatch.setattr(run_eval, "apply_diff", _relaxed_apply)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _relaxed_apply)
     records = _run(tmp_path, _DiffPatcher([_FIX]), patch_verifier_scope="disabled")
     record = _attempts(records)[0]
     assert record["patch_meta"]["patch_apply_mode"] == "relaxed_fallback"
@@ -213,7 +213,7 @@ def test_att10_analysis_counts_relaxed_and_test_surface_attempts() -> None:
 
 
 def test_orc06_abbreviated_flags_are_rejected(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr("evals.eval_main_flow.run_main_flow", lambda **_kw: 0)
+    monkeypatch.setattr(run_eval, "run_main_flow", lambda **_kw: 0)
     with pytest.raises(SystemExit) as excinfo:
         run_eval.main(["--job", "3"])
     assert excinfo.value.code == 2

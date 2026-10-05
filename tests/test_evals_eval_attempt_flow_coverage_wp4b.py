@@ -232,7 +232,7 @@ def _run_impl(
 
     monkeypatch.setattr(
         eval_attempt_flow,
-        "_call_run_pytest_compat",
+        "run_pytest",
         lambda *a, **kw: fake_result,
     )
 
@@ -1200,7 +1200,7 @@ class TestSyntaxPreflightPassEvent:
 
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             _fake_pytest,
         )
 
@@ -1651,7 +1651,7 @@ class TestAdaptiveGatedMultiAttempt:
 
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             _fake_pytest,
         )
 

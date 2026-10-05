@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from evals import run_eval
+from evals import patch_relevance, pytest_runner, run_eval, run_state
 from evals.eval_types import (
     ADAPTIVE_REWARD_MATERIALIZATION_SCALE_DEFAULT,
     ADAPTIVE_REWARD_PROGRESS_SCALE_DEFAULT,
@@ -34,6 +34,7 @@ from evals.patchers.base import (
     PatchResult,
 )
 from evals.run_condition_builder import build_run_condition_inputs
+from evals.run_context import RunContext
 
 
 @dataclass(frozen=True)
@@ -723,7 +724,7 @@ class TestRunStateRepair:
         )
         cases = [_make_case(tmp_path, "case_a"), _make_case(tmp_path, "case_b")]
         conditions = [run_eval.Condition.BASE_REPAIR, run_eval.Condition.COT_REPAIR]
-        monkeypatch.setattr(run_eval, "_build_patcher_config", lambda **_kw: {"cfg": 1})
+        monkeypatch.setattr(run_state, "_build_patcher_config", lambda **_kw: {"cfg": 1})
         fingerprint = run_eval._build_run_settings_fingerprint(
             args=args,
             cases=cases,
@@ -738,7 +739,7 @@ class TestRunStateRepair:
         )
         assert reseeded != fingerprint
         # CAP-20: a snapshot-format change is settings drift for resume.
-        monkeypatch.setattr(run_eval, "_resolve_llmdebug_snapshot_schema_version", lambda: "9.9")
+        monkeypatch.setattr(run_state, "_resolve_llmdebug_snapshot_schema_version", lambda: "9.9")
         assert (
             run_eval._build_run_settings_fingerprint(args=args, cases=cases, conditions=conditions)
             != reseeded
@@ -758,14 +759,17 @@ class TestPytestAndContainerHelpers:
             condition=run_eval.Condition.BASE_REPAIR,
         ) == ["python", "-q"]
 
-        monkeypatch.setattr(run_eval._ACTIVE_RUN_SETTINGS, "deterministic", True, raising=False)
-        monkeypatch.setattr(run_eval._ACTIVE_RUN_SETTINGS, "seed", 7, raising=False)
-        env = run_eval._base_pytest_env(output_format="json", snapshot_condition=True)
+        env = run_eval._base_pytest_env(
+            output_format="json",
+            snapshot_condition=True,
+            settings=run_eval._ActiveRunSettings(deterministic=True, seed=7),
+        )
         assert env["PYTHONHASHSEED"] == "7"
         assert env["TZ"] == "UTC"
         assert env["LLMDEBUG_CATEGORIZE_ERRORS"] == "0"
-        monkeypatch.setattr(run_eval._ACTIVE_RUN_SETTINGS, "deterministic", False, raising=False)
-        monkeypatch.setattr(run_eval._ACTIVE_RUN_SETTINGS, "seed", None, raising=False)
+        assert "PYTHONHASHSEED" not in run_eval._base_pytest_env(
+            output_format="json", snapshot_condition=True
+        )
 
     def test_run_pytest_local_and_pooled(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -777,13 +781,13 @@ class TestPytestAndContainerHelpers:
             stderr="",
             returncode=0,
         )
-        monkeypatch.setattr(run_eval, "run_monitored_subprocess", lambda **_kw: monitored)
+        monkeypatch.setattr(pytest_runner, "run_monitored_subprocess", lambda **_kw: monitored)
         result = run_eval._run_pytest_local(
             cwd=tmp_path,
             python_args=["-m", "pytest", "-q"],
             condition=run_eval.Condition.BASE_REPAIR,
             timeout_sec=30,
-            output_format="json",
+            base_env={"LLMDEBUG_OUTPUT_FORMAT": "json"},
         )
         assert result.returncode == 0
         assert result.timed_out is False
@@ -795,13 +799,13 @@ class TestPytestAndContainerHelpers:
             stderr="err",
             returncode=1,
         )
-        monkeypatch.setattr(run_eval, "run_monitored_subprocess", lambda **_kw: timed_out)
+        monkeypatch.setattr(pytest_runner, "run_monitored_subprocess", lambda **_kw: timed_out)
         result = run_eval._run_pytest_local(
             cwd=tmp_path,
             python_args=["-m", "pytest", "-q"],
             condition=run_eval.Condition.BASE_REPAIR,
             timeout_sec=30,
-            output_format="json",
+            base_env={"LLMDEBUG_OUTPUT_FORMAT": "json"},
         )
         assert result.timed_out is True
         assert "pytest timed out" in result.stderr
@@ -840,7 +844,7 @@ class TestPytestAndContainerHelpers:
             python_args=["-m", "pytest", "-q"],
             condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
             timeout_sec=20,
-            output_format="json",
+            base_env={"LLMDEBUG_OUTPUT_FORMAT": "json"},
             execution=run_eval.ExecutionConfig(executor="testcontainers"),
             pool=pool,
         )
@@ -852,7 +856,7 @@ class TestPytestAndContainerHelpers:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
-            run_eval,
+            pytest_runner,
             "_run_pytest_local",
             lambda **_kw: run_eval.RunResult(
                 returncode=11,
@@ -863,25 +867,16 @@ class TestPytestAndContainerHelpers:
                 timeout_sec=None,
             ),
         )
-        monkeypatch.setattr(
-            run_eval,
-            "get_active_execution_config",
-            lambda: run_eval.ExecutionConfig(executor="local"),
-        )
         result = run_eval.run_pytest(
             tmp_path,
             ["-m", "pytest", "-q"],
             run_eval.Condition.BASE_REPAIR,
             10,
             "json",
+            run_context=RunContext(execution=run_eval.ExecutionConfig(executor="local")),
         )
         assert result.returncode == 11
 
-        monkeypatch.setattr(
-            run_eval,
-            "get_active_execution_config",
-            lambda: run_eval.ExecutionConfig(executor="testcontainers"),
-        )
         pool = SimpleNamespace(
             acquire=lambda: SimpleNamespace(
                 exec_pytest=lambda **_kw: run_eval.RunResult(
@@ -895,29 +890,27 @@ class TestPytestAndContainerHelpers:
             ),
             release=lambda _container: None,
         )
-        monkeypatch.setattr(run_eval, "_ACTIVE_CONTAINER_POOL", pool, raising=False)
         result = run_eval.run_pytest(
             tmp_path,
             ["-m", "pytest", "-q"],
             run_eval.Condition.BASE_REPAIR,
             10,
             "json",
+            run_context=RunContext(
+                execution=run_eval.ExecutionConfig(executor="testcontainers"),
+                container_pool=pool,  # type: ignore[arg-type]
+            ),
         )
         assert result.stdout == "pooled"
-        monkeypatch.setattr(run_eval, "_ACTIVE_CONTAINER_POOL", None, raising=False)
 
         with pytest.raises(RuntimeError, match="unsupported executor"):
-            monkeypatch.setattr(
-                run_eval,
-                "get_active_execution_config",
-                lambda: run_eval.ExecutionConfig(executor="bogus"),
-            )
             run_eval.run_pytest(
                 tmp_path,
                 ["-m", "pytest", "-q"],
                 run_eval.Condition.BASE_REPAIR,
                 10,
                 "json",
+                run_context=RunContext(execution=run_eval.ExecutionConfig(executor="bogus")),
             )
 
         fake_module = ModuleType("testcontainers")
@@ -933,7 +926,7 @@ class TestPytestAndContainerHelpers:
             python_args=["-m", "pytest", "-q"],
             condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
             timeout_sec=10,
-            output_format="json",
+            base_env={"LLMDEBUG_OUTPUT_FORMAT": "json"},
             execution=run_eval.ExecutionConfig(executor="testcontainers"),
         )
         assert container_result.returncode == 0
@@ -961,7 +954,7 @@ class TestPytestAndContainerHelpers:
             python_args=["-m", "pytest", "-q"],
             condition=run_eval.Condition.BASE_REPAIR,
             timeout_sec=10,
-            output_format="json",
+            base_env={"LLMDEBUG_OUTPUT_FORMAT": "json"},
             execution=run_eval.ExecutionConfig(executor="testcontainers"),
         )
         assert timeout_result.timed_out is True
@@ -1227,9 +1220,11 @@ class TestBudgetAndSnapshotHelpers:
     def test_infer_source_scope_and_score_relevance(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(run_eval, "_import_neighbors", lambda **_kw: ["helper.py", "helper.py"])
         monkeypatch.setattr(
-            run_eval,
+            patch_relevance, "_import_neighbors", lambda **_kw: ["helper.py", "helper.py"]
+        )
+        monkeypatch.setattr(
+            patch_relevance,
             "_extract_subprocess_script_neighbors",
             lambda **_kw: ["script.py"],
         )

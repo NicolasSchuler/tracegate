@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals import eval_main_support as legacy
 from evals.decision_model.config import decision_model_settings_from_args
 from evals.decision_model.runtime import check_decision_model_health
 from evals.eval_main_setup import MainFlowCliError, MainSetupState
+from evals.eval_seams import EvalSeams, default_eval_seams
 from evals.eval_types import (
     DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC,
     CaseSpec,
@@ -41,28 +41,30 @@ def prepare_main_resume(
     setup: MainSetupState,
     args: argparse.Namespace,
     argv_tokens: list[str],
+    seams: EvalSeams | None = None,
 ) -> MainResumeState:
+    seams = seams if seams is not None else default_eval_seams()
     execution_units = [(case, condition) for case in setup.cases for condition in setup.conditions]
     total_units = len(execution_units)
-    run_settings_fingerprint = legacy._build_run_settings_fingerprint(
+    run_settings_fingerprint = seams.build_run_settings_fingerprint(
         args=args,
         cases=setup.cases,
         conditions=setup.conditions,
     )
     try:
-        resolved_config_lock_path = legacy._write_resolved_run_config_lockfile(
+        resolved_config_lock_path = seams.write_resolved_run_config_lockfile(
             run_id=setup.run_id,
             args=args,
             argv_tokens=argv_tokens,
             run_settings_fingerprint=run_settings_fingerprint,
             config_state=setup.config_state,
-            repo_root=legacy._REPO_ROOT,
+            repo_root=seams.repo_root,
         )
     except OSError as exc:
         resolved_config_lock_path = None
         print(f"Warning: failed to write resolved config lock file: {exc}")
 
-    run_results_lock, run_lock_error, run_lock_warning = legacy._RunResultsLock.acquire(
+    run_results_lock, run_lock_error, run_lock_warning = seams.run_results_lock.acquire(
         results_path=setup.results_path,
         run_id=setup.run_id,
     )
@@ -78,14 +80,14 @@ def prepare_main_resume(
             existing_run_settings_fingerprint,
             existing_records_count,
             trailing_tail_issue,
-        ) = legacy._load_existing_run_state(
+        ) = seams.load_existing_run_state(
             results_path=setup.results_path,
             run_id=setup.run_id,
             max_attempts_per_unit=int(args.k),
         )
         if trailing_tail_issue is not None:
             try:
-                sidecar_path, removed_bytes = legacy._repair_trailing_results_tail(
+                sidecar_path, removed_bytes = seams.repair_trailing_results_tail(
                     results_path=setup.results_path,
                     run_id=setup.run_id,
                     issue=trailing_tail_issue,
@@ -139,11 +141,11 @@ def prepare_main_resume(
             raise MainFlowCliError(f"Environment check failed: {decision_model_error}")
 
     if remaining_units > 0 and setup.execution_config.executor == "testcontainers":
-        ok, message = legacy.check_testcontainers_runtime_available()
+        ok, message = seams.check_testcontainers_runtime_available()
         if not ok:
             _release_lock(run_results_lock)
             raise MainFlowCliError(f"Environment check failed: {message}")
-        removed, failed, cleanup_error = legacy.cleanup_stale_eval_containers(
+        removed, failed, cleanup_error = seams.cleanup_stale_eval_containers(
             grace_sec=DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC
         )
         if cleanup_error is not None:

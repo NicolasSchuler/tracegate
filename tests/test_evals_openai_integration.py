@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
 from llmdebug import _json as json
 
@@ -800,9 +800,9 @@ def test_stage_a_outside_file_request_uses_fallback_and_does_not_leak_secret(
                 stderr="",
             )
 
-        monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "read_latest_snapshot",
             lambda *_args, **_kwargs: (None, "missing snapshot"),
         )

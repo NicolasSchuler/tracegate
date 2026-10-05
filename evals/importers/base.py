@@ -115,7 +115,7 @@ def validate_generated_case(
         if not (case_dir / fname).exists():
             return False, f"missing required file: {fname}"
 
-    from evals.run_eval import VALID_CATEGORIES, VALID_DIFFICULTIES, VALID_SNAPSHOT_DEPENDENCIES
+    from evals.eval_types import VALID_CATEGORIES, VALID_DIFFICULTIES, VALID_SNAPSHOT_DEPENDENCIES
 
     category = meta.get("category")
     if category not in VALID_CATEGORIES:

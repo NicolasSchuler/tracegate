@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from evals import progress_output, run_eval
+from evals import eval_attempt_flow, progress_output, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
 from llmdebug import _json as json
 
@@ -996,7 +996,7 @@ def test_run_eval_streamed_retry_gate_record_is_persisted_once(
     patcher = _SameEvidencePatcher()
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: patcher)
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1006,7 +1006,7 @@ def test_run_eval_streamed_retry_gate_record_is_persisted_once(
         ),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (
             {

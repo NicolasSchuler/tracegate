@@ -17,18 +17,17 @@ import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .run_eval import (
+from .case_loading import load_cases
+from .eval_config import (
     _REPO_ROOT,
-    CaseSpec,
-    Condition,
     add_execution_arguments,
-    apply_diff,
     build_execution_config_from_args,
-    check_testcontainers_runtime_available,
-    load_cases,
-    run_pytest,
     set_active_execution_config,
 )
+from .eval_containers import check_testcontainers_runtime_available
+from .eval_patches import apply_diff
+from .eval_types import CaseSpec, Condition
+from .pytest_runner import run_pytest
 
 REQUIRED_CASE_FILES = ("test_buggy.py", "case.json", "oracle.patch")
 EXCEPTION_TOKEN_RE = re.compile(r"\b([A-Za-z_][\w\.]*(?:Error|Exception|Exit|Interrupt))\b")

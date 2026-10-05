@@ -11,8 +11,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from evals import eval_main_support as legacy
 from evals.adaptive_budget_online_policy import BUDGET_POLICY_ARCHITECTURES
+from evals.baseline_runtime import (
+    _normalize_adaptive_controller_lambda_rlm_settings,
+    _normalize_baseline_selection,
+    _resolve_conditions_for_run,
+    _resolve_external_baseline_runtime_requirements,
+)
 from evals.decision_model.config import (
     check_decision_model_settings,
     decision_model_settings_from_args,
@@ -24,12 +29,7 @@ from evals.eval_config import (
     build_execution_config_from_args,
     resolve_execution_runtime_metadata,
 )
-from evals.eval_main_support import (
-    _normalize_adaptive_controller_lambda_rlm_settings,
-    _normalize_baseline_selection,
-    _resolve_conditions_for_run,
-    _resolve_external_baseline_runtime_requirements,
-)
+from evals.eval_seams import EvalSeams, default_eval_seams
 from evals.eval_types import (
     ADAPTIVE_BUDGET_POLICY_ALGOS,
     ADAPTIVE_BUDGET_POLICY_MODES,
@@ -161,10 +161,13 @@ def _validate_context_compaction_scope(scope: str) -> None:
         )
 
 
-def _load_filtered_cases(args: argparse.Namespace) -> list[CaseSpec]:
-    cases_dir = legacy._REPO_ROOT / args.cases_dir
+def _load_filtered_cases(
+    args: argparse.Namespace, seams: EvalSeams | None = None
+) -> list[CaseSpec]:
+    seams = seams if seams is not None else default_eval_seams()
+    cases_dir = seams.repo_root / args.cases_dir
     try:
-        cases = legacy.load_cases(cases_dir)
+        cases = seams.load_cases(cases_dir)
     except ValueError as exc:
         _fail(f"Invalid case metadata: {exc}")
 
@@ -292,51 +295,45 @@ def _force_adaptive_policies_off_when_unused(
 _RUN_ID_PATTERN = re.compile(r"(?!\.+$)[A-Za-z0-9._-]{1,128}")
 
 
-def _derive_run_paths(*, args: argparse.Namespace, config_state: Any) -> tuple[str, Path, Path]:
+def _derive_run_paths(
+    *, args: argparse.Namespace, config_state: Any, repo_root: Path
+) -> tuple[str, Path, Path]:
     run_id = str(args.run_id).strip() or (
         time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     )
     if not str(args.adaptive_online_state_path).strip():
         args.adaptive_online_state_path = str(
-            legacy._REPO_ROOT / "evals" / "artifacts" / "policies" / f"{run_id}.json"
+            repo_root / "evals" / "artifacts" / "policies" / f"{run_id}.json"
         )
         if config_state.value_sources.get("adaptive_online_state_path") == "default":
             config_state.value_sources["adaptive_online_state_path"] = "derived_from_run_id"
     if not str(args.adaptive_online_events_path).strip():
         args.adaptive_online_events_path = str(
-            legacy._REPO_ROOT / "evals" / "results" / f"{run_id}.adaptive_policy.jsonl"
+            repo_root / "evals" / "results" / f"{run_id}.adaptive_policy.jsonl"
         )
         if config_state.value_sources.get("adaptive_online_events_path") == "default":
             config_state.value_sources["adaptive_online_events_path"] = "derived_from_run_id"
     if not str(args.adaptive_budget_online_state_path).strip():
         args.adaptive_budget_online_state_path = str(
-            legacy._REPO_ROOT
-            / "evals"
-            / "artifacts"
-            / "policies"
-            / f"{run_id}.adaptive_budget_policy.json"
+            repo_root / "evals" / "artifacts" / "policies" / f"{run_id}.adaptive_budget_policy.json"
         )
         if config_state.value_sources.get("adaptive_budget_online_state_path") == "default":
             config_state.value_sources["adaptive_budget_online_state_path"] = "derived_from_run_id"
     if not str(args.adaptive_budget_online_events_path).strip():
         args.adaptive_budget_online_events_path = str(
-            legacy._REPO_ROOT / "evals" / "results" / f"{run_id}.adaptive_budget_policy.jsonl"
+            repo_root / "evals" / "results" / f"{run_id}.adaptive_budget_policy.jsonl"
         )
         if config_state.value_sources.get("adaptive_budget_online_events_path") == "default":
             config_state.value_sources["adaptive_budget_online_events_path"] = "derived_from_run_id"
     if not str(getattr(args, "adaptive_tep_state_path", "")).strip():
         args.adaptive_tep_state_path = str(
-            legacy._REPO_ROOT
-            / "evals"
-            / "artifacts"
-            / "policies"
-            / f"{run_id}.adaptive_tep_state.json"
+            repo_root / "evals" / "artifacts" / "policies" / f"{run_id}.adaptive_tep_state.json"
         )
         if config_state.value_sources.get("adaptive_tep_state_path") == "default":
             config_state.value_sources["adaptive_tep_state_path"] = "derived_from_run_id"
 
-    artifacts_root = legacy._REPO_ROOT / "evals" / "artifacts" / run_id
-    results_root = legacy._REPO_ROOT / "evals" / "results"
+    artifacts_root = repo_root / "evals" / "artifacts" / run_id
+    results_root = repo_root / "evals" / "results"
     results_root.mkdir(parents=True, exist_ok=True)
     results_path = results_root / f"{run_id}.jsonl"
     return run_id, artifacts_root, results_path
@@ -402,7 +399,9 @@ def prepare_main_setup(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     argv_tokens: list[str],
+    seams: EvalSeams | None = None,
 ) -> MainSetupState:
+    seams = seams if seams is not None else default_eval_seams()
     try:
         config_state = _apply_toml_configs_to_args(
             parser=parser,
@@ -793,7 +792,7 @@ def prepare_main_setup(
             "--syntax-preflight-max-cycles < 2."
         )
 
-    cases = _load_filtered_cases(args)
+    cases = _load_filtered_cases(args, seams)
     try:
         conditions = _resolve_conditions_for_run(args=args, config_state=config_state)
     except ValueError as exc:
@@ -817,7 +816,9 @@ def prepare_main_setup(
             f"Invalid --run-id {str(args.run_id).strip()!r}: use 1-128 characters from "
             "A-Z, a-z, 0-9, '.', '_' and '-'."
         )
-    run_id, artifacts_root, results_path = _derive_run_paths(args=args, config_state=config_state)
+    run_id, artifacts_root, results_path = _derive_run_paths(
+        args=args, config_state=config_state, repo_root=seams.repo_root
+    )
     if explicit_run_id:
         _append_similar_run_id_warning(
             run_id=run_id,

@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from evals.eval_seams import REPO_ROOT
+
 # ---------------------------------------------------------------------------
 # adaptive_budget_online_policy — line 127 (invalid feature_scaling_profile)
 # ---------------------------------------------------------------------------
@@ -453,7 +455,7 @@ class TestEvalMainSetupGaps:
         }
 
         run_id, _artifacts_root, _results_path = _derive_run_paths(
-            args=args, config_state=config_state
+            args=args, config_state=config_state, repo_root=REPO_ROOT
         )
         assert run_id == "test_run_123"
         assert "test_run_123" in str(args.adaptive_online_state_path)
@@ -486,7 +488,7 @@ class TestEvalMainSetupGaps:
             "adaptive_tep_state_path": "cli",
         }
 
-        _derive_run_paths(args=args, config_state=config_state)
+        _derive_run_paths(args=args, config_state=config_state, repo_root=REPO_ROOT)
         # value_sources should NOT have been changed to "derived_from_run_id"
         assert config_state.value_sources["adaptive_online_state_path"] == "cli"
         assert config_state.value_sources["adaptive_tep_state_path"] == "cli"

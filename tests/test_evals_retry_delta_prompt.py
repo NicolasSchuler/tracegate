@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.native_stage_b_flow import OpenAIPromptBudgetError
 from evals.patchers.base import ContextRequestResult, PatchResult
 
@@ -122,7 +122,7 @@ def test_structured_retry_uses_delta_prompt_and_evidence_references(tmp_path, mo
     patcher = _DeltaCapturePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -132,7 +132,9 @@ def test_structured_retry_uses_delta_prompt_and_evidence_references(tmp_path, mo
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -187,7 +189,7 @@ def test_prompt_budget_caps_prompt_size(tmp_path, monkeypatch) -> None:
     patcher = _BudgetPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -245,7 +247,7 @@ def test_openai_preflight_context_window_caps_prompt(tmp_path, monkeypatch) -> N
     patcher = _OpenAIPreflightCapturePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -304,7 +306,7 @@ def test_openai_preflight_degenerate_context_window_raises_instead_of_one_char_p
     patcher = _OpenAIPreflightCapturePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,

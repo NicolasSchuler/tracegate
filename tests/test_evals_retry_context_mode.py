@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.base import PatchResult
 
 
@@ -91,7 +91,7 @@ def test_retry_context_mode_history_includes_previous_attempt_summary(
     shutil.copytree(case.path, workdir)
     patcher = _CapturePatcher()
 
-    monkeypatch.setattr(run_eval, "run_pytest", _failing_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _failing_pytest)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -132,7 +132,7 @@ def test_retry_context_mode_fresh_excludes_previous_attempt_summary(
     shutil.copytree(case.path, workdir)
     patcher = _CapturePatcher()
 
-    monkeypatch.setattr(run_eval, "run_pytest", _failing_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _failing_pytest)
 
     records = run_eval.run_one_condition(
         case=case,

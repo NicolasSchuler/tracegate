@@ -3,7 +3,6 @@
 Targets specific uncovered lines and branches to push coverage from ~90.5%
 toward ~93%.  Focuses on:
 
-- _call_run_pytest_compat fallback and re-raise paths (lines 66-70)
 - Progress callback exception swallowing (lines 146-147, 628-630)
 - Trace-level progress printing (lines 199-220)
 - Detailed-level record callback formatting (lines 333-416)
@@ -126,72 +125,6 @@ def _fake_run_one_condition_factory(
         return result_records
 
     return _fake
-
-
-# ===================================================================
-# 1. _call_run_pytest_compat — fallback and re-raise paths
-# ===================================================================
-
-
-class TestCallRunPytestCompat:
-    """Cover lines 64-70 of _call_run_pytest_compat."""
-
-    def test_fallback_on_unexpected_keyword_argument(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 70: fallback to run_pytest without kwargs when TypeError mentions
-        'unexpected keyword argument' and 'progress_update'."""
-        from evals import eval_attempt_flow
-
-        call_log: list[str] = []
-
-        def _mock_run_pytest(*args: Any, **kwargs: Any) -> str:
-            if "progress_update" in kwargs:
-                call_log.append("with_kwargs")
-                raise TypeError("run_pytest() got an unexpected keyword argument 'progress_update'")
-            call_log.append("without_kwargs")
-            return "fallback_result"
-
-        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _mock_run_pytest)
-
-        result = eval_attempt_flow._call_run_pytest_compat(
-            "/tmp/cwd",
-            ["-m", "pytest"],
-            "base_repair",
-            30,
-            "diff",
-            progress_update=lambda *a: None,
-            progress_phase_label="test",
-        )
-        assert result == "fallback_result"
-        assert call_log == ["with_kwargs", "without_kwargs"]
-
-    def test_reraise_unrelated_type_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 69: re-raise TypeError that is NOT about unexpected keyword arguments."""
-        from evals import eval_attempt_flow
-
-        def _mock_run_pytest(*args: Any, **kwargs: Any) -> str:
-            raise TypeError("int() argument must be a string, not 'list'")
-
-        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _mock_run_pytest)
-
-        with pytest.raises(TypeError, match="int\\(\\) argument must be"):
-            eval_attempt_flow._call_run_pytest_compat(
-                "/tmp/cwd", ["-m", "pytest"], "base_repair", 30, "diff"
-            )
-
-    def test_reraise_type_error_wrong_kwarg_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 69: re-raise when 'unexpected keyword argument' appears but neither
-        'progress_update' nor 'progress_phase_label' is mentioned."""
-        from evals import eval_attempt_flow
-
-        def _mock_run_pytest(*args: Any, **kwargs: Any) -> str:
-            raise TypeError("run_pytest() got an unexpected keyword argument 'verbose'")
-
-        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _mock_run_pytest)
-
-        with pytest.raises(TypeError, match="unexpected keyword argument 'verbose'"):
-            eval_attempt_flow._call_run_pytest_compat(
-                "/tmp/cwd", ["-m", "pytest"], "base_repair", 30, "diff"
-            )
 
 
 # ===================================================================
@@ -702,12 +635,6 @@ class TestRunOneConditionProgressUpdateException:
             timed_out=False,
         )
         monkeypatch.setattr(eval_attempt_flow, "run_pytest", lambda *a, **kw: fake_result)
-        # Mock _call_run_pytest_compat to use the patched run_pytest
-        monkeypatch.setattr(
-            eval_attempt_flow,
-            "_call_run_pytest_compat",
-            lambda *a, **kw: fake_result,
-        )
 
         # run_one_condition_impl uses many globals from run_eval, so let's
         # call it through run_eval.run_one_condition which delegates properly.
@@ -769,7 +696,7 @@ class TestPatcherAttributeCoercionFallback:
         )
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *a, **kw: fake_result,
         )
 
@@ -822,7 +749,7 @@ class TestNormalizationEdgeCases:
         )
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *a, **kw: fake_result,
         )
 
@@ -869,7 +796,7 @@ class TestNormalizationEdgeCases:
         )
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *a, **kw: fake_result,
         )
 
@@ -916,7 +843,7 @@ class TestNormalizationEdgeCases:
         )
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *a, **kw: fake_result,
         )
 
@@ -963,7 +890,7 @@ class TestNormalizationEdgeCases:
         )
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *a, **kw: fake_result,
         )
 
@@ -1197,51 +1124,6 @@ class TestProgressStateEvalDuration:
             ),
         )
         assert outcome.runtime_error is None
-
-
-# ===================================================================
-# 15. Parametrized _call_run_pytest_compat edge cases
-# ===================================================================
-
-
-class TestCallRunPytestCompatEdges:
-    """Additional edge cases for the compat wrapper."""
-
-    def test_successful_call_with_kwargs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Happy path: run_pytest accepts the kwargs."""
-        from evals import eval_attempt_flow
-
-        def _mock_run_pytest(*args: Any, **kwargs: Any) -> str:
-            assert "progress_update" in kwargs
-            return "success"
-
-        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _mock_run_pytest)
-
-        result = eval_attempt_flow._call_run_pytest_compat(
-            "/cwd", [], "cond", 10, "diff", progress_update=lambda: None
-        )
-        assert result == "success"
-
-    def test_fallback_on_progress_phase_label_kwarg(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fallback when TypeError mentions progress_phase_label."""
-        from evals import eval_attempt_flow
-
-        call_log: list[str] = []
-
-        def _mock_run_pytest(*args: Any, **kwargs: Any) -> str:
-            if kwargs:
-                call_log.append("with")
-                raise TypeError("got an unexpected keyword argument 'progress_phase_label'")
-            call_log.append("without")
-            return "ok"
-
-        monkeypatch.setattr(eval_attempt_flow, "run_pytest", _mock_run_pytest)
-
-        result = eval_attempt_flow._call_run_pytest_compat(
-            "/cwd", [], "cond", 10, "diff", progress_phase_label="test"
-        )
-        assert result == "ok"
-        assert call_log == ["with", "without"]
 
 
 # ===================================================================

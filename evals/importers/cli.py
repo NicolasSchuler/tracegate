@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals.run_eval import (
+from evals.eval_config import (
     add_execution_arguments,
     build_execution_config_from_args,
-    check_testcontainers_runtime_available,
     set_active_execution_config,
+)
+from evals.eval_containers import (
+    check_testcontainers_runtime_available,
 )
 from evals.validate_cases import check_pytest_available
 

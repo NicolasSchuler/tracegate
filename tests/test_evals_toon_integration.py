@@ -482,7 +482,7 @@ class TestAttemptFlowToonFeatureGating:
         monkeypatch.setattr(eval_attempt_flow, "read_latest_snapshot", lambda *_: (snapshot, None))
         monkeypatch.setattr(
             eval_attempt_flow,
-            "_call_run_pytest_compat",
+            "run_pytest",
             lambda *args, **kwargs: _failing_run_result(),
         )
         monkeypatch.setattr(

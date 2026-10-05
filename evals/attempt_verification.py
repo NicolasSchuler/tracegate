@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from evals.eval_evidence import _xxh3_128_text
+from evals.eval_types import (
+    PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
+    PATCH_VERIFIER_SCOPE_DISABLED,
+)
 
 from .eval_patches import (
     _backup_diff_target_files,
@@ -309,3 +316,119 @@ __all__ = [
     "evaluate_syntax_preflight",
     "make_syntax_preflight_state",
 ]
+
+
+def _sync_syntax_preflight_metadata(
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    enabled: bool,
+    cycles_used: int,
+    failures: int,
+    last_error_type: str,
+    last_error_msg: str,
+    events: list[dict[str, Any]],
+) -> None:
+    patch_meta["syntax_preflight_enabled"] = bool(enabled)
+    patch_meta["syntax_preflight_cycles_used"] = int(cycles_used)
+    patch_meta["syntax_preflight_failures"] = int(failures)
+    patch_meta["syntax_preflight_last_error_type"] = str(last_error_type or "")
+    patch_meta["syntax_preflight_last_error_msg"] = str(last_error_msg or "")
+    patch_meta["syntax_preflight_events"] = list(events)
+    attempt_metadata["syntax_preflight_enabled"] = bool(enabled)
+    attempt_metadata["syntax_preflight_cycles_used"] = int(cycles_used)
+    attempt_metadata["syntax_preflight_failures"] = int(failures)
+    attempt_metadata["syntax_preflight_last_error_type"] = str(last_error_type or "")
+    attempt_metadata["syntax_preflight_last_error_msg"] = str(last_error_msg or "")
+
+
+def _sync_patch_sanitize_metadata(
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    enabled: bool,
+    passed: bool,
+    rejected: bool,
+    reasons: list[str],
+    error_msg: str,
+) -> None:
+    values: dict[str, Any] = {
+        "patch_sanitize_enabled": bool(enabled),
+        "patch_sanitize_passed": bool(passed),
+        "patch_sanitize_rejected": bool(rejected),
+        "patch_sanitize_reasons": list(reasons),
+        "patch_sanitize_error_msg": str(error_msg or ""),
+    }
+    patch_meta.update(values)
+    attempt_metadata.update(values)
+
+
+def _sync_patch_diff_metadata(*, patch_meta: dict[str, Any], diff: str) -> None:
+    patch_meta["patch_diff_xxh3_128"] = _xxh3_128_text(diff)
+    patch_meta["patch_diff_chars"] = len(diff)
+    patch_meta.update(_compute_patch_path_metrics(diff))
+
+
+def _sync_patch_verifier_metadata(
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    enabled: bool,
+    scope: str,
+    passed: bool | None,
+    score: int | None,
+    reasons: list[str],
+    min_score: int,
+) -> None:
+    values: dict[str, Any] = {
+        "patch_verifier_enabled": bool(enabled),
+        "patch_verifier_scope": str(scope or PATCH_VERIFIER_SCOPE_DISABLED),
+        "patch_verifier_min_score": max(0, int(min_score)),
+        "patch_verifier_passed": passed if isinstance(passed, bool) else None,
+        "patch_verifier_score": int(score) if isinstance(score, int) else None,
+        "patch_verifier_reasons": list(reasons),
+    }
+    patch_meta.update(values)
+    attempt_metadata.update(values)
+
+
+def _sync_patch_verifier_recovery_metadata(
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    eligible: bool,
+    invoked: bool,
+    result: str,
+    prompt_chars_before: int = 0,
+    prompt_chars_after: int = 0,
+    duration_sec: float = 0.0,
+    terminal_note: str = "",
+    score_before: int | None = None,
+    reasons_before: Sequence[str] | None = None,
+    patch_files_before: Sequence[str] | None = None,
+    source_scope_matched_before: bool = False,
+    raw_meta: Any = None,
+) -> None:
+    normalized_raw_meta = dict(raw_meta) if isinstance(raw_meta, dict) else raw_meta
+    values: dict[str, Any] = {
+        "patch_verifier_recovery_eligible": bool(eligible),
+        "patch_verifier_recovery_invoked": bool(invoked),
+        "patch_verifier_recovery_result": str(
+            result or PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE
+        ),
+        "patch_verifier_recovery_prompt_chars_before": int(prompt_chars_before),
+        "patch_verifier_recovery_prompt_chars_after": int(prompt_chars_after),
+        "patch_verifier_recovery_duration_sec": max(0.0, float(duration_sec)),
+        "patch_verifier_recovery_terminal_note": str(terminal_note or ""),
+        "patch_verifier_recovery_score_before": (
+            int(score_before) if isinstance(score_before, int) else None
+        ),
+        "patch_verifier_recovery_reasons_before": [str(item) for item in (reasons_before or [])],
+        "patch_verifier_recovery_patch_files_before": [
+            str(item) for item in (patch_files_before or [])
+        ],
+        "patch_verifier_recovery_source_scope_matched_before": bool(source_scope_matched_before),
+        "patch_verifier_recovery_raw_meta": normalized_raw_meta,
+    }
+    patch_meta.update(values)
+    attempt_metadata.update(values)

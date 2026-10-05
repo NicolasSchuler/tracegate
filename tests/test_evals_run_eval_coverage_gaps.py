@@ -389,9 +389,9 @@ class TestNormAdaptiveCtrlLambda:
         monkeypatch.setattr(
             "evals.lambda_rlm_backend.default_lambda_rlm_repo_dir", lambda: Path("/r")
         )
-        monkeypatch.setattr("evals.run_eval._autodetect_lambda_rlm_python", lambda: "/p")
+        monkeypatch.setattr("evals.baseline_runtime._autodetect_lambda_rlm_python", lambda: "/p")
         monkeypatch.setattr(
-            "evals.run_eval._baseline_runtime_manifest_path", lambda *_a, **_k: None
+            "evals.baseline_runtime._baseline_runtime_manifest_path", lambda *_a, **_k: None
         )
         a = _ns(
             adaptive_controller_lambda_rlm=True,
@@ -484,7 +484,7 @@ class TestAdaptiveBudgetCompact:
 class TestPlanPatchSnapshot:
     def test_budget_exhausted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "evals.run_eval._patcher_with_shared_attempt_budget",
+            "evals.attempt_proposal._patcher_with_shared_attempt_budget",
             lambda *, patcher, attempt_deadline_monotonic: (patcher, -1.0, None, False),
         )
         r = run_eval._plan_patch_with_snapshot_context(
@@ -500,7 +500,7 @@ class TestPlanPatchSnapshot:
 
     def test_swap_and_enrich(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "evals.run_eval._patcher_with_shared_attempt_budget",
+            "evals.attempt_proposal._patcher_with_shared_attempt_budget",
             lambda *, patcher, attempt_deadline_monotonic: (patcher, 10, 5, True),
         )
         sf = tmp_path / "snapshot.json"
@@ -537,7 +537,7 @@ class TestPlanPatchSnapshot:
 class TestProposePatchSnapshot:
     def test_swap_and_restore(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "evals.run_eval._patcher_with_shared_attempt_budget",
+            "evals.attempt_proposal._patcher_with_shared_attempt_budget",
             lambda *, patcher, attempt_deadline_monotonic: (patcher, 10, None, False),
         )
         sf = tmp_path / "snapshot.json"
@@ -563,7 +563,7 @@ class TestProposePatchSnapshot:
 
     def test_no_swap_equal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "evals.run_eval._patcher_with_shared_attempt_budget",
+            "evals.attempt_proposal._patcher_with_shared_attempt_budget",
             lambda *, patcher, attempt_deadline_monotonic: (patcher, None, None, False),
         )
 
@@ -640,10 +640,10 @@ class TestStructuredDiff:
 
 class TestScorePatchRelevance:
     def test_no_crash(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("evals.run_eval._import_neighbors", lambda **kw: [])
-        monkeypatch.setattr("evals.run_eval._crash_file_from_snapshot", lambda s: "")
-        monkeypatch.setattr("evals.run_eval._detect_failing_test_file", lambda **kw: "")
-        monkeypatch.setattr("evals.run_eval._infer_test_source_scope", lambda **kw: [])
+        monkeypatch.setattr("evals.patch_relevance._import_neighbors", lambda **kw: [])
+        monkeypatch.setattr("evals.patch_relevance._crash_file_from_snapshot", lambda s: "")
+        monkeypatch.setattr("evals.patch_relevance._detect_failing_test_file", lambda **kw: "")
+        monkeypatch.setattr("evals.patch_relevance._infer_test_source_scope", lambda **kw: [])
         _, d = run_eval._score_patch_relevance(
             diff="diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-a\n+b\n",
             cwd=tmp_path,
@@ -654,10 +654,12 @@ class TestScorePatchRelevance:
         assert "patch_verifier_reasons" in d
 
     def test_touches_test(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr("evals.run_eval._import_neighbors", lambda **kw: [])
-        monkeypatch.setattr("evals.run_eval._crash_file_from_snapshot", lambda s: "bar.py")
-        monkeypatch.setattr("evals.run_eval._detect_failing_test_file", lambda **kw: "test_f.py")
-        monkeypatch.setattr("evals.run_eval._infer_test_source_scope", lambda **kw: [])
+        monkeypatch.setattr("evals.patch_relevance._import_neighbors", lambda **kw: [])
+        monkeypatch.setattr("evals.patch_relevance._crash_file_from_snapshot", lambda s: "bar.py")
+        monkeypatch.setattr(
+            "evals.patch_relevance._detect_failing_test_file", lambda **kw: "test_f.py"
+        )
+        monkeypatch.setattr("evals.patch_relevance._infer_test_source_scope", lambda **kw: [])
         _, d = run_eval._score_patch_relevance(
             diff="diff --git a/test_f.py b/test_f.py\n--- a/test_f.py\n+++ b/test_f.py\n@@ -1 +1 @@\n-a\n+b\n",
             cwd=tmp_path,

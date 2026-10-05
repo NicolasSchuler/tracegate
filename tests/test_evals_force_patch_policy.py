@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.base import ContextCompactionResult, ContextRequestResult, PatchResult
 
 
@@ -363,7 +363,7 @@ def test_runner_force_patch_attempt_applies_when_no_diff(tmp_path, monkeypatch) 
     context_dir = tmp_path / "context"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         return run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
@@ -371,8 +371,8 @@ def test_runner_force_patch_attempt_applies_when_no_diff(tmp_path, monkeypatch) 
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,
@@ -402,7 +402,7 @@ def test_runner_no_force_patch_attempt_preserves_no_patch_proposed(tmp_path, mon
     context_dir = tmp_path / "context_no_force"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         return run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
@@ -416,8 +416,8 @@ def test_runner_no_force_patch_attempt_preserves_no_patch_proposed(tmp_path, mon
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -445,9 +445,14 @@ def test_runner_force_patch_attempt_skips_on_request_failure(tmp_path, monkeypat
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -461,7 +466,7 @@ def test_runner_force_patch_attempt_skips_on_request_failure(tmp_path, monkeypat
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -494,9 +499,14 @@ def test_runner_force_patch_attempt_skips_on_context_limit_failure(tmp_path, mon
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -510,7 +520,7 @@ def test_runner_force_patch_attempt_skips_on_context_limit_failure(tmp_path, mon
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -545,9 +555,14 @@ def test_runner_force_patch_attempt_skips_on_retryable_http_transport_failure(
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -561,7 +576,7 @@ def test_runner_force_patch_attempt_skips_on_retryable_http_transport_failure(
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -596,9 +611,14 @@ def test_runner_force_patch_attempt_skips_on_compat_reasoning_only_failure(
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -612,7 +632,7 @@ def test_runner_force_patch_attempt_skips_on_compat_reasoning_only_failure(
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -647,9 +667,14 @@ def test_runner_force_patch_attempt_skips_on_fallback_compat_reasoning_only_fail
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -663,7 +688,7 @@ def test_runner_force_patch_attempt_skips_on_fallback_compat_reasoning_only_fail
         apply_called["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -696,9 +721,14 @@ def test_request_budget_exceeded_retries_by_default(tmp_path, monkeypatch) -> No
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -714,7 +744,7 @@ def test_request_budget_exceeded_retries_by_default(tmp_path, monkeypatch) -> No
         return True, ""
 
     patcher = _AlwaysRequestBudgetExceededPatcher()
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -747,9 +777,14 @@ def test_request_budget_exceeded_case_fail_fast_stops_additional_attempts(
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
@@ -764,7 +799,7 @@ def test_request_budget_exceeded_case_fail_fast_stops_additional_attempts(
         return True, ""
 
     patcher = _AlwaysRequestBudgetExceededPatcher()
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -796,7 +831,7 @@ def test_runner_force_patch_recovers_after_apply_failure(tmp_path, monkeypatch) 
     context_dir = tmp_path / "context_recovery"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         return run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
@@ -812,8 +847,8 @@ def test_runner_force_patch_recovers_after_apply_failure(tmp_path, monkeypatch) 
             return True, ""
         return False, "simulated hunk failure"
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -856,7 +891,7 @@ def test_runner_no_force_patch_keeps_apply_failure(tmp_path, monkeypatch) -> Non
     context_dir = tmp_path / "context_recovery_off"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         return run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
@@ -864,8 +899,10 @@ def test_runner_no_force_patch_keeps_apply_failure(tmp_path, monkeypatch) -> Non
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (False, "simulated hunk failure"))
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(
+        eval_attempt_flow, "apply_diff", lambda cwd, diff: (False, "simulated hunk failure")
+    )
 
     records = run_eval.run_one_condition(
         case=case,
@@ -892,7 +929,7 @@ def test_non_adaptive_staged_context_ignores_stage_a_request_path(tmp_path, monk
     context_dir = tmp_path / "context_stage_a_fallback"
     shutil.copytree(case.path, workdir)
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         return run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
@@ -900,8 +937,8 @@ def test_non_adaptive_staged_context_ignores_stage_a_request_path(tmp_path, monk
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,
@@ -933,7 +970,7 @@ def test_patch_metrics_detect_test_file_edits(tmp_path, monkeypatch) -> None:
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -942,7 +979,7 @@ def test_patch_metrics_detect_test_file_edits(tmp_path, monkeypatch) -> None:
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,
@@ -974,7 +1011,7 @@ def test_context_compaction_stage_a_request_replaces_raw_sections(tmp_path, monk
     patcher = _CompactingStageAPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -983,9 +1020,9 @@ def test_context_compaction_stage_a_request_replaces_raw_sections(tmp_path, monk
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (
             {
@@ -1041,7 +1078,7 @@ def test_context_recovery_retries_once_with_compact_budget(tmp_path, monkeypatch
     patcher = _ContextRecoveryDiffPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1050,7 +1087,7 @@ def test_context_recovery_retries_once_with_compact_budget(tmp_path, monkeypatch
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,
@@ -1085,7 +1122,7 @@ def test_openai_no_diff_recovery_retries_once_before_forced_patch(tmp_path, monk
     patcher = _OpenAINoDiffRecoveryPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1094,7 +1131,7 @@ def test_openai_no_diff_recovery_retries_once_before_forced_patch(tmp_path, monk
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,
@@ -1129,7 +1166,7 @@ def test_marker_only_diff_is_treated_as_forced_noop(tmp_path, monkeypatch) -> No
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1138,7 +1175,7 @@ def test_marker_only_diff_is_treated_as_forced_noop(tmp_path, monkeypatch) -> No
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     records = run_eval.run_one_condition(
         case=case,

@@ -383,9 +383,7 @@ class TestBaselinePatcherImportFailure:
         context_dir = tmp_path / "contexts" / "import_fail" / "base_repair"
         context_dir.mkdir(parents=True, exist_ok=True)
 
-        monkeypatch.setattr(
-            eval_attempt_flow, "_call_run_pytest_compat", lambda *a, **kw: _make_run_result()
-        )
+        monkeypatch.setattr(eval_attempt_flow, "run_pytest", lambda *a, **kw: _make_run_result())
 
         stub_patcher = SimpleNamespace(
             name="custom_patcher",

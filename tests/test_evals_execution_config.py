@@ -9,8 +9,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from evals import eval_config, eval_main_setup, lambda_rlm_backend, run_eval
+from evals import (
+    baseline_runtime,
+    eval_config,
+    eval_main_setup,
+    lambda_rlm_backend,
+    pytest_runner,
+    run_eval,
+)
 from evals.eval_types import ConfigResolutionState
+from evals.run_context import RunContext
 from llmdebug import _json as json
 
 
@@ -56,6 +64,8 @@ def test_run_eval_cli_defaults_match_repo_eval_defaults(
     case = _make_synthetic_case(repo_root, "cli_defaults_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="null"))
     monkeypatch.setattr(
@@ -106,6 +116,8 @@ def test_run_eval_main_propagates_syntax_preflight_fallthrough(
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="null"))
 
@@ -197,6 +209,8 @@ def test_run_eval_main_propagates_patch_verifier_scope_and_min_score(
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="null"))
 
@@ -268,6 +282,8 @@ def test_run_eval_main_rejects_negative_patch_verifier_min_score(
     case = _make_synthetic_case(repo_root, "cli_negative_patch_verifier_min_score_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="null"))
 
@@ -428,6 +444,8 @@ def test_baseline_patch_inventory_reads_sorted_patch_files(
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
 
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
+
     assert run_eval._baseline_patch_inventory("LDB") == ["a.patch", "b.patch"]
 
 
@@ -481,6 +499,7 @@ def test_normalize_baseline_selection_tracecoder_sets_default_repo_dir(
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     args = argparse.Namespace(
         patcher="command",
@@ -505,6 +524,7 @@ def test_normalize_baseline_selection_rlm_sets_default_repo_dir(
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     args = argparse.Namespace(
         patcher="command",
@@ -536,6 +556,8 @@ def test_normalize_adaptive_controller_lambda_rlm_settings_rewrites_stale_repo_l
     stale_root = tmp_path / "stale-checkout"
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     args = argparse.Namespace(
         adaptive_controller_lambda_rlm=True,
@@ -632,7 +654,7 @@ def test_normalize_adaptive_controller_lambda_rlm_settings_autofills_repo_and_py
         lambda: repo_dir,
     )
     monkeypatch.setattr(
-        run_eval,
+        baseline_runtime,
         "_autodetect_lambda_rlm_python",
         lambda: str(python_executable),
     )
@@ -688,12 +710,14 @@ def test_normalize_adaptive_controller_lambda_rlm_settings_uses_manifest_fallbac
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         lambda_rlm_backend,
         "default_lambda_rlm_repo_dir",
         lambda: repo_root / "baselines" / "repos" / "lambda-RLM",
     )
-    monkeypatch.setattr(run_eval, "_autodetect_lambda_rlm_python", lambda: "")
+    monkeypatch.setattr(baseline_runtime, "_autodetect_lambda_rlm_python", lambda: "")
 
     run_eval._normalize_adaptive_controller_lambda_rlm_settings(
         args=args,
@@ -829,6 +853,8 @@ def test_run_eval_baseline_shorthand_records_external_baseline_metadata(
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name=baseline_name))
 
@@ -890,6 +916,7 @@ def test_run_eval_native_cot_baseline_shorthand_records_resolved_metadata(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -959,6 +986,7 @@ def test_run_eval_native_cot_baseline_shorthand_supports_layered_adaptive_llm(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -1034,6 +1062,8 @@ def test_run_eval_main_parses_lambda_force_task_type_flag(
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
 
     def _make_patcher(args: argparse.Namespace):
@@ -1481,6 +1511,7 @@ def test_shipped_baseline_templates_resolve_expected_baseline_metadata(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="baseline"))
 
@@ -1706,6 +1737,7 @@ response_mode = "edits"
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -1780,28 +1812,28 @@ def test_shipped_baseline_templates_pin_condition_and_comparable_timeouts(
 
 def test_run_pytest_dispatches_local_executor(tmp_path, monkeypatch) -> None:
     marker = run_eval.RunResult(returncode=0, duration_sec=0.0, stdout="ok", stderr="")
-    monkeypatch.setattr(run_eval, "_run_pytest_local", lambda **kwargs: marker)
+    monkeypatch.setattr(pytest_runner, "_run_pytest_local", lambda **kwargs: marker)
     result = run_eval.run_pytest(
         cwd=tmp_path,
         python_args=["-m", "pytest", "-q"],
         condition=run_eval.Condition.BASE_REPAIR,
         timeout_sec=1,
         output_format="json_compact",
-        execution=run_eval.ExecutionConfig(executor="local"),
+        run_context=RunContext(execution=run_eval.ExecutionConfig(executor="local")),
     )
     assert result is marker
 
 
 def test_run_pytest_dispatches_testcontainers_executor(tmp_path, monkeypatch) -> None:
     marker = run_eval.RunResult(returncode=1, duration_sec=0.0, stdout="", stderr="x")
-    monkeypatch.setattr(run_eval, "_run_pytest_testcontainers", lambda **kwargs: marker)
+    monkeypatch.setattr(pytest_runner, "_run_pytest_testcontainers", lambda **kwargs: marker)
     result = run_eval.run_pytest(
         cwd=tmp_path,
         python_args=["-m", "pytest", "-q"],
         condition=run_eval.Condition.BASE_REPAIR,
         timeout_sec=1,
         output_format="json_compact",
-        execution=run_eval.ExecutionConfig(executor="testcontainers"),
+        run_context=RunContext(execution=run_eval.ExecutionConfig(executor="testcontainers")),
     )
     assert result is marker
 
@@ -1829,7 +1861,7 @@ def test_write_run_outputs_truncates_to_latest_lines(tmp_path) -> None:
 
 
 def test_write_run_outputs_applies_hard_char_cap(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(run_eval, "PERSISTED_PYTEST_OUTPUT_HARD_CHAR_CAP", 64)
+    monkeypatch.setattr(pytest_runner, "PERSISTED_PYTEST_OUTPUT_HARD_CHAR_CAP", 64)
     huge_line = "prefix\n" + ("x" * 500)
     run = run_eval.RunResult(returncode=1, duration_sec=0.0, stdout=huge_line, stderr="")
     run_eval._write_run_outputs(tmp_path, run, prefix="pytest_before", tail_lines=0)
@@ -1883,6 +1915,8 @@ def test_run_eval_preflights_testcontainers_runtime(tmp_path, monkeypatch, capsy
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(
         run_eval,
@@ -1925,6 +1959,8 @@ def test_run_eval_prunes_stale_containers_before_testcontainers_run(tmp_path, mo
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(
         run_eval,
@@ -1992,6 +2028,8 @@ def test_run_eval_openai_max_propose_default_in_patcher_config(tmp_path, monkeyp
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -2064,6 +2102,8 @@ def test_run_eval_openai_transport_retry_settings_in_patcher_config(tmp_path, mo
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -2136,6 +2176,8 @@ def test_run_eval_openai_http2_disable_in_patcher_config(tmp_path, monkeypatch) 
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -2202,6 +2244,8 @@ def test_run_eval_openai_thinking_auto_enables_reasoning_fallback_in_patcher_con
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
 
@@ -2295,6 +2339,8 @@ def test_run_eval_case_list_file_filters_selected_cases(tmp_path, monkeypatch) -
     case_list_file.write_text("# comment\n\ncase_b\n", encoding="utf-8")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case_a, case_b, case_c])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
 
@@ -2360,6 +2406,8 @@ def test_run_eval_case_list_file_rejects_unknown_case_id(tmp_path, monkeypatch, 
     case_list_file.write_text("unknown_case\n", encoding="utf-8")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
 
     exit_code = run_eval.main(
@@ -2409,6 +2457,8 @@ def test_run_eval_case_list_file_read_error_returns_cli_error(
     case_list_file.write_text("known_case\n", encoding="utf-8")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
 
     original_read_text = Path.read_text
@@ -2460,6 +2510,8 @@ def test_run_eval_forwards_pytest_output_tail_lines(tmp_path, monkeypatch) -> No
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
 
@@ -2520,6 +2572,8 @@ def test_run_eval_forwards_snapshot_artifact_max_string_chars(tmp_path, monkeypa
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
 
@@ -2604,6 +2658,8 @@ prompt_repair_method_scaffold = true
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
     observed: dict[str, object] = {}
@@ -2682,6 +2738,8 @@ def test_run_eval_uses_run_scoped_adaptive_policy_state_paths_by_default(
     case = _make_synthetic_case(repo_root, "adaptive_state_defaults_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
 
@@ -2752,6 +2810,8 @@ def test_run_eval_preserves_explicit_adaptive_policy_state_paths(
     budget_state_path = repo_root / "evals" / "artifacts" / "policies" / "shared-budget.json"
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
     monkeypatch.setattr(
@@ -2814,6 +2874,8 @@ def test_run_eval_forces_adaptive_only_features_off_for_non_adaptive_runs(
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
 
@@ -2898,6 +2960,8 @@ def test_run_eval_records_budget_policy_architecture_in_lockfile(
     case = _make_synthetic_case(repo_root, "adaptive_budget_architecture_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
     monkeypatch.setattr(
@@ -2979,6 +3043,8 @@ api_key_env = "LLMDEBUG_TEST_OPENAI_KEY"
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     observed_openai_key: dict[str, str] = {}
 
@@ -3054,6 +3120,8 @@ model = "demo"
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     observed_openai_key: dict[str, str] = {}
 
@@ -3123,6 +3191,8 @@ model = "demo"
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     observed_openai_key: dict[str, str] = {}
 
@@ -3161,6 +3231,8 @@ def test_run_eval_banner_reports_adaptive_context_override(
     case = _make_synthetic_case(repo_root, "adaptive_banner_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
     monkeypatch.setattr(
@@ -3218,6 +3290,8 @@ def test_run_eval_banner_prints_stage_a_limits_for_adaptive_runs(
     case = _make_synthetic_case(repo_root, "adaptive_stage_a_banner_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
     monkeypatch.setattr(
@@ -3271,6 +3345,8 @@ def test_run_eval_banner_prints_prompt_feature_flags(
     case = _make_synthetic_case(repo_root, "prompt_feature_banner_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
     monkeypatch.setattr(
@@ -3328,6 +3404,8 @@ def test_run_eval_rejects_retry_plan_then_patch_for_non_openai_patcher(
     case = _make_synthetic_case(repo_root, "retry_plan_requires_openai_case")
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
 
     exit_code = run_eval.main(
@@ -3375,6 +3453,7 @@ def test_shipped_nonadaptive_configs_disable_budget_policy(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
     monkeypatch.setattr(
@@ -3595,6 +3674,7 @@ def test_shipped_prompt_feature_templates_enable_expected_flags(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-token")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
     monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="openai"))
     monkeypatch.setattr(

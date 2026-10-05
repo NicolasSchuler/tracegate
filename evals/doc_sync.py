@@ -22,8 +22,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
+from .case_loading import load_cases
 from .doc_sync_policy import stale_policy_defaults_docs, write_policy_defaults_blocks
-from .run_eval import CaseSpec, load_cases
+from .eval_types import CaseSpec
 
 BEGIN_CASE_INVENTORY_MARKER = "<!-- BEGIN AUTO-GENERATED: CASE_INVENTORY -->"
 END_CASE_INVENTORY_MARKER = "<!-- END AUTO-GENERATED: CASE_INVENTORY -->"
