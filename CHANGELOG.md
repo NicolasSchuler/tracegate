@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- `generate_hypotheses` keeps distinct hypotheses of one pattern (CAP-16): de-duplication by pattern alone kept only the first, so a `KeyError` with several dict locals or a `TypeError` naming two types reported one of them. Hypotheses are now de-duplicated by pattern and description, with at most `max_per_pattern` (default 3) per pattern; `max_per_pattern=1` gives the old output, and the eval decision-model state uses it so its inputs are unchanged.
 - `diff_snapshots` no longer hands out shared mutable placeholders (CAP-14): for snapshots without git context, `SnapshotDiffResult.old_git`/`new_git` were one module-level dict, so a caller mutating one corrupted every later diff. Empty values are now fresh objects.
 - `filter_snapshot(detail="crash")` returns keys in the snapshot's order (CAP-11): it iterated a `frozenset`, so the key order depended on string hash randomization and differed between processes, which broke diffing and prompt caching of `crash`-detail output.
 - `.traceback.txt` sidecars of pytest snapshots are cleaned up with their snapshot (CAP-05): the sidecar name was derived with `with_suffix("")`, which cuts at the first dot, and every `test_foo.py` node name has one, so retention and `llmdebug clean` deleted the snapshot and left the sidecar (six captures with `max_snapshots=2` left six). One helper, `snapshot_index.traceback_sidecar`, now names it for writers and cleaners.
