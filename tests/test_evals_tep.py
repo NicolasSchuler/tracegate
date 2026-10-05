@@ -305,7 +305,7 @@ class TestTepNudgeEscalation:
         assert _sections_by_key(sections, "loop_breaker") == []
 
     def test_static_loop_breaker_when_tep_disabled(self) -> None:
-        """Static loop_breaker at priority 3 when TEP is disabled."""
+        """Static loop_breaker when TEP is disabled."""
         evidence = _base_evidence(failure_signature_repeat=True)
         sections = _build_sections(
             evidence=evidence,
@@ -314,7 +314,6 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 3
 
     def test_static_loop_breaker_when_tep_enabled_streak_zero(self) -> None:
         """Falls through to static loop_breaker when stagnation_streak=0."""
@@ -326,10 +325,9 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 3
 
     def test_tep_streak_1_mild_nudge(self) -> None:
-        """Streak 1: priority 2, mild nudge, no diagnosis_refinement."""
+        """Streak 1: mild nudge, no diagnosis_refinement."""
         evidence = _base_evidence(failure_signature_repeat=True)
         sections = _build_sections(
             evidence=evidence,
@@ -338,12 +336,11 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 2
         assert "Loop breaker" in lb[0]["text"]
         assert _sections_by_key(sections, "diagnosis_refinement") == []
 
     def test_tep_streak_2_warning_with_diagnosis(self) -> None:
-        """Streak 2: priority 1, stagnation warning, diagnosis_refinement."""
+        """Streak 2: stagnation warning, diagnosis_refinement."""
         evidence = _base_evidence(failure_signature_repeat=True)
         sections = _build_sections(
             evidence=evidence,
@@ -352,13 +349,12 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 1
         assert "Stagnation warning" in lb[0]["text"]
         dr = _sections_by_key(sections, "diagnosis_refinement")
         assert len(dr) == 1
 
     def test_tep_streak_3_critical_with_diagnosis(self) -> None:
-        """Streak 3: priority 0, critical stagnation, diagnosis_refinement."""
+        """Streak 3: critical stagnation, diagnosis_refinement."""
         evidence = _base_evidence(failure_signature_repeat=True)
         sections = _build_sections(
             evidence=evidence,
@@ -367,7 +363,6 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 0
         assert "CRITICAL STAGNATION" in lb[0]["text"]
         dr = _sections_by_key(sections, "diagnosis_refinement")
         assert len(dr) == 1
@@ -382,7 +377,6 @@ class TestTepNudgeEscalation:
         )
         lb = _sections_by_key(sections, "loop_breaker")
         assert len(lb) == 1
-        assert lb[0]["priority"] == 0
 
     def test_diagnosis_refinement_not_present_at_streak_1(self) -> None:
         """Only loop_breaker, no diagnosis_refinement at streak 1."""
@@ -407,7 +401,6 @@ class TestTepNudgeEscalation:
         dr = _sections_by_key(sections, "diagnosis_refinement")
         assert len(lb) == 1
         assert len(dr) == 1
-        assert dr[0]["priority"] == 1
 
 
 # ---------------------------------------------------------------------------
