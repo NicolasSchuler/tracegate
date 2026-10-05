@@ -33,8 +33,10 @@ PII_PATTERNS: tuple[str, ...] = (
     # redacted too, since it may be userinfo, and so is an authority longer than any real
     # host (fail closed). Runs before the email pattern, which would otherwise take
     # "TOKEN@github.com" together with the host.
-    r"(?<=://)[^\s/]{1,512}(?=@)|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)"
-    r"|(?<=://)[^\s/]{513,}",
+    # The long-authority branch comes first: otherwise the userinfo branch would redact only
+    # the part before an early "@" of an over-long authority.
+    r"(?<=://)[^\s/]{513,}|(?<=://)[^\s/]{1,512}(?=@)"
+    r"|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)",
     # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
     r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
