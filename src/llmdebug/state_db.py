@@ -1,23 +1,23 @@
 """SQLite state database helpers for RCA and snapshot metadata."""
 
-from __future__ import annotations  # pragma: no cover
+from __future__ import annotations
 
-import sqlite3  # pragma: no cover
-import time  # pragma: no cover
-from collections.abc import Callable, Iterator, Mapping  # pragma: no cover
-from contextlib import contextmanager  # pragma: no cover
-from pathlib import Path  # pragma: no cover
-from typing import Any, cast  # pragma: no cover
+import sqlite3
+import time
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, cast
 
-from . import _json as json  # pragma: no cover
-from ._coerce import read_env_int  # pragma: no cover
-from ._warnings import emit_warning  # pragma: no cover
+from . import _json as json
+from ._coerce import read_env_int
+from ._warnings import emit_warning
 
-STATE_DB_FILENAME = "llmdebug_state.sqlite3"  # pragma: no cover
-_BUSY_TIMEOUT_MS = 30_000  # pragma: no cover
-_WAL_RETRY_ATTEMPTS = 8  # pragma: no cover
-_WAL_BASE_SLEEP_SEC = 0.01  # pragma: no cover
-_WAL_WARNED_PATHS: set[str] = set()  # pragma: no cover
+STATE_DB_FILENAME = "llmdebug_state.sqlite3"
+_BUSY_TIMEOUT_MS = 30_000
+_WAL_RETRY_ATTEMPTS = 8
+_WAL_BASE_SLEEP_SEC = 0.01
+_WAL_WARNED_PATHS: set[str] = set()
 
 
 def state_db_path(out_dir: str | Path) -> Path:

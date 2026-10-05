@@ -7,6 +7,7 @@ import importlib
 
 def test_reload_core_modules_executes_module_level_code() -> None:
     import llmdebug._json as json_module
+    import llmdebug._warnings as warnings_module
     import llmdebug.capture as capture_module
     import llmdebug.cli as cli_module
     import llmdebug.config as config_module
@@ -31,6 +32,7 @@ def test_reload_core_modules_executes_module_level_code() -> None:
     importlib.reload(serialize_module)
     importlib.reload(git_context_module)
     importlib.reload(state_db_module)
+    importlib.reload(warnings_module)
 
     assert capture_module.capture_exception
     assert cli_module.main
@@ -42,5 +44,6 @@ def test_reload_core_modules_executes_module_level_code() -> None:
     assert log_capture_module.LLMDebugLogHandler
     assert output_module.write_bundle
     assert state_db_module.state_db_path
+    assert warnings_module.emit_warning
     assert serialize_module.serialize_locals
     assert git_context_module.get_git_context
