@@ -170,9 +170,11 @@ just decision-model-smoke
 **Both ways.** The harness finds the endpoint via `--adaptive-decision-model-url`,
 `[run_eval.adaptive] decision_model_url`, or `TRACEGATE_DECISION_MODEL_URL` (default
 `http://127.0.0.1:8090`). `run_eval_docker.sh` forwards the variable, rewrites a localhost URL
-for the container, and uses host networking on Linux when the URL is local. An enabled role
-health-checks the endpoint before the first unit and stops the run with a clear error when it is
-down or still loading.
+for the container, and uses host networking on Linux when the URL is local. With an enabled role
+and no URL configured anywhere it materializes that default first (and says so), so the implicit
+sidecar is translated like an explicit one instead of resolving to container loopback. An enabled
+role health-checks the endpoint before the first unit and stops the run with a clear error when it
+is down or still loading.
 
 ## 2. Run a smoke test first
 
