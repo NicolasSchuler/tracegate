@@ -25,13 +25,13 @@ import pytest
 
 from evals.attempt_metadata import (
     AdaptiveAttemptMetadata,
+    AttemptMetadataRequest,
     ContextCompactionMetadata,
     OpenAIAttemptMetadata,
     PromptBudgetMetadata,
     RetryAttemptMetadata,
     StageAAttemptMetadata,
     SyntaxPreflightMetadata,
-    build_attempt_metadata_request,
     build_attempt_metadata_request_from_legacy_kwargs,
 )
 from evals.eval_recording import (
@@ -845,7 +845,7 @@ class TestMaterializeAttemptMetadata:
             legacy_request = build_attempt_metadata_request_from_legacy_kwargs(**required)
         assert Path(captured[0].filename).resolve() == Path(__file__).resolve()
         grouped_meta = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(**required)
+            request=AttemptMetadataRequest(**required)
         )
 
         assert legacy_meta == grouped_meta
@@ -1034,7 +1034,7 @@ class TestMaterializeAttemptMetadata:
 
         legacy_meta = _materialize_attempt_metadata(**base_kwargs)
         grouped_meta = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(
+            request=AttemptMetadataRequest(
                 attempt_dir=attempt_dir,
                 attempt=1,
                 max_attempts=3,

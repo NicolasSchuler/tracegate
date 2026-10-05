@@ -87,10 +87,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "The OPE analysis helper directly exposes its statistical inputs.",
         {"_deterministic_target_ope": 7},
     ),
-    "evals/attempt_metadata.py": _FileArityDebt(
-        "The transitional grouped builder still mirrors AttemptMetadataRequest fields.",
-        {"build_attempt_metadata_request": 26},
-    ),
     "evals/adaptive_progress.py": _FileArityDebt(
         "Adaptive progress helpers (from run_eval, X-02) still take flattened attempt state.",
         {

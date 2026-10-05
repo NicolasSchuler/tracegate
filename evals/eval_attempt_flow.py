@@ -71,13 +71,13 @@ from evals.adaptive_tep import (
 )
 from evals.attempt_metadata import (
     AdaptiveAttemptMetadata,
+    AttemptMetadataRequest,
     ContextCompactionMetadata,
     OpenAIAttemptMetadata,
     PromptBudgetMetadata,
     RetryAttemptMetadata,
     StageAAttemptMetadata,
     SyntaxPreflightMetadata,
-    build_attempt_metadata_request,
 )
 from evals.attempt_proposal import (
     _ensure_deterministic_seed_ack,
@@ -4760,11 +4760,11 @@ def _run_one_condition_attempts(
             + max(0, len(retry_plan_text))
         )
         attempt_metadata = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(
+            request=AttemptMetadataRequest(
                 attempt_dir=attempt_dir,
                 attempt=attempt,
                 max_attempts=k,
-                evidence=evidence,
+                evidence=dict(evidence),
                 prompt=prompt,
                 record_prompt=record_prompt,
                 record_evidence=record_evidence,
