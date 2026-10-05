@@ -245,6 +245,23 @@ def test_llm09_edit_to_crlf_file_changes_one_line_and_keeps_crlf(
     )
 
 
+def test_llm09_crlf_replacement_payload_does_not_double_carriage_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "buggy.py"
+    target.write_bytes(b"a = 1\r\nc = 3\r\n")
+    edits = '{"edits":[{"path":"buggy.py","find":"a = 1","replace":"a = 2\\r\\nb = 3"}]}'
+    _scripted(monkeypatch, [(_response(edits, "stop"), {})])
+
+    result = openai_mod._propose_patch_via_edits(**_CALL, cwd=tmp_path)
+
+    assert result.diff is not None
+    assert "\r\r" not in result.diff
+    ok, message = apply_diff(tmp_path, result.diff)
+    assert ok, message
+    assert target.read_bytes() == b"a = 2\r\nb = 3\r\nc = 3\r\n"
+
+
 def test_llm09_full_file_answer_for_crlf_file_keeps_crlf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

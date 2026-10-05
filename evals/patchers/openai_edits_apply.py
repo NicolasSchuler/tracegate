@@ -102,6 +102,9 @@ def _resolve_edits(edits: list[Any], *, cwd: Path) -> _ResolvedEdits:
             return _fail("bad_path", entry=_safe_trunc(entry))
         if not isinstance(find, str) or not isinstance(replace, str):
             return _fail("bad_find_replace", entry=_safe_trunc(entry))
+        # Chaining and matching run on LF text: a CRLF replacement payload would reach
+        # _with_line_endings unnormalized and come back with doubled "\r" (LLM-09).
+        replace = _normalize_newlines(replace)
         if not find:
             return _fail("empty_find", path=path)
         if path not in current:
