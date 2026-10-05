@@ -1122,6 +1122,7 @@ from evals.eval_recording import (  # noqa: E402
     _empty_attempt_metadata,
     _materialize_attempt_metadata,
     _native_openai_compat_settings_from_args,
+    _resolve_llmdebug_snapshot_schema_version,
     _RunResultsLock,
     _SynchronizedJsonlWriter,
 )
@@ -3190,6 +3191,8 @@ def _build_run_settings_fingerprint(
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "prompt_budget_retry_history_chars": int(args.prompt_budget_retry_history_chars),
+        # CAP-20: the snapshot format (e.g. dict-key rendering) is part of the prompt evidence.
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
     }
     return _xxh3_128_jsonlike(payload)
 

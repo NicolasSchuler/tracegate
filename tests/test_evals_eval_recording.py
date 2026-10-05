@@ -45,6 +45,7 @@ from evals.eval_recording import (
     _materialize_attempt_metadata,
     _materialize_attempt_metadata_request,
     _normalize_openai_base_url,
+    _resolve_llmdebug_snapshot_schema_version,
     _resolve_llmdebug_version,
     _RunResultsLock,
     _SynchronizedJsonlWriter,
@@ -362,6 +363,36 @@ class TestResolveLlmdebugVersion:
         fake.__version__ = "1.2.3"  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "llmdebug", fake)
         assert _resolve_llmdebug_version() == "1.2.3"
+
+
+class TestResolveLlmdebugSnapshotSchemaVersion:
+    """CAP-20: run metadata records the snapshot format the prompts were built from."""
+
+    def test_matches_the_capture_schema(self) -> None:
+        from llmdebug.capture import SCHEMA_VERSION
+
+        assert _resolve_llmdebug_snapshot_schema_version() == SCHEMA_VERSION
+
+    def test_import_fails_returns_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setitem(sys.modules, "llmdebug.capture", None)
+        assert _resolve_llmdebug_snapshot_schema_version() == "unknown"
+
+    def test_recorded_in_both_metadata_builders(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "evals.eval_recording._resolve_llmdebug_snapshot_schema_version", lambda: "9.9"
+        )
+        monkeypatch.setattr("evals.eval_recording._collect_dependency_versions", lambda mode: {})
+        built = _build_run_metadata(
+            args=_run_metadata_args(record_env=[], record_deps="none"),
+            patcher_name="openai",
+            run_id="run-1",
+            started_at_utc="2024-01-01T00:00:00Z",
+            run_settings_fingerprint="abc123",
+        )
+        default = _default_run_metadata(run_id="r1", patcher_name="openai")
+
+        assert built["llmdebug_snapshot_schema_version"] == "9.9"
+        assert default["llmdebug_snapshot_schema_version"] == "9.9"
 
 
 # ── _collect_dependency_versions ─────────────────────────────────────────

@@ -246,6 +246,7 @@ def _build_run_metadata(
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "llmdebug_version": _resolve_llmdebug_version(),
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
         "patcher_name": patcher_name,
         "patcher_config": patcher_config,
         "patcher_config_fingerprint": _xxh3_128_jsonlike(patcher_config),
@@ -575,6 +576,15 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
     return config
 
 
+def _resolve_llmdebug_snapshot_schema_version() -> str:
+    """Debug-session schema the pytest plugin writes; its locals reach snapshot prompts."""
+    try:
+        from llmdebug.capture import SCHEMA_VERSION
+    except Exception:
+        return "unknown"
+    return str(SCHEMA_VERSION)
+
+
 def _resolve_llmdebug_version() -> str:
     try:
         import llmdebug  # type: ignore
@@ -666,6 +676,7 @@ def _default_run_metadata(*, run_id: str, patcher_name: str) -> dict[str, Any]:
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "llmdebug_version": _resolve_llmdebug_version(),
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
         "patcher_name": patcher_name,
         "patcher_config": {"patcher_name": patcher_name},
         "patcher_config_fingerprint": _xxh3_128_text("default"),
