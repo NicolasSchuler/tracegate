@@ -601,3 +601,37 @@ def test_get_enhanced_and_basic_git_context_error_branches(monkeypatch: pytest.M
     assert "branch" not in basic
     assert basic["dirty"] is False
     assert basic["_git_warnings"] == ["head info: no commits"]
+
+
+def test_run_git_command_tolerates_non_utf8_output(tmp_path: Path) -> None:
+    """RCA-14: strict locale decoding raised UnicodeDecodeError past the error handlers."""
+    import shutil
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    repo = str(tmp_path)
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            repo,
+            "-c",
+            "user.name=ci",
+            "-c",
+            "user.email=ci@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "J\u00f6rg's fix",
+        ],
+        check=True,
+    )
+
+    # --encoding makes git emit Latin-1 bytes, which are not valid UTF-8.
+    subject = gc._run_git_command(
+        ["log", "-1", "--format=%s", "--encoding=ISO-8859-1"], repo_root=repo
+    )
+
+    assert subject == "J\ufffdrg's fix"
