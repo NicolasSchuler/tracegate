@@ -215,3 +215,52 @@ def test_jsonl_status_tail_reader_skips_malformed_lines(tmp_path: Path, monkeypa
     status = get_rca_status(out_dir=out_dir, session_id="s1")
     assert status is not None
     assert status["attempt_id"] == "a2"
+
+
+def _advance(out_dir: str, session_id: str, signature: str, action: str, **kwargs: Any) -> Any:
+    request = RCAAttemptRequest(
+        session_id=session_id,
+        action=action,
+        failure_signature=signature,
+        evidence_refs=("crash_frame:app.py:42:parse_input",),
+        hypothesis="parser rejects the empty string",
+        experiment_plan="guard the empty case",
+        gate_mode="strict",
+        **kwargs,
+    )
+    return advance_rca_attempt(out_dir=out_dir, request=request)
+
+
+def test_stale_pass_does_not_resolve_a_different_failure(tmp_path: Path) -> None:
+    """RCA-01: a pass recorded for ValueError:AAA must not resolve TypeError:BBB."""
+    out_dir = str(tmp_path)
+    _advance(out_dir, "s", "ValueError:AAA", "verify", verification_result={"status": "pass"})
+
+    record = _advance(out_dir, "s", "TypeError:BBB", "resolve")
+
+    assert record["gate_feedback"]["allowed"] is False
+    assert "verification_required" in record["gate_feedback"]["triggered_checks"]
+    assert record["verification_result"] is None
+    assert record["state"] != "resolved"
+
+
+def test_a_new_change_invalidates_the_previous_verification(tmp_path: Path) -> None:
+    out_dir = str(tmp_path)
+    _advance(out_dir, "s", "ValueError:AAA", "verify", verification_result={"status": "pass"})
+    changed = _advance(out_dir, "s", "ValueError:AAA", "change")
+
+    record = _advance(out_dir, "s", "ValueError:AAA", "resolve")
+
+    assert changed["verification_result"] is None
+    assert record["gate_feedback"]["allowed"] is False
+
+
+def test_pass_carries_forward_for_the_same_failure(tmp_path: Path) -> None:
+    out_dir = str(tmp_path)
+    _advance(out_dir, "s", "ValueError:AAA", "verify", verification_result={"status": "pass"})
+
+    record = _advance(out_dir, "s", "ValueError:AAA", "resolve")
+
+    assert record["gate_feedback"]["allowed"] is True
+    assert record["state"] == "resolved"
+    assert record["verification_result"] == {"status": "pass"}

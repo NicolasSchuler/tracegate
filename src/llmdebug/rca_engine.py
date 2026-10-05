@@ -12,6 +12,7 @@ from .rca_transitions import (
     allowed_actions_for_state,
     apply_stall_rule,
     build_transition_history,
+    carry_forward_verification,
     default_next_required,
     derive_attempt_progress,
     normalize_action,
@@ -87,20 +88,13 @@ def build_rca_attempt_record(
     ) = resolve_previous_values(previous)
 
     merged_refs = resolve_merged_evidence_refs(previous_refs, list(request.evidence_refs))
-    (
-        hypothesis_value,
-        plan_value,
-        verification_value,
-        proposed_change_value,
-    ) = resolve_attempt_values(
+    hypothesis_value, plan_value, proposed_change_value = resolve_attempt_values(
         previous_hypothesis=previous_hypothesis,
         previous_plan=previous_plan,
         previous_change_summary=previous_change_summary,
-        previous_verification=previous_verification,
         hypothesis=request.hypothesis,
         experiment_plan=request.experiment_plan,
         proposed_change_summary=request.proposed_change_summary,
-        verification_result=request.verification_result,
     )
     same_signature, repeat_count, hypothesis_delta, plan_advanced, hypothesis_advanced = (
         derive_attempt_progress(
@@ -111,6 +105,12 @@ def build_rca_attempt_record(
             previous_plan=previous_plan,
             plan_value=plan_value,
         )
+    )
+    verification_value = carry_forward_verification(
+        previous_verification,
+        request.verification_result,
+        same_signature=same_signature,
+        action=normalized_action,
     )
 
     # Evaluate the current attempt against the previously available budget,

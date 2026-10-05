@@ -343,7 +343,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         {
             "apply_stall_rule": 8,
             "build_transition_history": 7,
-            "resolve_attempt_values": 8,
         },
     ),
     "src/llmdebug/redaction_policy.py": _FileArityDebt(

@@ -136,6 +136,12 @@ The gate system evaluates these prerequisites before allowing a transition:
 **Hard fail** checks block the transition in `strict` mode. In `soft` mode,
 all checks produce warnings but never block.
 
+Hypothesis, plan, change summary and evidence carry forward from the previous attempt
+when a request omits them. A previous `verification_result` carries forward only while
+the failure signature is unchanged and the action is not `change`: a result verified
+one failure, or the code before a new change, so it can't satisfy `verification_required`
+for another.
+
 ### Strict Mode Override
 
 In `strict` mode, a blocked action can still proceed by setting both:

@@ -170,20 +170,36 @@ def resolve_attempt_values(
     previous_hypothesis: str,
     previous_plan: str,
     previous_change_summary: str,
-    previous_verification: Any,
     hypothesis: str | None,
     experiment_plan: str | None,
     proposed_change_summary: str | None,
-    verification_result: dict[str, Any] | None,
-) -> tuple[str, str, Any, str]:
-    """Resolve effective attempt values (input overrides previous)."""
+) -> tuple[str, str, str]:
+    """Resolve effective text values (input overrides previous)."""
     hypothesis_value = (hypothesis or "").strip() or previous_hypothesis
     plan_value = (experiment_plan or "").strip() or previous_plan
-    verification_value = (
-        verification_result if verification_result is not None else previous_verification
-    )
     proposed_change_value = (proposed_change_summary or "").strip() or previous_change_summary
-    return hypothesis_value, plan_value, verification_value, proposed_change_value
+    return hypothesis_value, plan_value, proposed_change_value
+
+
+def carry_forward_verification(
+    previous_verification: Any,
+    verification_result: dict[str, Any] | None,
+    *,
+    same_signature: bool,
+    action: RCAAction,
+) -> Any:
+    """Return the verification result that applies to this attempt.
+
+    A new result always wins. The previous one describes the failure and the code it ran
+    against, so it carries forward only while the failure signature is unchanged and no
+    new change is being applied; otherwise a stale ``pass`` would satisfy the strict
+    ``resolve`` gate for a different failure (RCA-01).
+    """
+    if verification_result is not None:
+        return verification_result
+    if same_signature and action != "change":
+        return previous_verification
+    return None
 
 
 def derive_attempt_progress(
