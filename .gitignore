@@ -83,3 +83,4 @@ swebench-generate-launch-*.log
 .worktrees
 .playwright-mcp
 *.tex
+.golden-diff/

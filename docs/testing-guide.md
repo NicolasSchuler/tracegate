@@ -60,6 +60,8 @@ tests/
 ├── test_hooks.py                # Production exception hooks
 ├── test_benchmarks.py           # Performance benchmarks
 ├── test_evals_*.py              # Eval harness tests
+├── golden_eval/                 # Golden fixture runs of the eval harness
+├── golden/eval_runs/            # Their committed outputs (gzipped JSON)
 └── ...
 ```
 
@@ -332,6 +334,31 @@ def test_show_command(tmp_path, sample_snapshot):
 Eval tests verify the evaluation harness — case loading, scoring, result
 analysis. They often use fixtures or small inline data. These tests are
 more integration-heavy and may carry the `slow` marker.
+
+### Golden Fixture Runs (`golden_eval/`)
+
+Golden runs prove that a harness refactor changes no behaviour. Each scenario in
+`tests/golden_eval/scenarios.py` runs `run_eval.main` end to end (`--jobs 1`,
+`--deterministic --seed 7`, local executor) on six synthetic cases from
+`tests/golden_eval/cases.py`, against a stub model that scripts the n-th patch call of
+each unit: wrong patches, syntax errors, sanitizer rejections, stale diffs, non-answers
+and transport faults. The output keeps the result records, policy event logs and
+states, the artifact tree, every model request and the `analyze_results`,
+`report_run_metrics` and `eval_summary` output, with timings, ports, random IDs and
+the run root replaced by placeholders. Together the scenarios cover about 80% of
+`eval_attempt_flow.py`; baselines aren't covered because they need provisioned repos.
+
+```bash
+just golden-evals          # compare with tests/golden/eval_runs/ (about 15 s)
+just golden-evals-update   # rewrite the golden files after an intended change
+```
+
+On a difference, the runner prints the first differing paths and writes the full
+output to `.golden-diff/`. Prompts contain the checkout and interpreter paths, and
+pytest's output depends on `uv.lock`, so golden files only compare in the environment
+recorded in `tests/golden/eval_runs/environment.json`; elsewhere `just golden-evals`
+exits 2 and the integration test skips. To use them on another machine, run
+`just golden-evals-update` on a commit whose behaviour you trust first.
 
 ## Coverage Requirements
 

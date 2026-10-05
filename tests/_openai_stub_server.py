@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -18,10 +19,16 @@ class StubbedResponse:
     headers: dict[str, str]
 
 
+# Called with (method, path, parsed JSON body) when no queued response matches.
+StubResponder = Callable[[str, str, "dict[str, Any] | list[Any] | None"], "StubbedResponse | None"]
+
+
 class OpenAIStubServer:
-    def __init__(self) -> None:
+    def __init__(self, responder: StubResponder | None = None, *, port: int = 0) -> None:
+        self._port = port
         self._responses: dict[tuple[str, str], deque[StubbedResponse]] = defaultdict(deque)
         self._requests: list[dict[str, Any]] = []
+        self._responder = responder
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -130,8 +137,15 @@ class OpenAIStubServer:
                 with outer._lock:
                     outer._requests.append(request_record)
                     queue = outer._responses[(self.command.upper(), self.path)]
+                    scripted = (
+                        outer._responder(self.command.upper(), self.path, body_json)
+                        if not queue and outer._responder is not None
+                        else None
+                    )
                     if queue:
                         response = queue.popleft()
+                    elif scripted is not None:
+                        response = scripted
                     else:
                         response = StubbedResponse(
                             status=404,
@@ -164,7 +178,7 @@ class OpenAIStubServer:
     def __enter__(self) -> OpenAIStubServer:
         if self._server is not None:
             raise RuntimeError("stub server already running")
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler_cls())
+        self._server = ThreadingHTTPServer(("127.0.0.1", self._port), self._handler_cls())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
