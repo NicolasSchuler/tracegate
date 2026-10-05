@@ -188,29 +188,33 @@ def _cleanup_filesystem_snapshots(out_dir: Path, max_snapshots: int) -> None:
 def _cleanup_old_snapshots(out_dir: Path, max_snapshots: int) -> None:
     """Remove old snapshots beyond the limit.
 
-    While the snapshot index covers every file on disk, it answers "over the limit?" with
-    a ``LIMIT max_snapshots + 1`` query and the cleanup uses its ordering. Only a missing,
-    incomplete or unreadable index falls back to ``iterdir()`` + ``stat()``; that used to
-    happen on every write while under the limit (CAP-15).
+    One ``LIMIT max_snapshots + 1`` index query answers "over the limit?"; over it, the
+    cleanup uses the index ordering, and under it a complete index (row count equal to the
+    snapshot files, one ``scandir``) means nothing to do. Only a missing, incomplete or
+    unreadable index falls back to ``iterdir()`` + ``stat()``, which used to happen on
+    every write while under the limit (CAP-15).
     """
     if max_snapshots <= 0:
         return  # Unlimited
 
     try:
         indexed_count, newest = snapshot_index_window(str(out_dir), limit=max_snapshots + 1)
-        index_healthy = indexed_count == len(snapshot_files(out_dir))
     except Exception:
-        index_healthy, newest = False, []
+        indexed_count, newest = 0, []
 
-    if index_healthy and len(newest) <= max_snapshots:
-        return
-    if index_healthy:
+    if indexed_count > max_snapshots:
+        # Over the limit by the index's count, the steady state of a busy directory: clean
+        # up in index order. The window already holds every row when it is one over.
         try:
-            indexed = list_snapshot_records(str(out_dir))
+            indexed = (
+                newest if len(newest) >= indexed_count else list_snapshot_records(str(out_dir))
+            )
         except Exception:
             indexed = []
         if indexed and _cleanup_indexed_snapshots(out_dir, indexed, max_snapshots):
             return
+    elif indexed_count == len(snapshot_files(out_dir)):
+        return  # complete index, under the limit: no stat() scan
 
     _cleanup_filesystem_snapshots(out_dir, max_snapshots)
 
