@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from llmdebug.gates import evaluate_gate
+from llmdebug.gates import GateRequest, evaluate_gate
 
 
 def test_soft_mode_warns_but_allows_missing_requirements() -> None:
     feedback = evaluate_gate(
-        mode="soft",
-        current_state="captured",
-        action="plan",
-        payload={
-            "evidence_refs": [],
-            "hypothesis": "",
-            "experiment_plan": "",
-        },
+        GateRequest(
+            mode="soft",
+            current_state="captured",
+            action="plan",
+            payload={
+                "evidence_refs": [],
+                "hypothesis": "",
+                "experiment_plan": "",
+            },
+        )
     )
     assert feedback.allowed is True
     assert feedback.severity == "warning"
@@ -26,14 +28,16 @@ def test_soft_mode_warns_but_allows_missing_requirements() -> None:
 
 def test_strict_mode_blocks_missing_requirements() -> None:
     feedback = evaluate_gate(
-        mode="strict",
-        current_state="captured",
-        action="change",
-        payload={
-            "evidence_refs": [],
-            "hypothesis": "",
-            "experiment_plan": "",
-        },
+        GateRequest(
+            mode="strict",
+            current_state="captured",
+            action="change",
+            payload={
+                "evidence_refs": [],
+                "hypothesis": "",
+                "experiment_plan": "",
+            },
+        )
     )
     assert feedback.allowed is False
     assert feedback.severity == "error"
@@ -43,16 +47,18 @@ def test_strict_mode_blocks_missing_requirements() -> None:
 
 def test_strict_mode_exploratory_override_allows() -> None:
     feedback = evaluate_gate(
-        mode="strict",
-        current_state="captured",
-        action="change",
-        payload={
-            "evidence_refs": [],
-            "hypothesis": "",
-            "experiment_plan": "",
-            "exploratory": True,
-            "override_reason": "Need a probe to inspect runtime branch.",
-        },
+        GateRequest(
+            mode="strict",
+            current_state="captured",
+            action="change",
+            payload={
+                "evidence_refs": [],
+                "hypothesis": "",
+                "experiment_plan": "",
+                "exploratory": True,
+                "override_reason": "Need a probe to inspect runtime branch.",
+            },
+        )
     )
     assert feedback.allowed is True
     assert feedback.severity == "warning"
@@ -61,17 +67,19 @@ def test_strict_mode_exploratory_override_allows() -> None:
 
 def test_loop_protection_warning_after_repeats() -> None:
     feedback = evaluate_gate(
-        mode="soft",
-        current_state="changed",
-        action="change",
-        payload={
-            "evidence_refs": ["crash_frame:app.py:42:parse_input"],
-            "hypothesis": "Input parsing fails on non-digit value.",
-            "experiment_plan": "Guard int conversion with try/except.",
-            "hypothesis_advanced": False,
-        },
-        repeated_signature_count=4,
-        exploration_budget=2,
+        GateRequest(
+            mode="soft",
+            current_state="changed",
+            action="change",
+            payload={
+                "evidence_refs": ["crash_frame:app.py:42:parse_input"],
+                "hypothesis": "Input parsing fails on non-digit value.",
+                "experiment_plan": "Guard int conversion with try/except.",
+                "hypothesis_advanced": False,
+            },
+            repeated_signature_count=4,
+            exploration_budget=2,
+        )
     )
     assert feedback.allowed is True
     assert "loop_protection" in feedback.triggered_checks
@@ -116,10 +124,12 @@ class TestEvaluateGateOffMode:
 
     def test_off_mode_always_allows(self) -> None:
         feedback = evaluate_gate(
-            mode="off",
-            current_state="captured",
-            action="resolve",
-            payload={},
+            GateRequest(
+                mode="off",
+                current_state="captured",
+                action="resolve",
+                payload={},
+            )
         )
         assert feedback.allowed is True
         assert feedback.severity == "info"
@@ -134,14 +144,16 @@ class TestEvaluateGateStrictNoHardFailButWarnings:
     def test_strict_with_soft_warnings_only(self) -> None:
         """plan_required is not a hard failure, so strict should allow but warn."""
         feedback = evaluate_gate(
-            mode="strict",
-            current_state="planned",
-            action="change",
-            payload={
-                "evidence_refs": ["frame:app.py:10:fn"],
-                "hypothesis": "Input parsing fails.",
-                "experiment_plan": "",  # missing plan → plan_required (not hard)
-            },
+            GateRequest(
+                mode="strict",
+                current_state="planned",
+                action="change",
+                payload={
+                    "evidence_refs": ["frame:app.py:10:fn"],
+                    "hypothesis": "Input parsing fails.",
+                    "experiment_plan": "",  # missing plan → plan_required (not hard)
+                },
+            )
         )
         assert feedback.allowed is True
         assert feedback.severity == "warning"
@@ -150,15 +162,17 @@ class TestEvaluateGateStrictNoHardFailButWarnings:
     def test_strict_with_no_issues_at_all(self) -> None:
         """No issues → severity='info', allowed=True."""
         feedback = evaluate_gate(
-            mode="strict",
-            current_state="verified",
-            action="resolve",
-            payload={
-                "evidence_refs": ["crash_frame:app.py:42:parse"],
-                "hypothesis": "Bug in parsing.",
-                "experiment_plan": "Guard int().",
-                "verification_result": {"status": "pass"},
-            },
+            GateRequest(
+                mode="strict",
+                current_state="verified",
+                action="resolve",
+                payload={
+                    "evidence_refs": ["crash_frame:app.py:42:parse"],
+                    "hypothesis": "Bug in parsing.",
+                    "experiment_plan": "Guard int().",
+                    "verification_result": {"status": "pass"},
+                },
+            )
         )
         assert feedback.allowed is True
         assert feedback.severity == "info"
@@ -176,7 +190,9 @@ _COMPLETE_PAYLOAD = {
 def test_strict_mode_blocks_an_illegal_transition() -> None:
     """RCA-06: every prerequisite is met, but "resolve" isn't a transition from "captured"."""
     feedback = evaluate_gate(
-        mode="strict", current_state="captured", action="resolve", payload=_COMPLETE_PAYLOAD
+        GateRequest(
+            mode="strict", current_state="captured", action="resolve", payload=_COMPLETE_PAYLOAD
+        )
     )
 
     assert feedback.allowed is False
@@ -186,10 +202,12 @@ def test_strict_mode_blocks_an_illegal_transition() -> None:
 
 def test_soft_mode_warns_about_an_illegal_transition_last() -> None:
     feedback = evaluate_gate(
-        mode="soft",
-        current_state="captured",
-        action="verify",
-        payload={"evidence_refs": [], "hypothesis": "", "experiment_plan": ""},
+        GateRequest(
+            mode="soft",
+            current_state="captured",
+            action="verify",
+            payload={"evidence_refs": [], "hypothesis": "", "experiment_plan": ""},
+        )
     )
 
     assert feedback.allowed is True
@@ -201,7 +219,7 @@ def test_illegal_transition_accepts_the_exploratory_override() -> None:
     payload = {**_COMPLETE_PAYLOAD, "exploratory": True, "override_reason": "spike"}
 
     feedback = evaluate_gate(
-        mode="strict", current_state="captured", action="resolve", payload=payload
+        GateRequest(mode="strict", current_state="captured", action="resolve", payload=payload)
     )
 
     assert feedback.allowed is True
@@ -214,7 +232,7 @@ def test_illegal_transition_accepts_the_exploratory_override() -> None:
 )
 def test_allowed_transitions_pass(state: str, action: str) -> None:
     feedback = evaluate_gate(
-        mode="strict", current_state=state, action=action, payload=_COMPLETE_PAYLOAD
+        GateRequest(mode="strict", current_state=state, action=action, payload=_COMPLETE_PAYLOAD)
     )
 
     assert "illegal_transition" not in feedback.triggered_checks
@@ -222,8 +240,29 @@ def test_allowed_transitions_pass(state: str, action: str) -> None:
 
 def test_a_first_attempt_has_no_transition_to_check() -> None:
     feedback = evaluate_gate(
-        mode="strict", current_state=None, action="resolve", payload=_COMPLETE_PAYLOAD
+        GateRequest(mode="strict", current_state=None, action="resolve", payload=_COMPLETE_PAYLOAD)
     )
 
     assert feedback.allowed is True
     assert feedback.triggered_checks == ()
+
+
+def test_keyword_form_is_deprecated_but_still_works() -> None:
+    """RCA-23: evaluate_gate takes a GateRequest; the old keyword form warns."""
+    with pytest.warns(DeprecationWarning, match="pass a GateRequest"):
+        feedback = evaluate_gate(
+            mode="strict", current_state="verified", action="resolve", payload=_COMPLETE_PAYLOAD
+        )
+
+    assert feedback == evaluate_gate(
+        GateRequest(
+            action="resolve", payload=_COMPLETE_PAYLOAD, mode="strict", current_state="verified"
+        )
+    )
+
+
+def test_request_and_keywords_together_are_rejected() -> None:
+    request = GateRequest(action="plan", payload={})
+
+    with pytest.raises(TypeError, match="not both"):
+        evaluate_gate(request, mode="soft")

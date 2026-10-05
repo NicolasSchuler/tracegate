@@ -303,10 +303,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Artifact rendering still exposes independent payload and presentation inputs.",
         {"_build_export_html_cards": 9, "build_export_payload": 10},
     ),
-    "src/llmdebug/gates.py": _FileArityDebt(
-        "Gate evaluation still exposes the stable public threshold contract.",
-        {"evaluate_gate": 7},
-    ),
     "src/llmdebug/hooks.py": _FileArityDebt(
         "Hook setup still mirrors public installation and production config options.",
         {"_build_production_config": 7, "install_hooks": 9},
@@ -337,13 +333,6 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
     "src/llmdebug/mcp_snapshot_tools.py": _FileArityDebt(
         "MCP snapshot dispatch still receives individual protocol parameters.",
         {"handle_frame": 8},
-    ),
-    "src/llmdebug/rca_transitions.py": _FileArityDebt(
-        "Pure transition helpers still expose individual state-machine inputs.",
-        {
-            "apply_stall_rule": 8,
-            "build_transition_history": 7,
-        },
     ),
     "src/llmdebug/redaction_policy.py": _FileArityDebt(
         "Redaction resolution still mirrors the stable public policy options.",

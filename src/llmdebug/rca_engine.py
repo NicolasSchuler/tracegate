@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .gates import evaluate_gate, normalize_gate_mode
+from .gates import GateRequest, evaluate_gate, normalize_gate_mode
 from .rca_transitions import (
+    TransitionInputs,
+    TransitionStep,
     allowed_actions_for_state,
     apply_stall_rule,
     build_transition_history,
@@ -96,16 +98,15 @@ def build_rca_attempt_record(
         experiment_plan=request.experiment_plan,
         proposed_change_summary=request.proposed_change_summary,
     )
-    same_signature, repeat_count, hypothesis_delta, plan_advanced, hypothesis_advanced = (
-        derive_attempt_progress(
-            previous=previous,
-            failure_signature=request.failure_signature,
-            previous_hypothesis=previous_hypothesis,
-            hypothesis_value=hypothesis_value,
-            previous_plan=previous_plan,
-            plan_value=plan_value,
-        )
+    progress = derive_attempt_progress(
+        previous=previous,
+        failure_signature=request.failure_signature,
+        previous_hypothesis=previous_hypothesis,
+        hypothesis_value=hypothesis_value,
+        previous_plan=previous_plan,
+        plan_value=plan_value,
     )
+    same_signature, repeat_count, hypothesis_delta, _, hypothesis_advanced = progress
     verification_value = carry_forward_verification(
         previous_verification,
         request.verification_result,
@@ -140,35 +141,36 @@ def build_rca_attempt_record(
         "hypothesis_advanced": hypothesis_advanced,
     }
     gate = evaluate_gate(
-        mode=normalized_mode,
-        # A session's first attempt has no state to transition from.
-        current_state=previous_state if previous else None,
-        action=normalized_action,
-        payload=gate_payload,
-        repeated_signature_count=repeat_count,
-        exploration_budget=request.exploration_budget,
-        exploration_budget_remaining=gate_budget_remaining,
+        GateRequest(
+            action=normalized_action,
+            payload=gate_payload,
+            mode=normalized_mode,
+            # A session's first attempt has no state to transition from.
+            current_state=previous_state if previous else None,
+            repeated_signature_count=repeat_count,
+            exploration_budget=request.exploration_budget,
+            exploration_budget_remaining=gate_budget_remaining,
+        )
     )
 
     target_state = resolve_target_state(previous_state, normalized_action, gate.allowed)
     target_state, gate_warnings = apply_stall_rule(
+        TransitionInputs(
+            action=normalized_action, progress=progress, stall_threshold=request.stall_threshold
+        ),
         target_state=target_state,
         gate_warnings=list(gate.warnings),
-        same_signature=same_signature,
-        repeat_count=repeat_count,
-        stall_threshold=request.stall_threshold,
-        hypothesis_advanced=hypothesis_advanced,
-        plan_advanced=plan_advanced,
-        normalized_action=normalized_action,
     )
     transition_history = build_transition_history(
-        previous=previous,
+        previous,
         now=now,
-        normalized_action=normalized_action,
-        previous_state=previous_state,
-        target_state=target_state,
-        gate_allowed=gate.allowed,
-        gate_mode=gate.mode,
+        step=TransitionStep(
+            action=normalized_action,
+            from_state=previous_state,
+            to_state=target_state,
+            gate_allowed=gate.allowed,
+            gate_mode=gate.mode,
+        ),
     )
     created_at = str(previous.get("created_at") or now) if previous else now
     next_required = (

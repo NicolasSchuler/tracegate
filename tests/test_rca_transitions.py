@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from llmdebug.rca_transitions import (
+    AttemptProgress,
+    TransitionInputs,
+    TransitionStep,
     apply_stall_rule,
     build_transition_history,
     classify_hypothesis_delta,
@@ -37,15 +40,17 @@ def test_merge_evidence_refs_deduplicates_and_caps() -> None:
 
 
 def test_apply_stall_rule_marks_state_when_no_progress() -> None:
-    state, warnings = apply_stall_rule(
-        target_state="verified",
-        gate_warnings=[],
+    progress = AttemptProgress(
         same_signature=True,
         repeat_count=3,
-        stall_threshold=3,
-        hypothesis_advanced=False,
+        hypothesis_delta="unchanged",
         plan_advanced=False,
-        normalized_action="bind_evidence",
+        hypothesis_advanced=False,
+    )
+    state, warnings = apply_stall_rule(
+        TransitionInputs(action="bind_evidence", progress=progress, stall_threshold=3),
+        target_state="verified",
+        gate_warnings=[],
     )
     assert state == "stalled"
     assert any("stalled" in w.lower() for w in warnings)
@@ -57,13 +62,15 @@ def test_build_transition_history_truncates_to_last_32() -> None:
         for i in range(40)
     ]
     history = build_transition_history(
-        previous={"transition_history": previous_history},
+        {"transition_history": previous_history},
         now="tnow",
-        normalized_action="verify",
-        previous_state="changed",
-        target_state="verified",
-        gate_allowed=True,
-        gate_mode="soft",
+        step=TransitionStep(
+            action="verify",
+            from_state="changed",
+            to_state="verified",
+            gate_allowed=True,
+            gate_mode="soft",
+        ),
     )
 
     assert len(history) == 32

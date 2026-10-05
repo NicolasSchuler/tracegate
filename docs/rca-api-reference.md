@@ -396,27 +396,34 @@ RCA engine.
 **Module:** `llmdebug.gates`
 
 ```python
-def evaluate_gate(
-    *,
-    mode: str | None,
-    current_state: RCAState | str | None,
-    action: str,
-    payload: dict[str, Any],
-    repeated_signature_count: int = 1,
-    exploration_budget: int = 2,
-) -> GateFeedback:
+@dataclass(frozen=True)
+class GateRequest:
+    action: str
+    payload: dict[str, Any]
+    mode: str | None = None
+    current_state: RCAState | str | None = None
+    repeated_signature_count: int = 1
+    exploration_budget: int = 2
+    exploration_budget_remaining: int | None = None
+
+
+def evaluate_gate(request: GateRequest) -> GateFeedback:
 ```
 
-**Parameters:**
+The keyword form `evaluate_gate(mode=..., current_state=..., action=..., payload=...)`
+still works but emits a `DeprecationWarning`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `mode` | `str \| None` | — | Gate mode. `None` defaults to `"soft"`. |
-| `current_state` | `str \| None` | — | Current RCA state before the transition; `None` for a session's first attempt, which skips `illegal_transition`. |
+**`GateRequest` fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
 | `action` | `str` | — | Requested RCA action. |
 | `payload` | `dict` | — | Action payload with keys: `evidence_refs`, `hypothesis`, `experiment_plan`, `verification_result`, `exploratory`, `override_reason`, `hypothesis_advanced`. |
+| `mode` | `str \| None` | `None` | Gate mode. `None` defaults to `"soft"`. |
+| `current_state` | `str \| None` | `None` | Current RCA state before the transition; `None` for a session's first attempt, which skips `illegal_transition`. |
 | `repeated_signature_count` | `int` | `1` | How many times the current failure signature has been seen. |
 | `exploration_budget` | `int` | `2` | How many repeats are tolerated before `loop_protection` fires. |
+| `exploration_budget_remaining` | `int \| None` | `None` | Budget left after earlier repeats; falls back to `exploration_budget`. |
 
 **Returns:** A [`GateFeedback`](#gatefeedback-object) instance.
 
@@ -574,9 +581,9 @@ The gate system is designed for composition. To customize gate logic:
    `override_reason` to bypass strict gates on individual actions without
    changing the global mode.
 
-3. **Wrap `evaluate_gate()`** — Call `evaluate_gate()` directly with a
-   custom payload to implement domain-specific gate checks before calling
-   the engine.
+3. **Wrap `evaluate_gate()`** — Call `evaluate_gate(GateRequest(...))` directly
+   with a custom payload to implement domain-specific gate checks before
+   calling the engine.
 
 ### Adding New States
 

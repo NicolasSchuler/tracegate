@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, NamedTuple, cast, get_args
 
 from .rca_types import RCAAction, RCAState
@@ -196,6 +197,36 @@ def carry_forward_verification(
     return None
 
 
+class AttemptProgress(NamedTuple):
+    """Repeat and progression signals of the current attempt versus the previous one."""
+
+    same_signature: bool
+    repeat_count: int
+    hypothesis_delta: str
+    plan_advanced: bool
+    hypothesis_advanced: bool
+
+
+@dataclass(frozen=True)
+class TransitionInputs:
+    """The requested action and how the attempt progressed (RCA-23)."""
+
+    action: RCAAction
+    progress: AttemptProgress
+    stall_threshold: int
+
+
+@dataclass(frozen=True)
+class TransitionStep:
+    """One row of ``transition_history`` (RCA-23)."""
+
+    action: RCAAction
+    from_state: str
+    to_state: RCAState
+    gate_allowed: bool
+    gate_mode: str
+
+
 def derive_attempt_progress(
     *,
     previous: dict[str, Any] | None,
@@ -204,7 +235,7 @@ def derive_attempt_progress(
     hypothesis_value: str,
     previous_plan: str,
     plan_value: str,
-) -> tuple[bool, int, str, bool, bool]:
+) -> AttemptProgress:
     """Compute repeat counts and progression signals for current attempt."""
     same_signature = (
         bool(previous) and str(previous.get("failure_signature") or "") == failure_signature
@@ -213,7 +244,13 @@ def derive_attempt_progress(
     hypothesis_delta = classify_hypothesis_delta(previous_hypothesis, hypothesis_value)
     plan_advanced = bool(plan_value) and plan_value != previous_plan
     hypothesis_advanced = hypothesis_delta in {"added", "refined", "replaced"}
-    return same_signature, repeat_count, hypothesis_delta, plan_advanced, hypothesis_advanced
+    return AttemptProgress(
+        same_signature=same_signature,
+        repeat_count=repeat_count,
+        hypothesis_delta=hypothesis_delta,
+        plan_advanced=plan_advanced,
+        hypothesis_advanced=hypothesis_advanced,
+    )
 
 
 def resolve_target_state(
@@ -231,23 +268,19 @@ def resolve_target_state(
 
 
 def apply_stall_rule(
+    inputs: TransitionInputs,
     *,
     target_state: RCAState,
     gate_warnings: list[str],
-    same_signature: bool,
-    repeat_count: int,
-    stall_threshold: int,
-    hypothesis_advanced: bool,
-    plan_advanced: bool,
-    normalized_action: RCAAction,
 ) -> tuple[RCAState, list[str]]:
     """Apply stall detection for repeated signatures without progression."""
+    progress = inputs.progress
     if (
-        same_signature
-        and repeat_count >= max(stall_threshold, 2)
-        and not hypothesis_advanced
-        and not plan_advanced
-        and normalized_action in {"bind_evidence", "change", "verify"}
+        progress.same_signature
+        and progress.repeat_count >= max(inputs.stall_threshold, 2)
+        and not progress.hypothesis_advanced
+        and not progress.plan_advanced
+        and inputs.action in {"bind_evidence", "change", "verify"}
     ):
         gate_warnings.append(
             "Repeated failure signature without hypothesis/plan advancement; state marked stalled."
@@ -257,14 +290,10 @@ def apply_stall_rule(
 
 
 def build_transition_history(
-    *,
     previous: dict[str, Any] | None,
+    *,
     now: str,
-    normalized_action: RCAAction,
-    previous_state: str,
-    target_state: RCAState,
-    gate_allowed: bool,
-    gate_mode: str,
+    step: TransitionStep,
 ) -> list[dict[str, Any]]:
     """Append one transition row while capping history length."""
     previous_history_raw = (
@@ -280,11 +309,11 @@ def build_transition_history(
     transition_history.append(
         {
             "at": now,
-            "action": normalized_action,
-            "from": previous_state,
-            "to": target_state,
-            "gate_allowed": gate_allowed,
-            "gate_mode": gate_mode,
+            "action": step.action,
+            "from": step.from_state,
+            "to": step.to_state,
+            "gate_allowed": step.gate_allowed,
+            "gate_mode": step.gate_mode,
         }
     )
     if len(transition_history) > 32:
