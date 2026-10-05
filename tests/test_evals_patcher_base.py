@@ -388,3 +388,36 @@ def test_replace_patcher_keeps_the_progress_callback() -> None:
     assert clone.max_propose_sec == 5.0
     clone._emit_progress("heartbeat")
     assert events == ["heartbeat"]
+
+
+@pytest.mark.parametrize("method", ["generate_text", "generate_json"])
+def test_generation_calls_honour_the_propose_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    """LLM-11: TEP and Stage-A generations used to retry far past max_propose_sec."""
+    import time
+
+    from evals.patchers import openai_compat_patcher
+    from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+
+    deadlines: list[float | None] = []
+
+    def _fake_chat_completion(**kwargs):
+        deadlines.append(kwargs.get("deadline_monotonic"))
+        return None, {"error": "request_failed"}
+
+    monkeypatch.setattr(openai_compat_patcher, "_chat_completion", _fake_chat_completion)
+    patcher = OpenAICompatPatcher(model="m", base_url="http://127.0.0.1:1/v1", max_propose_sec=30)
+    kwargs: dict[str, object] = {
+        "system_prompt": "s",
+        "prompt": "p",
+        "context_dir": tmp_path,
+        "cwd": tmp_path,
+    }
+    if method == "generate_json":
+        kwargs.update(schema_name="x", schema={"type": "object"})
+    before = time.monotonic()
+    getattr(patcher, method)(**kwargs)
+
+    assert deadlines
+    assert all(d is not None and before + 29 <= d <= time.monotonic() + 30 for d in deadlines)
