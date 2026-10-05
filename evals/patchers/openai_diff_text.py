@@ -130,6 +130,7 @@ def _iter_file_diffs(lines: list[str]) -> list[tuple[str, str]]:
         old_path, new_path = _strip_git_prefixes(
             _clean_path_token(lines[j][4:].strip()),
             _clean_path_token(lines[j + 1][4:].strip()),
+            declared=_git_header_path(line) if git_header else None,
         )
         if old_path is None or new_path is None:
             i = j + 2
@@ -241,14 +242,36 @@ def _clean_path_token(raw: str) -> str | None:
     return token
 
 
-def _strip_git_prefixes(old: str | None, new: str | None) -> tuple[str | None, str | None]:
+def _git_header_path(line: str) -> str | None:
+    """The path a ``diff --git a/P b/P`` line declares, or ``None`` if it is ambiguous.
+
+    The two tokens name the same file on both sides, so the pair rule below decides
+    whether ``a/``/``b/`` are git's prefixes or a real top-level directory. A quoted or
+    space-containing header is left to the ``---``/``+++`` lines.
+    """
+    tokens = line.split()
+    if len(tokens) != 4 or '"' in line:
+        return None
+    old, new = tokens[2], tokens[3]
+    if old.startswith("a/") and new.startswith("b/"):
+        old, new = old.removeprefix("a/"), new.removeprefix("b/")
+    return old if old and old == new else None
+
+
+def _strip_git_prefixes(
+    old: str | None, new: str | None, *, declared: str | None = None
+) -> tuple[str | None, str | None]:
     """Drop git's ``a/`` and ``b/`` prefixes only when the headers use them as a pair.
 
     Stripping each side unconditionally mangled a real top-level directory named ``a``
     or ``b`` in prefix-less headers such as ``--- a/mod.py`` / ``+++ a/mod.py`` (LLM-23).
+    A ``/dev/null`` side carries no prefix evidence, so for creations and deletions the
+    path declared by an accompanying ``diff --git`` header wins when there is one.
     """
     if old is None or new is None:
         return old, new
+    if declared is not None and "/dev/null" in {old, new}:
+        return ("/dev/null", declared) if old == "/dev/null" else (declared, "/dev/null")
     old_git = old == "/dev/null" or old.startswith("a/")
     new_git = new == "/dev/null" or new.startswith("b/")
     if not (old_git and new_git):
