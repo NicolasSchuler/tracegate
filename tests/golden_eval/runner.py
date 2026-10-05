@@ -23,9 +23,11 @@ import contextlib
 import gzip
 import hashlib
 import io
+import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -44,7 +46,8 @@ GOLDEN_DIR = REPO_ROOT / "tests" / "golden" / "eval_runs"
 RUN_ID = "golden"
 # The base URL and the run root end up in settings fingerprints and prompt hashes,
 # so both are fixed per scenario rather than random.
-RUN_ROOT = Path("/tmp/tracegate-golden-eval")
+# User-private, so no other account can plant a symlink where the run root is deleted.
+RUN_ROOT = Path.home() / ".cache" / "tracegate-golden-eval"
 
 
 def stub_port(name: str) -> int:
@@ -412,15 +415,28 @@ def _collect(root: Path, normalizer: Normalizer, requests: list[dict[str, Any]])
     return output
 
 
+def _fresh_run_root(name: str) -> Path:
+    """Create an empty run root, refusing paths another user could have planted."""
+    RUN_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for directory in (RUN_ROOT.parent, RUN_ROOT):
+        info = directory.lstat()
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+            raise RuntimeError(f"refusing to use {directory}: a symlink or not owned by this user")
+    root = RUN_ROOT / name
+    if root.is_symlink():
+        raise RuntimeError(f"refusing to use {root}: it is a symlink")
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir()
+    return root
+
+
 def run_scenario(name: str, keep_root: Path | None = None) -> dict[str, Any]:
     from evals import run_eval
     from tests._openai_stub_server import OpenAIStubServer, StubbedResponse
 
     scenario = SCENARIOS[name]
-    root = (RUN_ROOT / name).resolve()
-    if root.exists():
-        shutil.rmtree(root)
-    root.mkdir(parents=True)
+    root = _fresh_run_root(name)
     try:
         _materialize_cases(root)
         model = ScriptedModel(root)
@@ -538,6 +554,7 @@ def environment() -> dict[str, str]:
         "python": ".".join(platform.python_version_tuple()[:2]),
         "system": platform.system(),
         "repo_root": str(REPO_ROOT),
+        "run_root": str(RUN_ROOT),
         "executable": interpreter(),
         "uv_lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else "",
     }
