@@ -30,11 +30,13 @@ from baselines.openai_compat import (
     response_error_meta,
 )
 from evals import _json as json
+from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR
 from evals.patchers.openai_response import (
     _coerce_content_to_text,
     _extract_response_seed,
     _get_first_choice_reasoning,
     _get_first_choice_reasoning_content,
+    _is_truncated_response,
     _nonnegative_int,
     _reasoning_tokens_from_payload,
     _usage_counts_from_payload,
@@ -837,10 +839,17 @@ def _chat_completion(
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
+            # A length-limited answer without usable final content is a truncation, not
+            # a compatibility problem: it must not be retried or relabelled (LLM-02).
+            rejection = (
+                TRUNCATED_RESPONSE_ERROR
+                if _is_truncated_response(data if isinstance(data, dict) else {})
+                else _OPENAI_COMPAT_REASONING_ONLY_ERROR
+            )
             compat_error_meta = copy_patcher_meta(
                 {
                     **meta,
-                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                    **response_error_meta(exc, error=rejection),
                 }
             )
             if retry_attempts:
@@ -1186,10 +1195,17 @@ async def _chat_completion_async(
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
+            # A length-limited answer without usable final content is a truncation, not
+            # a compatibility problem: it must not be retried or relabelled (LLM-02).
+            rejection = (
+                TRUNCATED_RESPONSE_ERROR
+                if _is_truncated_response(data if isinstance(data, dict) else {})
+                else _OPENAI_COMPAT_REASONING_ONLY_ERROR
+            )
             compat_error_meta = copy_patcher_meta(
                 {
                     **meta,
-                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                    **response_error_meta(exc, error=rejection),
                 }
             )
             if retry_attempts:

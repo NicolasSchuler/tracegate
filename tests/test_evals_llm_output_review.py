@@ -144,6 +144,74 @@ def test_llm02_truncated_context_request_and_compaction_payloads_are_rejected() 
     assert openai_mod._normalize_context_compaction_payload(response)[0] is None
 
 
+def _chat_completion_through_transport(body: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """Run one completion through the real HTTP transport and its normalization."""
+    with OpenAIStubServer() as server:
+        server.enqueue_json(method="POST", path="/v1/chat/completions", body=body)
+        return openai_mod._chat_completion(
+            url=f"{server.base_url_v1}/chat/completions",
+            api_key="local",
+            model="dummy",
+            messages=[{"role": "user", "content": "fix"}],
+            temperature=0.0,
+            max_tokens=32,
+            timeout_sec=5.0,
+            seed=None,
+            http2=False,
+            transport_retry_backoff_base_sec=0.0,
+            transport_retry_backoff_max_sec=0.0,
+        )
+
+
+def test_llm02_truncation_without_content_is_terminal_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A length-limited answer can also drop its content; that is still a truncation.
+    no_content = {"choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+    calls = _scripted(monkeypatch, [(no_content, {"finish_reason": "length"})])
+
+    result = openai_mod._propose_patch_via_diff(**_CALL)
+
+    assert result.diff is None
+    assert result.meta is not None
+    assert result.meta["error"] == "truncated_response"  # was no_choice_content
+    assert len(calls) == 1
+
+
+def test_llm02_truncated_reasoning_only_answer_is_reported_as_truncation() -> None:
+    # Reasoning present, no final content, reasoning fallback disabled: the transport
+    # used to reject this as openai_compat_reasoning_only before anyone saw the cut-off.
+    body = {
+        "choices": [
+            {
+                "message": {"content": "", "reasoning_content": "thinking hard"},
+                "finish_reason": "length",
+            }
+        ]
+    }
+
+    raw, meta = _chat_completion_through_transport(body)
+
+    assert raw is None
+    assert meta["error"] == "truncated_response"
+
+
+def test_llm02_reasoning_only_answer_without_truncation_stays_a_compat_failure() -> None:
+    body = {
+        "choices": [
+            {
+                "message": {"content": "", "reasoning_content": "thinking hard"},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+
+    raw, meta = _chat_completion_through_transport(body)
+
+    assert raw is None
+    assert meta["error"] == "openai_compat_reasoning_only"
+
+
 def test_llm02_complete_diff_still_applies(monkeypatch: pytest.MonkeyPatch) -> None:
     _scripted(monkeypatch, [(_response(_DIFF, "stop"), {"finish_reason": "stop"})])
 

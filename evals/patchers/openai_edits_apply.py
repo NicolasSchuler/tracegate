@@ -317,15 +317,26 @@ def _apply_fuzzy_block_replacement(
 
 def _normalize_full_file_response(raw: dict[str, Any]) -> tuple[str | None, PatcherMeta]:
     content = _get_first_choice_content(raw)
+    finish_reason = _get_first_choice_finish_reason(raw)
     if content is None:
-        return None, {"error": "empty_full_file_response", "raw_response": _safe_trunc(raw)}
+        # Truncation is terminal and decided before the content check (LLM-02).
+        empty_meta: PatcherMeta = {
+            "error": (
+                "truncated_full_file_response"
+                if finish_reason == "length"
+                else "empty_full_file_response"
+            ),
+            "raw_response": _safe_trunc(raw),
+        }
+        if finish_reason:
+            empty_meta["finish_reason"] = finish_reason
+        return None, empty_meta
 
     repaired, code_fence_stripped = _extract_first_fenced_code_block(content)
     meta: PatcherMeta = {
         "full_file_code_fence_stripped": code_fence_stripped,
         "full_file_output_chars": len(repaired),
     }
-    finish_reason = _get_first_choice_finish_reason(raw)
     if finish_reason:
         meta["finish_reason"] = finish_reason
     if finish_reason == "length":
