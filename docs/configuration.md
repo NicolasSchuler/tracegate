@@ -293,6 +293,17 @@ Snapshots are automatically enriched with contextual data:
 - **Log records**: recent log entries (opt-in via `capture_logs=True`)
 - **Capture config**: frames, locals_mode, truncation limits, redaction patterns
 
+### Locals Format
+
+Locals are serialized to JSON-safe values. A local and its direct elements are expanded
+(containers cut at `max_items`, strings at `max_str`); anything nested deeper becomes its
+`repr`. Dict keys that are strings
+are emitted as-is (`{"k": "v"}`); other key types use their `repr` (`{1: "a"}` becomes
+`{"1": "a"}`), and a key that collides with an earlier one gets a stable `#2`, `#3` suffix.
+Snapshots before schema `2.1` wrote every key as its `repr` (`{"'k'": "v"}`). Integers
+outside the 64-bit range are stored as their `repr` string, and a value that can't be
+introspected becomes `"<serialization failed: <ErrorType>>"` without affecting the rest.
+
 ### Coverage Notes
 
 `include_coverage` currently applies to pytest-plugin failure captures only. Coverage

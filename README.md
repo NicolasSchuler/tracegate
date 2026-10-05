@@ -274,7 +274,7 @@ On failure, `.llmdebug/latest.json` stores a versioned `DebugSession` envelope:
 
 ```json
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "kind": "llmdebug.debug_session",
   "session": {
     "name": "test_training_step",

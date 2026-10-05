@@ -226,8 +226,34 @@ def test_dict_serialization(cfg):
     d = {"a": 1, "b": "hello"}
     result = to_jsonlike(d, cfg)
     assert isinstance(result, dict)
-    assert result["'a'"] == 1
-    assert result["'b'"] == "hello"
+    assert result == {"a": 1, "b": "hello"}
+
+
+def test_dict_keys_plain_str_and_repr_otherwise(cfg):
+    """CAP-20: str keys are emitted as-is; other key types keep their repr."""
+    from enum import Enum
+
+    class Color(str, Enum):
+        RED = "red"
+
+    result = to_jsonlike({"k": 1, 2: "two", (1, 2): "pair", None: 0, Color.RED: "c"}, cfg)
+
+    # A str-based enum member is a str, so it renders as its plain string value.
+    assert result == {"k": 1, "2": "two", "(1, 2)": "pair", "None": 0, "red": "c"}
+    assert all(type(key) is str for key in result)
+
+
+def test_dict_key_collisions_keep_every_entry(cfg):
+    """CAP-20: {1: ..., "1": ...} would collide as "1"; the second gets a stable suffix."""
+    assert to_jsonlike({1: "int", "1": "str"}, cfg) == {"1": "int", "1#2": "str"}
+
+
+def test_long_str_keys_are_truncated(cfg):
+    result = to_jsonlike({"k" * (cfg.max_str + 50): 1}, cfg)
+
+    (key,) = result
+    assert key.endswith("...[TRUNC]")
+    assert len(key) <= cfg.max_str
 
 
 @pytest.mark.skipif(not _has_module("numpy"), reason="numpy not installed")
@@ -395,9 +421,9 @@ def test_serialize_locals_redacts_nested_dict():
     }
 
     result = serialize_locals(local_vars, cfg, redactors)
-    database = result["config"]["'database'"]
-    assert database["'password'"] == "[REDACTED]123"
-    assert database["'host'"] == "localhost"
+    database = result["config"]["database"]
+    assert database["password"] == "[REDACTED]123"
+    assert database["host"] == "localhost"
 
 
 def test_serialize_locals_redacts_in_arrays():

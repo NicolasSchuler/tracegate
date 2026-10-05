@@ -757,7 +757,9 @@ def _jsonlike_dict(x: dict[Any, Any], cfg: SnapshotConfig, depth: int) -> JsonLi
         if i >= cfg.max_items:
             _insert_redacted_key(out, "...[TRUNC]", f"+{len(x) - cfg.max_items} more keys")
             break
-        key = safe_repr(k, cfg)
+        # str keys stay plain (str.__str__ also unwraps str subclasses); others use repr.
+        # A collision such as {1: ..., "1": ...} keeps both entries as "1" and "1#2".
+        key = truncate_str(str.__str__(k), cfg.max_str) if isinstance(k, str) else safe_repr(k, cfg)
         _insert_redacted_key(out, key, to_jsonlike(v, cfg, depth + 1))
     return out
 

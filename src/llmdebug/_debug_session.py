@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-DEBUG_SESSION_SCHEMA_VERSION = "2.0"
+DEBUG_SESSION_SCHEMA_VERSION = "2.1"
 DEBUG_SESSION_KIND = "llmdebug.debug_session"
 
 
