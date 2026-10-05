@@ -8,6 +8,8 @@ so the analysis modules can change without touching their consumers (X-02).
 from __future__ import annotations
 
 from evals.analysis_numeric import _fmt_num_with_ci as fmt_num_with_ci
+from evals.analysis_numeric import _mean as mean
+from evals.analysis_numeric import _ratio as ratio
 from evals.analysis_ope import _adaptive_ope_samples as adaptive_ope_samples
 from evals.analysis_ope_support import (
     ADAPTIVE_BUDGET_ACTIONS,
@@ -40,8 +42,10 @@ __all__ = [
     "is_external_baseline_condition",
     "load_and_group_records",
     "matched_uplift",
+    "mean",
     "ope_target_order",
     "print_input_errors",
+    "ratio",
     "records_by_case_condition",
     "run_statistical_analysis",
     "summarize_bucket",
