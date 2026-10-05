@@ -652,3 +652,50 @@ def test_normalize_relative_path_parametrized(
 def test_shell_composition_rejected(cmd: str) -> None:
     """Various shell operators must be rejected."""
     assert normalize_native_pytest_command(cmd) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "--upload-pack=touch /tmp/pwned",
+        "ext::sh -c touch% /tmp/pwned",
+        "file:///etc",
+        "http://example.com/r.git",
+        "",
+    ],
+)
+def test_ensure_git_repo_rejects_unsafe_urls(tmp_path: Path, url: str, monkeypatch) -> None:
+    """DAT-12: only https:// and git@host: URLs reach git, so options and ext:: can't."""
+    from evals.importers import native_repro_helpers
+
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    ok, skip = native_repro_helpers.ensure_git_repo(url, tmp_path / "clone")
+    assert (ok, skip) == (False, native_repro_helpers.SKIP_UNSAFE_REPO_URL)
+    assert calls == []
+
+
+def test_clone_ends_options_before_the_url(tmp_path: Path, monkeypatch) -> None:
+    from evals.importers import native_repro_helpers
+
+    seen: list[list[str]] = []
+
+    def _run(argv, **_kwargs):
+        seen.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    assert native_repro_helpers.ensure_git_repo(
+        "git@github.com:owner/repo.git", tmp_path / "clone"
+    ) == (True, None)
+    assert seen[0][-3:] == ["--", "git@github.com:owner/repo.git", str(tmp_path / "clone")]
+
+
+def test_git_show_rejects_an_option_like_revision(tmp_path: Path, monkeypatch) -> None:
+    from evals.importers.native_repro_helpers import GitShowFileRequest, git_show_file
+
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    request = GitShowFileRequest(commitish="--output=/tmp/x", rel_path="a.py")
+    assert git_show_file(tmp_path, request) is None
+    assert calls == []
