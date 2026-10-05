@@ -855,7 +855,11 @@ def git_context(snapshot_ref: str | None, as_json: bool, max_commits: int, out_d
 
     snapshot = _load_snapshot_ref(snapshot_ref, out_dir)
 
-    context = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    try:
+        context = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    except Exception as e:  # RCA-10: an error message, not a raw traceback
+        click.echo(f"Enhanced git context failed: {type(e).__name__}: {e}", err=True)
+        raise SystemExit(1) from e
     if context is None:
         click.echo(
             "Enhanced git context unavailable (not in a git repository or git is unavailable)."

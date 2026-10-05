@@ -109,6 +109,9 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   `{argument, value, allowed_values}` (or plain text in `response_format="text"`).
 - `llmdebug_list` / `llmdebug_rca_status` / `llmdebug_rca_history` / `llmdebug_rca_advance`
   accept `response_format="text|json"` (default: `text`) and `evidence_schema="summary|full"`.
+- `llmdebug_list` and `llmdebug_rca_history` reject `limit <= 0` with `INVALID_ARGUMENT`.
+- `llmdebug_git_context` reports a failure while collecting git metadata as
+  `GIT_CONTEXT_ERROR`; "not a git repository" is still a normal response.
 - `gate_mode=off|soft|strict` and `exploratory=true|false` are available on RCA-aware tools.
 
 ## Error Handling Examples

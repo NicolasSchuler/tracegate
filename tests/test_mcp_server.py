@@ -806,6 +806,16 @@ class TestList:
         result = llmdebug_list(out_dir=str(tmp_path))
         assert "No snapshots found" in result
 
+    @pytest.mark.parametrize("limit", [0, -1])
+    def test_list_rejects_non_positive_limit(self, snapshot_dir_str: str, limit: int) -> None:
+        """RCA-17: limit <= 0 returned every snapshot; llmdebug_rca_history rejects it."""
+        data = json.loads(
+            llmdebug_list(out_dir=snapshot_dir_str, limit=limit, response_format="json")
+        )
+
+        assert data["error"]["code"] == "INVALID_ARGUMENT"
+        assert "limit must be >= 1" in data["error"]["message"]
+
     def test_respects_limit(self, snapshot_dir_str: str) -> None:
         result = llmdebug_list(out_dir=snapshot_dir_str, limit=1)
         assert "1 snapshot(s)" in result
@@ -1036,6 +1046,21 @@ class TestGitContext:
             code="INVALID_ARGUMENT",
             message_contains="Invalid max_commits value",
         )
+
+    def test_git_context_failure_stays_in_the_error_envelope(
+        self, snapshot_dir_str: str, monkeypatch
+    ) -> None:
+        """RCA-10: an exception from git used to escape the tool."""
+        import llmdebug.mcp_server as server
+
+        def _boom(*_args, **_kwargs):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+        monkeypatch.setattr(server, "get_enhanced_git_context", _boom)
+        data = json.loads(llmdebug_git_context(out_dir=snapshot_dir_str, response_format="json"))
+
+        assert data["error"]["code"] == "GIT_CONTEXT_ERROR"
+        assert "UnicodeDecodeError" in data["error"]["message"]
 
     def test_git_context_json_mode(self, snapshot_dir_str: str, monkeypatch) -> None:
         import llmdebug.mcp_server as server

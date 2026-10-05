@@ -1164,6 +1164,24 @@ class TestGitContext:
         assert payload["head"]["commit"] == "abc1234"
         assert payload["crash_file"]["file_rel"] == "app.py"
 
+    def test_git_context_failure_exits_1_without_a_traceback(
+        self, snapshot_dir: Path, monkeypatch
+    ) -> None:
+        """RCA-10: the CLI printed a raw traceback when git context raised."""
+        import llmdebug.git_context as git_context_module
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("git exploded")
+
+        monkeypatch.setattr(git_context_module, "get_enhanced_git_context", _boom)
+        result = CliRunner(mix_stderr=False).invoke(
+            main, ["git-context", "--dir", str(snapshot_dir)]
+        )
+
+        assert result.exit_code == 1
+        assert "Enhanced git context failed: OSError: git exploded" in result.stderr
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
     def test_git_context_text_output(self, snapshot_dir: Path, monkeypatch) -> None:
         import llmdebug.git_context as git_context_module
 

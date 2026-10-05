@@ -572,7 +572,18 @@ def llmdebug_git_context(
             code="INVALID_ARGUMENT",
             message=str(exc),
         )
-    enhanced = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    try:
+        enhanced = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    except Exception as exc:  # RCA-10: keep failures inside the error envelope
+        _logger.warning("enhanced git context failed: %s: %s", type(exc).__name__, exc)
+        return _render_tool_error(
+            tool="llmdebug_git_context",
+            response_format=response_format,
+            evidence_schema=evidence_schema,
+            with_rca=with_rca,
+            code="GIT_CONTEXT_ERROR",
+            message=f"Enhanced git context failed: {type(exc).__name__}: {exc}",
+        )
     if enhanced is None:
         body = "Enhanced git context unavailable (not in a git repository or git is unavailable)."
         rca_record = (
