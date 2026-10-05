@@ -247,8 +247,13 @@ Available subcommands:
   non-zero for any reason other than a patch that doesn't apply, a missing `output.json`,
   a wait timeout and an empty `fail_to_pass` list are infrastructure errors (DAT-04,
   DAT-09); a patch that doesn't apply under the official sequence (`git apply --verbose`,
-  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure.
-  `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
+  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure. Classification uses
+  only *this* execution's receipts: the workspace's `apply_status`, `run_status`,
+  `output.json` and logs are deleted before the container starts, `patch_apply_failed`
+  needs an `apply_status=failed` receipt (exit code 3 alone can come from a setup
+  command), a `run_status` of 126/127 or a signal exit means the test runner never ran,
+  and an unreadable or malformed `output.json` is an infrastructure error rather than a
+  wrong patch. `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
   `infrastructure_error` per instance and is written before the command fails. Cached
   outputs are reused only for the identical patch (`*_output.patch_sha256`, DAT-13), and
   dataset values are shell-quoted in the container entry script (DAT-11).

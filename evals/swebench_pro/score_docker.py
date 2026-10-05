@@ -255,7 +255,8 @@ def evaluate_instance_docker(
     if not redo and output_path.exists() and cached_digest == patch_digest:
         try:
             output = json.loads(output_path.read_text(encoding="utf-8"))
-            return _score_output(ctx, output)
+            if not _report_validation_error(output):
+                return _score_output(ctx, output)
         except Exception:
             pass  # Re-evaluate on parse failure
 
@@ -289,6 +290,12 @@ def evaluate_instance_docker(
         selected_test_files=ctx.selected_test_files,
         env_commands=env_cmds,
     )
+
+    # DAT-09: a retry or a changed patch must not inherit the previous execution's
+    # receipts, report or logs; a leftover apply_status=failed would otherwise turn the
+    # next container's infrastructure failure into patch_apply_failed, and a leftover
+    # output.json would be scored and stamped with the new patch digest.
+    _clear_execution_receipts(workspace_dir)
 
     # Write workspace files
     (workspace_dir / "patch.diff").write_text(cleaned_patch, encoding="utf-8")
@@ -362,8 +369,11 @@ def evaluate_instance_docker(
         )
 
         apply_status = _read_status(workspace_dir / "apply_status")
-        if status_code == APPLY_FAILED_EXIT_CODE or apply_status == "failed":
-            # The model's patch did not apply: a genuine failure, not infrastructure.
+        if apply_status == "failed":
+            # DAT-09: only this execution's apply-stage receipt classifies the patch as
+            # un-appliable. Exit code 3 alone is not exclusive to patch application (a
+            # setup command can exit 3 after the patch applied), so it must not suppress
+            # the infrastructure-error gate below.
             return ScoreInstanceResult(
                 instance_id=uid,
                 passed=False,
@@ -374,12 +384,30 @@ def evaluate_instance_docker(
         if status_code != 0:
             return _infrastructure_failure(uid, f"Container exited with code {status_code}")
 
+        # DAT-09: the entry script runs the test runner under `set +e` and the parser's
+        # exit code becomes the container status, so a runner that never ran (127) would
+        # otherwise be scored as an ordinary wrong patch from an empty test list.
+        runner_error = _runner_receipt_error(_read_status(workspace_dir / "run_status"))
+        if runner_error:
+            return _infrastructure_failure(uid, runner_error)
+
         # Parse output
         output_json_path = workspace_dir / "output.json"
         if not output_json_path.exists():
             return _infrastructure_failure(uid, "output.json not found after container execution")
 
-        output = json.loads(output_json_path.read_text(encoding="utf-8"))
+        # DAT-09: reading, parsing or validating the report is scorer infrastructure, so
+        # its failures must not be reported as a model failure.
+        try:
+            output = json.loads(output_json_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return _infrastructure_failure(
+                uid, f"unreadable output.json after container execution: {exc}"
+            )
+        report_error = _report_validation_error(output)
+        if report_error:
+            return _infrastructure_failure(uid, report_error)
+
         # Save output
         output_path.write_text(
             json.dumps(output, indent=2, ensure_ascii=False) + "\n",
@@ -414,6 +442,59 @@ def _infrastructure_failure(instance_id: str, error: str) -> ScoreInstanceResult
         error=error,
         infrastructure_error=True,
     )
+
+
+_EXECUTION_RECEIPT_FILENAMES = (
+    "apply_status",
+    "run_status",
+    "output.json",
+    "stdout.log",
+    "stderr.log",
+)
+"""Everything the container writes per execution; stale copies must never be read."""
+
+
+def _clear_execution_receipts(workspace_dir: Path) -> None:
+    """Delete the previous execution's status files, report and logs."""
+    for name in _EXECUTION_RECEIPT_FILENAMES:
+        (workspace_dir / name).unlink(missing_ok=True)
+
+
+_RUNNER_INFRASTRUCTURE_EXIT_CODES = frozenset({126, 127})
+"""``run_script.sh`` could not be executed (126) or its runner was missing (127)."""
+
+
+def _runner_receipt_error(raw: str) -> str:
+    """Classify the test runner's exit receipt; ``""`` when tests actually ran.
+
+    A non-zero exit is normally just failing tests. ``126``/``127`` and signal exits
+    (``>= 128``) mean the runner never produced test results, which is infrastructure.
+    A missing receipt is not classified here: the entry script writes it and the report
+    in the same step, so an absent receipt comes with an absent report.
+    """
+    text = raw.strip()
+    if not text:
+        return ""
+    try:
+        code = int(text)
+    except ValueError:
+        return f"unreadable run_status receipt: {text[:80]!r}"
+    if code in _RUNNER_INFRASTRUCTURE_EXIT_CODES or code >= 128:
+        return f"test runner exited with infrastructure code {code}"
+    return ""
+
+
+def _report_validation_error(output: Any) -> str:
+    """Reject a scorer report the parser wrote but the scorer cannot trust."""
+    if not isinstance(output, dict):
+        return "output.json is not a JSON object"
+    tests = output.get("tests")
+    if not isinstance(tests, list):
+        return "output.json has no 'tests' list"
+    for entry in tests:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+            return "output.json contains a malformed test entry"
+    return ""
 
 
 def _read_status(path: Path) -> str:
