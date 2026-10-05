@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Array statistics have one implementation (CAP-23): `count_anomalies` and `compute_array_stats` were separate copies of the backend code and had drifted from the combined path used by snapshots. That path counted NaN/Inf on the up-cast copy, so a JAX float64 array with values beyond float32 range reported false `inf` anomalies, and CuPy arrays got no anomaly counts. All three now share one dispatcher; anomalies are counted on the original array, and CuPy is included.
 - `generate_hypotheses` keeps distinct hypotheses of one pattern (CAP-16): de-duplication by pattern alone kept only the first, so a `KeyError` with several dict locals or a `TypeError` naming two types reported one of them. Hypotheses are now de-duplicated by pattern and description, with at most `max_per_pattern` (default 3) per pattern; `max_per_pattern=1` gives the old output, and the eval decision-model state uses it so its inputs are unchanged.
 - `diff_snapshots` no longer hands out shared mutable placeholders (CAP-14): for snapshots without git context, `SnapshotDiffResult.old_git`/`new_git` were one module-level dict, so a caller mutating one corrupted every later diff. Empty values are now fresh objects.
 - `filter_snapshot(detail="crash")` returns keys in the snapshot's order (CAP-11): it iterated a `frozenset`, so the key order depended on string hash randomization and differed between processes, which broke diffing and prompt caching of `crash`-detail output.

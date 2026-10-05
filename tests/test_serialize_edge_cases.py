@@ -207,6 +207,10 @@ def test_jax_stats_and_anomalies_with_stub(monkeypatch: pytest.MonkeyPatch) -> N
         def astype(self, dtype: Any) -> np.ndarray:
             return self._values.astype(dtype)
 
+        def __array__(self, dtype: Any = None, copy: Any = None) -> np.ndarray:
+            # Anomalies are counted on the array itself, not the float32 copy (CAP-23).
+            return self._values
+
     stats, anomalies = _jax_stats_and_anomalies(
         _JaxArray([1.0, float("nan"), float("inf")]), is_numeric_dtype=True
     )
@@ -856,3 +860,43 @@ def test_compute_array_stats_exception_returns_none() -> None:
             raise RuntimeError("astype exploded")
 
     assert compute_array_stats(_BrokenArray()) is None
+
+
+def test_jax_anomalies_are_counted_on_the_original_array(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAP-23: the float32 copy turned 1e300 into inf, a false anomaly."""
+    fake_jnp = types.SimpleNamespace(
+        float32=np.float32,
+        isnan=np.isnan,
+        isinf=np.isinf,
+        min=np.min,
+        max=np.max,
+        mean=np.mean,
+        std=np.std,
+    )
+    monkeypatch.setitem(__import__("sys").modules, "jax", types.SimpleNamespace(numpy=fake_jnp))
+    monkeypatch.setitem(__import__("sys").modules, "jax.numpy", fake_jnp)
+
+    with np.errstate(over="ignore"):
+        _, anomalies = _jax_stats_and_anomalies(np.array([1e300, 2.0]), is_numeric_dtype=True)
+
+    assert anomalies is None
+
+
+def test_cupy_arrays_get_anomaly_counts() -> None:
+    """CAP-23: the combined path counted NaN/Inf for NumPy only."""
+
+    class _FakeCupy:
+        __module__ = "cupy.core.core"
+
+        def __init__(self, values: list[float]) -> None:
+            self._values = np.asarray(values, dtype=np.float32)
+            self.dtype = self._values.dtype
+
+        def get(self) -> np.ndarray:
+            return self._values
+
+    from llmdebug.serialize import count_anomalies
+
+    arr = _FakeCupy([1.0, float("nan"), float("inf")])
+    assert count_anomalies(arr) == {"nan": 1, "inf": 1}
+    assert _compute_array_stats_and_anomalies(arr)[1] == {"nan": 1, "inf": 1}
