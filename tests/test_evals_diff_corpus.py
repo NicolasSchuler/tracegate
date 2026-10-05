@@ -75,6 +75,11 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
         "\n\n def h():\n",
         {"c.py": "def f():\n    return 2\n\n\ndef h():\n    return 3\n"},
     ),
+    "change_after_consecutive_blank_context_lines": (  # LLM-03
+        "--- a/c.py\n+++ b/c.py\n@@ -1,6 +1,6 @@\n def f():\n     return 1\n"
+        "\n\n def h():\n-    return 3\n+    return 4\n",
+        {"c.py": "def f():\n    return 1\n\n\ndef h():\n    return 4\n"},
+    ),
     "orphan_think_close_with_draft": (  # LLM-04
         "Let me think. Draft:\n" + DIFF_A.replace("return 2", "return 99") + "</think>\n"
         f"```diff\n{DIFF_A}```\n",

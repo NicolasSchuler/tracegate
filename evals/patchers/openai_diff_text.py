@@ -118,6 +118,20 @@ def _git_file_block(
     return path, "\n".join([*header, *hunks]) + "\n"
 
 
+def _blank_run_continues_hunk(lines: list[str], index: int) -> bool:
+    """Whether the run of blank lines at *index* is followed by more hunk body.
+
+    Several blank context lines in a row (LLM-03) must not end extraction: looking only
+    at the next line made the first blank of a pair terminate the hunk and silently drop
+    every change after it. The whole run is skipped and the first non-blank line decides.
+    """
+    probe = index
+    while probe < len(lines) and lines[probe] == "":
+        probe += 1
+    following = lines[probe] if probe < len(lines) else ""
+    return following.startswith((" ", "+", "-", "\\"))
+
+
 def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
     """Read the hunks of one file section; return them and the index after the section."""
     hunks: list[str] = []
@@ -147,8 +161,7 @@ def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
                 break
             if body == "":
                 # A blank line inside a hunk is a context line whose space was lost (LLM-03).
-                following = lines[i + 1] if i + 1 < n else ""
-                if counts_met or not following.startswith((" ", "+", "-", "\\")):
+                if counts_met or not _blank_run_continues_hunk(lines, i):
                     break
                 body = " "
             elif body.startswith(("+", "-")) and counts_met and _MARKDOWN_BULLET_RE.match(body):
