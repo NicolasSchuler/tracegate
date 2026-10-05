@@ -10,6 +10,7 @@ import platform
 import sys
 import traceback
 import types
+from collections.abc import Mapping
 from datetime import timezone
 from pathlib import Path
 from re import Pattern
@@ -226,7 +227,9 @@ def get_source_snippet(
         return {}
 
 
-def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, Any]] | None:
+def extract_function_args(
+    frame: types.FrameType, f_locals: Mapping[str, Any] | None = None
+) -> tuple[list[str], dict[str, Any]] | None:
     """Extract function argument names and values from a frame.
 
     Returns:
@@ -238,6 +241,9 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
     [positional-only][positional-or-keyword][keyword-only][*args][**kwargs][locals]
     """
     try:
+        # One read: on Python 3.10-3.12 every frame.f_locals access rebuilds the dict
+        # (CAP-12).
+        local_vars = frame.f_locals if f_locals is None else f_locals
         code = frame.f_code
         posonly_count = getattr(code, "co_posonlyargcount", 0)
         arg_count = code.co_argcount
@@ -257,8 +263,8 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
         # Positional-only + positional/keyword args
         for name in varnames[:positional_count]:
             arg_names.append(name)
-            if name in frame.f_locals:
-                arg_values[name] = frame.f_locals[name]
+            if name in local_vars:
+                arg_values[name] = local_vars[name]
 
         # Track position after positional args
         pos = positional_count
@@ -266,24 +272,24 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
         # Keyword-only args (come after positional args in varnames)
         for name in varnames[pos : pos + kwonly_count]:
             arg_names.append(name)
-            if name in frame.f_locals:
-                arg_values[name] = frame.f_locals[name]
+            if name in local_vars:
+                arg_values[name] = local_vars[name]
         pos += kwonly_count
 
         # Check for *args (CO_VARARGS = 0x04)
         if flags & _inspect_module.CO_VARARGS:
             args_name = varnames[pos]
             arg_names.append(f"*{args_name}")
-            if args_name in frame.f_locals:
-                arg_values[args_name] = frame.f_locals[args_name]
+            if args_name in local_vars:
+                arg_values[args_name] = local_vars[args_name]
             pos += 1
 
         # Check for **kwargs (CO_VARKEYWORDS = 0x08)
         if flags & _inspect_module.CO_VARKEYWORDS:
             kwargs_name = varnames[pos]
             arg_names.append(f"**{kwargs_name}")
-            if kwargs_name in frame.f_locals:
-                arg_values[kwargs_name] = frame.f_locals[kwargs_name]
+            if kwargs_name in local_vars:
+                arg_values[kwargs_name] = local_vars[kwargs_name]
 
         return arg_names, arg_values
     except Exception:
@@ -321,14 +327,15 @@ def _add_locals_safe(
     effective_redactors: list[Pattern[str]],
 ) -> None:
     """Add safe-mode locals (with metadata and optional args) to frame_dict."""
-    locals_bundle = serialize_locals_bundle(frame.f_locals, cfg, effective_redactors)
+    local_vars = frame.f_locals  # read once per frame (CAP-12)
+    locals_bundle = serialize_locals_bundle(local_vars, cfg, effective_redactors)
     frame_dict["locals"] = locals_bundle.values
     frame_dict["locals_meta"] = locals_bundle.metadata
     if locals_bundle.truncated:
         frame_dict["locals_truncated"] = True
         frame_dict["locals_truncated_keys"] = locals_bundle.truncated_keys
     if cfg.include_args:
-        arg_info = extract_function_args(frame)
+        arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
             args_bundle = serialize_locals_bundle(arg_values, cfg, effective_redactors)
@@ -343,9 +350,10 @@ def _add_locals_meta(
     warnings: list[str],
 ) -> None:
     """Add meta-mode locals to frame_dict."""
-    frame_dict["locals_meta"] = locals_metadata(frame.f_locals, cfg)
+    local_vars = frame.f_locals  # read once per frame (CAP-12)
+    frame_dict["locals_meta"] = locals_metadata(local_vars, cfg)
     try:
-        total_locals = len(frame.f_locals)
+        total_locals = len(local_vars)
     except Exception as e:
         _warn(warnings, f"locals count failed: {type(e).__name__}: {e}")
         total_locals = None
@@ -353,7 +361,7 @@ def _add_locals_meta(
         frame_dict["locals_truncated"] = True
         frame_dict["locals_truncated_keys"] = total_locals - cfg.max_items
     if cfg.include_args:
-        arg_info = extract_function_args(frame)
+        arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
             frame_dict["args_meta"] = locals_metadata(arg_values, cfg)

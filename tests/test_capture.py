@@ -1886,7 +1886,7 @@ def test_add_locals_safe_extract_args_returns_none(monkeypatch):
     # Monkeypatch extract_function_args to return None
     monkeypatch.setattr(
         "llmdebug.capture.extract_function_args",
-        lambda frame: None,
+        lambda frame, f_locals=None: None,
     )
 
     # Grab a real frame object
@@ -1911,7 +1911,7 @@ def test_add_locals_meta_extract_args_returns_none(monkeypatch):
 
     monkeypatch.setattr(
         "llmdebug.capture.extract_function_args",
-        lambda frame: None,
+        lambda frame, f_locals=None: None,
     )
 
     frame = sys._getframe(0)
@@ -1922,3 +1922,28 @@ def test_add_locals_meta_extract_args_returns_none(monkeypatch):
     assert "args_meta" not in frame_dict
     assert "arg_names" not in frame_dict
     assert "locals_meta" in frame_dict
+
+
+@pytest.mark.parametrize("helper_name", ["_add_locals_safe", "_add_locals_meta"])
+def test_frame_locals_are_read_once_per_frame(helper_name: str) -> None:
+    """CAP-12: f_locals was re-read for every argument (a dict rebuild on 3.10-3.12)."""
+    import llmdebug.capture as capture_module
+
+    def target(a, b, c, *rest, key=None, **extra):
+        return sys._getframe()
+
+    real = target(1, 2, 3, 4, 5, key=6, other=7)
+
+    class _CountingFrame:
+        reads = 0
+        f_code = real.f_code
+
+        @property
+        def f_locals(self) -> dict:
+            _CountingFrame.reads += 1
+            return real.f_locals
+
+    helper = getattr(capture_module, helper_name)  # (frame_dict, frame, cfg, redactors/warnings)
+    helper({}, _CountingFrame(), SnapshotConfig(include_args=True), [])
+
+    assert _CountingFrame.reads == 1
