@@ -219,6 +219,19 @@ explicitly disable profile patterns, and use `True`/`False` to explicitly
 override a profile boolean. The resulting `SnapshotConfig` attributes are
 always concrete tuples and booleans.
 
+Whenever any redaction pattern is active (`ci`, `prod`, `pii_safe=True`, or a custom
+`redact`), values are also redacted by **name**: a local variable, function argument, object
+attribute or dict key whose name contains `password`, `passwd`, `passphrase`, `secret`,
+`credential`, `private_key`, `api_key`/`access_key`, an `access`/`auth`/`refresh`/`bearer`/
+`session`/`csrf`/`api` token, `authorization` or `cookie` (case-insensitive, `_`/`-`
+optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
+`locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
+treated as secrets, because they are too common in ordinary code. `llmdebug.PII_PATTERNS`
+also covers credentials in URLs and connection strings (`postgres://user:pw@host` becomes
+`postgres://[REDACTED]@host`) and secret-named keys inside text such as the `repr` of a
+nested dict. Source snippets and the frame `code` line are source code and are not redacted.
+`dev`, no profile, or `redact=()` turn all of this off.
+
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a
 redaction profile or override so inherited-versus-explicit intent remains
 unambiguous:

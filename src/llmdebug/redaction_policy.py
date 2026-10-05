@@ -8,6 +8,14 @@ from typing import Any, Literal, cast
 
 RedactionProfile = Literal["dev", "ci", "prod"]
 
+# CAP-03: names that mark their value as a secret, as a regex alternation. Bare "key" and
+# "token" are left out: they are too common in ordinary code (dict keys, tokenizers).
+SENSITIVE_NAMES = (
+    r"password|passwd|passphrase|secret|credential|private[_-]?key"
+    r"|(?:api|access)[_-]?key|(?:access|auth|refresh|bearer|session|csrf|api)[_-]?token"
+    r"|authorization|cookie"
+)
+
 # Built-in PII-focused patterns used by safer profiles and production paths.
 PII_PATTERNS: tuple[str, ...] = (
     r"(?i)password\s*[:=]\s*\S+",
@@ -15,6 +23,10 @@ PII_PATTERNS: tuple[str, ...] = (
     r"(?i)bearer\s+\S+",
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
+    # Credentials in a URL or connection string: postgres://user:pw@host -> //[REDACTED]@host
+    r"(?<=://)[^\s/@:]*:[^\s/@]+(?=@)",
+    # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")\w*['\"]?\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^\s,;}\])]+)",
 )
 
 _VALID_PROFILES = {"dev", "ci", "prod"}

@@ -401,8 +401,9 @@ def test_serialize_locals_redacts_password():
     result = serialize_locals(local_vars, cfg, redactors)
     assert "password" in result
     assert "secret_key" in result
-    assert result["password"] == "[REDACTED]:hunter2"
-    assert result["secret_key"] == "[REDACTED]:abc123"
+    # CAP-03: the whole value of a secret-named local is replaced, not just the match.
+    assert result["password"] == "[REDACTED]"
+    assert result["secret_key"] == "[REDACTED]"
     assert result["username"] == "alice"
 
 
@@ -422,7 +423,7 @@ def test_serialize_locals_redacts_nested_dict():
 
     result = serialize_locals(local_vars, cfg, redactors)
     database = result["config"]["database"]
-    assert database["password"] == "[REDACTED]123"
+    assert database["password"] == "[REDACTED]"  # CAP-03: secret-named key
     assert database["host"] == "localhost"
 
 
@@ -482,17 +483,18 @@ def test_serialize_locals_default_avoids_key_collision() -> None:
     result = serialize_locals(local_vars, cfg, redactors)
 
     assert set(result.keys()) == {"api_key", "secret_token"}
-    assert result["api_key"] == "[REDACTED]=value"
-    assert result["secret_token"] == "[REDACTED]=value"
+    assert result["api_key"] == "[REDACTED]"
+    assert result["secret_token"] == "[REDACTED]"
 
 
 def test_serialize_locals_redact_keys_preserves_collisions() -> None:
-    cfg = SnapshotConfig(redact=("api_key|secret_token",), redact_keys=True)
+    # Non-secret names, so the values stay visible and show which entry got the suffix.
+    cfg = SnapshotConfig(redact=("user_id|order_id",), redact_keys=True)
     redactors = compile_redactors(cfg.redact)
 
     local_vars = {
-        "api_key": "alpha",
-        "secret_token": "beta",
+        "user_id": "alpha",
+        "order_id": "beta",
     }
     result = serialize_locals(local_vars, cfg, redactors)
 
@@ -575,7 +577,7 @@ def test_redact_jsonlike_nested_dict():
     inner = outer["inner"]
     assert isinstance(inner, dict)
 
-    assert inner["password"] == "[REDACTED]=hunter2"
+    assert inner["password"] == "[REDACTED]"  # CAP-03: secret-named key
     assert inner["safe"] == "ok"
     # Keys preserved by default
     assert "password" in inner
@@ -620,7 +622,7 @@ def test_redact_jsonlike_keys_preserved_by_default():
 
     assert isinstance(result, dict)
     assert "password_field" in result
-    assert result["password_field"] == "[REDACTED]_value"
+    assert result["password_field"] == "[REDACTED]"  # CAP-03: secret-named key
 
 
 def test_redact_jsonlike_keys_redacted_when_opted_in():
@@ -632,12 +634,13 @@ def test_redact_jsonlike_keys_redacted_when_opted_in():
     assert isinstance(result, dict)
     assert "password_field" not in result
     assert "[REDACTED]_field" in result
-    assert result["[REDACTED]_field"] == "[REDACTED]_value"
+    assert result["[REDACTED]_field"] == "[REDACTED]"  # CAP-03: secret-named key
 
 
 def test_redact_jsonlike_key_collisions_are_preserved() -> None:
-    redactors = compile_redactors(("api_key|secret_token",))
-    data = {"api_key": "first", "secret_token": "second"}
+    # Non-secret names, so the values stay visible and show which entry got the suffix.
+    redactors = compile_redactors(("user_id|order_id",))
+    data = {"user_id": "first", "order_id": "second"}
     result = redact_jsonlike(data, redactors, redact_keys=True)
 
     assert isinstance(result, dict)

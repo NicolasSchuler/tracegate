@@ -9,6 +9,7 @@ from re import Pattern
 from typing import Any, cast
 
 from .config import SnapshotConfig
+from .redaction_policy import SENSITIVE_NAMES
 
 JsonLike = None | bool | int | float | str | dict[str, Any] | list[Any]
 
@@ -69,10 +70,22 @@ def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[P
     return compiled
 
 
+REDACTED = "[REDACTED]"
+
+# CAP-03: matched against local-variable names and dict keys whenever any redaction pattern
+# is active; the value under a matching name is replaced whole.
+SENSITIVE_NAME_PATTERN = re.compile(f"(?i){SENSITIVE_NAMES}")
+
+
+def is_sensitive_name(name: str) -> bool:
+    """Whether a variable or key name marks its value as a secret."""
+    return SENSITIVE_NAME_PATTERN.search(name) is not None
+
+
 def redact_text(text: str, redactors: list[Pattern[str]]) -> str:
     """Apply redaction patterns to text."""
     for rx in redactors:
-        text = rx.sub("[REDACTED]", text)
+        text = rx.sub(REDACTED, text)
     return text
 
 
@@ -107,7 +120,9 @@ def redact_jsonlike(
     """Recursively redact only string leaf values in JSON-like data.
 
     This avoids the fragile serialize-then-regex-then-parse flow, where
-    aggressive patterns can corrupt JSON structure.
+    aggressive patterns can corrupt JSON structure. When any redactor is
+    active, the whole value under a dict key with a sensitive name (see
+    :func:`is_sensitive_name`) is replaced, whatever its type.
     """
     if isinstance(value, str):
         return redact_text(value, redactors)
@@ -131,7 +146,11 @@ def redact_jsonlike(
         out: dict[str, Any] = {}
         for key, item in value.items():
             redacted_key = redact_text(key, redactors) if redact_keys else key
-            redacted_item = redact_jsonlike(item, redactors, redact_keys=redact_keys)
+            redacted_item: JsonLike
+            if redactors and is_sensitive_name(str(key)):
+                redacted_item = REDACTED
+            else:
+                redacted_item = redact_jsonlike(item, redactors, redact_keys=redact_keys)
             if redact_keys:
                 _insert_redacted_key(out, redacted_key, redacted_item)
             else:
@@ -828,10 +847,12 @@ def serialize_locals(
     return result
 
 
+def _local_type_name(value: Any) -> str:
+    return f"{type(value).__module__}.{type(value).__name__}"
+
+
 def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "type": f"{type(value).__module__}.{type(value).__name__}",
-    }
+    entry: dict[str, Any] = {"type": _local_type_name(value)}
     try:
         entry["len"] = len(value)  # type: ignore[arg-type]
     except Exception:  # nosec B110 — safe serialization fallback
@@ -875,6 +896,11 @@ def serialize_locals_bundle(
     for i, (key, value) in enumerate(local_vars.items()):
         if i >= cfg.max_items:
             break
+        if redactors and is_sensitive_name(str(key)):
+            # Never repr a secret, and keep its length out of the metadata.
+            values[key] = REDACTED
+            metadata[str(key)] = {"type": _local_type_name(value)}
+            continue
         values[key] = _serialize_local_value(value, cfg)
         metadata[str(key)] = _build_local_metadata_entry(value)
 
