@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- `filter_snapshot(detail="crash")` returns keys in the snapshot's order (CAP-11): it iterated a `frozenset`, so the key order depended on string hash randomization and differed between processes, which broke diffing and prompt caching of `crash`-detail output.
 - `.traceback.txt` sidecars of pytest snapshots are cleaned up with their snapshot (CAP-05): the sidecar name was derived with `with_suffix("")`, which cuts at the first dot, and every `test_foo.py` node name has one, so retention and `llmdebug clean` deleted the snapshot and left the sidecar (six captures with `max_snapshots=2` left six). One helper, `snapshot_index.traceback_sidecar`, now names it for writers and cleaners.
 - Snapshot retention only deletes its own snapshot files: the indexed cleanup unlinked whatever path an index row named, so a poisoned or foreign `llmdebug_state.sqlite3` in a shared directory could delete files elsewhere. Rows that don't name a snapshot file directly inside the output directory (or name a symlink) are now dropped from the index, not deleted.
 - Capture no longer calls `len()` on arbitrary objects (CAP-21): `locals_meta` recorded `len` for anything that had one, so a lazy ORM query set (e.g. a Django `QuerySet`) ran its query during capture. `len` is now recorded for built-in containers, arrays and pandas objects only.
