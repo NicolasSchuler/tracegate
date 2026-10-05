@@ -82,6 +82,23 @@ _DIFF_META_PREFIXES = (
 
 _MARKDOWN_BULLET_RE = re.compile(r"^[-*+] +(?:[A-Z`*_\[(]|\d+\.)")
 
+# A lowercase bullet ("- fixes the return value") ends a complete hunk too (LLM-07).
+# Only plain words count, so a deleted or added source line stays diff content: code
+# punctuation (``=``, brackets, quotes, ``_``, ``:``) and the deeper indentation of real
+# source lines both fail this pattern.
+_PROSE_BULLET_RE = re.compile(r"^[-*+] [A-Za-z]+(?: +[A-Za-z0-9'`,.!?-]+)+ *$")
+
+
+def _ends_complete_hunk(body: str) -> bool:
+    """Whether *body* is trailing Markdown prose rather than another diff line."""
+    if _MARKDOWN_BULLET_RE.match(body):
+        return True
+    if not _PROSE_BULLET_RE.match(body):
+        return False
+    # Two bare words ("- return x") can still be a one-space-indented source line;
+    # a sentence or three or more words cannot.
+    return len(body[2:].split()) >= 3 or body.rstrip().endswith((".", "!", "?"))
+
 
 def _is_file_header_pair(lines: list[str], index: int) -> bool:
     return (
@@ -186,7 +203,7 @@ def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
                 if counts_met or not _blank_run_continues_hunk(lines, i):
                     break
                 body = " "
-            elif body.startswith(("+", "-")) and counts_met and _MARKDOWN_BULLET_RE.match(body):
+            elif body.startswith(("+", "-")) and counts_met and _ends_complete_hunk(body):
                 break  # trailing markdown bullets after a complete hunk (LLM-07)
             elif not body.startswith((" ", "+", "-", "\\")):
                 break

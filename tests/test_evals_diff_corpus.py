@@ -79,6 +79,10 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
         f"{DIFF_A}- This changes the return value to 2.\n- No other changes.\n",
         {"a.py": A_FIXED},
     ),
+    "trailing_lowercase_bullets": (  # LLM-07
+        f"{DIFF_A}- fixes the return value\n- leaves everything else alone\n",
+        {"a.py": A_FIXED},
+    ),
     "blank_context_line_without_space": (  # LLM-03
         "--- a/c.py\n+++ b/c.py\n@@ -1,5 +1,5 @@\n def f():\n-    return 1\n+    return 2\n"
         "\n\n def h():\n",
