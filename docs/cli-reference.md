@@ -122,6 +122,11 @@ Bundle exports default to `--mode redacted --redaction-profile ci` and emit:
 Use `--bundle-dir <path>` for collaboration-safe artifacts and `--output <path>`
 for a single file. These flags are mutually exclusive.
 
+`--mode redacted` needs a profile that redacts something: `--redaction-profile dev` is
+rejected as a usage error (exit code 2), and `apply_export_redaction(...)` raises
+`ValueError` for `dev` or no profile, instead of labelling an unredacted artifact
+"redacted".
+
 ## Detail Levels
 
 The `show` command defaults to **crash** level to keep evidence compact.

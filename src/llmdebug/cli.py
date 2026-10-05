@@ -232,6 +232,10 @@ def _resolve_export_defaults(
     effective_redaction_profile = redaction_profile
     if effective_mode == "redacted" and effective_redaction_profile is None:
         effective_redaction_profile = "ci"
+    if effective_mode == "redacted" and effective_redaction_profile == "dev":
+        raise click.UsageError(
+            "--mode redacted needs --redaction-profile ci or prod; dev redacts nothing."
+        )
     return effective_mode, effective_redaction_profile
 
 
