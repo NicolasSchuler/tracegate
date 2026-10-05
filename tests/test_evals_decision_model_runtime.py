@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import pytest
 
 from evals.decision_model import runtime, schema
 from evals.decision_model.client import SystemOneClient
@@ -246,3 +247,31 @@ def test_health_message_explains_loading_sidecar() -> None:
     )
     message = runtime.check_decision_model_health(settings, client=loading)
     assert "still loading" in message
+
+
+@pytest.mark.parametrize("noul", [None, "maybe", "nan", "inf"])
+def test_malformed_noul_answers_become_invalid_responses(noul: Any) -> None:
+    """A null/non-numeric/non-finite ``noul`` must not read as "traceback not sufficient".
+
+    The atomic profile maps the aux answers to an action in code, so a silent 0.0 used to
+    produce a confident ``frame_only`` with status ``ok``; the controller only applies its
+    baseline fallback for a non-ok status (covered by the policy-role fallback test of the
+    controller).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok", "revision": "rev-123"})
+        body = _answers_for(json.loads(request.content))
+        body["answers"][schema.QUESTION_TRACEBACK_SUFFICIENT] = {"type": "noul", "noul": noul}
+        return httpx.Response(200, json=body)
+
+    settings = _settings("evidence_atomic_v1")
+    advisor = runtime.SystemOneAdvisor(
+        settings, client=SystemOneClient(settings.client, transport=httpx.MockTransport(handler))
+    )
+    advice = advisor.advise(_request())
+
+    assert advice.status == runtime.STATUS_INVALID_RESPONSE
+    assert advice.atomic_action == ""
+    assert "noul probability" in advice.error

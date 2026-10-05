@@ -183,3 +183,22 @@ def test_parse_answers_ignores_non_finite_probabilities() -> None:
         available_actions=["skip_helper", "frame_only"],
     )
     assert parsed.action_probs == {"skip_helper": 0.0, "frame_only": 1.0}
+
+
+@pytest.mark.parametrize("noul", [None, "maybe", float("inf"), True])
+def test_parse_answers_rejects_malformed_noul_probabilities(noul: object) -> None:
+    with pytest.raises(ValueError, match="noul probability"):
+        schema.parse_answers(
+            _answers(**{schema.QUESTION_TRACEBACK_SUFFICIENT: {"type": "noul", "noul": noul}}),
+            profile=schema.get_profile("evidence_v1"),
+            available_actions=["skip_helper", "frame_only"],
+        )
+
+
+def test_parse_answers_accepts_numeric_noul_strings_and_clamps() -> None:
+    parsed = schema.parse_answers(
+        _answers(**{schema.QUESTION_TRACEBACK_SUFFICIENT: {"type": "noul", "noul": "1.4"}}),
+        profile=schema.get_profile("evidence_v1"),
+        available_actions=["skip_helper", "frame_only"],
+    )
+    assert parsed.traceback_sufficient == 1.0
