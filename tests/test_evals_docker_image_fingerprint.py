@@ -45,3 +45,20 @@ def test_compute_eval_image_build_fingerprint_changes_when_eval_dockerfile_chang
     after = compute_eval_image_build_fingerprint(tmp_path, include_baselines=False)
 
     assert after != before
+
+
+def test_generated_run_output_does_not_change_the_fingerprint(tmp_path: Path) -> None:
+    """ORC-16: SWE-Bench Pro runs and benchmarks must not trigger an image rebuild."""
+    _write_minimal_repo(tmp_path)
+    before = compute_eval_image_build_fingerprint(tmp_path, include_baselines=False)
+
+    for generated in (
+        "evals/swebench_pro_runs/run-1/predictions.jsonl",
+        "evals/swebench_pro_assets/instance/run_script.sh",
+        "evals/.benchmarks/Linux/0001_bench.json",
+    ):
+        path = tmp_path / generated
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("generated\n", encoding="utf-8")
+
+    assert compute_eval_image_build_fingerprint(tmp_path, include_baselines=False) == before

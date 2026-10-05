@@ -298,8 +298,9 @@ _RUN_ID_PATTERN = re.compile(r"(?!\.+$)[A-Za-z0-9._-]{1,128}")
 def _derive_run_paths(
     *, args: argparse.Namespace, config_state: Any, repo_root: Path
 ) -> tuple[str, Path, Path]:
+    # UTC, like every timestamp in the run metadata (ORC-24); the Z says so.
     run_id = str(args.run_id).strip() or (
-        time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:8]
     )
     if not str(args.adaptive_online_state_path).strip():
         args.adaptive_online_state_path = str(

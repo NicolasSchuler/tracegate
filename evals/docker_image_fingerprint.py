@@ -7,15 +7,20 @@ from pathlib import Path
 
 _FINGERPRINT_FILES = ("README.md", "pyproject.toml", "uv.lock")
 _FINGERPRINT_DIRS = ("src", "evals", "baselines")
+# Generated trees (AGENTS.md lists them): output written during a run must not change the
+# fingerprint and trigger an image rebuild mid-experiment (ORC-16).
 _EXCLUDED_PREFIXES = (
     "baselines/envs",
     "baselines/repos",
     "evals/artifacts",
     "evals/results",
     "evals/swebench_runs",
+    "evals/swebench_pro_runs",
+    "evals/swebench_pro_assets",
 )
 _EXCLUDED_DIR_NAMES = {
     "__pycache__",
+    ".benchmarks",
     ".llmdebug",
     ".mypy_cache",
     ".pytest_cache",
