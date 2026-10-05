@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from evals import eval_attempt_flow, progress_output, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
 from llmdebug import _json as json
@@ -1400,3 +1402,73 @@ def test_run_eval_resume_aborts_on_settings_mismatch_without_opt_in(
     assert exit_code == 2
     assert calls == []
     assert "run settings fingerprint mismatch" in capsys.readouterr().out
+
+
+def test_run_eval_patcher_config_error_is_a_clean_cli_failure(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """ORC-12: a patcher config error exits 2 with a message, not a raw SystemExit."""
+    from evals.patcher_factory import PatcherConfigError
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [_make_case(repo_root, "c")])
+
+    def _bad_patcher(_args):
+        raise PatcherConfigError("--openai-model is required")
+
+    monkeypatch.setattr(run_eval, "make_patcher", _bad_patcher)
+    exit_code = _run_eval_main(
+        ["--run-id", "bad-patcher", "--patcher", "null", "--conditions", "base_repair"]
+    )
+
+    assert exit_code == 2
+    assert "Invalid arguments: --openai-model is required" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("jobs", ["1", "2"])
+def test_every_unit_builds_its_own_patcher(tmp_path, monkeypatch, jobs: str) -> None:
+    """ORC-11: --jobs 1 and --jobs N use the same patcher policy, one per unit."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    cases = [_make_case(repo_root, "case_a"), _make_case(repo_root, "case_b")]
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: cases)
+
+    built: list[object] = []
+
+    def _make_patcher(_args):
+        patcher = SimpleNamespace(name="stub")
+        built.append(patcher)
+        return patcher
+
+    used: list[object] = []
+
+    def _run(*, case, condition, run_id, run_metadata, patcher, **_kwargs):
+        used.append(patcher)
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=True,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "make_patcher", _make_patcher)
+    monkeypatch.setattr(run_eval, "run_one_condition", _run)
+    exit_code = _run_eval_main(
+        [
+            *("--run-id", f"jobs-{jobs}", "--patcher", "null"),
+            *("--conditions", "base_repair", "--k", "1", "--jobs", jobs),
+        ]
+    )
+
+    assert exit_code == 0
+    # One run-level patcher (config check, context-window probe) plus one per unit.
+    assert len(built) == 3
+    assert len(used) == 2
+    assert len({id(p) for p in used}) == 2
+    assert id(built[0]) not in {id(p) for p in used}

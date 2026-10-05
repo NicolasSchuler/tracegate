@@ -16,6 +16,7 @@ from baselines.adapter_base import BaselineConfig
 from baselines.intervenor.adapter import IntervenorAdapter
 from baselines.ldb.adapter import LDBAdapter
 from evals import baseline_runtime, run_eval
+from evals.patcher_factory import PatcherConfigError
 
 
 def _write_executable(path: Path) -> Path:
@@ -743,7 +744,7 @@ def test_make_patcher_rejects_missing_baseline_env_before_build(
         openai_timeout_sec=30.0,
     )
 
-    with pytest.raises(SystemExit, match=r"setup_envs\.sh"):
+    with pytest.raises(PatcherConfigError, match=r"setup_envs\.sh"):
         run_eval.make_patcher(args)
 
     assert build_calls == 0
@@ -791,10 +792,11 @@ def test_make_patcher_rewrites_stale_repo_local_baseline_paths(
         openai_timeout_sec=30.0,
     )
 
+    stale_args = vars(args).copy()
     run_eval.make_patcher(args)
 
-    assert args.baseline_repo_dir == str(repo_dir)
-    assert args.baseline_python == str(env_python)
+    # ORC-12: the patcher gets the resolved paths; the shared args stay untouched.
+    assert vars(args) == stale_args
     assert captured["repo_dir"] == str(repo_dir)
     assert captured["python_executable"] == str(env_python)
 

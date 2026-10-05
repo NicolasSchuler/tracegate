@@ -50,6 +50,7 @@ from evals.eval_types import (
 from evals.eval_types import RunConditionInputs as _RunConditionInputs
 from evals.native_stage_b_flow import openai_usable_prompt_tokens
 from evals.patcher_factory import (
+    PatcherConfigError,
     _resolve_openai_context_window_for_run,
 )
 from evals.progress_display import (
@@ -179,6 +180,11 @@ def run_main_flow(
     jobs = int(args.jobs)
     try:
         patcher = seams.make_patcher(args)
+    except PatcherConfigError as exc:
+        _close_run_results_io()
+        display.close()
+        print(f"Invalid arguments: {exc}")
+        return 2
     except BaseException:
         _close_run_results_io()
         display.close()
@@ -659,11 +665,13 @@ def run_main_flow(
                     ),
                     style="info",
                 )
+                # ORC-11: each unit builds its own patcher, as with --jobs N, so the job
+                # count can't become a confounder once a patcher keeps per-instance state.
                 outcome = _execute_eval_unit(
                     case=case,
                     condition=condition,
                     artifacts_root=artifacts_root,
-                    inputs=replace(_unit_inputs_for(condition), patcher_override=patcher),
+                    inputs=_unit_inputs_for(condition),
                 )
                 should_abort = _handle_outcome(outcome)
                 if should_abort:
