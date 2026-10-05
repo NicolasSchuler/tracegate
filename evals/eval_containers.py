@@ -6,7 +6,9 @@ Re-exported by ``evals.run_eval`` for backward compatibility.
 
 from __future__ import annotations
 
+import os
 import queue
+import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -17,6 +19,9 @@ from .eval_types import (
     DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC,
     EVAL_CONTAINER_LABEL_KEY,
     EVAL_CONTAINER_LABEL_VALUE,
+    EVAL_CONTAINER_OWNER_HOST_LABEL,
+    EVAL_CONTAINER_OWNER_PID_LABEL,
+    EVAL_CONTAINER_RUN_ID_LABEL,
     PYTEST_TIMEOUT_RETURNCODE,
     ExecutionConfig,
     RunResult,
@@ -101,12 +106,55 @@ def _container_created_at_utc(container: Any) -> datetime | None:
     return _parse_docker_created_timestamp_utc(attrs.get("Created"))
 
 
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists, under another user
+    return True
+
+
+def _owner_is_gone(container: Any) -> bool:
+    """Whether a running pool container's owner process on this host has exited (ORC-08).
+
+    Pool containers run ``sleep infinity``, so after a ``kill -9`` or an OOM kill of the
+    run they never stop on their own. Containers without owner labels, or owned by
+    another host, are left alone; a reused PID can only make this keep a container.
+    """
+    labels = getattr(container, "labels", None)
+    if not isinstance(labels, dict):
+        return False
+    if labels.get(EVAL_CONTAINER_OWNER_HOST_LABEL) != socket.gethostname():
+        return False
+    try:
+        pid = int(labels.get(EVAL_CONTAINER_OWNER_PID_LABEL) or 0)
+    except ValueError:
+        return False
+    return pid > 0 and pid != os.getpid() and not _pid_is_alive(pid)
+
+
+def _owner_labels(run_id: str = "") -> dict[str, str]:
+    labels = {
+        EVAL_CONTAINER_LABEL_KEY: EVAL_CONTAINER_LABEL_VALUE,
+        EVAL_CONTAINER_OWNER_PID_LABEL: str(os.getpid()),
+        EVAL_CONTAINER_OWNER_HOST_LABEL: socket.gethostname(),
+    }
+    if run_id:
+        labels[EVAL_CONTAINER_RUN_ID_LABEL] = run_id
+    return labels
+
+
 def cleanup_stale_eval_containers(
     *,
     grace_sec: int = DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC,
     now_utc: datetime | None = None,
 ) -> tuple[int, int, str | None]:
     """Remove stopped eval containers older than *grace_sec* seconds.
+
+    Running containers are removed too when their owner process on this host is gone
+    (ORC-08); the grace period applies to both.
 
     Returns:
         Tuple of (removed_count, failed_count, error_message_or_None).
@@ -130,7 +178,7 @@ def cleanup_stale_eval_containers(
         )
         for container in containers:
             status = str(getattr(container, "status", "")).strip().lower()
-            if status in _CONTAINER_ACTIVE_STATES:
+            if status in _CONTAINER_ACTIVE_STATES and not _owner_is_gone(container):
                 continue
             created_at = _container_created_at_utc(container)
             if created_at is not None and grace > 0:
@@ -229,6 +277,7 @@ class _EvalContainerPool:
         size: int,
         execution: ExecutionConfig,
         workdirs_host: Path,
+        run_id: str = "",
     ) -> None:
         import docker  # type: ignore[import-not-found]
 
@@ -262,7 +311,7 @@ class _EvalContainerPool:
                     mem_limit=execution.container_memory,
                     nano_cpus=int(float(execution.container_cpus) * 1_000_000_000),
                     user=execution.container_user,
-                    labels={EVAL_CONTAINER_LABEL_KEY: EVAL_CONTAINER_LABEL_VALUE},
+                    labels=_owner_labels(run_id),
                     volumes=volumes,
                 )
                 wrapper = _EvalContainer(raw, workdirs_host)

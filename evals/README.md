@@ -557,7 +557,7 @@ Important execution flags:
   outlive units. Before the 2026-10-04 fix (ORC-02) the pool was started but never used, so
   every earlier result ran in one-shot containers. Recorded as
   `run_metadata.patcher_config.execution.container_pool`.
-- stale eval containers are pruned automatically at run start (best-effort, 5-minute grace)
+- stale eval containers are pruned automatically at run start (best-effort, 5-minute grace); this includes running pool containers whose owning run process on this host is gone, for example after `kill -9` (they are labelled with the owner's PID, host and run id)
 
 Use `--executor local` if you want the legacy host-side pytest execution.
 

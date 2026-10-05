@@ -669,6 +669,7 @@ def run_main_flow(
                 size=pool_size,
                 execution=execution_config,
                 workdirs_host=artifacts_root / "workdirs",
+                run_id=run_id,
             )
             run_context = replace(run_context, container_pool=container_pool)
             shared_unit_inputs = _with_run_context(shared_unit_inputs, run_context)
