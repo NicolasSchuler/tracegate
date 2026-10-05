@@ -553,10 +553,13 @@ Control maximum retained records via `LLMDEBUG_RCA_MAX_RECORDS` (default:
 
 ### Migration
 
-On first SQLite access, the backend checks for an existing
+On the first SQLite write, the backend checks for an existing
 `rca_attempts.jsonl` file and performs a one-way migration: valid records
-are bulk-inserted into SQLite and the JSONL file is renamed to
-`rca_attempts.jsonl.bak`.
+are merged into SQLite by `attempt_id` (rows already in SQLite win) and the
+JSONL file is renamed to `rca_attempts.jsonl.bak`. Reads never migrate and
+never create the database: until the first write, `get_rca_status` and
+`get_rca_history` merge the pending JSONL rows in memory, and with no
+database they return no SQLite rows instead of creating one.
 
 ## Environment Variables
 

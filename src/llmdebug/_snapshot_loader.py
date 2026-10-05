@@ -16,7 +16,12 @@ from ._warnings import emit_warning
 from .compact_keys import expand_keys, is_compact_snapshot
 from .output import get_latest_snapshot
 from .snapshot_types import SnapshotDict
-from .state_db import list_snapshot_records, remove_snapshot_records, replace_snapshot_records
+from .state_db import (
+    list_snapshot_records,
+    remove_snapshot_records,
+    replace_snapshot_records,
+    state_db_exists,
+)
 
 
 def _load_snapshot_file_raw(path: Path) -> SnapshotDict:
@@ -289,6 +294,27 @@ def _scan_snapshot_entries(out_dir: str) -> tuple[list[dict[str, Any]], int]:
     return entries, skipped
 
 
+def _refresh_snapshot_index(out_dir: str, entries: list[dict[str, Any]]) -> None:
+    try:
+        replace_snapshot_records(
+            out_dir,
+            [
+                {
+                    "path": str(entry["path"].resolve()),
+                    "mtime": float(entry["mtime"]),
+                    "name": entry["name"],
+                    "exc_type": entry["exc_type"],
+                    "exc_message": entry["exc_message"],
+                    "file": entry["file"],
+                    "line": str(entry["line"]),
+                }
+                for entry in entries
+            ],
+        )
+    except Exception as e:
+        emit_warning(f"failed to refresh snapshot index: {type(e).__name__}: {e}")
+
+
 def find_all_snapshots(
     out_dir: str,
     *,
@@ -322,26 +348,11 @@ def find_all_snapshots(
     if index_read_failed:
         emit_warning("snapshot index unavailable; falling back to filesystem scan")
 
-    # Fallback scan for index miss/corruption and rebuild index.
+    # Fallback scan for index miss/corruption. Only an existing index is rebuilt: reads
+    # never create the state database (RCA-02).
     entries, skipped = _scan_snapshot_entries(out_dir)
-    try:
-        replace_snapshot_records(
-            out_dir,
-            [
-                {
-                    "path": str(entry["path"].resolve()),
-                    "mtime": float(entry["mtime"]),
-                    "name": entry["name"],
-                    "exc_type": entry["exc_type"],
-                    "exc_message": entry["exc_message"],
-                    "file": entry["file"],
-                    "line": str(entry["line"]),
-                }
-                for entry in entries
-            ],
-        )
-    except Exception as e:
-        emit_warning(f"failed to refresh snapshot index: {type(e).__name__}: {e}")
+    if state_db_exists(out_dir):
+        _refresh_snapshot_index(out_dir, entries)
 
     if skipped > 0:
         emit_warning(f"skipped {skipped} corrupted snapshot(s) in {out_dir}")

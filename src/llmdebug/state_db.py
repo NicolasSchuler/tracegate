@@ -26,6 +26,11 @@ def state_db_path(out_dir: str | Path) -> Path:
     return Path(out_dir) / STATE_DB_FILENAME
 
 
+def state_db_exists(out_dir: str | Path) -> bool:
+    """Whether the state database exists. Read helpers never create it (RCA-02)."""
+    return state_db_path(out_dir).is_file()
+
+
 def _enable_wal_mode(
     conn: sqlite3.Connection,
     *,
@@ -130,6 +135,8 @@ def open_state_db(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
 
 def count_rca_records(out_dir: str | Path) -> int:
     """Return the number of persisted RCA attempt records for ``out_dir``."""
+    if not state_db_exists(out_dir):
+        return 0
     with open_state_db(out_dir) as conn:
         row = conn.execute("SELECT COUNT(*) FROM rca_attempts").fetchone()
     return int(row[0]) if row else 0
@@ -250,6 +257,8 @@ def fetch_latest_rca_record(
         sql += " WHERE session_id = ?"
         params = (session_id,)
     sql += " ORDER BY updated_at DESC, rowid DESC LIMIT 1"
+    if not state_db_exists(out_dir):
+        return None
     with open_state_db(out_dir) as conn:
         rows = conn.execute(sql, params).fetchall()
     decoded = _decode_payload_rows(rows)
@@ -276,6 +285,8 @@ def fetch_rca_history_records(
     if limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
+    if not state_db_exists(out_dir):
+        return []
     with open_state_db(out_dir) as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return _decode_payload_rows(rows)
@@ -303,7 +314,7 @@ def upsert_snapshot_record(out_dir: str | Path, record: dict[str, Any]) -> None:
 
 def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
     """Delete snapshot index rows for the provided on-disk paths."""
-    if not paths:
+    if not paths or not state_db_exists(out_dir):
         return
     with open_state_db(out_dir) as conn:
         conn.executemany("DELETE FROM snapshots WHERE path = ?", [(path,) for path in paths])
@@ -340,6 +351,8 @@ def list_snapshot_records(
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
+    if not state_db_exists(out_dir):
+        return []
     with open_state_db(out_dir) as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     out: list[dict[str, Any]] = []

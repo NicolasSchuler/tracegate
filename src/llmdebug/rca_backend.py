@@ -198,6 +198,16 @@ def ensure_sqlite_migration(out_dir: str) -> None:
             emit_warning(f"could not rotate {jsonl_path.name} after migration: {exc}")
 
 
+def _pending_jsonl_records(out_dir: str, session_id: str | None) -> list[dict[str, Any]]:
+    """Valid JSONL rows not migrated to sqlite yet (reads don't migrate: no file writes)."""
+    return [
+        record
+        for record in _iter_jsonl_records(_store_path(out_dir))
+        if _is_valid_rca_record(record)
+        and (not session_id or record.get("session_id") == session_id)
+    ]
+
+
 def get_rca_history(
     *,
     out_dir: str,
@@ -206,8 +216,14 @@ def get_rca_history(
 ) -> list[dict[str, Any]]:
     """Load RCA history, newest-first."""
     if _backend() == "sqlite":
-        ensure_sqlite_migration(out_dir)
-        return history(out_dir=out_dir, session_id=session_id, limit=limit)
+        records = history(out_dir=out_dir, session_id=session_id, limit=limit)
+        pending = _pending_jsonl_records(out_dir, session_id)
+        if not pending:
+            return records
+        stored_ids = {record.get("attempt_id") for record in records}
+        merged = records + [row for row in pending if row.get("attempt_id") not in stored_ids]
+        merged.sort(key=lambda record: str(record.get("updated_at") or ""), reverse=True)
+        return merged[:limit] if limit > 0 else merged
 
     records = _iter_jsonl_records(_store_path(out_dir))
     if session_id:
@@ -221,14 +237,20 @@ def get_rca_history(
 def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, Any] | None:
     """Return latest RCA attempt for a session."""
     if _backend() == "sqlite":
-        ensure_sqlite_migration(out_dir)
-        return latest_record(out_dir=out_dir, session_id=session_id)
+        stored = latest_record(out_dir=out_dir, session_id=session_id)
+        pending = _pending_jsonl_records(out_dir, session_id)
+        if not pending:
+            return stored
+        newest_pending = max(pending, key=lambda record: str(record.get("updated_at") or ""))
+        if stored is None or str(newest_pending["updated_at"]) > str(stored.get("updated_at")):
+            return newest_pending
+        return stored
 
     return _latest_jsonl_record(_store_path(out_dir), session_id=session_id)
 
 
 def persist_rca_record(*, out_dir: str, record: Mapping[str, Any]) -> None:
-    """Persist one RCA record using the configured backend."""
+    """Persist one RCA record using the configured backend (migrating JSONL first)."""
     if _backend() == "sqlite":
         ensure_sqlite_migration(out_dir)
         store_rca_record(record, out_dir=out_dir, max_records=max_rca_records())

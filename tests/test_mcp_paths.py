@@ -89,3 +89,45 @@ def test_tool_schemas_keep_their_parameters() -> None:
     for name in _TOOL_NAMES:
         assert "out_dir" in by_name[name].inputSchema["properties"], name
     assert "index" in by_name["llmdebug_frame"].inputSchema["properties"]
+
+
+_READ_ONLY_CALLS: dict[str, dict[str, object]] = {
+    "llmdebug_diagnose": {},
+    "llmdebug_show": {},
+    "llmdebug_list": {},
+    "llmdebug_frame": {"index": 0},
+    "llmdebug_git_context": {},
+    "llmdebug_diff": {},
+    "llmdebug_rca_status": {},
+    "llmdebug_rca_history": {},
+}
+
+
+def _tree(path: Path) -> list[str]:
+    return sorted(str(item.relative_to(path)) for item in path.rglob("*"))
+
+
+@pytest.mark.parametrize("tool_name", sorted(_READ_ONLY_CALLS))
+def test_read_only_tools_do_not_create_a_missing_out_dir(root: Path, tool_name: str) -> None:
+    """D11: read-only tools never create files, even inside the root."""
+    getattr(mcp_server, tool_name)(out_dir="missing", **_READ_ONLY_CALLS[tool_name])
+
+    assert not (root / "missing").exists()
+
+
+@pytest.mark.parametrize("tool_name", sorted(_READ_ONLY_CALLS))
+def test_read_only_tools_do_not_create_the_state_database(root: Path, tool_name: str) -> None:
+    from llmdebug.config import SnapshotConfig
+    from llmdebug.output import write_bundle
+
+    out_dir = root / ".llmdebug"
+    cfg = SnapshotConfig(out_dir=str(out_dir), output_format="json")
+    for name in ("first", "second"):
+        write_bundle({"name": name, "exception": {"type": "E", "message": name}, "frames": []}, cfg)
+    for db_file in out_dir.glob("llmdebug_state.sqlite3*"):
+        db_file.unlink()
+    before = _tree(out_dir)
+
+    getattr(mcp_server, tool_name)(out_dir=".llmdebug", **_READ_ONLY_CALLS[tool_name])
+
+    assert _tree(out_dir) == before

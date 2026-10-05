@@ -11,6 +11,7 @@ import pytest
 
 from llmdebug import _json as json
 from llmdebug import state_db
+from llmdebug.rca_backend import ensure_sqlite_migration
 from llmdebug.rca_state import advance_rca_attempt, get_rca_history, get_rca_status
 from llmdebug.rca_types import RCAAttemptRequest
 
@@ -86,6 +87,7 @@ def test_sqlite_backend_migrates_jsonl_and_keeps_backup(tmp_path: Path, monkeypa
         encoding="utf-8",
     )
 
+    ensure_sqlite_migration(out_dir)  # writes migrate; reads only merge in memory (RCA-02)
     history = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=10)
     assert len(history) == 2
     assert history[0]["attempt_id"] == "a2"

@@ -82,6 +82,11 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   anything is read or created. Snapshot paths and diff refs must also lie inside
   `out_dir`, so they are confined too. Set `LLMDEBUG_MCP_ROOT` in the server's
   environment (for example in `.mcp.json`) to serve a different tree.
+- **Read-only calls create nothing:** `llmdebug_list`, `llmdebug_git_context`,
+  `llmdebug_rca_status`, `llmdebug_rca_history`, and `llmdebug_diagnose`,
+  `llmdebug_show`, `llmdebug_frame` and `llmdebug_diff` without `with_rca`
+  never create `out_dir`, the state database or the snapshot index. They read
+  what exists and fall back to scanning snapshot files.
 
 ## Parameter Glossary
 
