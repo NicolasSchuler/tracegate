@@ -719,7 +719,7 @@ def _perform_deletions(to_delete: list[Path]) -> tuple[int, int]:
     failed = 0
     for p in to_delete:
         try:
-            p.unlink()
+            p.unlink(missing_ok=True)  # already gone (another process) is not a failure
             deleted += 1
         except Exception as e:
             failed += 1
@@ -749,7 +749,7 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str, purge_state: boo
     out_path = Path(out_dir)
     if not out_path.is_dir():
         click.echo(f"Directory not found: {out_dir}", err=True)
-        return
+        raise SystemExit(1)  # RCA-15: errors on stderr exit non-zero
 
     from .snapshot_index import snapshot_files as _list_snapshot_files
     from .state_db import remove_snapshot_records
@@ -781,6 +781,8 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str, purge_state: boo
     if failed:
         msg += f" Failed to delete {failed} file(s)."
     click.echo(msg)
+    if failed:
+        raise SystemExit(1)
 
 
 @main.command()
@@ -888,10 +890,12 @@ def git_context(snapshot_ref: str | None, as_json: bool, max_commits: int, out_d
         click.echo(f"Enhanced git context failed: {type(e).__name__}: {e}", err=True)
         raise SystemExit(1) from e
     if context is None:
+        # stderr and exit 1, so `--json` consumers never get prose on stdout (RCA-15).
         click.echo(
-            "Enhanced git context unavailable (not in a git repository or git is unavailable)."
+            "Enhanced git context unavailable (not in a git repository or git is unavailable).",
+            err=True,
         )
-        return
+        raise SystemExit(1)
 
     if as_json:
         click.echo(json.dumps(context, indent=2, ensure_ascii=False, default=str))

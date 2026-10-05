@@ -459,12 +459,14 @@ def test_perform_deletions_counts_success_and_failures(
 ) -> None:
     ok_file = tmp_path / "ok.json"
     ok_file.write_text("{}", encoding="utf-8")
-    missing = tmp_path / "missing.json"
+    missing = tmp_path / "missing.json"  # deleted by someone else: counts as done
+    undeletable = tmp_path / "a_directory.json"
+    undeletable.mkdir()
 
-    deleted, failed = cli._perform_deletions([ok_file, missing])
-    assert deleted == 1
+    deleted, failed = cli._perform_deletions([ok_file, missing, undeletable])
+    assert deleted == 2
     assert failed == 1
-    assert "could not delete" in capsys.readouterr().err
+    assert "could not delete a_directory.json" in capsys.readouterr().err
 
 
 def test_list_command_rich_branch(monkeypatch: pytest.MonkeyPatch) -> None:

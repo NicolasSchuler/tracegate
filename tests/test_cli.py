@@ -582,7 +582,7 @@ class TestClean:
         missing_dir = tmp_path / "missing"
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(main, ["clean", "--dir", str(missing_dir)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1  # RCA-15
         assert "Directory not found" in result.stderr
 
 
@@ -1263,8 +1263,9 @@ class TestGitContext:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(main, ["git-context", "--dir", str(snapshot_dir)])
-        assert result.exit_code == 0
-        assert "unavailable" in result.output.lower()
+        assert result.exit_code == 1  # RCA-15: nothing on stdout for --json consumers
+        assert "unavailable" in result.stderr.lower()
+        assert result.output == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1505,7 +1506,7 @@ class TestCleanFailedDeletion:
 
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(main, ["clean", "--keep", "1", "--yes", "--dir", str(tmp_path)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1  # RCA-15: deletions failed
         assert "Failed to delete" in result.output
 
 

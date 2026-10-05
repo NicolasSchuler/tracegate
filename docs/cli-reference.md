@@ -90,6 +90,12 @@ Outputs metadata only:
 - Recent commit metadata + shortstats
 - Crash-file diffstat metadata
 
+When git context is unavailable (not a git repository, git missing) or
+collecting it fails, the message goes to stderr and the command exits 1, so
+`--json` output on stdout is always JSON. Every command that reports an error on
+stderr exits non-zero; `clean` exits 1 for a missing directory or a failed
+deletion.
+
 ### clean
 
 Remove old snapshots, keeping only the most recent.
