@@ -777,8 +777,24 @@ def _jsonlike_object(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     return out
 
 
+def _serialization_failed(error: Exception) -> str:
+    return f"<serialization failed: {type(error).__name__}>"
+
+
 def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
-    """Convert arbitrary Python object to JSON-serializable form."""
+    """Convert arbitrary Python object to JSON-serializable form.
+
+    Never raises: a value whose introspection fails (for example a
+    ``__getattribute__`` that raises) becomes a ``<serialization failed: ...>``
+    marker, so one hostile object can't abort the capture or hide its siblings.
+    """
+    try:
+        return _to_jsonlike(x, cfg, depth)
+    except Exception as e:
+        return _serialization_failed(e)
+
+
+def _to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     if x is None or isinstance(x, (bool, float)):
         return x
     if isinstance(x, int):
@@ -797,7 +813,7 @@ def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
         return _jsonlike_collection(x, cfg, depth)
     if isinstance(x, dict):
         return _jsonlike_dict(cast(dict[Any, Any], x), cfg, depth)
-    if hasattr(x, "__dict__") and depth < 1:
+    if depth < 1 and hasattr(x, "__dict__"):
         return _jsonlike_object(x, cfg, depth)
     return safe_repr(x, cfg)
 
@@ -818,14 +834,25 @@ def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
         entry["len"] = len(value)  # type: ignore[arg-type]
     except Exception:  # nosec B110 — safe serialization fallback
         pass
-    if (is_array_like(value) or is_dataframe(value) or is_series(value)) and hasattr(
-        value, "shape"
-    ):
-        try:
+    try:
+        if (is_array_like(value) or is_dataframe(value) or is_series(value)) and hasattr(
+            value, "shape"
+        ):
             entry["shape"] = list(value.shape)
-        except Exception as e:
-            entry["shape"] = f"<error: {type(e).__name__}>"
+    except Exception as e:
+        entry["shape"] = f"<error: {type(e).__name__}>"
     return entry
+
+
+def _serialize_local_value(value: Any, cfg: SnapshotConfig) -> JsonLike:
+    """Serialize one local; modules, functions and classes collapse to a type tag."""
+    try:
+        is_definition = (
+            inspect.ismodule(value) or inspect.isfunction(value) or inspect.isclass(value)
+        )
+    except Exception as e:
+        return _serialization_failed(e)
+    return f"<{type(value).__name__}>" if is_definition else to_jsonlike(value, cfg)
 
 
 def serialize_locals_bundle(
@@ -846,10 +873,7 @@ def serialize_locals_bundle(
     for i, (key, value) in enumerate(local_vars.items()):
         if i >= cfg.max_items:
             break
-        if inspect.ismodule(value) or inspect.isfunction(value) or inspect.isclass(value):
-            values[key] = f"<{type(value).__name__}>"
-        else:
-            values[key] = to_jsonlike(value, cfg)
+        values[key] = _serialize_local_value(value, cfg)
         metadata[str(key)] = _build_local_metadata_entry(value)
 
     cleaned = redact_jsonlike(values, redactors, redact_keys=bool(cfg.redact_keys))

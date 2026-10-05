@@ -174,3 +174,141 @@ def test_unprintable_exception_is_still_categorized(tmp_path: Path) -> None:
 
     assert snapshot["exception"]["error_category"]["category"]
     assert not any("categorization" in w for w in snapshot.get("_capture_warnings", []))
+
+
+# ---------------------------------------------------------------------------
+# Hostile locals: one bad value must not abort the capture or hide its siblings
+# ---------------------------------------------------------------------------
+
+
+class _NoRepr:
+    def __repr__(self) -> str:
+        raise RuntimeError("no repr")
+
+
+class _NoLen(list[int]):
+    def __len__(self) -> int:
+        raise RuntimeError("no len")
+
+
+class _NoAttributes:
+    """Every attribute lookup but ``__class__`` raises a non-AttributeError."""
+
+    def __getattribute__(self, name: str) -> Any:
+        if name == "__class__":
+            return object.__getattribute__(self, name)
+        raise RuntimeError(f"no {name}")
+
+
+class _NoClass:
+    """Even ``__class__`` raises, so ``isinstance`` against other types raises."""
+
+    def __getattribute__(self, name: str) -> Any:
+        raise RuntimeError(f"no {name}")
+
+
+class _NoGetattr:
+    def __init__(self) -> None:
+        self.visible = 1
+
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(f"no {name}")
+
+
+class _Lazy:
+    """Stands in for a lazy query object whose ``__len__`` does work."""
+
+    def __init__(self) -> None:
+        self.len_calls = 0
+
+    def __len__(self) -> int:
+        self.len_calls += 1
+        return 3
+
+
+_HOSTILE_FACTORIES: dict[str, Callable[[], Any]] = {
+    "no_repr": _NoRepr,
+    "no_len": lambda: _NoLen([1, 2]),
+    "no_attributes": _NoAttributes,
+    "no_class": _NoClass,
+    "no_getattr": _NoGetattr,
+    "lazy": _Lazy,
+}
+
+
+@pytest.mark.parametrize("locals_mode", ["safe", "meta"])
+@pytest.mark.parametrize("kind", sorted(_HOSTILE_FACTORIES))
+def test_hostile_local_keeps_its_siblings(tmp_path: Path, kind: str, locals_mode: str) -> None:
+    def boom() -> None:
+        before = "kept"  # noqa: F841 - captured local
+        hostile = _HOSTILE_FACTORIES[kind]()  # noqa: F841 - captured local
+        after = [1, 2]  # noqa: F841 - captured local
+        raise ValueError(kind)
+
+    snapshot = _capture(tmp_path, boom, locals_mode=locals_mode)
+
+    frame = snapshot["frames"][0]
+    assert {"before", "hostile", "after"} <= set(frame["locals_meta"])
+    if locals_mode == "safe":
+        local_vars = frame["locals"]
+        assert local_vars["before"] == "kept"
+        assert local_vars["after"] == [1, 2]
+        assert isinstance(local_vars["hostile"], (str, dict, list))
+
+
+@pytest.mark.parametrize("kind", ["no_attributes", "no_class"])
+def test_raising_getattribute_is_marked(tmp_path: Path, kind: str) -> None:
+    def boom() -> None:
+        hostile = _HOSTILE_FACTORIES[kind]()  # noqa: F841 - captured local
+        raise ValueError(kind)
+
+    snapshot = _capture(tmp_path, boom)
+
+    assert _crash_locals(snapshot)["hostile"] == "<serialization failed: RuntimeError>"
+
+
+def test_hostile_values_nested_in_containers(tmp_path: Path) -> None:
+    def boom() -> None:
+        mixed = [1, _NoClass(), _NoRepr(), "ok"]  # noqa: F841 - captured local
+        mapping = {"bad": _NoAttributes(), "good": 2}  # noqa: F841 - captured local
+        raise ValueError("nested hostile")
+
+    snapshot = _capture(tmp_path, boom)
+
+    local_vars = _crash_locals(snapshot)
+    assert local_vars["mixed"][0] == 1
+    assert local_vars["mixed"][1] == "<serialization failed: RuntimeError>"
+    assert local_vars["mixed"][2] == "<unreprable _NoRepr>"
+    assert local_vars["mixed"][3] == "ok"
+    good, bad = sorted(local_vars["mapping"].values(), key=lambda v: isinstance(v, str))
+    assert good == 2
+    assert "_NoAttributes object" in bad
+
+
+def test_recursive_containers(tmp_path: Path) -> None:
+    def boom() -> None:
+        loop: list[Any] = [1]
+        loop.append(loop)
+        cycle: dict[str, Any] = {"n": 1}
+        cycle["self"] = cycle
+        raise ValueError("recursive")
+
+    snapshot = _capture(tmp_path, boom)
+
+    local_vars = _crash_locals(snapshot)
+    assert local_vars["loop"][0] == 1
+    assert "[...]" in str(local_vars["loop"][1])
+    assert "{...}" in str(local_vars["cycle"])
+
+
+def test_very_long_local_names(tmp_path: Path) -> None:
+    long_name = "v" * 300
+    namespace: dict[str, Any] = {}
+    exec(  # builds a frame with a 300-character local name
+        f"def boom():\n    {long_name} = 1\n    raise ValueError('long name')\n",
+        namespace,
+    )
+
+    snapshot = _capture(tmp_path, namespace["boom"])
+
+    assert _crash_locals(snapshot)[long_name] == 1
