@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 RCAState = Literal[
     "captured",
@@ -25,6 +25,7 @@ RCAAction = Literal[
 ]
 
 DEFAULT_STATE: RCAState = "captured"
+_VALID_STATES: frozenset[str] = frozenset(get_args(RCAState))
 _VALID_ACTIONS: set[str] = {
     "capture",
     "bind_evidence",
@@ -231,10 +232,9 @@ def resolve_target_state(
     target_state = _STATE_TRANSITIONS.get(normalized_action, "evidence_bound")
     if gate_allowed:
         return target_state
-    return cast(
-        RCAState,
-        previous_state if previous_state in _STATE_TRANSITIONS.values() else "captured",
-    )
+    # A denied action keeps any valid state, including "stalled", which no action targets
+    # (RCA-04): resetting it to "captured" dropped the stall marker.
+    return cast(RCAState, previous_state if previous_state in _VALID_STATES else DEFAULT_STATE)
 
 
 def apply_stall_rule(

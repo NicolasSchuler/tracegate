@@ -264,3 +264,37 @@ def test_pass_carries_forward_for_the_same_failure(tmp_path: Path) -> None:
     assert record["gate_feedback"]["allowed"] is True
     assert record["state"] == "resolved"
     assert record["verification_result"] == {"status": "pass"}
+
+
+def test_denied_action_keeps_a_stalled_session_stalled(tmp_path: Path) -> None:
+    """RCA-04: "stalled" isn't an action target, and a denial used to reset it to captured."""
+    out_dir = str(tmp_path)
+    for _ in range(3):
+        stalled = advance_rca_attempt(
+            out_dir=out_dir,
+            request=RCAAttemptRequest(
+                session_id="s",
+                action="bind_evidence",
+                failure_signature="ValueError:AAA",
+                evidence_refs=("crash_frame:app.py:42:parse_input",),
+                gate_mode="soft",
+            ),
+        )
+    assert stalled["state"] == "stalled"
+
+    denied = advance_rca_attempt(
+        out_dir=out_dir,
+        request=RCAAttemptRequest(
+            session_id="s", action="plan", failure_signature="ValueError:AAA", gate_mode="strict"
+        ),
+    )
+
+    assert denied["gate_feedback"]["allowed"] is False
+    assert denied["state"] == "stalled"
+
+
+def test_denied_action_with_an_unknown_previous_state_falls_back_to_captured() -> None:
+    from llmdebug.rca_transitions import resolve_target_state
+
+    assert resolve_target_state("not-a-state", "plan", False) == "captured"
+    assert resolve_target_state("verified", "resolve", False) == "verified"
