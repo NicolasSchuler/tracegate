@@ -160,6 +160,7 @@ eval framework, and adaptive online learning.
   │  │ change/verify/resolve                  → experiment_plan req.   │   │
   │  │ resolve                                → verification pass req. │   │
   │  │ repeated signature w/o progress        → loop_protection warn   │   │
+  │  │ action not allowed from current state  → illegal_transition     │   │
   │  └──────────────────────────────────────────────────────────────────┘   │
   │                                                                        │
   │  off:    allowed=True always, severity=info                            │

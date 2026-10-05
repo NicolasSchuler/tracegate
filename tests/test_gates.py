@@ -163,3 +163,67 @@ class TestEvaluateGateStrictNoHardFailButWarnings:
         assert feedback.allowed is True
         assert feedback.severity == "info"
         assert feedback.triggered_checks == ()
+
+
+_COMPLETE_PAYLOAD = {
+    "evidence_refs": ["crash_frame:app.py:42"],
+    "hypothesis": "empty input",
+    "experiment_plan": "guard it",
+    "verification_result": {"status": "pass"},
+}
+
+
+def test_strict_mode_blocks_an_illegal_transition() -> None:
+    """RCA-06: every prerequisite is met, but "resolve" isn't a transition from "captured"."""
+    feedback = evaluate_gate(
+        mode="strict", current_state="captured", action="resolve", payload=_COMPLETE_PAYLOAD
+    )
+
+    assert feedback.allowed is False
+    assert feedback.triggered_checks == ("illegal_transition",)
+    assert "bind_evidence, capture" in feedback.next_required[0]
+
+
+def test_soft_mode_warns_about_an_illegal_transition_last() -> None:
+    feedback = evaluate_gate(
+        mode="soft",
+        current_state="captured",
+        action="verify",
+        payload={"evidence_refs": [], "hypothesis": "", "experiment_plan": ""},
+    )
+
+    assert feedback.allowed is True
+    assert feedback.triggered_checks[-1] == "illegal_transition"
+    assert feedback.triggered_checks[0] == "evidence_required"
+
+
+def test_illegal_transition_accepts_the_exploratory_override() -> None:
+    payload = {**_COMPLETE_PAYLOAD, "exploratory": True, "override_reason": "spike"}
+
+    feedback = evaluate_gate(
+        mode="strict", current_state="captured", action="resolve", payload=payload
+    )
+
+    assert feedback.allowed is True
+    assert "illegal_transition" in feedback.triggered_checks
+
+
+@pytest.mark.parametrize(
+    ("state", "action"),
+    [("verified", "resolve"), ("changed", "verify"), ("stalled", "plan"), ("resolved", "capture")],
+)
+def test_allowed_transitions_pass(state: str, action: str) -> None:
+    feedback = evaluate_gate(
+        mode="strict", current_state=state, action=action, payload=_COMPLETE_PAYLOAD
+    )
+
+    assert "illegal_transition" not in feedback.triggered_checks
+
+
+def test_a_first_attempt_has_no_transition_to_check() -> None:
+    feedback = evaluate_gate(
+        mode="strict", current_state=None, action="resolve", payload=_COMPLETE_PAYLOAD
+    )
+
+    assert feedback.allowed is True
+    assert feedback.triggered_checks == ()

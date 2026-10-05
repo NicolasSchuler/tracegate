@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from .rca_transitions import allowed_actions_for_state
+
 GateMode = Literal["off", "soft", "strict"]
 RCAState = Literal[
     "captured",
@@ -66,6 +68,7 @@ def _collect_gate_issues(
     repeated_signature_count: int,
     exploration_budget: int,
     exploration_budget_remaining: int | None = None,
+    current_state: str | None = None,
 ) -> tuple[list[str], list[str], list[str], bool]:
     """Evaluate all gate checks and return (warnings, next_required, triggered_checks, hard_failed)."""
     has_evidence = bool(payload.get("evidence_refs"))
@@ -136,6 +139,16 @@ def _collect_gate_issues(
             "Exploration is still allowed, but RCA should be updated.",
             "Revise hypothesis or gather new evidence before repeating equivalent patch attempts.",
         )
+    # Last, so the earlier checks keep their order in warnings (RCA-06).
+    if current_state is not None:
+        allowed_actions = allowed_actions_for_state(current_state)
+        if action not in allowed_actions:
+            _add(
+                "illegal_transition",
+                f"Action '{action}' is not a transition from state '{current_state}'.",
+                f"Use one of the allowed actions: {', '.join(allowed_actions)}.",
+                hard=True,
+            )
 
     return warnings, next_required, triggered_checks, hard_failed
 
@@ -162,7 +175,7 @@ def _make_feedback(
 def evaluate_gate(
     *,
     mode: str | None,
-    current_state: RCAState | str,
+    current_state: RCAState | str | None,
     action: str,
     payload: dict[str, Any],
     repeated_signature_count: int = 1,
@@ -197,12 +210,16 @@ def evaluate_gate(
     - ``loop_protection`` — repeated failure signature without
       hypothesis advancement triggers a warning when the exploration
       budget is exceeded.
+    - ``illegal_transition`` — the action isn't an allowed transition
+      from *current_state* (hard; checked last).
 
     Args:
         mode: Gate policy — ``"off"``, ``"soft"``, or ``"strict"``.
             ``None`` or unrecognized values default to ``"soft"``.
-        current_state: The current RCA state.  Reserved for future
-            state-aware policies; not used by current checks.
+        current_state: The current RCA state, or ``None`` for a session's
+            first attempt.  An action that isn't one of
+            :func:`allowed_actions_for_state` for it triggers the hard
+            ``illegal_transition`` check.
         action: The requested RCA action (e.g. ``"hypothesize"``,
             ``"plan"``, ``"change"``, ``"verify"``, ``"resolve"``).
         payload: Dict carrying the current attempt's data for gate
@@ -223,7 +240,6 @@ def evaluate_gate(
         ``warnings``, ``next_required`` steps, and ``triggered_checks``
         populated according to the gate policy and check results.
     """
-    _ = current_state  # Kept for future state-aware policies.
     gate_mode = normalize_gate_mode(mode)
     if gate_mode == "off":
         return _make_feedback(gate_mode, [], [], [], allowed=True, severity="info")
@@ -234,6 +250,7 @@ def evaluate_gate(
         repeated_signature_count,
         exploration_budget,
         exploration_budget_remaining,
+        current_state,
     )
 
     if gate_mode == "soft":

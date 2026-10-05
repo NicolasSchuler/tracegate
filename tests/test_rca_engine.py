@@ -161,7 +161,9 @@ def test_build_rca_attempt_record_strict_gate_retains_previous_state() -> None:
     )
     assert record["state"] == "captured"
     assert record["gate_feedback"]["allowed"] is False
+    # RCA-06: "plan" isn't a transition from "captured" either.
     assert set(record["gate_feedback"]["triggered_checks"]) == {
         "evidence_required",
         "hypothesis_required",
+        "illegal_transition",
     }

@@ -132,6 +132,7 @@ The gate system evaluates these prerequisites before allowing a transition:
 | `plan_required` | `change`, `verify`, `resolve` without experiment plan | No | Missing experiment plan. |
 | `verification_required` | `resolve` without `verification_result.status == "pass"` | Yes | Cannot resolve without passing verification. |
 | `loop_protection` | `change`, `verify`, `resolve` with repeated signature exceeding exploration budget and no hypothesis change | No | Failure signature repeated without hypothesis change. |
+| `illegal_transition` | An action that isn't an edge out of the current state in the diagram above (`allowed_actions`). Not checked on a session's first attempt. Checked last. | Yes | Action is not a transition from the current state. |
 
 **Hard fail** checks block the transition in `strict` mode. In `soft` mode,
 all checks produce warnings but never block.
@@ -390,7 +391,7 @@ RCA engine.
 def evaluate_gate(
     *,
     mode: str | None,
-    current_state: RCAState | str,
+    current_state: RCAState | str | None,
     action: str,
     payload: dict[str, Any],
     repeated_signature_count: int = 1,
@@ -403,7 +404,7 @@ def evaluate_gate(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `mode` | `str \| None` | — | Gate mode. `None` defaults to `"soft"`. |
-| `current_state` | `str` | — | Current RCA state before the transition. |
+| `current_state` | `str \| None` | — | Current RCA state before the transition; `None` for a session's first attempt, which skips `illegal_transition`. |
 | `action` | `str` | — | Requested RCA action. |
 | `payload` | `dict` | — | Action payload with keys: `evidence_refs`, `hypothesis`, `experiment_plan`, `verification_result`, `exploratory`, `override_reason`, `hypothesis_advanced`. |
 | `repeated_signature_count` | `int` | `1` | How many times the current failure signature has been seen. |

@@ -298,3 +298,17 @@ def test_denied_action_with_an_unknown_previous_state_falls_back_to_captured() -
 
     assert resolve_target_state("not-a-state", "plan", False) == "captured"
     assert resolve_target_state("verified", "resolve", False) == "verified"
+
+
+def test_strict_gate_enforces_the_transition_matrix(tmp_path: Path) -> None:
+    """RCA-06: from evidence_bound, resolve is blocked even with a passing verification."""
+    out_dir = str(tmp_path)
+    _advance(out_dir, "s", "ValueError:AAA", "bind_evidence")
+
+    record = _advance(
+        out_dir, "s", "ValueError:AAA", "resolve", verification_result={"status": "pass"}
+    )
+
+    assert record["gate_feedback"]["allowed"] is False
+    assert record["gate_feedback"]["triggered_checks"] == ["illegal_transition"]
+    assert record["state"] == "evidence_bound"

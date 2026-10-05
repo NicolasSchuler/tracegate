@@ -141,7 +141,8 @@ def build_rca_attempt_record(
     }
     gate = evaluate_gate(
         mode=normalized_mode,
-        current_state=previous_state,
+        # A session's first attempt has no state to transition from.
+        current_state=previous_state if previous else None,
         action=normalized_action,
         payload=gate_payload,
         repeated_signature_count=repeat_count,

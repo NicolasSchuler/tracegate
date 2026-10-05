@@ -117,7 +117,10 @@ prerequisites before allowing an RCA state transition:
 - **`plan_required`** — code changes require an experiment plan.
 - **`verification_required`** — resolving requires a passing verification.
 - **`loop_protection`** — repeated failure signatures without hypothesis change
-  trigger a warning (and a block in `strict` mode after the exploration budget).
+  trigger a warning once the exploration budget is used up (never a block).
+- **`illegal_transition`** — the action must be one of the current state's
+  `allowed_actions` (a warning in `soft` mode, a block in `strict` mode); a
+  session's first attempt is exempt.
 
 In `strict` mode, a blocked action can be overridden by setting
 `exploratory=true` with an `override_reason`, allowing intentional exploration
