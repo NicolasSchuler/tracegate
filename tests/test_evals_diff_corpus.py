@@ -66,6 +66,15 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
         f"{DIFF_A}\nNow b.py:\n{DIFF_B}",
         {"a.py": A_FIXED, "b.py": B_FIXED},
     ),
+    "fence_then_unfenced_second_file": (  # LLM-01
+        f"```diff\n{DIFF_A}```\nAnd b.py, without a fence this time:\n{DIFF_B}",
+        {"a.py": A_FIXED, "b.py": B_FIXED},
+    ),
+    "unfenced_revision_after_fenced_draft": (  # LLM-04
+        f"First try:\n```diff\n{DIFF_A.replace('return 2', 'return 5')}```\n"
+        f"Actually, better:\n{DIFF_A}",
+        {"a.py": A_FIXED},
+    ),
     "trailing_markdown_bullets": (  # LLM-07
         f"{DIFF_A}- This changes the return value to 2.\n- No other changes.\n",
         {"a.py": A_FIXED},

@@ -11,7 +11,8 @@ from evals.eval_patches import _diff_lines
 def _extract_unified_diff(text: str) -> str | None:
     """Extract every file diff from a model response as one git-style patch.
 
-    Review findings LLM-01/03/04/07/10: all fenced blocks and all file sections are
+    Review findings LLM-01/03/04/07/10: fenced and unfenced sections are scanned in
+    response order and all file sections are
     collected (a later diff for the same file replaces an earlier draft), hunks are read
     with their declared counts so trailing prose isn't absorbed, blank context lines are
     normalized to ``" "``, and ``/dev/null`` headers create or delete files.
@@ -19,19 +20,13 @@ def _extract_unified_diff(text: str) -> str | None:
     s = _strip_think(text).strip("\n")
     if not s.strip():
         return None
-    fences = [
-        match.group(1)
-        for match in re.finditer(
-            r"```(?:diff|patch)?[^\n]*\n(.*?)```", s, re.DOTALL | re.IGNORECASE
-        )
-    ]
-    sources = fences or [s]
+    sections, fenced = _response_sections(s)
     by_path: dict[str, str] = {}
-    for source in sources:
+    for source in sections:
         for path, block in _iter_file_diffs(source.split("\n")):
             by_path.pop(path, None)  # keep the last version, in the order it appeared
             by_path[path] = block
-    if not by_path and fences:
+    if not by_path and fenced:
         for path, block in _iter_file_diffs(s.split("\n")):
             by_path.pop(path, None)
             by_path[path] = block
@@ -42,6 +37,33 @@ def _extract_unified_diff(text: str) -> str | None:
 
 def _strip_think(text: str) -> str:
     return strip_think(text)
+
+
+_FENCE_RE = re.compile(r"```(?:diff|patch)?[^\n]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _response_sections(text: str) -> tuple[list[str], bool]:
+    """Split a response into fenced blocks and the text around them, in response order.
+
+    Collecting only the fenced blocks dropped an unfenced diff that followed a fenced
+    one and kept a fenced draft that a later unfenced revision replaced (LLM-01/LLM-04).
+    The second element reports whether any fence was found, for the whole-response
+    fallback scan of diffs that straddle a fence.
+    """
+    sections: list[str] = []
+    cursor = 0
+    fenced = False
+    for match in _FENCE_RE.finditer(text):
+        fenced = True
+        outside = text[cursor : match.start()]
+        if outside.strip():
+            sections.append(outside)
+        sections.append(match.group(1))
+        cursor = match.end()
+    tail = text[cursor:]
+    if tail.strip():
+        sections.append(tail)
+    return (sections or [text]), fenced
 
 
 _DIFF_META_PREFIXES = (
