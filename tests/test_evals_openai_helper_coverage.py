@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,13 +37,13 @@ def test_openai_client_wrappers_cover_cache_retry_and_timeout_paths(
     assert not openai_mod._is_http2_protocol_error(RuntimeError("plain error"))
 
     monkeypatch.setattr(
-        openai_mod.urllib.request,
+        urllib.request,
         "getproxies",
         lambda: {"http": "http://proxy.example:3128"},
     )
-    monkeypatch.setattr(openai_mod.urllib.request, "proxy_bypass", lambda host: False)
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
     assert openai_mod._should_use_proxy_transport("http://example.com")
-    monkeypatch.setattr(openai_mod.urllib.request, "proxy_bypass", lambda host: True)
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: True)
     assert not openai_mod._should_use_proxy_transport("http://example.com")
     assert not openai_mod._should_use_proxy_transport("file:///tmp/x")
 
@@ -106,8 +107,8 @@ def test_openai_client_wrappers_cover_cache_retry_and_timeout_paths(
 
     FakeSyncClient.created.clear()
     FakeAsyncClient.created.clear()
-    monkeypatch.setattr(openai_mod.httpx, "Client", FakeSyncClient)
-    monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(httpx, "Client", FakeSyncClient)
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
     openai_mod._THREAD_HTTP_CLIENTS.clients = {}
     openai_mod._ASYNC_HTTP_CLIENTS.clear()
 
@@ -275,9 +276,11 @@ def test_openai_payload_and_diff_helpers_cover_parser_branches() -> None:
     assert extracted is not None
     assert "diff --git a/foo.py b/foo.py" in extracted
     assert openai_mod._strip_think("<think>ignored</think>\nvalue") == "value"
-    assert openai_mod._clean_path_token('"a/foo.py"') == "foo.py"
-    assert openai_mod._clean_path_token("a/foo.py\t2024-01-01") == "foo.py"
-    assert openai_mod._clean_path_token("b/bar.py ---") == "bar.py"
+    # Git's ``a/``/``b/`` prefixes are stripped later, as a header pair, by
+    # ``_strip_git_prefixes`` (LLM-23); the token cleaner only unquotes and trims.
+    assert openai_mod._clean_path_token('"a/foo.py"') == "a/foo.py"
+    assert openai_mod._clean_path_token("a/foo.py\t2024-01-01") == "a/foo.py"
+    assert openai_mod._clean_path_token("b/bar.py ---") == "b/bar.py"
     assert openai_mod._clean_path_token("/dev/null") == "/dev/null"
     assert openai_mod._clean_path_token("a/") is None
 
@@ -505,10 +508,6 @@ def test_openai_edit_and_full_file_helpers_cover_recovery_and_targeting(
         .splitlines()[3]
         .startswith("@@ -1,1 +1,1 @@")
     )
-    assert openai_mod._extract_file_index_paths(
-        "Available files:\nfoo.py\ntest_foo.py\n\nPytest output:\nfailed\n"
-    ) == ["foo.py", "test_foo.py"]
-
     (tmp_path / "foo.py").write_text("print('a')\n", encoding="utf-8")
     (tmp_path / "test_foo.py").write_text("print('test')\n", encoding="utf-8")
     (tmp_path / "subdir").mkdir()
@@ -525,13 +524,7 @@ def test_openai_edit_and_full_file_helpers_cover_recovery_and_targeting(
         "single_non_test_python_file",
     )
 
-    prompt = (
-        "Available files (use exact relative paths):\n"
-        "test_foo.py\n"
-        "main.py\n\n"
-        "Pytest output (stdout):\nfailed\n"
-    )
-    forced = openai_mod._build_forced_attempt_diff(prompt=prompt, cwd=single)
+    forced = openai_mod._build_forced_attempt_diff(cwd=single)
     assert forced is not None
     target_rel, diff = forced
     assert target_rel == "main.py"
@@ -605,8 +598,8 @@ def test_openai_persistent_client_edge_branches_cover_retry_exhaustion_and_close
         async def aclose(self) -> None:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(openai_mod.httpx, "Client", AlwaysRetrySyncClient)
-    monkeypatch.setattr(openai_mod.httpx, "AsyncClient", AlwaysRetryAsyncClient)
+    monkeypatch.setattr(httpx, "Client", AlwaysRetrySyncClient)
+    monkeypatch.setattr(httpx, "AsyncClient", AlwaysRetryAsyncClient)
 
     sync_client = openai_mod._PersistentHTTPClient(
         scheme="http",

@@ -16,6 +16,13 @@ import httpx
 import pytest
 
 from evals.patchers import openai_compat_patcher as openai_mod
+from evals.patchers import (
+    openai_diff_text,
+    openai_edits_apply,
+    openai_probes,
+    openai_response,
+    openai_transport,
+)
 from evals.patchers.base import (
     ContextCompactionResult,
     ContextRequestResult,
@@ -23,6 +30,30 @@ from evals.patchers.base import (
     PatchResult,
 )
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+
+# ---------------------------------------------------------------------------
+# Monkeypatch retargeting
+# ---------------------------------------------------------------------------
+# ``openai_compat_patcher`` re-exports helpers that now live in sibling modules
+# (``openai_transport``, ``openai_probes``, ``openai_edits_apply``, ...). Each
+# function resolves those names in the module that *defines* it, so a fake has
+# to be installed on every patcher module that exposes the name.
+_PATCHER_MODULES = (
+    openai_mod,
+    openai_transport,
+    openai_probes,
+    openai_response,
+    openai_diff_text,
+    openai_edits_apply,
+)
+
+
+def _patch_patcher_modules(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    targets = [module for module in _PATCHER_MODULES if hasattr(module, name)]
+    assert targets, f"no patcher module exposes {name!r}"
+    for target in targets:
+        monkeypatch.setattr(target, name, value)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,7 +112,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -107,7 +138,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -134,7 +165,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -162,7 +193,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -186,7 +217,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -215,7 +246,7 @@ class TestHttpGetJson:
                     raise httpx.RemoteProtocolError("h2 error")
                 return SimpleNamespace(status_code=200, text='{"ok":1}', http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -239,7 +270,7 @@ class TestHttpGetJson:
             def get(self, url, headers):
                 raise ConnectionError("refused")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -265,7 +296,7 @@ class TestHttpGetJson:
                     raise httpx.RemoteProtocolError("h2 error")
                 raise RuntimeError("fallback also fails")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -299,7 +330,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, _meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -326,7 +357,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -352,7 +383,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url, headers):
                 raise ConnectionError("refused")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -380,7 +411,7 @@ class TestHttpGetJsonAsync:
                     raise httpx.RemoteProtocolError("h2 bad")
                 return SimpleNamespace(status_code=200, text="[1,2]", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -408,7 +439,7 @@ class TestHttpGetJsonAsync:
                     raise httpx.RemoteProtocolError("h2 bad")
                 raise ValueError("bad url in fallback")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -436,7 +467,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._http_get_json_async(
                 url="http://localhost/v1/models",
@@ -456,7 +487,7 @@ class TestHttpGetJsonAsync:
 
 class TestHttpProbeReady:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         fake_resp = SimpleNamespace(status_code=200, text="ok", http_version="HTTP/1.1")
 
@@ -473,7 +504,7 @@ class TestHttpProbeReady:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         ready, meta = openai_mod._http_probe_ready(
             url="http://localhost:8080/health",
             api_key="k",
@@ -484,7 +515,7 @@ class TestHttpProbeReady:
         assert meta["status"] == 200
 
     def test_non_2xx(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
         fake_resp = SimpleNamespace(status_code=503, text="unavailable", http_version="HTTP/1.1")
 
         class FakeClient:
@@ -500,7 +531,7 @@ class TestHttpProbeReady:
             def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         ready, meta = openai_mod._http_probe_ready(
             url="http://localhost:8080/health",
             api_key="k",
@@ -511,7 +542,7 @@ class TestHttpProbeReady:
         assert meta["error"] == "http_error"
 
     def test_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeClient:
             def __init__(self, **kw):
@@ -526,7 +557,7 @@ class TestHttpProbeReady:
             def get(self, url, headers):
                 raise ConnectionError("refused")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         ready, meta = openai_mod._http_probe_ready(
             url="http://localhost:8080/health",
             api_key="k",
@@ -539,7 +570,7 @@ class TestHttpProbeReady:
 
 class TestHttpProbeReadyAsync:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
         fake_resp = SimpleNamespace(status_code=200, text="ok", http_version="HTTP/1.1")
 
         class FakeAsyncClient:
@@ -555,7 +586,7 @@ class TestHttpProbeReadyAsync:
             async def get(self, url, headers):
                 return fake_resp
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         ready, _meta = asyncio.run(
             openai_mod._http_probe_ready_async(
                 url="http://localhost/health",
@@ -567,7 +598,7 @@ class TestHttpProbeReadyAsync:
         assert ready is True
 
     def test_http2_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, *, timeout, http2, trust_env):
@@ -584,7 +615,7 @@ class TestHttpProbeReadyAsync:
                     raise httpx.RemoteProtocolError("h2 bad")
                 return SimpleNamespace(status_code=200, text="ok", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         ready, meta = asyncio.run(
             openai_mod._http_probe_ready_async(
                 url="http://localhost/health",
@@ -597,7 +628,7 @@ class TestHttpProbeReadyAsync:
         assert meta["transport_http2_fallback_used"] is True
 
     def test_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -612,7 +643,7 @@ class TestHttpProbeReadyAsync:
             async def get(self, url, headers):
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         ready, meta = asyncio.run(
             openai_mod._http_probe_ready_async(
                 url="http://localhost/health",
@@ -635,21 +666,21 @@ class TestShouldUseProxyTransport:
         assert openai_mod._should_use_proxy_transport("ftp://example.com") is False
 
     def test_no_proxy(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod.urllib.request, "getproxies", lambda: {})
+        monkeypatch.setattr(openai_transport.urllib.request, "getproxies", lambda: {})
         assert openai_mod._should_use_proxy_transport("http://example.com/path") is False
 
     def test_proxy_bypassed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            openai_mod.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
+            openai_transport.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
         )
-        monkeypatch.setattr(openai_mod.urllib.request, "proxy_bypass", lambda host: True)
+        monkeypatch.setattr(openai_transport.urllib.request, "proxy_bypass", lambda host: True)
         assert openai_mod._should_use_proxy_transport("http://example.com/path") is False
 
     def test_proxy_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            openai_mod.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
+            openai_transport.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
         )
-        monkeypatch.setattr(openai_mod.urllib.request, "proxy_bypass", lambda host: False)
+        monkeypatch.setattr(openai_transport.urllib.request, "proxy_bypass", lambda host: False)
         assert openai_mod._should_use_proxy_transport("http://example.com/path") is True
 
 
@@ -668,7 +699,7 @@ class TestProbeContextWindowTokensAsync:
                 )
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_get_json_async", _fake_get_json)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", _fake_get_json)
         tokens, meta = asyncio.run(
             openai_mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -692,7 +723,7 @@ class TestProbeContextWindowTokensAsync:
                 )
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_get_json_async", _fake_get_json)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", _fake_get_json)
         tokens, meta = asyncio.run(
             openai_mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -709,7 +740,7 @@ class TestProbeContextWindowTokensAsync:
         async def _fake_get_json(*, url, api_key, timeout_sec, http2):
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_get_json_async", _fake_get_json)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", _fake_get_json)
         tokens, meta = asyncio.run(
             openai_mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -726,7 +757,7 @@ class TestProbeContextWindowTokensAsync:
         async def _fake_get_json(*, url, api_key, timeout_sec, http2):
             return {"data": [{"id": "other_model", "context_length": 2048}]}, {}
 
-        monkeypatch.setattr(openai_mod, "_http_get_json_async", _fake_get_json)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", _fake_get_json)
         tokens, meta = asyncio.run(
             openai_mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -752,7 +783,7 @@ class TestProbeServerReadyAsync:
                 return True, {"status": 200}
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_probe_ready_async", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", _fake_probe)
         ready, meta = asyncio.run(
             openai_mod._probe_server_ready_async(
                 base_url="http://localhost:1234/v1",
@@ -770,7 +801,7 @@ class TestProbeServerReadyAsync:
                 return False, {"error": "request_failed"}
             return True, {"status": 200}
 
-        monkeypatch.setattr(openai_mod, "_http_probe_ready_async", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", _fake_probe)
         ready, meta = asyncio.run(
             openai_mod._probe_server_ready_async(
                 base_url="http://localhost:1234/v1",
@@ -786,7 +817,7 @@ class TestProbeServerReadyAsync:
         async def _fake_probe(*, url, api_key, timeout_sec, http2):
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_probe_ready_async", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", _fake_probe)
         ready, meta = asyncio.run(
             openai_mod._probe_server_ready_async(
                 base_url="http://localhost:1234/v1",
@@ -809,7 +840,7 @@ class TestCompactContextViaJsonAsync:
         async def _fake_chat(**kw):
             return _ok_response('{"compacted_context": "short"}'), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         compacted, _raw, _meta = asyncio.run(
             openai_mod._compact_context_via_json_async(
                 url="http://localhost/v1/chat/completions",
@@ -841,7 +872,7 @@ class TestCompactContextViaJsonAsync:
                 }
             return _ok_response('{"compacted_context": "ok"}'), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         compacted, _raw, _meta = asyncio.run(
             openai_mod._compact_context_via_json_async(
                 url="http://localhost/v1/chat/completions",
@@ -868,7 +899,7 @@ class TestCompactContextViaJsonAsync:
                 "usage": dict(_GOOD_USAGE),
             }
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         compacted, _raw, _meta = asyncio.run(
             openai_mod._compact_context_via_json_async(
                 url="http://localhost/v1/chat/completions",
@@ -957,7 +988,7 @@ class TestAprobeContextWindowTokens:
         async def _fake_probe(**kw):
             return 4096, {"context_window_probe_provider": "openai_models"}
 
-        monkeypatch.setattr(openai_mod, "_probe_context_window_tokens_async", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_probe_context_window_tokens_async", _fake_probe)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -974,7 +1005,7 @@ class TestAprobeServerReady:
         async def _fake_probe(**kw):
             return True, {"server_ready": True}
 
-        monkeypatch.setattr(openai_mod, "_probe_server_ready_async", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_probe_server_ready_async", _fake_probe)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -1007,7 +1038,7 @@ class TestProposePatchViaDiffAsync:
         async def _fake_chat(**kw):
             return _ok_response(_VALID_DIFF), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1028,7 +1059,7 @@ class TestProposePatchViaDiffAsync:
         async def _fake_chat(**kw):
             return _ok_response("Sorry, I can't generate a diff."), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1053,7 +1084,7 @@ class TestProposePatchViaDiffAsync:
                 "usage": dict(_GOOD_USAGE),
             }
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1078,7 +1109,7 @@ class TestProposePatchViaDiffAsync:
                 return _ok_response("no diff here"), dict(_GOOD_META)
             return _ok_response(_VALID_DIFF), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1099,7 +1130,7 @@ class TestProposePatchViaDiffAsync:
         async def _fake_chat(**kw):
             return {"choices": [{"message": {}}], "usage": dict(_GOOD_USAGE)}, dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1132,7 +1163,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1156,7 +1187,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1182,7 +1213,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1208,7 +1239,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1244,7 +1275,7 @@ class TestProposePatchViaEditsAsync:
             calls["diff_calls"] += 1
             return _ok_response(_VALID_DIFF), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1268,7 +1299,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response("not json at all"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1313,7 +1344,7 @@ class TestProposePatchViaEditsAsync:
             )
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1344,7 +1375,7 @@ class TestProposePatchViaEditsAsync:
                 return _ok_response(edits_json), dict(_GOOD_META)
             return _ok_response(_VALID_DIFF), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1376,7 +1407,7 @@ class TestProposePatchViaEditsAsync:
                 "usage": dict(_GOOD_USAGE),
             }
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1402,7 +1433,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1429,7 +1460,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1453,7 +1484,7 @@ class TestProposePatchViaEditsAsync:
         async def _fake_chat(**kw):
             return _ok_response('{"changes": []}'), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1486,7 +1517,7 @@ class TestProposePatchViaFullFileAsync:
         async def _fake_chat(**kw):
             return _ok_response(_VALID_DIFF), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -1511,7 +1542,7 @@ class TestProposePatchViaFullFileAsync:
         async def _fake_chat(**kw):
             return _ok_response("def foo():\n    return 2\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -1535,7 +1566,7 @@ class TestProposePatchViaFullFileAsync:
         async def _fake_chat(**kw):
             return _ok_response("same content\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -1559,8 +1590,8 @@ class TestProposePatchViaFullFileAsync:
     def test_file_read_error(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         (tmp_path / "foo.py").write_text("code\n", encoding="utf-8")
         # Make file unreadable
-        monkeypatch.setattr(
-            openai_mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_resolve_full_file_target",
             lambda *, cwd: ("foo.py", "single_non_test_python_file"),
         )
@@ -1569,7 +1600,7 @@ class TestProposePatchViaFullFileAsync:
         def _bad_read(path):
             raise PermissionError("cannot read")
 
-        monkeypatch.setattr(openai_mod, "_read_edit_target", _bad_read)
+        _patch_patcher_modules(monkeypatch, "_read_edit_target", _bad_read)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -1597,7 +1628,7 @@ class TestProposePatchViaFullFileAsync:
                 "usage": dict(_GOOD_USAGE),
             }
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         result = asyncio.run(
             openai_mod._propose_patch_via_full_file_async(
                 url="http://localhost/v1/chat/completions",
@@ -1623,7 +1654,7 @@ class TestProposePatchViaFullFileAsync:
 
 class TestChatCompletionAsync:
     def test_success_first_try(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1644,7 +1675,7 @@ class TestChatCompletionAsync:
                 )
                 return SimpleNamespace(status_code=200, text=body, http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1666,7 +1697,7 @@ class TestChatCompletionAsync:
     def test_budget_exceeded_before_first_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import time
 
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
         deadline = time.monotonic() - 1  # already past
 
         data, meta = asyncio.run(
@@ -1688,7 +1719,7 @@ class TestChatCompletionAsync:
         assert meta["error"] == "request_budget_exceeded"
 
     def test_retryable_error_with_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
         calls = {"n": 0}
 
         class FakeAsyncClient:
@@ -1715,8 +1746,8 @@ class TestChatCompletionAsync:
                 )
                 return SimpleNamespace(status_code=200, text=body, http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
-        monkeypatch.setattr(openai_mod.asyncio, "sleep", lambda _: asyncio.sleep(0))
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.asyncio, "sleep", lambda _: asyncio.sleep(0))
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1737,7 +1768,7 @@ class TestChatCompletionAsync:
         assert meta["transport_retry_count"] == 1
 
     def test_non_retryable_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1752,7 +1783,7 @@ class TestChatCompletionAsync:
             async def post(self, url, content, headers):
                 return SimpleNamespace(status_code=400, text="bad request", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1772,7 +1803,7 @@ class TestChatCompletionAsync:
         assert meta["status"] == 400
 
     def test_bad_json_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1787,7 +1818,7 @@ class TestChatCompletionAsync:
             async def post(self, url, content, headers):
                 return SimpleNamespace(status_code=200, text="NOTJSON{{{", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1806,7 +1837,7 @@ class TestChatCompletionAsync:
         assert meta["error"] == "bad_json_response"
 
     def test_seed_acknowledged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1829,7 +1860,7 @@ class TestChatCompletionAsync:
                 )
                 return SimpleNamespace(status_code=200, text=body, http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1848,7 +1879,7 @@ class TestChatCompletionAsync:
         assert meta["api_compat_seed_requested"] == 42
 
     def test_http2_fallback_in_chat(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, *, timeout, http2, trust_env):
@@ -1871,7 +1902,7 @@ class TestChatCompletionAsync:
                 )
                 return SimpleNamespace(status_code=200, text=body, http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1890,7 +1921,7 @@ class TestChatCompletionAsync:
         assert meta["transport_http2_fallback_used"] is True
 
     def test_connection_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1905,7 +1936,7 @@ class TestChatCompletionAsync:
             async def post(self, url, content, headers):
                 raise ConnectionError("refused")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1924,7 +1955,7 @@ class TestChatCompletionAsync:
         assert meta["error"] == "request_failed"
 
     def test_reasoning_content_extracted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeAsyncClient:
             def __init__(self, **kw):
@@ -1952,7 +1983,7 @@ class TestChatCompletionAsync:
                 )
                 return SimpleNamespace(status_code=200, text=body, http_version="HTTP/1.1")
 
-        monkeypatch.setattr(openai_mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = asyncio.run(
             openai_mod._chat_completion_async(
                 url="http://localhost/v1/chat/completions",
@@ -1995,7 +2026,7 @@ class TestAproposeDispatch:
                 return _ok_response(edits_json), dict(_GOOD_META)
             return _ok_response("no diff here"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -2017,7 +2048,7 @@ class TestAproposeDispatch:
         async def _fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -2036,7 +2067,7 @@ class TestAproposeDispatch:
         async def _fake_chat(**kw):
             return _ok_response("new\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -2059,7 +2090,7 @@ class TestAproposeDispatch:
                 "usage": dict(_GOOD_USAGE),
             }
 
-        monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat)
         patcher = OpenAICompatPatcher(
             base_url="http://127.0.0.1:1234",
             model="m",
@@ -2149,7 +2180,7 @@ class TestProbeServerReady:
         def _fake_probe(*, url, api_key, timeout_sec, http2):
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_probe_ready", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready", _fake_probe)
         ready, meta = openai_mod._probe_server_ready(
             base_url="http://localhost:1234/v1",
             api_key="k",
@@ -2165,7 +2196,7 @@ class TestProbeServerReady:
                 return True, {"status": 200}
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(openai_mod, "_http_probe_ready", _fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready", _fake_probe)
         ready, meta = openai_mod._probe_server_ready(
             base_url="http://localhost:1234/v1",
             api_key="k",
@@ -2240,7 +2271,7 @@ class TestPatcherPublicMethodEdgeBranches:
             return None, "{bad}", {}
 
         monkeypatch.setattr(openai_mod, "_request_context_via_json", _fake_request_context_via_json)
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
         monkeypatch.setattr(
             openai_mod,
             "_compact_context_via_json",
@@ -2366,16 +2397,18 @@ class TestPatcherPublicMethodEdgeBranches:
             captured["aserver_ready_api_key"] = str(kwargs["api_key"])
             return True, {"server_ready_probe_provider": "stub_async"}
 
-        monkeypatch.setattr(
-            openai_mod, "_probe_context_window_tokens", _fake_probe_context_window_tokens
+        _patch_patcher_modules(
+            monkeypatch, "_probe_context_window_tokens", _fake_probe_context_window_tokens
         )
-        monkeypatch.setattr(
-            openai_mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_probe_context_window_tokens_async",
             _fake_probe_context_window_tokens_async,
         )
-        monkeypatch.setattr(openai_mod, "_probe_server_ready", _fake_probe_server_ready)
-        monkeypatch.setattr(openai_mod, "_probe_server_ready_async", _fake_probe_server_ready_async)
+        _patch_patcher_modules(monkeypatch, "_probe_server_ready", _fake_probe_server_ready)
+        _patch_patcher_modules(
+            monkeypatch, "_probe_server_ready_async", _fake_probe_server_ready_async
+        )
 
         patcher = OpenAICompatPatcher(base_url="http://example.com", model="m", api_key=None)
 
@@ -2413,7 +2446,7 @@ class TestPatcherPublicMethodEdgeBranches:
             "_propose_patch_via_diff_async",
             lambda **kwargs: asyncio.sleep(0, result=PatchResult(diff=None, meta={})),
         )
-        monkeypatch.setattr(openai_mod, "_build_forced_attempt_diff", lambda **kwargs: None)
+        _patch_patcher_modules(monkeypatch, "_build_forced_attempt_diff", lambda **kwargs: None)
 
         patcher = OpenAICompatPatcher(
             base_url="http://example.com",
@@ -2466,8 +2499,8 @@ class TestPatcherPublicMethodEdgeBranches:
             return PatchResult(diff=None, meta={})
 
         monkeypatch.setattr(openai_mod, "_propose_patch_via_diff_async", _fake_diff_async)
-        monkeypatch.setattr(
-            openai_mod, "_build_forced_attempt_diff", lambda **kwargs: ("main.py", forced_diff)
+        _patch_patcher_modules(
+            monkeypatch, "_build_forced_attempt_diff", lambda **kwargs: ("main.py", forced_diff)
         )
 
         patcher = OpenAICompatPatcher(
@@ -2530,7 +2563,7 @@ class TestPersistentHttpClients:
     def test_unreachable_branches_when_range_is_shadowed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(openai_mod, "range", lambda *args: [], raising=False)
+        monkeypatch.setattr(openai_transport, "range", lambda *args: [], raising=False)
 
         sync_client = openai_mod._PersistentHTTPClient(
             scheme="http",
@@ -2583,7 +2616,7 @@ class TestSyncHttpFallbacks:
                     raise httpx.RemoteProtocolError("h2 error")
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = openai_mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -2596,7 +2629,7 @@ class TestSyncHttpFallbacks:
     def test_http_probe_ready_http2_fallback_value_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeClient:
             def __init__(self, *, timeout, http2, trust_env):
@@ -2613,7 +2646,7 @@ class TestSyncHttpFallbacks:
                     raise httpx.RemoteProtocolError("h2 error")
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(openai_mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         ready, meta = openai_mod._http_probe_ready(
             url="http://localhost:8080/health",
             api_key="k",
@@ -2665,7 +2698,7 @@ class TestSyncHttpFallbacks:
                 return _ok_response('{"compacted_context": "short"}'), dict(_GOOD_META)
             raise AssertionError("unexpected helper invocation")
 
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat)
         request_raw, request_meta = openai_mod._request_context_via_json(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -2712,7 +2745,7 @@ class TestSyncPatchProposalBranches:
                 return {"choices": [{"message": {}}], "usage": dict(_GOOD_USAGE)}, dict(_GOOD_META)
             return _ok_response("plain text, not a diff"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat)
         result = openai_mod._propose_patch_via_diff(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -2734,7 +2767,7 @@ class TestSyncPatchProposalBranches:
         def _fake_chat(**kwargs):
             return _ok_response("not json at all"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat)
         result = openai_mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -2779,7 +2812,7 @@ class TestSyncPatchProposalBranches:
                 )
             return _ok_response("not a diff"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat)
         result = openai_mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -2823,8 +2856,8 @@ class TestSyncPatchProposalBranches:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         (tmp_path / "foo.py").write_text("code\n", encoding="utf-8")
-        monkeypatch.setattr(
-            openai_mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_resolve_full_file_target",
             lambda *, cwd: ("foo.py", "single_non_test_python_file"),
         )
@@ -2832,7 +2865,7 @@ class TestSyncPatchProposalBranches:
         def _bad_read(path):
             raise PermissionError("cannot read")
 
-        monkeypatch.setattr(openai_mod, "_read_edit_target", _bad_read)
+        _patch_patcher_modules(monkeypatch, "_read_edit_target", _bad_read)
         result = openai_mod._propose_patch_via_full_file(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -2861,7 +2894,7 @@ class TestSyncPatchProposalBranches:
                 return _ok_response("same\n"), dict(_GOOD_META)
             return _ok_response("not a diff"), dict(_GOOD_META)
 
-        monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat)
         result = openai_mod._propose_patch_via_full_file(
             url="http://localhost/v1/chat/completions",
             api_key="k",
