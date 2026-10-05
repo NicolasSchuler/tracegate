@@ -91,3 +91,86 @@ def test_wide_ints_in_pandas_previews(tmp_path: Path) -> None:
     local_vars = _crash_locals(snapshot)
     assert local_vars["frame"]["head"][0] == [repr(2**70)]
     assert local_vars["series"]["head"] == [repr(2**70), 2]
+
+
+# ---------------------------------------------------------------------------
+# CAP-02: exception text whose __str__ raises
+# ---------------------------------------------------------------------------
+
+
+class _Unprintable:
+    def __str__(self) -> str:
+        raise RuntimeError("no str")
+
+    def __repr__(self) -> str:
+        raise RuntimeError("no repr")
+
+
+class _UnprintableError(Exception):
+    def __str__(self) -> str:
+        raise RuntimeError("no str")
+
+
+def test_exception_whose_str_raises(tmp_path: Path) -> None:
+    def boom() -> None:
+        raise _UnprintableError("hidden")
+
+    snapshot = _capture(tmp_path, boom)
+
+    exc = snapshot["exception"]
+    assert exc["type"] == "_UnprintableError"
+    assert exc["message"] == "<str() failed: RuntimeError>"
+    assert exc["args"] == ["hidden"]
+
+
+def test_exception_arg_whose_str_raises(tmp_path: Path) -> None:
+    def boom() -> None:
+        raise ValueError(_Unprintable(), "readable")
+
+    snapshot = _capture(tmp_path, boom)
+
+    exc = snapshot["exception"]
+    assert exc["message"] == "<str() failed: RuntimeError>"
+    assert exc["args"] == ["<str() failed: RuntimeError>", "readable"]
+
+
+def test_exception_note_whose_str_raises(tmp_path: Path) -> None:
+    def boom() -> None:
+        err = ValueError("noted")
+        err.__notes__ = ["readable", _Unprintable()]
+        raise err
+
+    snapshot = _capture(tmp_path, boom)
+
+    assert snapshot["exception"]["notes"] == ["readable", "<str() failed: RuntimeError>"]
+
+
+def test_chained_exception_whose_str_raises(tmp_path: Path) -> None:
+    def boom() -> None:
+        try:
+            raise _UnprintableError()
+        except _UnprintableError as inner:
+            raise ValueError("outer") from inner
+
+    snapshot = _capture(tmp_path, boom)
+
+    exc = snapshot["exception"]
+    assert exc["message"] == "outer"
+    assert exc["cause"]["message"] == "<str() failed: RuntimeError>"
+
+
+def _raise_no_str(_self: object) -> str:
+    raise RuntimeError("no str")
+
+
+def test_unprintable_exception_is_still_categorized(tmp_path: Path) -> None:
+    # Categories match on the exact type name, so keep the name "KeyError".
+    unprintable_key_error = type("KeyError", (KeyError,), {"__str__": _raise_no_str})
+
+    def boom() -> None:
+        raise unprintable_key_error("k")
+
+    snapshot = _capture(tmp_path, boom)
+
+    assert snapshot["exception"]["error_category"]["category"]
+    assert not any("categorization" in w for w in snapshot.get("_capture_warnings", []))

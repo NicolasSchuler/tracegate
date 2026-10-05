@@ -186,7 +186,10 @@ def categorize_exception(exc: BaseException) -> dict[str, Any] | None:
         }
     """
     exc_type_name = type(exc).__name__
-    message = str(exc)
+    try:
+        message = str(exc)
+    except Exception:
+        message = ""  # an unprintable exception is still categorized by its type
 
     # Score each category
     best_match: tuple[str, int, int] | None = None
