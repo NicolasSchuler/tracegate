@@ -42,6 +42,14 @@ test-quick:
 test-integration:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} pytest -m "integration and not baseline_runtime" -v
 
+# Compare golden fixture runs of the eval harness with tests/golden/eval_runs/
+golden-evals:
+    uv run python -m tests.golden_eval.runner
+
+# Rewrite the golden fixture runs after an intended behaviour change
+golden-evals-update:
+    uv run python -m tests.golden_eval.runner --update
+
 # Run provisioned baseline runtime integration tests
 test-baseline-runtime:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} pytest -m "integration and baseline_runtime" -v
