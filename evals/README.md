@@ -1466,6 +1466,11 @@ diagnostics report `duplicate_attempt_rows_seen`, `duplicate_attempt_rows_resolv
 `duplicate_attempt_rows_conflicting` — equal-priority rows that disagree about `success`,
 where no recorded field says which superseded the other. Those are warned about and
 `--strict-input` rejects them.
+Input diagnostics also list `record_schema_versions`, every schema version the analysis
+read. Older records stay readable, but `analyze_results`, `eval_summary`,
+`report_run_metrics` and `baselines.compare_results` all warn when one cohort mixes
+versions, and all four now report `records_schema_invalid` so a schema-invalid row cannot
+shrink the cohort silently.
 For adaptive OPE, DR reward models are fit separately per
 `*_feature_scaling_profile`; mixed-profile buckets still report IPS/SNIPS on the pooled
 samples and now expose the contributing `feature_scaling_profiles` in the summary.

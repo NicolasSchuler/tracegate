@@ -9,6 +9,7 @@ from evals.analysis_ope import (
     ADAPTIVE_BUDGET_TARGET_POLICY_ORDER,
     ADAPTIVE_ONLINE_TARGET_POLICY_ORDER,
 )
+from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION
 
 
 def _print_summary(summary: dict[str, Any]) -> None:
@@ -285,6 +286,24 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
     )
 
 
+def schema_version_warning(input_errors: Any) -> str:
+    """Warning line when one analysis read records of several schema versions (1e#13).
+
+    Older records stay readable, but mixing pre-remediation rows with current ones in one
+    cohort changes what the headline means, so every consumer says so.
+    """
+    if not isinstance(input_errors, dict):
+        return ""
+    versions = input_errors.get("record_schema_versions")
+    if not isinstance(versions, (list, tuple)) or len(versions) < 2:
+        return ""
+    listed = ", ".join(str(version) for version in versions)
+    return (
+        f"records come from several schema versions ({listed}); "
+        f"rows older than {EVAL_RECORD_SCHEMA_VERSION} predate the 2026-10-04 review fixes"
+    )
+
+
 def _attempt_budget_note(bucket: dict[str, Any]) -> str:
     """How the compared outcomes were scored (STA-13, D12)."""
     if str(bucket.get("uplift_attempt_budget_basis") or "") != "common_k":
@@ -303,15 +322,19 @@ def _print_input_errors(input_errors: Any) -> None:
     duplicate_attempt_rows_seen = int(input_errors.get("duplicate_attempt_rows_seen", 0))
     duplicate_attempt_rows_resolved = int(input_errors.get("duplicate_attempt_rows_resolved", 0))
     duplicate_conflicting = int(input_errors.get("duplicate_attempt_rows_conflicting", 0))
+    schema_warning = schema_version_warning(input_errors)
     if (
         files_unreadable == 0
         and json_lines_invalid == 0
         and records_skipped == 0
         and records_schema_invalid == 0
         and duplicate_attempt_rows_seen == 0
+        and not schema_warning
     ):
         return
     print("\nInput diagnostics:")
+    if schema_warning:
+        print(f"- warning: {schema_warning}")
     if files_unreadable or json_lines_invalid or records_skipped or records_schema_invalid:
         print(
             "- errors: "

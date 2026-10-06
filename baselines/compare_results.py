@@ -27,7 +27,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from evals.analysis_api import derive_case_condition_rows, load_and_group_records
+from evals.analysis_api import (
+    derive_case_condition_rows,
+    load_and_group_records,
+    schema_version_warning,
+)
 from evals.stats import (
     analyze_paired_results,
     comparison_eligible,
@@ -64,8 +68,25 @@ def _load_results(
     if unreadable:
         # BAS-09: the counter is an int; len() on it raised TypeError instead of warning.
         print(f"Warning: {unreadable} unreadable file(s)", file=sys.stderr)
-    rows = derive_case_condition_rows(grouped)
-    return rows
+    # codex 2-2#5: every other way input is dropped was silent here, so a cohort could
+    # shrink without any warning.
+    dropped = {
+        key: int(errors.get(key) or 0)
+        for key in ("json_lines_invalid", "records_skipped", "records_schema_invalid")
+    }
+    if any(dropped.values()):
+        detail = ", ".join(f"{key}={value}" for key, value in dropped.items())
+        print(f"Warning: dropped input records ({detail})", file=sys.stderr)
+    conflicting = int(errors.get("duplicate_attempt_rows_conflicting") or 0)
+    if conflicting:
+        print(
+            f"Warning: {conflicting} duplicate attempt row(s) disagree about success",
+            file=sys.stderr,
+        )
+    schema_warning = schema_version_warning(errors)
+    if schema_warning:
+        print(f"Warning: {schema_warning}", file=sys.stderr)
+    return derive_case_condition_rows(grouped)
 
 
 # ------------------------------------------------------------------

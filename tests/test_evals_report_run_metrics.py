@@ -1115,3 +1115,65 @@ def test_sta21_report_uses_and_prints_the_requested_ope_settings(
         capsys.readouterr().out
     )
     assert main(["--jsonl", str(jsonl), "--adaptive-ope-propensity-floor", "0"]) == 2
+
+
+def _schema_record(case_id: str, condition: str, success: bool, **overrides):
+    from tests.test_evals_analyze_grouping import _record
+
+    record = _record(
+        run_id="r1",
+        case_id=case_id,
+        condition=condition,
+        attempt=1,
+        success=success,
+        category="logic_error",
+        difficulty="easy",
+        snapshot_dependency="helpful",
+    )
+    record.update(overrides)
+    return record
+
+
+def _v7_record(case_id: str, condition: str, success: bool):
+    """A current-schema record: v7 carries the xxh3 prompt/evidence hashes."""
+    record = _schema_record(case_id, condition, success, schema_version=7)
+    record["attempt_metadata"]["prompt_xxh3_128"] = "p"
+    record["attempt_metadata"]["evidence_xxh3_128"] = "e"
+    return record
+
+
+def test_main_warns_about_schema_invalid_rows_and_mixed_versions(tmp_path, capsys) -> None:
+    """codex 2-2#5 / 1e#13: dropped rows and mixed schema versions were silent here."""
+    from evals import _json as json
+    from evals import report_run_metrics as rrm
+
+    records = [
+        _schema_record("c1", "base_repair", True),
+        _v7_record("c1", "cot_repair", False),
+        _schema_record("c2", "base_repair", False),
+        _schema_record("c2", "cot_repair", True),
+        # Valid JSON, invalid against the record schema: dropped from the cohort.
+        _schema_record("c3", "base_repair", True, attempt="not-an-int"),
+    ]
+    jsonl = tmp_path / "mixed.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    assert rrm.main(["--jsonl", str(jsonl), "--bootstrap", "16", "--seed", "3"]) == 0
+    out = capsys.readouterr().out
+
+    assert "records_schema_invalid=1" in out
+    assert "several schema versions (5, 7)" in out
+
+
+def test_main_rejects_schema_invalid_rows_with_strict_input(tmp_path, capsys) -> None:
+    from evals import _json as json
+    from evals import report_run_metrics as rrm
+
+    jsonl = tmp_path / "invalid.jsonl"
+    jsonl.write_text(
+        json.dumps(_schema_record("c1", "base_repair", True, attempt="nope")) + "\n",
+        encoding="utf-8",
+    )
+
+    assert rrm.main(["--jsonl", str(jsonl), "--strict-input"]) == 2
+    assert "Input error" in capsys.readouterr().out

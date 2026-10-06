@@ -17,7 +17,7 @@ Reliability & Input Quality
 - stage-a request success rate: n/a
 - retry gate block rate: n/a
 - retry history truncation rate: 0.0%
-- input diagnostics: files_unreadable=0, json_lines_invalid=0, records_skipped=0, infra_event_rows_seen=0, infra_event_rows_skipped=0, duplicate_attempt_rows_seen=0, duplicate_attempt_rows_resolved=0
+- input diagnostics: files_unreadable=0, json_lines_invalid=0, records_skipped=0, records_schema_invalid=0, infra_event_rows_seen=0, infra_event_rows_skipped=0, duplicate_attempt_rows_seen=0, duplicate_attempt_rows_resolved=0, duplicate_attempt_rows_conflicting=0
 
 Adaptive Signals (layered_adaptive_llm)
 - helper: invocation_case_rate=0.0%, invocation_attempt_rate=0.0%, success_when_invoked=n/a, rescue_rate=n/a

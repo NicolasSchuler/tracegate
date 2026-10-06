@@ -25,6 +25,7 @@ from evals.analysis_api import (
     is_external_baseline_condition,
     load_and_group_records,
     records_by_case_condition,
+    schema_version_warning,
     summarize_bucket,
 )
 from evals.analysis_api import mean as _mean
@@ -1590,7 +1591,7 @@ def _print_report(
     condition_summary: dict[str, Any] | None = None,
     failures: dict[str, Any] | None = None,
     overhead: dict[str, Any] | None = None,
-    input_errors: dict[str, int] | None = None,
+    input_errors: dict[str, Any] | None = None,
 ) -> None:
     dual_objective = dual_objective if isinstance(dual_objective, dict) else {}
     token_estimate_diagnostics = (
@@ -2176,17 +2177,34 @@ def _print_dual_objective(
         )
 
 
-def _print_input_errors(input_errors: dict[str, int]) -> None:
+def _print_input_errors(input_errors: dict[str, Any]) -> None:
+    """Report dropped input, so an incomplete cohort is never silent (STA-25, codex 2-2#5)."""
     files_unreadable = int(input_errors.get("files_unreadable", 0))
     json_lines_invalid = int(input_errors.get("json_lines_invalid", 0))
     records_skipped = int(input_errors.get("records_skipped", 0))
-    if files_unreadable == 0 and json_lines_invalid == 0 and records_skipped == 0:
+    records_schema_invalid = int(input_errors.get("records_schema_invalid", 0))
+    duplicate_conflicting = int(input_errors.get("duplicate_attempt_rows_conflicting", 0))
+    schema_warning = schema_version_warning(input_errors)
+    if schema_warning:
+        print(f"- Warning: {schema_warning}")
+    if duplicate_conflicting:
+        print(
+            f"- Warning: {duplicate_conflicting} duplicate attempt row(s) disagree about success; "
+            "rerun with --strict-input to reject them"
+        )
+    if (
+        files_unreadable == 0
+        and json_lines_invalid == 0
+        and records_skipped == 0
+        and records_schema_invalid == 0
+    ):
         return
     print(
         "- Input diagnostics: "
         f"files_unreadable={files_unreadable}, "
         f"json_lines_invalid={json_lines_invalid}, "
-        f"records_skipped={records_skipped}"
+        f"records_skipped={records_skipped}, "
+        f"records_schema_invalid={records_schema_invalid}"
     )
 
 

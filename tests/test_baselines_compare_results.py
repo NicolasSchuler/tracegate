@@ -175,3 +175,32 @@ def test_bas01_unsupported_baseline_rows_are_not_losing_pairs() -> None:
 
     assert result["error"] == "no_common_cases"
     assert result["n_cases"] == 0
+
+
+def test_load_results_warns_about_dropped_and_mixed_version_records(tmp_path, capsys) -> None:
+    """codex 2-2#5 / 1e#13: compare_results ignored every counter but unreadable files."""
+    from baselines.compare_results import _load_results
+    from evals import _json as json
+    from tests.test_evals_report_run_metrics import _schema_record, _v7_record
+
+    jsonl = tmp_path / "mixed.jsonl"
+    jsonl.write_text(
+        "".join(
+            json.dumps(record) + "\n"
+            for record in (
+                _schema_record("c1", "base_repair", True),
+                _v7_record("c1", "ldb", False),
+                _schema_record("c2", "base_repair", True, attempt="nope"),
+            )
+        )
+        + "{not json}\n",
+        encoding="utf-8",
+    )
+
+    rows = _load_results([str(jsonl)])
+    err = capsys.readouterr().err
+
+    assert len(rows) == 2
+    assert "records_schema_invalid=1" in err
+    assert "json_lines_invalid=1" in err
+    assert "several schema versions (5, 7)" in err
