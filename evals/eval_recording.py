@@ -1144,6 +1144,7 @@ def _empty_attempt_metadata(*, attempt: int) -> dict[str, Any]:
             "test_after_sec": 0.0,
             "recovery_llm_sec": 0.0,
             "recovery_total_sec": 0.0,
+            "tep_learning_llm_sec": 0.0,
             "llmdebug_total_sec": 0.0,
             "llm_total_sec": 0.0,
             "overhead_sec": 0.0,

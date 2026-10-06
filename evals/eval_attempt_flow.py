@@ -114,6 +114,7 @@ from evals.attempt_usage import (
     _summarize_recovery_usage_meta,
     _sync_attempt_prompt_char_metadata,
     _sync_attempt_usage_metadata,
+    _token_usage_available_from_meta,
     _usage_token_counts_from_patch_meta,
 )
 from evals.attempt_verification import (
@@ -1293,16 +1294,21 @@ def _fold_tep_learning_usage(
     """Add TEP critic/update calls to the attempt's usage (POL-02).
 
     They run after the propose-path aggregation, so token, latency and reward accounting
-    used to miss up to 12 calls per attempt.
+    used to miss up to 12 calls per attempt. The canonical usage fields on both the attempt
+    metadata and ``patch_meta`` are rewritten through the shared sync, so ``usage``,
+    ``tokens_input``/``tokens_output`` and the availability flag describe the same calls.
     """
     metas = learning.pop("llm_call_metas", None) or []
     calls = sum(_llm_call_count_from_meta(meta, default=1) for meta in metas)
     prompt = completion = total = 0
+    tep_usage_known = False
     for meta in metas:
         meta_prompt, meta_completion, meta_total = _usage_token_counts_from_patch_meta(meta)
         prompt += meta_prompt
         completion += meta_completion
         total += meta_total
+        if _token_usage_available_from_meta(meta):
+            tep_usage_known = True
     learning["llm_call_count"] = calls
     learning["tokens_prompt"] = prompt
     learning["tokens_completion"] = completion
@@ -1311,13 +1317,48 @@ def _fold_tep_learning_usage(
     patch_meta["tep_learning_tokens_total"] = total
     if not calls:
         return
-    for key, value in (
-        ("llm_call_count", calls),
-        ("tokens_prompt", prompt),
-        ("tokens_completion", completion),
-        ("tokens_total", total),
-    ):
-        attempt_metadata[key] = _nonnegative_int(attempt_metadata.get(key), default=0) + value
+
+    prior_calls = _nonnegative_int(attempt_metadata.get("llm_call_count"), default=0)
+    prior_available = _token_usage_available_from_meta(patch_meta)
+    prior_prompt, prior_completion, prior_total = (
+        _usage_token_counts_from_patch_meta(patch_meta) if prior_available else (0, 0, 0)
+    )
+    # Reasoning coverage over the propose segment plus every learning call.
+    reasoning_tokens, reasoning_available = _combine_reasoning_usage_segments(
+        (dict(patch_meta), prior_calls),
+        *((meta, 1) for meta in metas),
+    )
+    # A segment that served calls without reporting usage leaves the attempt partly
+    # covered; the known counts are still worth recording (the alternative is losing them).
+    missing_segments = [
+        name
+        for name, applicable, known in (
+            ("patch", prior_calls > 0, prior_available),
+            ("tep_learning", True, tep_usage_known),
+        )
+        if applicable and not known
+    ]
+    patch_meta["token_usage_available"] = prior_available or tep_usage_known
+    patch_meta["token_usage_partial"] = bool(missing_segments) and (
+        prior_available or tep_usage_known
+    )
+    patch_meta["token_usage_missing_segments"] = missing_segments
+    _apply_usage_totals_to_patch_meta(
+        patch_meta=patch_meta,
+        llm_call_count=prior_calls + calls,
+        tokens_prompt=prior_prompt + prompt,
+        tokens_completion=prior_completion + completion,
+        tokens_total=prior_total + total,
+        tokens_reasoning=reasoning_tokens,
+        reasoning_token_usage_available=reasoning_available,
+    )
+    _sync_attempt_usage_metadata(
+        attempt_metadata=attempt_metadata,
+        patch_meta=patch_meta,
+        llm_call_count=prior_calls + calls,
+    )
+    attempt_metadata["token_usage_partial"] = patch_meta["token_usage_partial"]
+    attempt_metadata["token_usage_missing_segments"] = list(missing_segments)
 
 
 def _unit_runtime_error_record(
@@ -7679,8 +7720,6 @@ def _run_one_condition_attempts(
             adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
             note=note,
         )
-        attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-        cumulative_runtime_sec += attempt_wall_sec
         _update_aux_signals_from_attempt(
             online_kwargs=online_finalize_kwargs,
             budget_kwargs=budget_finalize_kwargs,
@@ -7735,6 +7774,7 @@ def _run_one_condition_attempts(
                     ),
                 },
             )
+            tep_learning_started = time.perf_counter()
             adaptive_tep_learning = run_post_attempt_learning(
                 controller=adaptive_tep_controller,
                 patcher=patcher_for_attempt,
@@ -7743,6 +7783,7 @@ def _run_one_condition_attempts(
                 case_id=case.case_id,
                 node_packets=tep_node_packets,
             )
+            tep_learning_duration_sec = max(0.0, time.perf_counter() - tep_learning_started)
             _fold_tep_learning_usage(
                 learning=adaptive_tep_learning,
                 attempt_metadata=attempt_metadata,
@@ -7751,6 +7792,39 @@ def _run_one_condition_attempts(
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
+            # POL-02: learning is LLM time inside the attempt, and a cost the budget
+            # policy's reward has to see; it used to land in neither.
+            _accumulate_timing_metadata_field(
+                "tep_learning_llm_sec",
+                tep_learning_duration_sec,
+                attempt_metadata,
+                patch_meta,
+            )
+            tep_learning_calls = _nonnegative_int(
+                adaptive_tep_learning.get("llm_call_count"), default=0
+            )
+            if tep_learning_calls > 0 or tep_learning_duration_sec > 0.0:
+                budget_local_llm_calls += tep_learning_calls
+                budget_local_tokens_prompt += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_prompt"), default=0
+                )
+                budget_local_tokens_completion += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_completion"), default=0
+                )
+                budget_local_tokens_total += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_total"), default=0
+                )
+                budget_local_wall_sec += tep_learning_duration_sec
+                budget_finalize_kwargs["local_accounting"] = _adaptive_policy_local_accounting(
+                    llm_call_count=budget_local_llm_calls,
+                    tokens_prompt=budget_local_tokens_prompt,
+                    tokens_completion=budget_local_tokens_completion,
+                    tokens_total=budget_local_tokens_total,
+                    wall_sec=budget_local_wall_sec,
+                )
+        # POL-02: the attempt's wall clock closes after learning, not before it.
+        attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
+        cumulative_runtime_sec += attempt_wall_sec
         # ATT-17: persist after every learning pass and record a failed save.
         _save_adaptive_tep_state(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
         pending_credit = _finalize_adaptive_policy_attempt(

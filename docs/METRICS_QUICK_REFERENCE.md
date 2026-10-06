@@ -20,7 +20,8 @@
 | `baseline_internal_total_sec` | Total time spent inside the baseline repair loop. |
 | `baseline_eval_sec` | Time the baseline spent running its own internal checks/tests. |
 | `baseline_orchestration_sec` | Baseline-internal non-LLM, non-eval orchestration time. |
-| `llm_total_sec` | Pure LLM time across stage A, stage B, and context compaction. |
+| `tep_learning_llm_sec` | Pure LLM time of the full-TEP post-attempt critic/update pass (`--adaptive-tep-mode full`). |
+| `llm_total_sec` | Pure LLM time across stage A, stage B, context compaction, and full-TEP learning. |
 | `overhead_sec` | Residual framework overhead after subtracting pytest, pure LLM, and baseline-internal eval/orchestration. |
 | `adaptive_controller_prepare_sec` | Time spent building the adaptive controller runtime for hybrid baseline runs before proposal starts. |
 | `adaptive_controller_summarizer_sec` | Time spent generating the controller strategy summary used by hybrid baseline sidecars. |

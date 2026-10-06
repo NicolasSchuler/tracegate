@@ -67,7 +67,8 @@ def test_empty_attempt_metadata_has_timing_breakdown() -> None:
     assert timing["llm_total_sec"] == 0.0
     assert timing["overhead_sec"] == 0.0
     assert timing["llmdebug_total_sec"] == 0.0
-    assert len(timing) == 26
+    assert timing["tep_learning_llm_sec"] == 0.0
+    assert len(timing) == 27
 
 
 def test_empty_attempt_metadata_has_token_breakdown() -> None:

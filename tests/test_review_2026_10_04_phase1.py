@@ -646,8 +646,23 @@ def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
     }
     learning: dict[str, Any] = {"enabled": True, "llm_call_metas": [call_meta] * 3}
-    attempt_metadata: dict[str, Any] = {"llm_call_count": 2, "tokens_total": 500}
-    patch_meta: dict[str, Any] = {}
+    # The propose path syncs the same usage onto both dicts before the fold runs.
+    propose_usage = {"prompt_tokens": 400, "completion_tokens": 100, "total_tokens": 500}
+    attempt_metadata: dict[str, Any] = {
+        "llm_call_count": 2,
+        "token_usage_available": True,
+        "tokens_prompt": 400,
+        "tokens_completion": 100,
+        "tokens_total": 500,
+    }
+    patch_meta: dict[str, Any] = {
+        "llm_call_count": 2,
+        "token_usage_available": True,
+        "tokens_prompt": 400,
+        "tokens_completion": 100,
+        "tokens_total": 500,
+        "usage": dict(propose_usage),
+    }
     _fold_tep_learning_usage(
         learning=learning, attempt_metadata=attempt_metadata, patch_meta=patch_meta
     )
@@ -655,6 +670,111 @@ def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
     assert attempt_metadata["tokens_total"] == 860
     assert patch_meta["tep_learning_llm_call_count"] == 3
     assert "llm_call_metas" not in learning
+    # codex 1f#3: the canonical fields describe the same calls as tokens_total.
+    assert patch_meta["tokens_total"] == 860
+    assert patch_meta["usage"]["total_tokens"] == 860
+    assert attempt_metadata["tokens_input"] == 700
+    assert attempt_metadata["tokens_output"] == 160
+    assert attempt_metadata["token_usage_partial"] is False
+
+
+class _FullTepPatcher:
+    """An ``openai``-shaped patcher whose patch call reports no usage but whose TEP
+    critic/update calls do, with a clock that advances one second per learning call."""
+
+    name = "openai"
+    response_mode = "diff"
+
+    def __init__(self, *, clock_offset: dict[str, float]) -> None:
+        self._clock_offset = clock_offset
+        self.served_usage: list[dict[str, int]] = []
+
+    def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path, **_kw: Any) -> Any:
+        del prompt, context_dir, cwd
+        # A valid patch response that carries no usage payload at all.
+        return PatchResult(diff=_FIX, meta={"llm_call_count": 1})
+
+    def generate_text(self, **_kwargs: Any) -> Any:
+        raise AssertionError("full TEP learning only uses generate_json")
+
+    def generate_json(self, **kwargs: Any) -> Any:
+        from types import SimpleNamespace
+
+        self._clock_offset["value"] += 1.0
+        usage = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        self.served_usage.append(dict(usage))
+        operation = str(kwargs.get("operation_name") or "")
+        payload: dict[str, Any] = (
+            {"overall_score_10": 6.0, "improvement_kind": "stable", "summary": "ok"}
+            if "critic" in operation
+            else {"rationale": "no change", "system_prompts": {}, "blocks": {}}
+        )
+        return SimpleNamespace(
+            payload=payload,
+            meta={"llm_call_count": 1, "usage": dict(usage)},
+        )
+
+
+def test_pol02_full_tep_learning_lands_in_usage_latency_and_policy_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1f#3 / 1f#4: the TEP critic/update calls are paid for in every account.
+
+    Drives the real full-TEP seam: the patch response omits usage, the learning calls
+    report it, and each learning call costs one (fake) second.
+    """
+    clock_offset = {"value": 0.0}
+    real_perf_counter = time.perf_counter
+
+    class _OffsetClock:
+        def __getattr__(self, item: str) -> Any:
+            return getattr(time, item)
+
+        def perf_counter(self) -> float:
+            return real_perf_counter() + clock_offset["value"]
+
+    from evals import attempt_proposal
+
+    offset_clock = _OffsetClock()
+    monkeypatch.setattr(eval_attempt_flow, "time", offset_clock)
+    # The wall-clock measurement reads its own module's clock.
+    monkeypatch.setattr(attempt_proposal, "time", offset_clock)
+    patcher = _FullTepPatcher(clock_offset=clock_offset)
+    records = _run(
+        tmp_path,
+        patcher,  # type: ignore[arg-type]
+        patch_verifier_scope="disabled",
+        adaptive_tep_mode="full",
+        adaptive_tep_state_path=str(tmp_path / "tep_state.json"),
+    )
+    record = _attempts(records)[0]
+    meta = record["attempt_metadata"]
+    patch_meta = record["patch_meta"]
+
+    served_total = sum(usage["total_tokens"] for usage in patcher.served_usage)
+    assert served_total > 0
+    learning = meta["adaptive_tep_full_learning"]
+    assert learning["llm_call_count"] == len(patcher.served_usage)
+
+    # 1f#3: the known learning tokens are not discarded for lack of patch usage, and
+    # every canonical field describes the same calls.
+    assert meta["token_usage_available"] is True
+    assert meta["tokens_total"] == served_total
+    assert meta["tokens_input"] == sum(u["prompt_tokens"] for u in patcher.served_usage)
+    assert meta["tokens_output"] == sum(u["completion_tokens"] for u in patcher.served_usage)
+    assert patch_meta["usage"]["total_tokens"] == served_total
+    assert patch_meta["tokens_total"] == served_total
+    # The propose call served without usage, so coverage is partial, not complete.
+    assert meta["token_usage_partial"] is True
+    assert meta["token_usage_missing_segments"] == ["patch"]
+
+    # 1f#4: learning is inside the attempt's wall clock and the policy-local cost.
+    learning_sec = float(len(patcher.served_usage))
+    assert meta["timing_breakdown"]["tep_learning_llm_sec"] >= learning_sec
+    assert record["attempt_wall_clock_sec"] >= learning_sec
+    assert record["cumulative_runtime_sec"] >= learning_sec
+    assert meta["adaptive_budget_local_tokens_total"] >= served_total
+    assert meta["adaptive_budget_local_wall_sec"] >= learning_sec
 
 
 def test_att09_equilibrium_replans_accumulate_usage() -> None:

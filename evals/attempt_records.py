@@ -280,6 +280,9 @@ def _finalize_breakdowns(record: dict[str, Any]) -> None:
     timing["recovery_llm_sec"] = recovery_llm_sec
     timing["recovery_total_sec"] = recovery_llm_sec
 
+    # POL-02: the full-TEP post-attempt critic/update pass is pure LLM time in the attempt.
+    timing["tep_learning_llm_sec"] = max(0.0, float(pm.get("tep_learning_llm_sec") or 0.0))
+
     # llmdebug_total_sec: snapshot_read + context_fulfillment (tool calls for llmdebug data)
     timing["llmdebug_total_sec"] = max(
         0.0,
@@ -291,7 +294,8 @@ def _finalize_breakdowns(record: dict[str, Any]) -> None:
         0.0,
         stage_a_llm_sec
         + timing.get("stage_b_llm_sec", 0.0)
-        + timing.get("context_compaction_llm_sec", 0.0),
+        + timing.get("context_compaction_llm_sec", 0.0)
+        + timing.get("tep_learning_llm_sec", 0.0),
     )
 
     # overhead_sec: wall_clock - test_before - test_after - llm_total
