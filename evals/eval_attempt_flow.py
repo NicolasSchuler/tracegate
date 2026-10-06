@@ -11,13 +11,18 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from baselines.case_information import build_baseline_case_context_payload
+from baselines.case_information import (
+    TEST_SOURCE_FULL,
+    TEST_SOURCE_NONE,
+    build_baseline_case_context_payload,
+    case_information_record,
+)
 from baselines.controller_packet import HYBRID_GUIDANCE_MODE_FIXED_V1
 from evals import _json as json
 from evals.adaptive_action_selection import (
@@ -140,6 +145,7 @@ from evals.eval_evidence import (
     _xxh3_128_text,
     build_fallback_context_bundle,
     collect_text_context,
+    context_block_paths,
     evidence_chars_by_type,
 )
 from evals.eval_patch_constants import patcher_meta_truncated
@@ -450,6 +456,39 @@ def _reset_patch_usage_sync_metadata(patch_meta: dict[str, Any]) -> None:
     """Clear attempt-synced usage fields before merging fresh patch metadata."""
     for key in _PATCH_USAGE_SYNC_META_KEYS:
         patch_meta.pop(key, None)
+
+
+def _is_test_source_path(rel_path: str) -> bool:
+    name = PurePosixPath(str(rel_path).replace("\\", "/")).name
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def _native_case_information(
+    *,
+    project_files_context: str,
+    evidence_items: Sequence[Mapping[str, Any]],
+    stage_a_context_delivered: bool,
+) -> dict[str, Any]:
+    """Case-information manifest for a native arm's assembled Stage-B prompt (BAS-07).
+
+    Mirrors what the baseline converters record: which case files carried content into the
+    prompt, and whether the test source was among them. Project files come from the
+    monolithic context blocks, staged files from the delivered file evidence.
+    """
+    prompt_files = list(context_block_paths(project_files_context))
+    if stage_a_context_delivered:
+        for item in evidence_items:
+            if not isinstance(item, Mapping) or str(item.get("type") or "") != "file":
+                continue
+            locator = str(item.get("path") or item.get("locator") or "").strip()
+            if locator:
+                prompt_files.append(locator)
+    exposure = (
+        TEST_SOURCE_FULL
+        if any(_is_test_source_path(path) for path in prompt_files)
+        else TEST_SOURCE_NONE
+    )
+    return case_information_record(test_source_exposure=exposure, prompt_files=prompt_files)
 
 
 def _build_full_tep_node_packets(
@@ -5092,6 +5131,21 @@ def _run_one_condition_attempts(
 
         patch_meta: dict[str, Any] = {}
         patch_meta["context_protocol"] = attempt_context_protocol
+        if not is_baseline_patcher:
+            # BAS-07: the baseline converters record their own manifest inside
+            # BaselinePatcher.propose_patch; the native arms need the other half of the
+            # comparison, derived from the prompt that was actually assembled.
+            patch_meta["case_information"] = _native_case_information(
+                project_files_context=(
+                    project_files_context if include_project_files_in_prompt else ""
+                ),
+                evidence_items=bookkeeping_evidence_items_for_prompt,
+                stage_a_context_delivered=bool(
+                    include_stage_a_context_in_prompt
+                    and prompt_budget_result.section_status.get("stage_a_context", "")
+                    not in {"", "dropped"}
+                ),
+            )
         patch_meta["adaptive_tep_mode_requested"] = requested_adaptive_tep_mode
         patch_meta["adaptive_tep_full_enabled"] = full_tep_enabled
         patch_meta["adaptive_tep_state_path"] = adaptive_tep_state_path

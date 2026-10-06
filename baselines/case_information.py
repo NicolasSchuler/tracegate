@@ -27,6 +27,10 @@ TEST_SOURCE_ASSERTS = "asserts"
 """Only the test assertions are in the prompt; used by LDB, whose converter accepts only
 plain-assert test bodies, so the assertions carry the whole test content."""
 
+TEST_SOURCE_NONE = "none"
+"""No test source reached the prompt. A native arm whose evidence staging or prompt budget
+left the test file out records this, so BAS-07 comparisons have both halves."""
+
 
 def build_baseline_case_context_payload(
     *,

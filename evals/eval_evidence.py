@@ -1030,6 +1030,18 @@ def collect_text_context(
     return "\n".join(parts).rstrip() + ("\n" if parts else "")
 
 
+_CONTEXT_BLOCK_HEADER = re.compile(r"^--- (.+?) ---$", re.MULTILINE)
+
+
+def context_block_paths(text: str) -> list[str]:
+    """Relative paths of the ``--- <path> ---`` blocks in a collected context section.
+
+    Lets the native conditions report which case files reached the prompt (BAS-07), the
+    same way the baseline converters report their ``case_information.prompt_files``.
+    """
+    return [match.group(1).strip() for match in _CONTEXT_BLOCK_HEADER.finditer(text or "")]
+
+
 def collect_file_index(root: Path) -> str:
     """Return a newline-delimited index of eligible files under *root*."""
     return "\n".join(_collect_file_index_lines(root))

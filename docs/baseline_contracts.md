@@ -56,6 +56,12 @@ decision D1). It fixes which case data any arm may see:
   `case_information` (`case_info_policy`, `test_source_exposure`,
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
   the run-level policy.
+- The baseline arms' manifest comes from their converter; a native arm's
+  (`base_repair`, `cot_repair`, both adaptive conditions) is derived from the
+  assembled Stage-B prompt, so `prompt_files` lists the monolithic project-file
+  blocks plus the staged file evidence that was actually delivered. A native
+  attempt whose evidence policy or prompt budget left the test file out records
+  `test_source_exposure = "none"` — the native half of the BAS-07 comparison.
 
 ## Generation contract (decision D4, BAS-03/04/08/11)
 

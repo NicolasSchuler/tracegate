@@ -7227,3 +7227,67 @@ def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
     assert meta["adaptive_online_policy_mode"] == "off"
     assert meta["adaptive_online_feature_vector"] == {}
     assert meta["adaptive_online_feature_vector_raw"]
+
+
+def test_bas07_native_attempt_records_a_case_information_manifest(tmp_path, monkeypatch) -> None:
+    """BAS-07 (codex 1a#3): native arms record which case files reached their prompt."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-bas07-files",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert isinstance(manifest, dict)
+    assert manifest["case_info_policy"] == "neutral_v1"
+    assert manifest["test_source_exposure"] == "full"
+    assert manifest["prompt_files"] == ["buggy.py", "helper.py", "test_buggy.py"]
+    assert "Reference tests" not in patcher.patch_prompts[0]
+    assert "def test_f() -> None:" in patcher.patch_prompts[0]
+
+
+def test_bas07_native_attempt_without_file_context_records_no_test_source(
+    tmp_path, monkeypatch
+) -> None:
+    """The omitted-test-source half: no project files and no staged file evidence."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-bas07-nofiles",
+        include_snapshot=False,
+        include_files_context=False,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert manifest["test_source_exposure"] == "none"
+    assert manifest["prompt_files"] == []
+    assert "def test_f() -> None:" not in patcher.patch_prompts[0]
+
+
+def test_bas07_native_manifest_lists_only_staged_file_evidence(tmp_path, monkeypatch) -> None:
+    """A restricted file-only action reports just the file it was granted."""
+    patcher = _AdaptiveActionCapturePatcher(
+        request_payload={
+            "need_more_context": True,
+            "requests": [{"type": "file", "path": "test_buggy.py"}],
+            "sufficiency_rationale": "need the failing test",
+        }
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_FILE_ONLY,
+        run_id="run-bas07-staged",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert manifest["prompt_files"] == ["test_buggy.py"]
+    assert manifest["test_source_exposure"] == "full"
