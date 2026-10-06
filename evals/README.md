@@ -1439,11 +1439,67 @@ unsupported and should be regenerated with the current harness before analysis.
   block is a non-scored `infra_event` and the attempt is retried once (ATT-05). A completion
   cut off at `max_tokens` is recorded as `note="truncated_response"` (patcher error
   `truncated_response`) instead of being repaired into a patch or recorded as
-  `no_patch_proposed` (LLM-02), and model diffs are taken from every fenced block with
-  reasoning stripped, the last diff per file winning (LLM-01, LLM-04). Run metadata records
+  `no_patch_proposed` (LLM-02), and model diffs are taken from fenced and unfenced sections in
+  response order with reasoning stripped, the last diff per file winning (LLM-01, LLM-04). Run
+  metadata records
   `llmdebug_snapshot_schema_version`, the debug-session schema the pytest plugin wrote for
   snapshot-based conditions, and the settings fingerprint includes it, so resuming a run
   across a snapshot-format change counts as settings drift.
+  Corrections from the codex review of the remediation branches (2026-10-06) extend v7:
+  Diff extraction keeps hunk lines after consecutive blank context lines, does not absorb trailing
+  prose bullets (including lowercase ones) as diff lines, and a `/dev/null` creation or deletion
+  keeps a real top-level `a/`/`b/` directory when a `diff --git` header declares it (LLM-03,
+  LLM-07, LLM-23). Truncation is terminal wherever it is detectable: a length-limited answer
+  without content, a truncated reasoning-only answer, and truncated Stage-A `request_context` /
+  `compact_context` answers all record `truncated_response`, and no recovery call follows
+  (LLM-02). Edit payloads with CRLF replacements keep single carriage returns, fuzzy block
+  recovery is skipped above 4,000 characters (LLM-09, LLM-12), a `Retry-After` is honoured above
+  the backoff cap (`transport_retry_stop_reason`, LLM-22), and patch cleanup keeps `.orig`/`.rej`
+  files the diff itself names (ATT-16).
+  `evidence_chars_by_type` counts the evidence as delivered (deduplicated across the seed bundle
+  and Stage-A requests, filtered to the new items on a delta retry, and scaled by what survived
+  compaction and the prompt budget), and `adaptive_snapshot_included` /
+  `stage_b_snapshot_in_prompt` are derived from the final prompt sections. A restricted helper
+  action whose request list is emptied keeps `context_protocol = "staged"` and receives no
+  monolithic project-file context (ATT-03). Native records carry a `patch_meta.case_information`
+  manifest (`prompt_files`, `test_source_exposure`, with a new `"none"` value) like the baselines'
+  (BAS-07).
+  Attempt usage includes every served LLM call: TEP equilibrium re-plans, transport-recovery
+  replays and the full-TEP learning pass, which `timing_breakdown.tep_learning_llm_sec` reports as
+  part of `llm_total_sec`; the attempt's wall clock closes after it. A retry-gate block's paid
+  work is carried into the next scored row (`retry_gate_carried_llm_call_count`,
+  `retry_gate_carried_tokens_total`). `token_usage_available` may be true when the patch call
+  reported no usage; `token_usage_partial` and `token_usage_missing_segments` then mark the
+  unknown segment. A terminal `unit_runtime_error` is numbered after the last scored attempt, so a
+  unit that crashes after an infra event stays in the denominator (ATT-05, ATT-08, POL-02).
+  Adaptive policy (Phase 3): `policy_defaults_version: 2` defaults (per-arm decay 1.0, random
+  greedy tie-breaking, widened feature family); escalation is charged only its incremental cost
+  (POL-08); the delayed rescue bonus requires the helper's evidence to survive into the successful
+  prompt (POL-11); BwK pacing penalizes scores by `λ·ĉ_k/target` (POL-04); TEP acceptance is a
+  paired critic comparison and unparsed critiques are excluded (POL-17); Thompson draws are keyed
+  per decision (POL-05). Decision-model runs (`--adaptive-decision-model-role`) carry
+  `adaptive_online_dm_*` attempt fields and helper-event schema v5's `decision_model` block; with
+  `--adaptive-reveal-mode full` the default `--adaptive-lite-snapshot-mode replace` makes the lite
+  snapshot sections replace the full snapshot in the patch prompt; shadow-mode helper rows carry
+  behaviour propensity 1.0 (analysis corrects older shadow rows at read time).
+  Baseline runs report the effective generation values in `patch_meta.baseline_generation`,
+  including baseline-specific overrides (`overrides`);
+  `patch_meta.baseline_repo_state.tree_patch_sha256` also covers untracked upstream file contents;
+  one wall-clock deadline bounds every blocking adapter step (`error="deadline_exceeded"` for
+  INTERVENOR, λ-RLM and RLM); TraceCoder prompts keep the full test source and the retry context;
+  and `--seed` affects baseline sampling only together with `--deterministic` (BAS-02, BAS-03,
+  BAS-04, BAS-07, BAS-08, BAS-11, BAS-14, BAS-19).
+  Run metadata and its fingerprints distinguish v7 configurations whose behaviour differs even
+  when every CLI flag matches: `patcher_config` records `policy_defaults_version`,
+  `evidence_policy_revision`, `attempt_accounting_version`, `retry_gate_max_consecutive_blocks`,
+  `oracle_policy` (the effective test-oracle policy: version, pristine test-surface restoration,
+  JUnit-counted verdict and the test-surface rule sets), `llmdebug_snapshot_schema_version`
+  (resolved from the executor that runs pytest; `container:<image>` for an unmounted container),
+  and, for baseline runs, the resolved generation contract (`baseline_generation`,
+  `baseline_api_timeout_sec`, `baseline_process_timeout_sec`, `baseline_max_iterations`,
+  `baseline_extra`). With a decision model, `patcher_config.adaptive_decision_model_serving`
+  records the model id, revision, device, dtype, quantization and context limit the sidecar
+  served. Resuming a results file whose records use an older `schema_version` is refused.
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
