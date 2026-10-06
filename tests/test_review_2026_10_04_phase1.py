@@ -981,6 +981,8 @@ def test_att16_cleanup_keeps_a_diff_target_that_ends_in_orig(tmp_path: Path) -> 
 
     assert ok, msg
     assert (tmp_path / "fixture.orig").read_text(encoding="utf-8") == "expected = 1\n"
+
+
 @dataclass
 class _CountingOpenAIPatcher:
     """A patcher the runner treats as the OpenAI one, counting its proposals."""
