@@ -585,6 +585,11 @@ class ExecutionConfig:
     container_mount_repo_src: bool = True
     container_env: dict[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
+    container_pool: bool = False
+    """Reuse a pool of long-lived containers (one per job) instead of a fresh container per
+    pytest call. Off by default: pooled containers share the read-write workdirs mount
+    and outlive units, which is weaker isolation than the one-shot containers that
+    produced all pre-2026-10-04 results (ORC-02)."""
 
 
 @dataclass(frozen=True)

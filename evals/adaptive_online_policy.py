@@ -12,7 +12,8 @@ from __future__ import annotations
 import random
 import threading
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,7 @@ from .policy_feature_scaling import (
     normalize_feature_scaling_profile,
     scale_feature_mapping,
 )
+from .seed_derivation import derive_seed
 
 ACTION_SKIP_HELPER = "skip_helper"
 ACTION_INVOKE_HELPER = "invoke_helper"
@@ -367,6 +369,23 @@ class AdaptiveOnlinePolicyController:
             return ACTION_SKIP_HELPER
         return str(available_actions[0])
 
+    @contextmanager
+    def _decision_rng(self, rng_key: str | None) -> Iterator[None]:
+        """Use an RNG keyed by *rng_key* for one decision (POL-05).
+
+        Keyed draws do not depend on how concurrent units interleave; without a key or a
+        seed the controller's shared stream is used.
+        """
+        if rng_key is None or self.config.random_seed is None:
+            yield
+            return
+        shared = self._rng
+        self._rng = random.Random(derive_seed(self.config.random_seed, rng_key))
+        try:
+            yield
+        finally:
+            self._rng = shared
+
     def decide(
         self,
         *,
@@ -375,6 +394,7 @@ class AdaptiveOnlinePolicyController:
         available_actions: Collection[str] | None = None,
         unavailable_action_reasons: Mapping[str, str] | None = None,
         advice: DecisionModelAdvice | None = None,
+        rng_key: str | None = None,
     ) -> PolicyDecision:
         """Select an action given the current context features.
 
@@ -393,7 +413,7 @@ class AdaptiveOnlinePolicyController:
         }
         if role == ROLE_FEATURES:
             cleaned_features.update(advice_feature_values(advice))
-        with self._lock:
+        with self._lock, self._decision_rng(rng_key):
             (
                 scaled_features,
                 feature_scaling_caps,

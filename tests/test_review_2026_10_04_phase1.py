@@ -210,3 +210,102 @@ def test_att10_analysis_counts_relaxed_and_test_surface_attempts() -> None:
     )
     assert rows[0]["relaxed_apply_attempts"] == 1
     assert rows[0]["test_surface_modified_attempts"] == 1
+
+
+def test_orc06_abbreviated_flags_are_rejected(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr("evals.eval_main_flow.run_main_flow", lambda **_kw: 0)
+    with pytest.raises(SystemExit) as excinfo:
+        run_eval.main(["--job", "3"])
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments: --job" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("conditions", "message"),
+    [("base_repair,base_repair", "duplicate condition"), (",", "no conditions given")],
+)
+def test_orc15_conditions_are_validated(conditions: str, message: str, tmp_path: Path) -> None:
+    from argparse import Namespace
+
+    from evals.eval_config import ConfigResolutionState
+
+    args = Namespace(conditions=conditions, patcher="openai", native_baseline_mode="")
+    with pytest.raises(ValueError, match=message):
+        run_eval._resolve_conditions_for_run(
+            args=args, config_state=ConfigResolutionState(config_paths=[], value_sources={})
+        )
+
+
+@pytest.mark.parametrize("run_id", ["..", "a/b", "../escape", "run id", "x" * 129])
+def test_orc21_invalid_run_ids_are_rejected(run_id: str, capsys) -> None:
+    exit_code = run_eval.main(["--run-id", run_id, "--patcher", "null", "--executor", "local"])
+    assert exit_code == 2
+    assert "Invalid --run-id" in capsys.readouterr().out
+
+
+def test_pol05_pol23_budget_controllers_are_per_condition_with_own_seeds(
+    tmp_path: Path,
+) -> None:
+    from evals.adaptive_budget_online_policy import BudgetPolicyConfig
+    from evals.eval_main_flow import _per_condition_budget_configs
+
+    base = BudgetPolicyConfig.normalize(
+        mode="on",
+        state_path=tmp_path / "budget.json",
+        events_path=tmp_path / "budget_events.jsonl",
+    )
+    both = _per_condition_budget_configs(
+        base,
+        conditions=[
+            Condition.BASE_REPAIR,
+            Condition.LAYERED_ADAPTIVE_GATED,
+            Condition.LAYERED_ADAPTIVE_LLM,
+        ],
+        seed=7,
+    )
+    assert sorted(both) == ["layered_adaptive_gated", "layered_adaptive_llm"]
+    gated, llm = both["layered_adaptive_gated"], both["layered_adaptive_llm"]
+    assert gated.state_path == tmp_path / "budget.layered_adaptive_gated.json"
+    assert llm.events_path == tmp_path / "budget_events.layered_adaptive_llm.jsonl"
+    assert gated.random_seed != llm.random_seed
+    assert gated.random_seed is not None and gated.random_seed != 7
+
+    single = _per_condition_budget_configs(
+        base, conditions=[Condition.LAYERED_ADAPTIVE_LLM], seed=None
+    )
+    assert single["layered_adaptive_llm"].state_path == tmp_path / "budget.json"
+    assert single["layered_adaptive_llm"].random_seed is None
+
+
+def test_pol05_keyed_decisions_do_not_depend_on_decision_order() -> None:
+    from evals.adaptive_online_policy import AdaptiveOnlinePolicyController, OnlinePolicyConfig
+
+    def _controller() -> AdaptiveOnlinePolicyController:
+        return AdaptiveOnlinePolicyController(
+            OnlinePolicyConfig.normalize(mode="on", warmup_decisions=1000, random_seed=11)
+        )
+
+    features = {"bias": 1.0, "x": 0.3}
+    first = _controller()
+    keyed_first = first.decide(feature_values=features, rng_key="case-a|llm|1").selected_action
+
+    second = _controller()
+    for index in range(5):  # other units decide first under a different interleaving
+        second.decide(feature_values=features, rng_key=f"case-b|llm|{index}")
+    keyed_second = second.decide(feature_values=features, rng_key="case-a|llm|1").selected_action
+    assert keyed_first == keyed_second
+
+    draws = {
+        _controller().decide(feature_values=features, rng_key=f"k{i}").selected_action
+        for i in range(30)
+    }
+    assert len(draws) > 1  # different keys give different streams
+
+
+def test_derive_seed_is_stable_and_separates_streams() -> None:
+    from evals.seed_derivation import derive_seed
+
+    assert derive_seed(1, "helper") == derive_seed(1, "helper")
+    assert derive_seed(1, "helper") != derive_seed(1, "budget")
+    assert derive_seed(1, "helper") != derive_seed(2, "helper")
+    assert 0 <= derive_seed(123, "x", 4) < 2**63

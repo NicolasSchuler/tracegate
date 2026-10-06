@@ -202,6 +202,7 @@ def test_run_eval_resume_warns_on_settings_mismatch_and_continues(
     monkeypatch.setattr(run_eval, "run_one_condition", _run_resume)
     resume_exit = _run_eval_main(
         [
+            "--allow-settings-drift",  # ORC-04: drift is now opt-in
             "--run-id",
             "mismatch-run",
             "--patcher",
@@ -374,6 +375,7 @@ def test_run_eval_resume_warns_on_retry_context_mode_mismatch(
     monkeypatch.setattr(run_eval, "run_one_condition", _should_not_run)
     resume_exit = _run_eval_main(
         [
+            "--allow-settings-drift",  # ORC-04: drift is now opt-in
             "--run-id",
             "retry-mode-run",
             "--patcher",
@@ -443,6 +445,7 @@ def test_run_eval_resume_warns_on_retry_history_budget_mismatch(
     monkeypatch.setattr(run_eval, "run_one_condition", _should_not_run)
     resume_exit = _run_eval_main(
         [
+            "--allow-settings-drift",  # ORC-04: drift is now opt-in
             "--run-id",
             "retry-history-budget-run",
             "--patcher",
@@ -884,6 +887,7 @@ def test_run_eval_resume_recomputes_fingerprint_across_repeated_main_calls(
     monkeypatch.setattr(run_eval, "_build_run_settings_fingerprint", lambda **_kwargs: "fp-two")
     second_exit = _run_eval_main(
         [
+            "--allow-settings-drift",  # ORC-04: drift is now opt-in
             "--run-id",
             "fingerprint-run",
             "--patcher",
@@ -1357,3 +1361,40 @@ def test_run_eval_continues_when_lock_is_unavailable(tmp_path, monkeypatch, caps
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "Run lock warning: simulated-missing-fcntl" in out
+
+
+def test_run_eval_resume_aborts_on_settings_mismatch_without_opt_in(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """ORC-04: records written under new settings must not claim the old configuration."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    case = _make_case(repo_root, "case_only")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+    calls: list[str] = []
+
+    def _run(*, case, condition, run_id, run_metadata, **_kwargs):
+        calls.append(condition.value)
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run)
+    base = ["--run-id", "drift-run", "--patcher", "null", "--k", "1"]
+    assert _run_eval_main([*base, "--conditions", "base_repair"]) == 0
+    capsys.readouterr()
+    calls.clear()
+
+    exit_code = _run_eval_main([*base, "--conditions", "base_repair,layered_adaptive_gated"])
+
+    assert exit_code == 2
+    assert calls == []
+    assert "run settings fingerprint mismatch" in capsys.readouterr().out

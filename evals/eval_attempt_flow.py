@@ -2979,6 +2979,7 @@ def run_one_condition_impl(
             )
             if budget_policy_eligible:
                 budget_policy_decision = adaptive_budget_policy_controller.decide(
+                    rng_key=f"budget|{case.case_id}|{condition.value}|{attempt}",
                     feature_values=budget_policy_features_raw,
                     default_action=ACTION_KEEP_BUDGET,
                     family_feature_values=budget_policy_features_raw,
@@ -3485,7 +3486,8 @@ def run_one_condition_impl(
                         )
                         decide_kwargs["advice"] = decision_model_advice
                     online_policy_decision = adaptive_online_policy_controller.decide(
-                        **decide_kwargs
+                        rng_key=f"helper|{case.case_id}|{condition.value}|{attempt}",
+                        **decide_kwargs,
                     )
                     record_advice_state(
                         decision_model_binding,

@@ -2018,6 +2018,7 @@ def _make_minimal_args() -> MagicMock:
 def _make_full_setup_args() -> MagicMock:
     """Create a comprehensive argparse.Namespace mock for prepare_main_setup."""
     ns = MagicMock()
+    ns.run_id = "run-1"
     ns.deterministic = False
     ns.seed = None
     ns.record_prompt = "none"

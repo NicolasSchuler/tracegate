@@ -531,6 +531,11 @@ Important execution flags:
 - `--container-user <uid:gid>` (default: host `uid:gid` when available; fallback `0:0`)
 - `--container-tmpfs-size-mb <int>` (default: `128`)
 - `--container-env KEY=VALUE` (repeatable, explicit allowlist)
+- `--container-pool`: reuse one long-lived container per job instead of a fresh container per
+  pytest call. Off by default: pooled containers share the read-write workdirs mount and
+  outlive units. Before the 2026-10-04 fix (ORC-02) the pool was started but never used, so
+  every earlier result ran in one-shot containers. Recorded as
+  `run_metadata.patcher_config.execution.container_pool`.
 - stale eval containers are pruned automatically at run start (best-effort, 5-minute grace)
 
 Use `--executor local` if you want the legacy host-side pytest execution.
@@ -886,6 +891,13 @@ to forced-patch handling.
 - `DONE <case>/<condition>` with `status`, unit time, elapsed time, ETA, and cumulative
   prompt-char/token usage for the unit,
 - `SKIP (resumed) <case>/<condition>` for units already completed in a resumed run.
+
+Resuming requires the same run settings: when the run settings fingerprint (which covers the
+patcher config, the case and condition selection, the record policy and `--seed`) differs from
+the existing results, the run aborts instead of writing records that would claim the old
+configuration (ORC-04). `--allow-settings-drift` resumes anyway; new records then carry fresh
+run metadata with `settings_drift_from_fingerprint`. `--seed` is always recorded, with
+`deterministic` as a separate flag, because it also seeds bandit exploration (ORC-05).
 
 For long-running units, enable richer in-flight visibility:
 
@@ -1359,7 +1371,8 @@ unsupported and should be regenerated with the current harness before analysis.
   application (ATT-10); adaptive evidence follows the policy: no fallback or seed bundle for
   restricted actions, and the full snapshot only when the action grants it (ATT-03, ATT-04,
   ATT-06; new `seed_bundle_chars`, `evidence_chars_by_type`, `adaptive_snapshot_requested`,
-  `stage_b_snapshot_in_prompt`). Later review fixes extend this list.
+  `stage_b_snapshot_in_prompt`); runs with both adaptive conditions train separate budget
+  controllers with derived seeds (POL-05, POL-23). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with

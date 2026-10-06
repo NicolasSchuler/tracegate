@@ -919,6 +919,10 @@ def _resolve_conditions_for_run(
         return resolved_conditions
 
     raw_conditions = [token.strip() for token in str(args.conditions).split(",") if token.strip()]
+    # ORC-15: duplicates would double the work and one copy was silently discarded later.
+    duplicates = sorted({token for token in raw_conditions if raw_conditions.count(token) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate condition(s): {', '.join(duplicates)}")
     native_baseline_mode = str(getattr(args, "native_baseline_mode", "") or "").strip().lower()
     if native_baseline_mode:
         conditions_source = config_state.value_sources.get("conditions", "default")
@@ -947,6 +951,8 @@ def _resolve_conditions_for_run(
         return _finalize(parsed)
 
     if str(args.patcher) != "baseline":
+        if not raw_conditions:
+            raise ValueError("no conditions given")
         return _finalize([Condition(token) for token in raw_conditions])
 
     baseline_name = (getattr(args, "baseline_name", "") or "").strip()
@@ -996,6 +1002,38 @@ def _resolve_conditions_for_run(
 
 _ACTIVE_EXECUTION_CONFIG = ExecutionConfig()
 _ACTIVE_CONTAINER_POOL: _EvalContainerPool | None = None
+
+
+# ORC-01/ORC-02: run-scoped globals are set through these functions. Assigning
+# ``eval_main_support.<NAME> = ...`` binds on the forwarding shim and never reaches
+# the readers in this module (tests/test_evals_shim_writes.py guards against it).
+
+
+def set_active_run_settings(settings: _ActiveRunSettings) -> _ActiveRunSettings:
+    """Install the run settings read by ``_base_pytest_env``; return the previous ones."""
+    global _ACTIVE_RUN_SETTINGS
+    previous = _ACTIVE_RUN_SETTINGS
+    _ACTIVE_RUN_SETTINGS = settings
+    return previous
+
+
+def set_active_container_pool(pool: _EvalContainerPool | None) -> _EvalContainerPool | None:
+    """Install the container pool used by ``run_pytest``; return the previous one."""
+    global _ACTIVE_CONTAINER_POOL
+    previous = _ACTIVE_CONTAINER_POOL
+    _ACTIVE_CONTAINER_POOL = pool
+    return previous
+
+
+def set_active_policy_controllers(
+    *,
+    online: AdaptiveOnlinePolicyController | None,
+    budget: AdaptiveBudgetPolicyController | None,
+) -> None:
+    """Record the run's policy controllers for cleanup."""
+    global _ACTIVE_ONLINE_POLICY_CONTROLLER, _ACTIVE_BUDGET_POLICY_CONTROLLER
+    _ACTIVE_ONLINE_POLICY_CONTROLLER = online
+    _ACTIVE_BUDGET_POLICY_CONTROLLER = budget
 
 
 def _normalized_progress_verbosity(raw: Any) -> str:
@@ -1098,7 +1136,9 @@ def main(argv: list[str] | None = None) -> int:
     global _ACTIVE_ONLINE_POLICY_CONTROLLER, _ACTIVE_BUDGET_POLICY_CONTROLLER
     argv_tokens = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
-        description="Run the llmdebug multi-condition repair benchmark harness."
+        description="Run the llmdebug multi-condition repair benchmark harness.",
+        # ORC-06: config-file values must not override abbreviated CLI flags.
+        allow_abbrev=False,
     )
     parser.add_argument("--cases-dir", default="evals/cases", help="Cases directory.")
     parser.add_argument("--case", action="append", default=[], help="Case id(s) to run.")
@@ -1187,6 +1227,14 @@ def main(argv: list[str] | None = None) -> int:
         "--run-id",
         default="",
         help="Optional run identifier. If the matching results file exists, unfinished units are resumed.",
+    )
+    parser.add_argument(
+        "--allow-settings-drift",
+        action="store_true",
+        help=(
+            "Resume even when the run settings fingerprint differs from the existing results; "
+            "new records then carry their own run metadata (ORC-04)."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -3115,6 +3163,9 @@ def _build_run_settings_fingerprint(
         "record_evidence": str(args.record_evidence),
         "record_env": sorted(key.strip() for key in args.record_env if str(key).strip()),
         "record_deps": str(args.record_deps),
+        # ORC-05: the seed drives bandit exploration even without --deterministic.
+        "seed": args.seed,
+        "deterministic": bool(args.deterministic),
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "prompt_budget_retry_history_chars": int(args.prompt_budget_retry_history_chars),

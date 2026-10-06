@@ -222,10 +222,10 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
   - No restricted action yields more evidence characters than `invoke_helper` on the same fixture.
 
 ### 1D. Run settings and reproducibility
-- [ ] **ORC-01, ORC-02:** replace the `legacy.<NAME> = ...` writes with setter functions in `run_eval` (or a run-context object; see Phase 5.1). Add an architecture test that bans module-attribute writes through the shim.
-- [ ] **ORC-04:** abort on a settings-fingerprint mismatch unless `--allow-settings-drift` is passed. **ORC-05:** always record the raw seed and include it in the fingerprint.
-- [ ] **ORC-06:** set `allow_abbrev=False`. **ORC-15:** validate `--conditions`. **ORC-21:** validate `--run-id`.
-- [ ] **POL-05, POL-23:** create one policy controller per condition. Derive per-unit RNGs from `(seed, case_id, condition, attempt)` and give each controller its own sub-seed. In deterministic mode, either serialize policy updates or document that `--jobs 1` is required.
+- [x] **ORC-01, ORC-02:** replace the `legacy.<NAME> = ...` writes with setter functions in `run_eval` (or a run-context object; see Phase 5.1). Add an architecture test that bans module-attribute writes through the shim. *(The pool is now opt-in via `--container-pool`: every earlier result ran in one-shot containers, and pooling shares the workdirs mount across units.)*
+- [x] **ORC-04:** abort on a settings-fingerprint mismatch unless `--allow-settings-drift` is passed. **ORC-05:** always record the raw seed and include it in the fingerprint.
+- [x] **ORC-06:** set `allow_abbrev=False`. **ORC-15:** validate `--conditions`. **ORC-21:** validate `--run-id`.
+- [x] **POL-05, POL-23:** create one policy controller per condition. Derive per-unit RNGs from `(seed, case_id, condition, attempt)` and give each controller its own sub-seed. In deterministic mode, either serialize policy updates or document that `--jobs 1` is required.
 - **Acceptance:**
   - An integration test goes through `run_main_flow` setup and asserts `PYTHONHASHSEED` is in the pytest environment and `pool.acquire` is used under the testcontainers executor (the pool can be stubbed).
   - A resume test aborts on a fingerprint mismatch.

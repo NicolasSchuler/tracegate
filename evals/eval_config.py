@@ -590,6 +590,16 @@ def add_execution_arguments(
         default=_default([]),
         help="Environment variable to inject in container (KEY=VALUE, repeatable).",
     )
+    parser.add_argument(
+        "--container-pool",
+        dest="container_pool",
+        action="store_true",
+        default=_default(False),
+        help=(
+            "Reuse one long-lived container per job instead of a fresh container per pytest "
+            "call (faster, weaker isolation between units)."
+        ),
+    )
 
 
 def _parse_container_env(entries: list[str]) -> dict[str, str]:
@@ -666,6 +676,7 @@ def build_execution_config_from_args(args: argparse.Namespace) -> ExecutionConfi
         container_user=container_user,
         container_tmpfs_size_mb=container_tmpfs_size_mb,
         container_mount_repo_src=bool(getattr(args, "container_mount_repo_src", True)),
+        container_pool=bool(getattr(args, "container_pool", False)),
         container_env=container_env,
         warnings=warnings,
     )
@@ -697,5 +708,6 @@ def _execution_config_payload(config: ExecutionConfig) -> dict[str, Any]:
         "container_user": config.container_user,
         "container_tmpfs_size_mb": config.container_tmpfs_size_mb,
         "container_mount_repo_src": config.container_mount_repo_src,
+        "container_pool": config.container_pool,
         "container_env_keys": sorted(config.container_env),
     }
