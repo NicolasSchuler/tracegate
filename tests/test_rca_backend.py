@@ -88,6 +88,7 @@ def test_sqlite_migration_merges_when_rows_exist(tmp_path: Path, monkeypatch) ->
     ]
     jsonl_path.write_text("\n".join(json.dumps(row) for row in jsonl_rows) + "\n", "utf-8")
 
+    ensure_sqlite_migration(out_dir)
     history = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=10)
 
     assert {row["attempt_id"] for row in history} == {"shared", "jsonl-1"}
@@ -96,14 +97,44 @@ def test_sqlite_migration_merges_when_rows_exist(tmp_path: Path, monkeypatch) ->
     assert Path(f"{jsonl_path}.bak").exists()
 
 
+def test_reads_see_unmigrated_jsonl_without_writing(tmp_path: Path, monkeypatch) -> None:
+    """RCA-02: reads merge pending JSONL rows in memory and create or rotate nothing."""
+    monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
+    out_dir = str(tmp_path)
+    jsonl_path = tmp_path / "rca_attempts.jsonl"
+    rows = [
+        _record("j1", updated_at="2026-02-27T10:00:00Z"),
+        _record("j2", updated_at="2026-02-27T10:05:00Z", state="planned"),
+    ]
+    jsonl_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", "utf-8")
+    before = sorted(path.name for path in tmp_path.iterdir())
+
+    history = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=10)
+    status = get_rca_status(out_dir=out_dir, session_id="sess-a")
+
+    assert [row["attempt_id"] for row in history] == ["j2", "j1"]
+    assert status is not None and status["attempt_id"] == "j2"
+    assert sorted(path.name for path in tmp_path.iterdir()) == before
+
+
+def test_status_prefers_the_newer_of_stored_and_pending(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
+    out_dir = str(tmp_path)
+    persist_rca_record(out_dir=out_dir, record=_record("sql", updated_at="2026-02-27T11:00:00Z"))
+    (tmp_path / "rca_attempts.jsonl").write_text(
+        json.dumps(_record("old", updated_at="2026-02-27T09:00:00Z")) + "\n", "utf-8"
+    )
+
+    assert get_rca_status(out_dir=out_dir, session_id="sess-a")["attempt_id"] == "sql"
+
+
 def test_sqlite_migration_runs_once(tmp_path: Path, monkeypatch) -> None:
     import llmdebug.rca_backend as backend
 
     monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
     out_dir = str(tmp_path)
-    persist_rca_record(out_dir=out_dir, record=_record("sql-1"))
     (tmp_path / "rca_attempts.jsonl").write_text(json.dumps(_record("j1")) + "\n", "utf-8")
-    get_rca_history(out_dir=out_dir, limit=10)
+    persist_rca_record(out_dir=out_dir, record=_record("sql-1"))  # a write migrates
 
     calls: list[object] = []
     monkeypatch.setattr(backend, "_store_lock", lambda path: calls.append(path))
@@ -128,6 +159,7 @@ def test_sqlite_migration_filters_invalid_records_and_applies_retention(
     ]
     jsonl_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
+    ensure_sqlite_migration(out_dir)
     history = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=10)
     assert [entry["attempt_id"] for entry in history] == ["a3", "a2"]
     assert not jsonl_path.exists()
@@ -606,3 +638,32 @@ class TestErrorFallbacks:
         monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
         result = get_rca_status(out_dir=str(tmp_path), session_id="nonexistent")
         assert result is None
+
+
+def test_trim_replaces_the_store_atomically(tmp_path: Path, monkeypatch) -> None:
+    """RCA-18: readers take no lock, so the trim must never truncate the live file."""
+    import os
+
+    import llmdebug.rca_backend as backend
+
+    monkeypatch.setenv("LLMDEBUG_RCA_MAX_RECORDS", "2")
+    store = tmp_path / "rca_attempts.jsonl"
+    for attempt in ("a1", "a2"):
+        _append_record(store, dict(_record(attempt)))  # type: ignore[arg-type]
+    seen_at_swap: list[list[str]] = []
+    real_replace = os.replace
+
+    def _replace(src: object, dst: object) -> None:
+        # What a concurrent reader would see right before the swap: the complete old file.
+        seen_at_swap.append(Path(str(dst)).read_text(encoding="utf-8").splitlines())
+        real_replace(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(backend.os, "replace", _replace)
+    _append_record(store, dict(_record("a3")))  # type: ignore[arg-type]
+
+    assert [json.loads(line)["attempt_id"] for line in seen_at_swap[0]] == ["a1", "a2", "a3"]
+    assert [json.loads(line)["attempt_id"] for line in store.read_text().splitlines()] == [
+        "a2",
+        "a3",
+    ]
+    assert not (tmp_path / "rca_attempts.jsonl.tmp").exists()

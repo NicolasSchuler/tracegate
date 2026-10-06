@@ -303,6 +303,16 @@ def handle_list(
             code="INVALID_ARGUMENT",
             message=schema_error,
         )
+    if limit <= 0:
+        # Same rule as llmdebug_rca_history; limit <= 0 used to list everything (RCA-17).
+        return render_tool_error(
+            tool="llmdebug_list",
+            response_format=response_format,
+            evidence_schema=evidence_schema,
+            with_rca=False,
+            code="INVALID_ARGUMENT",
+            message=f"limit must be >= 1 (got {limit})",
+        )
     try:
         entries = find_all_snapshots(out_dir, limit=limit)
     except OSError as e:

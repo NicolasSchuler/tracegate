@@ -17,10 +17,10 @@ from filelock import FileLock, Timeout
 
 from . import _json as json
 from ._debug_session import normalize_snapshot_view
-from ._formatting import frame_file_label
 from ._hashing import xxh64_hexdigest_text
 from ._warnings import emit_warning
 from .config import SnapshotConfig
+from .snapshot_index import index_entry_from_payload, snapshot_files
 from .state_db import list_snapshot_records, remove_snapshot_records, upsert_snapshot_record
 
 
@@ -161,15 +161,8 @@ def _cleanup_indexed_snapshots(
 def _cleanup_filesystem_snapshots(out_dir: Path, max_snapshots: int) -> None:
     """Remove overflow snapshots by scanning the output directory."""
     snapshots: list[tuple[float, Path]] = []
-    for path in out_dir.iterdir():
+    for path in snapshot_files(out_dir):
         try:
-            if (
-                not path.is_file()
-                or path.suffix not in {".json", ".toon"}
-                or path.name.startswith("latest")
-                or path.name.endswith(".tmp")
-            ):
-                continue
             snapshots.append((path.stat().st_mtime, path))
         except OSError:
             continue
@@ -207,30 +200,6 @@ def _cleanup_old_snapshots(out_dir: Path, max_snapshots: int) -> None:
         return
 
     _cleanup_filesystem_snapshots(out_dir, max_snapshots)
-
-
-def _snapshot_index_entry(snapshot_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    """Build snapshot index metadata from an in-memory payload."""
-    view = normalize_snapshot_view(payload)
-    exc = cast(dict[str, Any], view.get("exception") or {})
-    frames_raw = view.get("frames")
-    frames: list[dict[str, Any]] = (
-        cast(list[dict[str, Any]], frames_raw) if isinstance(frames_raw, list) else []
-    )
-    frame0: dict[str, Any] = frames[0] if frames else {}
-    try:
-        mtime = snapshot_path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    return {
-        "path": str(snapshot_path.resolve()),
-        "mtime": mtime,
-        "name": view.get("name", "?"),
-        "exc_type": exc.get("type", "?"),
-        "exc_message": (exc.get("message") or "")[:80],
-        "file": frame_file_label(frame0),
-        "line": frame0.get("line", "?"),
-    }
 
 
 def write_bundle(payload: dict[str, Any], cfg: SnapshotConfig) -> Path:
@@ -278,7 +247,7 @@ def write_bundle(payload: dict[str, Any], cfg: SnapshotConfig) -> Path:
     tmp.write_text(content, encoding="utf-8")
     tmp.rename(snapshot_path)
     try:
-        upsert_snapshot_record(str(out_dir), _snapshot_index_entry(snapshot_path, payload))
+        upsert_snapshot_record(str(out_dir), index_entry_from_payload(snapshot_path, payload))
     except Exception as index_error:
         emit_warning(
             "snapshot index update failed for "

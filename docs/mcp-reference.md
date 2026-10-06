@@ -75,6 +75,22 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   parsing free-form error text.
 - Text mode is retained for interactive compatibility; JSON mode is the safer
   default for programmatic consumers.
+- **Path confinement:** every tool resolves `out_dir` against the MCP root,
+  `$LLMDEBUG_MCP_ROOT`, or the server's working directory when it is unset.
+  A relative `out_dir` is taken relative to the root. An `out_dir` that resolves
+  outside it, after following symlinks, returns `INVALID_ARGUMENT` before
+  anything is read or created. Snapshot paths and diff refs must also lie inside
+  `out_dir`, so they are confined too. Set `LLMDEBUG_MCP_ROOT` in the server's
+  environment (for example in `.mcp.json`) to serve a different tree.
+- **Concurrency:** tools are registered as async and run their work in a
+  worker thread, so a slow git call, a SQLite busy wait or a file lock doesn't
+  block other calls or the protocol heartbeat. RCA advances within one server
+  process are serialized.
+- **Read-only calls create nothing:** `llmdebug_list`, `llmdebug_git_context`,
+  `llmdebug_rca_status`, `llmdebug_rca_history`, and `llmdebug_diagnose`,
+  `llmdebug_show`, `llmdebug_frame` and `llmdebug_diff` without `with_rca`
+  never create `out_dir`, the state database or the snapshot index. They read
+  what exists and fall back to scanning snapshot files.
 
 ## Parameter Glossary
 
@@ -97,6 +113,9 @@ For JSON errors, `metadata.with_rca` reflects the request, while `rca` is omitte
   `{argument, value, allowed_values}` (or plain text in `response_format="text"`).
 - `llmdebug_list` / `llmdebug_rca_status` / `llmdebug_rca_history` / `llmdebug_rca_advance`
   accept `response_format="text|json"` (default: `text`) and `evidence_schema="summary|full"`.
+- `llmdebug_list` and `llmdebug_rca_history` reject `limit <= 0` with `INVALID_ARGUMENT`.
+- `llmdebug_git_context` reports a failure while collecting git metadata as
+  `GIT_CONTEXT_ERROR`; "not a git repository" is still a normal response.
 - `gate_mode=off|soft|strict` and `exploratory=true|false` are available on RCA-aware tools.
 
 ## Error Handling Examples

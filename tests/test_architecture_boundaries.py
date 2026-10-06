@@ -15,6 +15,7 @@ _INTERFACE_MODULES = frozenset(
         "llmdebug.mcp_contract",
         "llmdebug.mcp_diff_tools",
         "llmdebug.mcp_git_context",
+        "llmdebug.mcp_paths",
         "llmdebug.mcp_rca",
         "llmdebug.mcp_server",
         "llmdebug.mcp_snapshot_tools",

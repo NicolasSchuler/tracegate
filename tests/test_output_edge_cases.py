@@ -108,7 +108,7 @@ def test_update_latest_symlink_posix_failure_cleans_temp(
 
 
 def test_snapshot_index_entry_handles_missing_path_stat() -> None:
-    from llmdebug.output import _snapshot_index_entry
+    from llmdebug.snapshot_index import index_entry_from_payload as _snapshot_index_entry
 
     missing = Path("/tmp/llmdebug-this-file-does-not-exist.json")
     payload = {

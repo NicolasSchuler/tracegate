@@ -15,8 +15,14 @@ from ._formatting import frame_file_label
 from ._warnings import emit_warning
 from .compact_keys import expand_keys, is_compact_snapshot
 from .output import get_latest_snapshot
+from .snapshot_index import index_matches_disk, snapshot_files
 from .snapshot_types import SnapshotDict
-from .state_db import list_snapshot_records, remove_snapshot_records, replace_snapshot_records
+from .state_db import (
+    list_snapshot_records,
+    remove_snapshot_records,
+    replace_snapshot_records,
+    state_db_exists,
+)
 
 
 def _load_snapshot_file_raw(path: Path) -> SnapshotDict:
@@ -116,18 +122,7 @@ def load_snapshot_raw(
 
 
 def _has_snapshot_files(out_path: Path) -> bool:
-    try:
-        for path in out_path.iterdir():
-            if (
-                path.is_file()
-                and path.suffix in {".json", ".toon"}
-                and not path.name.startswith("latest")
-                and not path.name.endswith(".tmp")
-            ):
-                return True
-    except OSError:
-        return False
-    return False
+    return bool(snapshot_files(out_path))
 
 
 def _normalize_line_value(value: Any) -> Any:
@@ -245,23 +240,12 @@ def _matches_snapshot_search(entry: dict[str, Any], search: str | None) -> bool:
 
 
 def _scan_snapshot_entries(out_dir: str) -> tuple[list[dict[str, Any]], int]:
-    out_path = Path(out_dir)
     candidates: list[tuple[float, Path]] = []
-    try:
-        for path in out_path.iterdir():
-            if (
-                not path.is_file()
-                or path.suffix not in {".json", ".toon"}
-                or path.name.startswith("latest")
-                or path.name.endswith(".tmp")
-            ):
-                continue
-            try:
-                candidates.append((path.stat().st_mtime, path))
-            except OSError:
-                continue
-    except OSError:
-        return [], 0
+    for path in snapshot_files(out_dir):
+        try:
+            candidates.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     entries: list[dict[str, Any]] = []
@@ -289,6 +273,27 @@ def _scan_snapshot_entries(out_dir: str) -> tuple[list[dict[str, Any]], int]:
     return entries, skipped
 
 
+def _refresh_snapshot_index(out_dir: str, entries: list[dict[str, Any]]) -> None:
+    try:
+        replace_snapshot_records(
+            out_dir,
+            [
+                {
+                    "path": str(entry["path"].resolve()),
+                    "mtime": float(entry["mtime"]),
+                    "name": entry["name"],
+                    "exc_type": entry["exc_type"],
+                    "exc_message": entry["exc_message"],
+                    "file": entry["file"],
+                    "line": str(entry["line"]),
+                }
+                for entry in entries
+            ],
+        )
+    except Exception as e:
+        emit_warning(f"failed to refresh snapshot index: {type(e).__name__}: {e}")
+
+
 def find_all_snapshots(
     out_dir: str,
     *,
@@ -313,7 +318,13 @@ def find_all_snapshots(
     indexed_entries, index_ok, index_read_failed = _entries_from_index(
         out_dir, limit=effective_limit, search=search
     )
-    if indexed_entries and (effective_limit is None or len(indexed_entries) >= effective_limit):
+    # A partially populated index (best-effort writes) used to hide the files it missed
+    # for good; it is only trusted while it covers every snapshot on disk (RCA-03).
+    if (
+        indexed_entries
+        and (effective_limit is None or len(indexed_entries) >= effective_limit)
+        and index_matches_disk(out_dir)
+    ):
         return indexed_entries[:effective_limit] if effective_limit is not None else indexed_entries
 
     if index_ok and not indexed_entries and not _has_snapshot_files(out_path):
@@ -322,26 +333,11 @@ def find_all_snapshots(
     if index_read_failed:
         emit_warning("snapshot index unavailable; falling back to filesystem scan")
 
-    # Fallback scan for index miss/corruption and rebuild index.
+    # Fallback scan for index miss/corruption. Only an existing index is rebuilt: reads
+    # never create the state database (RCA-02).
     entries, skipped = _scan_snapshot_entries(out_dir)
-    try:
-        replace_snapshot_records(
-            out_dir,
-            [
-                {
-                    "path": str(entry["path"].resolve()),
-                    "mtime": float(entry["mtime"]),
-                    "name": entry["name"],
-                    "exc_type": entry["exc_type"],
-                    "exc_message": entry["exc_message"],
-                    "file": entry["file"],
-                    "line": str(entry["line"]),
-                }
-                for entry in entries
-            ],
-        )
-    except Exception as e:
-        emit_warning(f"failed to refresh snapshot index: {type(e).__name__}: {e}")
+    if state_db_exists(out_dir):
+        _refresh_snapshot_index(out_dir, entries)
 
     if skipped > 0:
         emit_warning(f"skipped {skipped} corrupted snapshot(s) in {out_dir}")

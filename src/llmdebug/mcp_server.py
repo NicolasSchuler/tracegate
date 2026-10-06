@@ -15,8 +15,13 @@ Run with: llmdebug-mcp (stdio transport for IDE integration)
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import inspect
 import logging
 import sys
+from collections.abc import Callable
+from typing import ParamSpec
 
 # Guard import — mcp is optional
 try:
@@ -51,6 +56,7 @@ from .mcp_contract import (
 )
 from .mcp_diff_tools import handle_diff
 from .mcp_git_context import collect_git_evidence_refs, parse_max_commits
+from .mcp_paths import resolve_mcp_out_dir
 from .mcp_rca import (
     RCAAdvanceToolRequest,
     RCAAttemptRequest,
@@ -119,12 +125,56 @@ def _check_rate_limit(tool: str, response_format: str, evidence_schema: str) -> 
     )
 
 
+_P = ParamSpec("_P")
+
+
+def _confined(tool: Callable[_P, str]) -> Callable[_P, str]:
+    """Resolve the tool's ``out_dir`` inside the MCP root, or answer with an error (RCA-02)."""
+    signature = inspect.signature(tool)
+
+    @functools.wraps(tool)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        try:
+            bound.arguments["out_dir"] = resolve_mcp_out_dir(str(bound.arguments["out_dir"]))
+        except ValueError as exc:
+            return _render_tool_error(
+                tool=tool.__name__,
+                response_format=str(bound.arguments.get("response_format", "json")),
+                evidence_schema=str(bound.arguments.get("evidence_schema", "summary")),
+                with_rca=False,
+                code="INVALID_ARGUMENT",
+                message=str(exc),
+            )
+        return tool(*bound.args, **bound.kwargs)
+
+    return wrapper
+
+
+def _tool(fn: Callable[_P, str]) -> Callable[_P, str]:
+    """Register *fn* with FastMCP as an async tool that runs in a worker thread (RCA-09).
+
+    FastMCP calls synchronous tools on the event loop, so git calls, the SQLite busy
+    timeout and file locks stalled every other call and the protocol heartbeat. The
+    module keeps the synchronous (confined) function for direct callers.
+    """
+    confined = _confined(fn)
+
+    @functools.wraps(confined)
+    async def run_in_worker_thread(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        return await asyncio.to_thread(confined, *args, **kwargs)
+
+    _mcp.tool()(run_in_worker_thread)
+    return confined
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_diagnose(
     out_dir: str = ".llmdebug",
     detail: str = "context",
@@ -239,7 +289,7 @@ def llmdebug_diagnose(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_show(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -396,7 +446,7 @@ def llmdebug_show(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_list(
     out_dir: str = ".llmdebug",
     limit: int = 10,
@@ -426,7 +476,7 @@ def llmdebug_list(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_frame(
     index: int = 0,
     out_dir: str = ".llmdebug",
@@ -468,7 +518,7 @@ def llmdebug_frame(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_git_context(
     out_dir: str = ".llmdebug",
     snapshot_path: str = "",
@@ -535,7 +585,18 @@ def llmdebug_git_context(
             code="INVALID_ARGUMENT",
             message=str(exc),
         )
-    enhanced = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    try:
+        enhanced = get_enhanced_git_context(snapshot, out_dir=out_dir, max_commits=max_commits)
+    except Exception as exc:  # RCA-10: keep failures inside the error envelope
+        _logger.warning("enhanced git context failed: %s: %s", type(exc).__name__, exc)
+        return _render_tool_error(
+            tool="llmdebug_git_context",
+            response_format=response_format,
+            evidence_schema=evidence_schema,
+            with_rca=with_rca,
+            code="GIT_CONTEXT_ERROR",
+            message=f"Enhanced git context failed: {type(exc).__name__}: {exc}",
+        )
     if enhanced is None:
         body = "Enhanced git context unavailable (not in a git repository or git is unavailable)."
         rca_record = (
@@ -612,7 +673,7 @@ def llmdebug_git_context(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_diff(
     old_ref: str = "previous",
     new_ref: str = "latest",
@@ -654,7 +715,7 @@ def llmdebug_diff(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_rca_status(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -675,7 +736,7 @@ def llmdebug_rca_status(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_rca_history(
     out_dir: str = ".llmdebug",
     session_id: str = "",
@@ -696,7 +757,7 @@ def llmdebug_rca_history(
     )
 
 
-@_mcp.tool()
+@_tool
 def llmdebug_rca_advance(
     action: str,
     out_dir: str = ".llmdebug",

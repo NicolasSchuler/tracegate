@@ -104,9 +104,17 @@ rm -f .llmdebug/llmdebug_state.sqlite3-shm
 # For non-pytest capture entry points, set SnapshotConfig(out_dir=...) explicitly.
 ```
 
-The WAL mode initialization includes retry logic (8 attempts with exponential
+The WAL mode initialization includes retry logic (8 attempts with linear
 back-off) to tolerate brief startup contention. If you still hit issues, check
 whether multiple CI jobs share the same workspace directory.
+
+If the filesystem doesn't allow WAL, llmdebug prints
+`llmdebug: warning: could not enable WAL mode for ...` once per database and
+keeps using SQLite's rollback journal; concurrent writers then block each other
+more often. A database written by a newer llmdebug release (higher
+`PRAGMA user_version`) is refused with a `RuntimeError`; upgrade llmdebug or
+delete `llmdebug_state.sqlite3` (it holds the RCA history and a rebuildable
+snapshot index).
 
 ### Snapshot Corruption / Malformed JSON
 

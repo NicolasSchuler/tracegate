@@ -266,6 +266,10 @@ Claude Code configuration (`.mcp.json`):
 }
 ```
 
+Tools only read and write under the server's working directory, or under
+`LLMDEBUG_MCP_ROOT` if set (add `"env": {"LLMDEBUG_MCP_ROOT": "/path/to/project"}`
+to the server entry); an `out_dir` outside it is rejected.
+
 Full reference: [docs/mcp-reference.md](docs/mcp-reference.md)
 
 ## Output

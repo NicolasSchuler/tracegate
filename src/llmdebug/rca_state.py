@@ -6,6 +6,7 @@ identity/transition/backend helpers.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -27,6 +28,10 @@ from .rca_transitions import (
 from .rca_types import RCAAttemptRecord, RCAAttemptRequest
 
 RCABackend = Literal["sqlite", "jsonl"]
+
+# advance_rca_attempt reads the previous record and writes the next one; MCP tools run in
+# worker threads (RCA-09), so concurrent advances in one process are serialized here.
+_ADVANCE_LOCK = threading.Lock()
 
 
 def _now_utc() -> str:
@@ -81,15 +86,16 @@ def advance_rca_attempt(
     request: RCAAttemptRequest,
 ) -> RCAAttemptRecord:
     """Advance RCA state machine and persist attempt row."""
-    now = _now_utc()
-    previous = get_rca_status(out_dir=out_dir, session_id=request.session_id)
-    record = build_rca_attempt_record(
-        previous=previous,
-        attempt_id=_new_attempt_id(),
-        request=request,
-        now=now,
-    )
-    persist_rca_record(out_dir=out_dir, record=record)
+    with _ADVANCE_LOCK:
+        now = _now_utc()
+        previous = get_rca_status(out_dir=out_dir, session_id=request.session_id)
+        record = build_rca_attempt_record(
+            previous=previous,
+            attempt_id=_new_attempt_id(),
+            request=request,
+            now=now,
+        )
+        persist_rca_record(out_dir=out_dir, record=record)
     return record
 
 
