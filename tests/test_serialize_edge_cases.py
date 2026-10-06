@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+from collections import namedtuple
 from typing import Any
 
 import numpy as np
@@ -940,12 +941,58 @@ def test_depth_limit_repr_stops_at_its_own_depth_bound() -> None:
 
 
 def test_depth_limit_repr_fails_closed_on_an_unwalkable_container() -> None:
-    class _Hostile(dict):  # type: ignore[type-arg]
-        def items(self) -> Any:
-            raise RuntimeError("no items")
+    class _HostileKey:
+        """Hashable exactly once, so the rebuild of the dict fails, not its construction."""
+
+        def __init__(self) -> None:
+            self.hashed = 0
+
+        def __hash__(self) -> int:
+            self.hashed += 1
+            if self.hashed > 1:
+                raise RuntimeError("no hash")
+            return 7
 
     cfg = SnapshotConfig(redaction_profile="prod")
 
-    assert _past_depth_limit(_Hostile(password="hunter2"), cfg) == (
+    assert _past_depth_limit({_HostileKey(): "hunter2"}, cfg) == (
         "<serialization failed: RuntimeError>"
     )
+
+
+def test_depth_limit_repr_leaves_container_subclasses_to_the_text_patterns() -> None:
+    """A plain rebuild would drop the type name and field names their repr carries."""
+
+    class _Config(dict):  # type: ignore[type-arg]
+        def __repr__(self) -> str:
+            return f"_Config({dict.__repr__(self)})"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Config(password="hunter2"), cfg) == (
+        "_Config({'password': 'hunter2'})"
+    )
+
+
+def test_depth_limit_repr_redacts_namedtuple_fields_by_name() -> None:
+    creds = namedtuple("creds", ["user", "password", "extra"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    rendered = _past_depth_limit(creds("bob", "hunter2", {"api_key": "abc"}), cfg)
+
+    assert rendered == "creds(user='bob', password='[REDACTED]', extra={'api_key': '[REDACTED]'})"
+
+
+def test_depth_limit_repr_keeps_a_namedtuple_that_cannot_be_replaced() -> None:
+    class _Broken(tuple):  # type: ignore[type-arg]
+        _fields = ("password",)
+
+        def _replace(self, **_kwargs: Any) -> Any:
+            raise TypeError("no _replace")
+
+        def __repr__(self) -> str:
+            return "_Broken(password='hunter2')"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Broken(), cfg) == "_Broken(password='hunter2')"

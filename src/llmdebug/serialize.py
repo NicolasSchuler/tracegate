@@ -778,11 +778,44 @@ def _serialization_failed(error: Exception) -> str:
 _REPR_REDACTION_MAX_DEPTH = 6
 
 
+def _is_exact_type(x: Any, expected: type[Any]) -> bool:
+    """``type(x) is expected``: a subclass must keep its own repr, see below."""
+    return type(x) is expected
+
+
+def _redact_namedtuple_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
+    """A namedtuple with the fields under sensitive names replaced, keeping its type.
+
+    Rebuilding it as a plain tuple would drop the field names from the repr, and the text
+    patterns would then no longer see the ``password=`` that protects the value.
+    """
+    try:
+        fields = cast(tuple[str, ...], x._fields)
+        return x._replace(
+            **{
+                field: (
+                    REDACTED
+                    if is_sensitive_name(field)
+                    else _redact_for_repr(getattr(x, field), cfg, depth + 1)
+                )
+                for field in fields
+            }
+        )
+    except Exception:
+        # The unmodified repr still goes through the text patterns in redact_text.
+        return x
+
+
 def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
-    """A copy of *x* with the values under sensitive names replaced, for repr rendering."""
+    """A copy of *x* with the values under sensitive names replaced, for repr rendering.
+
+    Only exact ``dict``/``list``/``tuple`` instances and namedtuples are rebuilt. Any other
+    subclass is returned unchanged: its repr carries information (a type name, field names)
+    that a plain rebuild would drop, and that the text patterns still need to see.
+    """
     if depth >= _REPR_REDACTION_MAX_DEPTH:
         return x
-    if isinstance(x, dict):
+    if _is_exact_type(x, dict):
         mapping = cast(dict[Any, Any], x)
         out: dict[Any, Any] = {}
         for i, (key, item) in enumerate(mapping.items()):
@@ -794,14 +827,18 @@ def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
             else:
                 out[key] = _redact_for_repr(item, cfg, depth + 1)
         return out
-    if isinstance(x, (list, tuple)):
+    if _is_exact_type(x, list) or _is_exact_type(x, tuple):
         sequence = cast(list[Any] | tuple[Any, ...], x)
-        items = [_redact_for_repr(item, cfg, depth + 1) for item in sequence[: cfg.max_items]]
+        items: list[Any] = [
+            _redact_for_repr(item, cfg, depth + 1) for item in sequence[: cfg.max_items]
+        ]
         if len(sequence) == 2 and _is_sensitive_pair_name(sequence[0]):
             items[1] = REDACTED
         elif len(sequence) > cfg.max_items:
             items.append("...[TRUNC]")
-        return tuple(items) if isinstance(x, tuple) else items
+        return tuple(items) if _is_exact_type(x, tuple) else items
+    if hasattr(x, "_fields") and isinstance(x, tuple):
+        return _redact_namedtuple_for_repr(cast(Any, x), cfg, depth)
     return x
 
 

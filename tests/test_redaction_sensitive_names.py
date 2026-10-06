@@ -8,6 +8,7 @@ verbatim. These tests go end-to-end through ``capture_exception``.
 from __future__ import annotations
 
 import time
+from collections import namedtuple
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ _S = {
     "hyphen": "hunter-9",
     "quoted": "alpha beta gamma",
     "long_key": "hunter-long",
+    "tuple_field": "nt-secret",
+    "bare": "ab,cd;ef)gh",
 }
 
 
@@ -228,6 +231,20 @@ def test_ordinary_names(name: str) -> None:
         # A quoted name/value pair, as in the repr of a header list.
         ("['Authorization', 'Basic abc']", "[[REDACTED]]"),
         ("('password', 'alpha beta')", "([REDACTED])"),
+        # Unquoted values run to the next whitespace, as the legacy `\\S+` patterns did.
+        ("password=ab,cd", "[REDACTED]"),
+        ("api_key=x;y)z rest", "[REDACTED] rest"),
+        ("password: hunter2;next rest", "[REDACTED] rest"),
+        # A quoted header value is taken whole, commas and brackets included.
+        ("{'Authorization': 'Basic a,b', 'Accept': 'json'}", "{'[REDACTED], 'Accept': 'json'}"),
+        ('Cookie: "a=1, b=2" rest', "[REDACTED] rest"),
+        # Brackets inside a string do not end a container value.
+        ("{'password': ['a]b', 'c'], 'host': 'h'}", "{'[REDACTED], 'host': 'h'}"),
+        # A nested, unterminated or over-long container fails closed to the end of the line.
+        ("{'password': ['a', ['b']], 'host': 'h'}", "{'[REDACTED]"),
+        ("{'password': ['a', 'b'", "{'[REDACTED]"),
+        ("{'password': [" + "9, " * 500 + "0]}", "{'[REDACTED]"),
+        ("password=(a, (b))\nnext", "[REDACTED]\nnext"),
         # A truncated authority is redacted whole even when the password contains "@".
         ("postgres://admin:p@ss-secret...[TRUNC]", "postgres://[REDACTED]...[TRUNC]"),
         (
@@ -289,6 +306,13 @@ def test_secret_name_value_pairs(tmp_path: Path) -> None:
         "://" + "a" * 100_000 + "...[TRUNC]",
         "://" + "a...[TRUNC]" * 10_000,
         "'secret" + "-k" * 50_000,
+        # Quoted container items must not make the container repeat ambiguous.
+        "password: [" + "b'x'" * 30_000,
+        "password: [" + "'a', " * 20_000,
+        "password: " + "[" * 50_000,
+        "password=" + "x" * 100_000,
+        "Authorization: '" + "x" * 100_000,
+        "{'password': '" + "a\\'" * 50_000,
     ],
 )
 def test_new_patterns_stay_linear_on_adversarial_input(text: str) -> None:
@@ -421,3 +445,41 @@ def test_bytes_dict_key_is_sensitive_through_its_repr(tmp_path: Path) -> None:
 
     assert _S["long_key"] not in raw
     assert local_vars["creds"] == {"b'password'": "[REDACTED]"}
+
+
+def test_namedtuple_fields_keep_their_names_past_the_depth_limit(tmp_path: Path) -> None:
+    """Rebuilding a namedtuple as a plain tuple would drop the names the patterns need."""
+    creds = namedtuple("creds", ["user", "password"])
+
+    def boom() -> None:
+        deep = {"a": {"b": creds("bob", _S["tuple_field"])}}  # noqa: F841
+        raise ValueError("namedtuple")
+
+    local_vars, raw = _capture_locals(tmp_path, boom)
+
+    assert _S["tuple_field"] not in raw
+    # The type and the non-secret field names survive, so the text patterns still apply.
+    assert local_vars["deep"]["a"]["b"] == "creds(user='bob', [REDACTED])"
+
+
+def test_unquoted_secret_value_with_structural_delimiters(tmp_path: Path) -> None:
+    """The delimiter-bounded value class must not apply to plain `name=value` text."""
+
+    def boom() -> None:
+        raise ValueError("connect failed: password=" + _S["bare"] + " host=db")
+
+    try:
+        boom()
+    except ValueError as exc:
+        cfg = SnapshotConfig(
+            out_dir=str(tmp_path),
+            redaction_profile="prod",
+            include_git=False,
+            source_mode="none",
+            output_format="json",
+        )
+        path = capture_exception("bare", exc, exc.__traceback__, cfg)
+    raw = path.read_text(encoding="utf-8")
+
+    assert _S["bare"] not in raw
+    assert "cd;ef" not in raw

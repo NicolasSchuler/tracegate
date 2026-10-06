@@ -25,19 +25,43 @@ _NAME_SUFFIX = r"[\w-]{0,128}"
 # optional so a value cut by truncation is still covered to its end.
 _QUOTED_VALUE = r"""[bru]{0,2}(?:'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)"""
 
-# One level of bracketed container, so a composite value is consumed whole instead of up to
-# its first comma: {'password': ['alpha', 'beta']} must not keep "beta". Each inner class
-# excludes its own brackets and is bounded, so matching stays linear.
-_CONTAINER_VALUE = r"\[[^\[\]\r\n]{0,1024}\]|\{[^{}\r\n]{0,1024}\}|\([^()\r\n]{0,1024}\)"
+# One item of a bracketed container value: a complete string literal, or any character that
+# is neither a quote nor a bracket. The three alternatives are distinguished by their first
+# character, so there is exactly one way to match any input and the repeat stays linear. A
+# quoted item is matched as a unit so that a bracket inside a string does not end the
+# container, and nesting is excluded so that a nested container fails this branch instead of
+# matching half of it.
+_CONTAINER_ITEM = r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^][{}()'"\r\n]"""
 
-# A bare value, up to the delimiter that ends it in a repr or JSON rendering.
-_BARE_VALUE = r"[^\s,;}\])]+"
+# A composite value consumed whole instead of up to its first comma: the repr of
+# {'password': ['alpha', 'beta']} must not keep "beta".
+_CONTAINER_VALUE = (
+    r"\[(?:" + _CONTAINER_ITEM + r"){0,1024}\]"
+    r"|\{(?:" + _CONTAINER_ITEM + r"){0,1024}\}"
+    r"|\((?:" + _CONTAINER_ITEM + r"){0,1024}\)"
+)
 
-_SECRET_VALUE = f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_BARE_VALUE})"
+# A value that opens a container but is nested, unterminated or longer than the bound above:
+# matching part of it would leak the rest, so it is redacted to the end of its line.
+_OPEN_CONTAINER_VALUE = r"[\[{(][^\r\n]{0,4096}"
+
+# A bare value up to the delimiter that ends it in a repr or JSON rendering. Only used where
+# the name was quoted, i.e. the text really is a structured rendering whose shape should
+# survive; elsewhere an unquoted value runs to the next whitespace.
+_BARE_STRUCTURED_VALUE = r"[^\s,;}\])]+"
+_BARE_TEXT_VALUE = r"\S{1,4096}"
+
+_STRUCTURED_SECRET_VALUE = (
+    f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_STRUCTURED_VALUE})"
+)
+_TEXT_SECRET_VALUE = (
+    f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_TEXT_VALUE})"
+)
 
 # Header fields whose value is whitespace- or ";"-separated, so one token is not the whole
-# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". Their value is consumed up
-# to the structural delimiters of a surrounding repr/JSON object, which stay readable.
+# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". A quoted value is taken
+# whole; an unquoted one is consumed up to the structural delimiters of a surrounding
+# repr/JSON object, which stay readable.
 _AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
 
 # Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
@@ -45,17 +69,33 @@ _AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
 # tracebacks) stays linear. The order matters: `redact_text` applies them in sequence, and a
 # pattern that consumes a longer value must run before one that would stop inside it.
 PII_PATTERNS: tuple[str, ...] = (
-    # Authorization/Cookie fields first: the generic assignment pattern below would stop at
+    # Authorization/Cookie fields first: the generic assignment patterns below would stop at
     # the space in "Basic dXNlcjpwYXNz" and leave the credential behind.
-    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*[^\r\n,}\])]{0,4096}",
-    # A secret-named name/value assignment, in a log line, an exception message or the repr
-    # of a nested dict: password="a b", {'secret-key': 'hunter2'}, api_key: ['a', 'b'].
-    # This one pattern replaces the former `password\s*[:=]\s*\S+` pair, which matched first
-    # and cut quoted multi-word values off after their first word.
-    r"(?i)(?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]?\s*[:=]\s*" + _SECRET_VALUE,
-    # A quoted secret name followed by a quoted value: the repr of a header or form pair,
+    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*"
+    r"(?:" + _QUOTED_VALUE + r"|[^\r\n,}\])]{0,4096})",
+    # A quoted secret name assigned a value, i.e. the repr of a dict or a JSON object:
+    # {'secret-key': 'hunter2'}, {"api_key": ["a", "b"]}. The name's quotes are matched with a
+    # lookbehind so the rendering keeps its shape around the replacement.
+    r"(?i)(?<=['\"])(?:"
+    + SENSITIVE_NAMES
+    + r")"
+    + _NAME_SUFFIX
+    + r"['\"]\s*[:=]\s*"
+    + _STRUCTURED_SECRET_VALUE,
+    # An unquoted secret name assigned a value: a log line, an exception message, an object
+    # repr. An unquoted value here runs to the next whitespace, as the former
+    # `password\s*[:=]\s*\S+` pattern did, so "password=ab,cd" is redacted whole. That pair of
+    # patterns is replaced by this one, which no longer pre-empts the quoted-value matcher
+    # below it and so no longer cuts "password=\"alpha beta gamma\"" off after its first word.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]?\s*[:=]\s*" + _TEXT_SECRET_VALUE,
+    # A quoted secret name followed by a value: the repr of a header or form pair,
     # ['Authorization', 'Basic dXNlcjpwYXNz'], which has no ":"/"=" separator.
-    r"(?i)['\"](?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]\s*,\s*" + _SECRET_VALUE,
+    r"(?i)['\"](?:"
+    + SENSITIVE_NAMES
+    + r")"
+    + _NAME_SUFFIX
+    + r"['\"]\s*,\s*"
+    + _STRUCTURED_SECRET_VALUE,
     r"(?i)bearer\s+\S+",
     # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
     # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
