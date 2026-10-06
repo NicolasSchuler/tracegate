@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import collections
 import functools
+import heapq
 import inspect
+import itertools
 import re
 from dataclasses import dataclass
 from re import Pattern
@@ -664,7 +667,9 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
 
 def _preview_cell(value: Any, cfg: SnapshotConfig) -> Any:
-    """Keep a pandas preview cell as-is unless it is an int orjson can't encode."""
+    """A pandas preview cell, bounded like any other value (CAP-01, CAP-13)."""
+    if isinstance(value, str):
+        return truncate_str(value, cfg.max_str)
     if isinstance(value, int) and not JSON_INT_MIN <= value <= JSON_INT_MAX:
         return safe_repr(value, cfg)
     return value
@@ -730,7 +735,9 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
 
 def _dataframe_head(df: Any, cfg: SnapshotConfig) -> list[list[Any]]:
-    rows = cast(list[list[Any]], df.head(min(3, len(df))).values.tolist())
+    # Only the columns listed in "columns" (max_items), not every column (CAP-13).
+    head = df.iloc[: min(3, len(df)), : cfg.max_items]
+    rows = cast(list[list[Any]], head.values.tolist())
     return [[_preview_cell(cell, cfg) for cell in row] for row in rows]
 
 
@@ -760,16 +767,32 @@ def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     return summary
 
 
+# Up to this size a set is sorted by repr, as always; larger sets are previewed without
+# rendering every element (CAP-10: a 200,000-element set took 40-160 ms).
+_SET_FULL_SORT_LIMIT = 1000
+
+
+def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> list[Any]:
+    """The first ``max_items + 1`` elements of a set, in a process-independent order."""
+    count = cfg.max_items + 1
+
+    def by_repr(item: Any) -> tuple[str, str, str]:
+        return (type(item).__module__, type(item).__name__, safe_repr(item, cfg))
+
+    if len(x) <= _SET_FULL_SORT_LIMIT:
+        return sorted(x, key=by_repr)[:count]
+    try:
+        return heapq.nsmallest(count, x)  # natural order, no repr per element
+    except TypeError:  # element types that don't compare: sort a bounded sample
+        return sorted(itertools.islice(x, _SET_FULL_SORT_LIMIT), key=by_repr)[:count]
+
+
 def _jsonlike_collection(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     """Serialize list/tuple/set/frozenset to JSON-like form."""
     if isinstance(x, (list, tuple)):
         items: list[Any] = list(cast(list[Any], x)[: cfg.max_items + 1])
     else:
-        ordered: list[Any] = sorted(
-            x,
-            key=lambda item: (type(item).__module__, type(item).__name__, safe_repr(item, cfg)),
-        )
-        items = ordered[: cfg.max_items + 1]
+        items = _set_preview(cast(set[Any] | frozenset[Any], x), cfg)
     truncated = len(items) > cfg.max_items
     if truncated:
         items = items[: cfg.max_items]
@@ -861,12 +884,42 @@ def _local_type_name(value: Any) -> str:
     return f"{type(value).__module__}.{type(value).__name__}"
 
 
-def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
-    entry: dict[str, Any] = {"type": _local_type_name(value)}
+# Types whose len() is known to be cheap and side-effect free. Calling len() on arbitrary
+# objects ran user code: a lazy ORM query set executes its query (CAP-21).
+_SAFE_LEN_TYPES = (
+    str,
+    bytes,
+    bytearray,
+    list,
+    tuple,
+    dict,
+    set,
+    frozenset,
+    range,
+    collections.deque,
+)
+
+
+def _safe_len(value: Any) -> int | None:
+    """``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
     try:
-        entry["len"] = len(value)  # type: ignore[arg-type]
+        if (
+            isinstance(value, _SAFE_LEN_TYPES)
+            or is_array_like(value)
+            or is_dataframe(value)
+            or is_series(value)
+        ):
+            return len(cast(Any, value))
     except Exception:  # nosec B110 — safe serialization fallback
         pass
+    return None
+
+
+def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = {"type": _local_type_name(value)}
+    length = _safe_len(value)
+    if length is not None:
+        entry["len"] = length
     try:
         if (is_array_like(value) or is_dataframe(value) or is_series(value)) and hasattr(
             value, "shape"

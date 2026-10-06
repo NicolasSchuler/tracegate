@@ -1378,3 +1378,50 @@ def test_summarize_series_no_dtype() -> None:
     result = summarize_series(_FakeSeries(), SnapshotConfig())
     assert "dtype" not in result
     assert result["name"] == "col_a"
+
+
+def test_small_sets_keep_their_repr_order(cfg):
+    assert to_jsonlike({10, 2, 33}, cfg) == [10, 2, 33]  # repr order: "10" < "2" < "33"
+
+
+def test_large_sets_are_previewed_without_rendering_every_element(cfg, monkeypatch):
+    """CAP-10: a 200,000-element set was fully repr'd and sorted before truncation."""
+    import llmdebug.serialize as serialize_module
+
+    reprs = {"count": 0}
+    real = serialize_module.safe_repr
+
+    def _counting_repr(value, config):
+        reprs["count"] += 1
+        return real(value, config)
+
+    monkeypatch.setattr(serialize_module, "safe_repr", _counting_repr)
+    result = to_jsonlike(set(range(200_000)), cfg)
+
+    assert result[:3] == [0, 1, 2]  # natural order, deterministic
+    assert result[-1] == "...[TRUNC]"
+    assert len(result) == cfg.max_items + 1
+    assert reprs["count"] < 1000
+
+
+def test_large_mixed_sets_fall_back_to_a_bounded_sample(cfg):
+    mixed = set(range(1500)) | {f"s{i}" for i in range(1500)}
+
+    result = to_jsonlike(mixed, cfg)
+
+    assert len(result) == cfg.max_items + 1
+    assert result[-1] == "...[TRUNC]"
+
+
+def test_dataframe_preview_respects_max_items_and_max_str():
+    """CAP-13: a 400-column frame with max_items=5 previewed 1,200 cells, strings untruncated."""
+    pd = pytest.importorskip("pandas")
+    cfg = SnapshotConfig(max_items=5, max_str=40)
+    frame = pd.DataFrame({f"c{i}": ["x" * 500] * 4 for i in range(400)})
+
+    summary = to_jsonlike(frame, cfg)
+
+    assert len(summary["columns"]) == 5
+    assert len(summary["head"]) == 3
+    assert all(len(row) == 5 for row in summary["head"])
+    assert all(len(cell) <= 40 and cell.endswith("...[TRUNC]") for cell in summary["head"][0])

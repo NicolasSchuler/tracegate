@@ -173,7 +173,7 @@ def test_configure_connection_invalid_busy_timeout_falls_back(
             self.commands.append(sql)
 
     monkeypatch.setenv("LLMDEBUG_DB_BUSY_TIMEOUT_MS", "nope")
-    monkeypatch.setattr(state_db, "_ensure_wal_mode", lambda _conn, *, db_path: None)
+    monkeypatch.setattr(state_db, "_ensure_wal_mode", lambda _conn, **_kwargs: None)
 
     conn = _Conn()
     state_db._configure_connection(conn, db_path=tmp_path / "llmdebug_state.sqlite3")

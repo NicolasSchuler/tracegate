@@ -1046,40 +1046,66 @@ def test_redaction_warning_not_emitted_with_explicit_patterns(tmp_path, monkeypa
         failing()
 
 
-def test_get_source_snippet_streams_without_readlines(monkeypatch):
-    import builtins
+def test_get_source_snippet_windows_linecache_lines(monkeypatch):
+    """CAP-08: snippets come from linecache, the same source traceback uses."""
+    import linecache
 
     import llmdebug.capture as capture_module
 
-    class _FakeFile:
-        def __init__(self, lines: list[str]) -> None:
-            self._lines = lines
+    lines = ["line 1\n", "line 2\n", "line 3\n", "line 4\n", "line 5\n"]
+    monkeypatch.setitem(linecache.cache, "<cell-7>", (0, None, lines, "<cell-7>"))
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        def __iter__(self):
-            return iter(self._lines)
-
-        def readlines(self):  # pragma: no cover - guard rail assertion
-            raise AssertionError("readlines() should not be used")
-
-    monkeypatch.setattr(capture_module.os.path, "exists", lambda _path: True)
-    monkeypatch.setattr(
-        builtins,
-        "open",
-        lambda *_args, **_kwargs: _FakeFile(
-            ["line 1\n", "line 2\n", "line 3\n", "line 4\n", "line 5\n"]
-        ),
-    )
-
-    snippet = capture_module.get_source_snippet("demo.py", lineno=3, ctx=1)
+    snippet = capture_module.get_source_snippet("<cell-7>", lineno=3, ctx=1)
     assert snippet["start"] == 2
     assert snippet["end"] == 4
-    assert [row["lineno"] for row in snippet["snippet"]] == [2, 3, 4]
+    assert [row["code"] for row in snippet["snippet"]] == ["line 2", "line 3", "line 4"]
+
+
+def test_source_for_exec_and_cell_code_is_captured(tmp_path):
+    """CAP-08: an os.path.exists() check dropped source for IPython cells and exec code."""
+    import linecache
+
+    source = "def cell_fn():\n    value = 41\n    raise ValueError(value + 1)\n"
+    filename = "<ipython-input-3-deadbeef>"
+    linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
+    namespace: dict[str, object] = {}
+    exec(compile(source, filename, "exec"), namespace)
+    try:
+        namespace["cell_fn"]()  # type: ignore[operator]
+    except ValueError as exc:
+        cfg = SnapshotConfig(out_dir=str(tmp_path), include_git=False)
+        capture_exception("cell", exc, exc.__traceback__, cfg)
+    finally:
+        linecache.cache.pop(filename, None)
+
+    snapshot = get_latest_snapshot(str(tmp_path))
+    assert snapshot is not None
+    source_block = snapshot["frames"][0]["source"]
+    assert any("raise ValueError" in row["code"] for row in source_block["snippet"])
+
+
+def test_source_from_a_zipimported_module_is_captured(tmp_path, monkeypatch):
+    """CAP-08: zipimport sources are only reachable through the module's loader."""
+    import sys
+    import zipfile
+
+    archive = tmp_path / "pkg.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("zipped_mod.py", "def boom():\n    raise KeyError('zipped')\n")
+    monkeypatch.syspath_prepend(str(archive))
+    import zipped_mod  # type: ignore[import-not-found]
+
+    try:
+        zipped_mod.boom()
+    except KeyError as exc:
+        cfg = SnapshotConfig(out_dir=str(tmp_path / "snaps"), include_git=False)
+        capture_exception("zipped", exc, exc.__traceback__, cfg)
+    finally:
+        sys.modules.pop("zipped_mod", None)
+
+    snapshot = get_latest_snapshot(str(tmp_path / "snaps"))
+    assert snapshot is not None
+    assert "raise KeyError" in str(snapshot["frames"][0]["source"])
 
 
 # ---------------------------------------------------------------------------
@@ -1403,24 +1429,20 @@ def test_get_source_snippet_empty_file(tmp_path) -> None:
     empty_file = tmp_path / "empty.py"
     empty_file.write_text("")
     result = get_source_snippet(str(empty_file), 1, 3)
-    assert result == {}
+    # linecache reads an empty file as one blank line (CAP-08); a frame can't point there.
+    assert result in ({}, {"start": 1, "end": 1, "snippet": [{"lineno": 1, "code": ""}]})
 
 
 def test_get_source_snippet_exception(monkeypatch) -> None:
     """get_source_snippet returns {} on any exception during read."""
-    import builtins
-
     import llmdebug.capture as capture_module
 
-    monkeypatch.setattr(capture_module.os.path, "exists", lambda _p: True)
-
-    def _bad_open(*_a, **_kw):
+    def _bad_getlines(*_a, **_kw):
         raise PermissionError("no access")
 
-    monkeypatch.setattr(builtins, "open", _bad_open)
-    from llmdebug.capture import get_source_snippet
+    monkeypatch.setattr(capture_module.linecache, "getlines", _bad_getlines)
 
-    result = get_source_snippet("exists.py", 1, 3)
+    result = capture_module.get_source_snippet("exists.py", 1, 3)
     assert result == {}
 
 
@@ -1864,7 +1886,7 @@ def test_add_locals_safe_extract_args_returns_none(monkeypatch):
     # Monkeypatch extract_function_args to return None
     monkeypatch.setattr(
         "llmdebug.capture.extract_function_args",
-        lambda frame: None,
+        lambda frame, f_locals=None: None,
     )
 
     # Grab a real frame object
@@ -1889,7 +1911,7 @@ def test_add_locals_meta_extract_args_returns_none(monkeypatch):
 
     monkeypatch.setattr(
         "llmdebug.capture.extract_function_args",
-        lambda frame: None,
+        lambda frame, f_locals=None: None,
     )
 
     frame = sys._getframe(0)
@@ -1900,3 +1922,73 @@ def test_add_locals_meta_extract_args_returns_none(monkeypatch):
     assert "args_meta" not in frame_dict
     assert "arg_names" not in frame_dict
     assert "locals_meta" in frame_dict
+
+
+@pytest.mark.parametrize("helper_name", ["_add_locals_safe", "_add_locals_meta"])
+def test_frame_locals_are_read_once_per_frame(helper_name: str) -> None:
+    """CAP-12: f_locals was re-read for every argument (a dict rebuild on 3.10-3.12)."""
+    import llmdebug.capture as capture_module
+
+    def target(a, b, c, *rest, key=None, **extra):
+        return sys._getframe()
+
+    real = target(1, 2, 3, 4, 5, key=6, other=7)
+
+    class _CountingFrame:
+        reads = 0
+        f_code = real.f_code
+
+        @property
+        def f_locals(self) -> dict:
+            _CountingFrame.reads += 1
+            return real.f_locals
+
+    helper = getattr(capture_module, helper_name)  # (frame_dict, frame, cfg, redactors/warnings)
+    helper({}, _CountingFrame(), SnapshotConfig(include_args=True), [])
+
+    assert _CountingFrame.reads == 1
+
+
+def _frame_with_args():
+    import numpy as np
+
+    def target(arr, mapping, *rest, flag=True, **extra):
+        local_only = [1, 2]  # noqa: F841 - a local that isn't an argument
+        return sys._getframe()
+
+    return target(np.arange(6.0), {"k": 1}, 3, 4, flag=False, opt="x")
+
+
+def test_arguments_are_serialized_once(monkeypatch) -> None:
+    """CAP-09: args were serialized a second time although locals already held them."""
+    import llmdebug.capture as capture_module
+    import llmdebug.serialize as serialize_module
+
+    frame = _frame_with_args()
+    calls: list[str] = []
+    real = serialize_module._serialize_local_value
+    monkeypatch.setattr(
+        serialize_module,
+        "_serialize_local_value",
+        lambda value, cfg: calls.append(type(value).__name__) or real(value, cfg),
+    )
+    frame_dict: dict = {}
+    capture_module._add_locals_safe(frame_dict, frame, SnapshotConfig(include_args=True), [])
+
+    assert len(calls) == len(frame.f_locals)  # one serialization per local, args included
+    assert set(frame_dict["args"]) == {"arr", "mapping", "rest", "flag", "extra"}
+
+
+@pytest.mark.parametrize("redact_keys", [False, True])
+def test_shared_argument_serialization_matches_a_separate_pass(redact_keys: bool) -> None:
+    import llmdebug.capture as capture_module
+    from llmdebug.serialize import compile_redactors, serialize_locals_bundle
+
+    frame = _frame_with_args()
+    cfg = SnapshotConfig(include_args=True, redact=("secret",), redact_keys=redact_keys)
+    redactors = compile_redactors(cfg.redact)
+    frame_dict: dict = {}
+    capture_module._add_locals_safe(frame_dict, frame, cfg, redactors)
+
+    _, arg_values = capture_module.extract_function_args(frame) or ([], {})
+    assert frame_dict["args"] == serialize_locals_bundle(arg_values, cfg, redactors).values

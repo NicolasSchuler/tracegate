@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect as _inspect_module
+import linecache
 import os
 import platform
 import sys
 import traceback
 import types
+from collections.abc import Mapping
 from datetime import timezone
 from pathlib import Path
 from re import Pattern
@@ -197,38 +199,37 @@ def get_env_info(cfg: SnapshotConfig) -> dict[str, Any]:
     }
 
 
-def get_source_snippet(filename: str, lineno: int, ctx: int) -> dict[str, Any]:
-    """Extract source code around a line."""
+def get_source_snippet(
+    filename: str,
+    lineno: int,
+    ctx: int,
+    module_globals: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Extract source code around a line.
+
+    Reads through ``linecache``, the cache ``traceback`` already filled for this
+    exception (CAP-08): IPython cells and ``exec`` sources registered there, and
+    zipimport modules (via ``__loader__`` in *module_globals*) work, the snippet matches
+    the frame's ``code`` line, and a file is read once rather than once per frame.
+    """
     try:
-        if not filename or not os.path.exists(filename):
+        lines = linecache.getlines(filename, module_globals) if filename else []
+        if not lines:
             return {}
         start_line = max(lineno - ctx, 1)
         end_line = max(lineno + ctx, start_line)
-        snippet: list[dict[str, Any]] = []
-        last_line = 0
-        has_more_lines = False
-
-        # Stream file content and capture only the requested window.
-        with open(filename, encoding="utf-8", errors="replace") as f:
-            for line_no, line in enumerate(f, start=1):
-                last_line = line_no
-                if line_no < start_line:
-                    continue
-                if line_no > end_line:
-                    has_more_lines = True
-                    break
-                snippet.append({"lineno": line_no, "code": line.rstrip("\n")})
-
-        if last_line == 0:
-            return {}
-
-        actual_end = end_line if has_more_lines else min(end_line, last_line)
-        return {"start": start_line, "end": actual_end, "snippet": snippet}
+        snippet: list[dict[str, Any]] = [
+            {"lineno": line_no, "code": line.rstrip("\n")}
+            for line_no, line in enumerate(lines[start_line - 1 : end_line], start=start_line)
+        ]
+        return {"start": start_line, "end": min(end_line, len(lines)), "snippet": snippet}
     except Exception:
         return {}
 
 
-def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, Any]] | None:
+def extract_function_args(
+    frame: types.FrameType, f_locals: Mapping[str, Any] | None = None
+) -> tuple[list[str], dict[str, Any]] | None:
     """Extract function argument names and values from a frame.
 
     Returns:
@@ -240,6 +241,9 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
     [positional-only][positional-or-keyword][keyword-only][*args][**kwargs][locals]
     """
     try:
+        # One read: on Python 3.10-3.12 every frame.f_locals access rebuilds the dict
+        # (CAP-12).
+        local_vars = frame.f_locals if f_locals is None else f_locals
         code = frame.f_code
         posonly_count = getattr(code, "co_posonlyargcount", 0)
         arg_count = code.co_argcount
@@ -259,8 +263,8 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
         # Positional-only + positional/keyword args
         for name in varnames[:positional_count]:
             arg_names.append(name)
-            if name in frame.f_locals:
-                arg_values[name] = frame.f_locals[name]
+            if name in local_vars:
+                arg_values[name] = local_vars[name]
 
         # Track position after positional args
         pos = positional_count
@@ -268,24 +272,24 @@ def extract_function_args(frame: types.FrameType) -> tuple[list[str], dict[str, 
         # Keyword-only args (come after positional args in varnames)
         for name in varnames[pos : pos + kwonly_count]:
             arg_names.append(name)
-            if name in frame.f_locals:
-                arg_values[name] = frame.f_locals[name]
+            if name in local_vars:
+                arg_values[name] = local_vars[name]
         pos += kwonly_count
 
         # Check for *args (CO_VARARGS = 0x04)
         if flags & _inspect_module.CO_VARARGS:
             args_name = varnames[pos]
             arg_names.append(f"*{args_name}")
-            if args_name in frame.f_locals:
-                arg_values[args_name] = frame.f_locals[args_name]
+            if args_name in local_vars:
+                arg_values[args_name] = local_vars[args_name]
             pos += 1
 
         # Check for **kwargs (CO_VARKEYWORDS = 0x08)
         if flags & _inspect_module.CO_VARKEYWORDS:
             kwargs_name = varnames[pos]
             arg_names.append(f"**{kwargs_name}")
-            if kwargs_name in frame.f_locals:
-                arg_values[kwargs_name] = frame.f_locals[kwargs_name]
+            if kwargs_name in local_vars:
+                arg_values[kwargs_name] = local_vars[kwargs_name]
 
         return arg_names, arg_values
     except Exception:
@@ -323,19 +327,45 @@ def _add_locals_safe(
     effective_redactors: list[Pattern[str]],
 ) -> None:
     """Add safe-mode locals (with metadata and optional args) to frame_dict."""
-    locals_bundle = serialize_locals_bundle(frame.f_locals, cfg, effective_redactors)
+    local_vars = frame.f_locals  # read once per frame (CAP-12)
+    locals_bundle = serialize_locals_bundle(local_vars, cfg, effective_redactors)
     frame_dict["locals"] = locals_bundle.values
     frame_dict["locals_meta"] = locals_bundle.metadata
     if locals_bundle.truncated:
         frame_dict["locals_truncated"] = True
         frame_dict["locals_truncated_keys"] = locals_bundle.truncated_keys
     if cfg.include_args:
-        arg_info = extract_function_args(frame)
+        arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
-            args_bundle = serialize_locals_bundle(arg_values, cfg, effective_redactors)
-            frame_dict["args"] = args_bundle.values
+            frame_dict["args"] = _serialized_args(
+                arg_values, locals_bundle.values, cfg, effective_redactors
+            )
             frame_dict["arg_names"] = arg_names
+
+
+def _serialized_args(
+    arg_values: dict[str, Any],
+    serialized_locals: dict[str, Any],
+    cfg: SnapshotConfig,
+    redactors: list[Pattern[str]],
+) -> dict[str, Any]:
+    """Serialize the arguments, reusing their already serialized locals (CAP-09).
+
+    Arguments are locals, so serializing them again doubled the array statistics and
+    reprs per frame. Only arguments outside the locals' ``max_items`` window are
+    serialized here. With ``redact_keys`` the locals are keyed by redacted names, so
+    the arguments get their own pass.
+    """
+    if cfg.redact_keys:
+        return serialize_locals_bundle(arg_values, cfg, redactors).values
+    names = list(arg_values)[: cfg.max_items]
+    missing = {name: arg_values[name] for name in names if name not in serialized_locals}
+    extra = serialize_locals_bundle(missing, cfg, redactors).values if missing else {}
+    return {
+        name: serialized_locals[name] if name in serialized_locals else extra[name]
+        for name in names
+    }
 
 
 def _add_locals_meta(
@@ -345,9 +375,10 @@ def _add_locals_meta(
     warnings: list[str],
 ) -> None:
     """Add meta-mode locals to frame_dict."""
-    frame_dict["locals_meta"] = locals_metadata(frame.f_locals, cfg)
+    local_vars = frame.f_locals  # read once per frame (CAP-12)
+    frame_dict["locals_meta"] = locals_metadata(local_vars, cfg)
     try:
-        total_locals = len(frame.f_locals)
+        total_locals = len(local_vars)
     except Exception as e:
         _warn(warnings, f"locals count failed: {type(e).__name__}: {e}")
         total_locals = None
@@ -355,7 +386,7 @@ def _add_locals_meta(
         frame_dict["locals_truncated"] = True
         frame_dict["locals_truncated_keys"] = total_locals - cfg.max_items
     if cfg.include_args:
-        arg_info = extract_function_args(frame)
+        arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
             frame_dict["args_meta"] = locals_metadata(arg_values, cfg)
@@ -402,7 +433,9 @@ def _serialize_frame(
             _warn(warnings, f"coroutine frame detection failed: {type(e).__name__}: {e}")
 
     if cfg.source_mode == "all" or (cfg.source_mode == "crash_only" and idx == total - 1):
-        frame_dict["source"] = get_source_snippet(ex_item.filename, lineno, cfg.source_context)
+        frame_dict["source"] = get_source_snippet(
+            ex_item.filename, lineno, cfg.source_context, frame.f_globals
+        )
 
     if cfg.locals_mode == "safe":
         _add_locals_safe(frame_dict, frame, cfg, effective_redactors)
