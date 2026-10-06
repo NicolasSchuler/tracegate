@@ -1478,7 +1478,7 @@ class TestPrintSummary:
         bucket["pairwise_uplifts"] = ["not_a_dict"]
         ar._print_bucket(bucket)
         out = capsys.readouterr().out
-        assert "pairwise_uplifts:" in out
+        assert "pairwise_uplifts (own attempt budgets):" in out
 
 
 # ── Statistical analysis paths (lines 5121-5182) ────────────────────────
