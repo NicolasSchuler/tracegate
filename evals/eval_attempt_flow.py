@@ -6745,6 +6745,10 @@ def _run_one_condition_attempts(
                 diff_to_apply is None
                 and is_openai_patcher
                 and (not request_failed)
+                # A truncated answer is terminal (LLM-02): another proposal under the
+                # same token budget truncates again, and its metadata would replace the
+                # truncation with no_patch_proposed or a repair.
+                and not patcher_meta_truncated(patch_meta)
                 and str(patch_meta.get("error") or "").strip()
             ):
                 no_diff_recovery_sections = _build_stage_b_sections_for_attempt(

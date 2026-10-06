@@ -981,3 +981,34 @@ def test_att16_cleanup_keeps_a_diff_target_that_ends_in_orig(tmp_path: Path) -> 
 
     assert ok, msg
     assert (tmp_path / "fixture.orig").read_text(encoding="utf-8") == "expected = 1\n"
+@dataclass
+class _CountingOpenAIPatcher:
+    """A patcher the runner treats as the OpenAI one, counting its proposals."""
+
+    meta: dict[str, Any]
+    name: str = "openai"
+    calls: int = 0
+
+    def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path) -> PatchResult:
+        del prompt, context_dir, cwd
+        self.calls += 1
+        return PatchResult(diff=None, meta=dict(self.meta))
+
+
+def test_llm02_truncated_answer_skips_no_diff_recovery(tmp_path: Path) -> None:
+    patcher = _CountingOpenAIPatcher({"error": "truncated_response", "finish_reason": "length"})
+
+    records = _attempts(_run(tmp_path, patcher))  # type: ignore[arg-type]
+
+    assert patcher.calls == 1  # terminal: no second proposal under the same budget
+    assert records[0]["patch_meta"].get("no_diff_recovery_invoked") is not True
+    assert [r["note"] for r in records] == ["truncated_response"]
+
+
+def test_llm02_other_no_diff_errors_still_reach_no_diff_recovery(tmp_path: Path) -> None:
+    patcher = _CountingOpenAIPatcher({"error": "no_diff_found"})
+
+    records = _attempts(_run(tmp_path, patcher))  # type: ignore[arg-type]
+
+    assert patcher.calls == 2
+    assert records[0]["patch_meta"]["no_diff_recovery_invoked"] is True
