@@ -13,6 +13,7 @@ from typing import Any
 
 from evals.analyze_results import (
     _derive_case_condition_rows,
+    _fmt_num_with_ci,
     _is_external_baseline_condition,
     _load_and_group_records,
     _ope_target_order,
@@ -461,14 +462,30 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
         if agreement_warning:
             diagnostics.append(f"agreement={agreement_warning}")
         diagnostics_fragment = f" [{', '.join(diagnostics)}]" if diagnostics else ""
+        ci_raw = target.get("ope_ci")
+        ci: dict[str, Any] = ci_raw if isinstance(ci_raw, dict) else {}
         parts.append(
-            f"{target_name}: ips={_fmt_num(target.get('ips'))}, "
-            f"snips={_fmt_num(target.get('snips'))}, "
-            f"dr={_fmt_num(target.get('dr'))}, "
+            f"{target_name}: ips={_fmt_num_with_ci(target.get('ips'), ci.get('ips'))}, "
+            f"snips={_fmt_num_with_ci(target.get('snips'), ci.get('snips'))}, "
+            f"dr={_fmt_num_with_ci(target.get('dr'), ci.get('dr'))}, "
             f"ess={_fmt_num(target.get('effective_sample_size'))}"
             f"{diagnostics_fragment}"
         )
-    return "; ".join(parts) if parts else "n/a"
+    notes = _ope_sample_notes(ope)
+    rendered = "; ".join(parts) if parts else "n/a"
+    return f"{notes}{rendered}" if notes else rendered
+
+
+def _ope_sample_notes(ope: dict[str, Any]) -> str:
+    """Samples left out of or corrected in the estimates (STA-12, POL-03)."""
+    notes: list[str] = []
+    dropped = int(ope.get("propensity_missing_dropped") or 0)
+    if dropped:
+        notes.append(f"{dropped} sample(s) without a propensity dropped")
+    corrected = int(ope.get("shadow_corrected_samples") or 0)
+    if corrected:
+        notes.append(f"{corrected} shadow-mode propensity(ies) corrected to 1.0")
+    return f"[{'; '.join(notes)}] " if notes else ""
 
 
 if __name__ == "__main__":

@@ -4,11 +4,14 @@
 
 ### Features
 
+- Off-policy estimates (IPS, SNIPS, DR) carry 95% case-bootstrap intervals (`ope_ci`, 1,000 seeded resamples, cross-fitted models held fixed), printed next to each estimate; they had no uncertainty at all.
 - Add an offline `llmdebug quickstart` command that creates and displays a real synthetic snapshot.
 - Add a System-1 decision-model advisor for the adaptive helper policy (`evals/decision_model/`): a SystemOne-compatible endpoint (e.g. Cloudflare clef-flash served by llama.cpp through llama-swap, or the bundled PyTorch sidecar) can run in `shadow`, `policy`, `features` or `prior` role via `--adaptive-decision-model-role`, with versioned question profiles, a redacted bounded decision state, policy-event schema v5, decision-model off-policy targets, and an `--adaptive-decision-model-api-key` (default `$TRACEGATE_DECISION_MODEL_API_KEY`) that `run_eval_docker.sh` passes as a flag and lockfiles redact.
 
 ### Bug Fixes
 
+- Doubly robust off-policy estimates are cross-fitted (5 folds per stratum) instead of fitting the reward model on the samples it corrects, and the OPE summary reports the ridge alphas actually used per action (`ridge_alphas_selected`, `ridge_alpha_fallback`, `dr_crossfit_folds`) instead of the configured fallback value. Very small strata now report DR as unsupported (`insufficient_crossfit_support`) (STA-11).
+- Off-policy samples without a logged propensity are dropped and counted (`propensity_missing_dropped`) instead of silently getting propensity 1.0 in IPS, SNIPS and DR; the OPE lines print that count and the number of shadow-mode propensities corrected for POL-03 (STA-12).
 - Conditions with different attempt budgets are compared at a common k (STA-13, D12): each condition reports `success_within_common_k`, the share of cases solved within the smallest attempt budget in the bucket (`common_attempt_k`), next to its own-budget `success_rate`; `evals.stats.pass_at_k` adds the unbiased pass@k estimator.
 - `baselines/compare_results` pairs cases through the shared case-level analysis: repeated runs are aggregated by majority vote with `runs_per_case_max` reported, instead of the last run in glob order overwriting the others, and per-category N matches the paired N (BAS-06). An unreadable input file prints a warning instead of raising `TypeError` (BAS-09).
 - `analyze_results --strict-input` now also governs schema validation: without it a schema-invalid record is skipped and counted as `records_schema_invalid` instead of aborting the whole analysis (STA-25).

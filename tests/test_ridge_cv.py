@@ -332,3 +332,95 @@ class TestRegressionNumericalCloseness:
         assert len(ADAPTIVE_OPE_RIDGE_ALPHAS) == 6
         assert 0.001 in ADAPTIVE_OPE_RIDGE_ALPHAS
         assert 100.0 in ADAPTIVE_OPE_RIDGE_ALPHAS
+
+
+def _ope_sample(action: str, x: float, reward: float) -> dict[str, object]:
+    return {
+        "action": action,
+        "propensity": 0.5,
+        "reward": reward,
+        "features": {"x": x},
+        "feature_scaling_profile": "v1",
+    }
+
+
+def test_sta11_crossfit_models_never_see_their_own_fold() -> None:
+    """STA-11: the DR reward model was fitted on the samples it then corrected."""
+    from evals.analyze_results import _crossfit_reward_models, _fit_action_reward_models
+
+    samples = [_ope_sample("a", float(i), float(i)) for i in range(10)]
+    samples[3]["reward"] = 1000.0  # an outlier the in-sample fit would absorb
+    crossfit = _crossfit_reward_models(
+        samples=samples, action_space={"a"}, min_action_support=1, ridge_alpha=0.1
+    )
+    held_out = _fit_action_reward_models(
+        samples=[s for idx, s in enumerate(samples) if idx % 5 != 3 % 5],
+        action_space={"a"},
+        min_action_support=1,
+        ridge_alpha=0.1,
+        feature_names=["x"],
+    )
+    assert np.allclose(crossfit.per_sample[3]["a"], held_out.models["a"])
+    in_sample = _fit_action_reward_models(
+        samples=samples, action_space={"a"}, min_action_support=1, ridge_alpha=0.1
+    )
+    assert not np.allclose(crossfit.per_sample[3]["a"], in_sample.models["a"])
+
+
+def test_sta11_summary_reports_the_alphas_actually_used() -> None:
+    from evals.analyze_results import ADAPTIVE_OPE_RIDGE_ALPHAS, _adaptive_ope_summary
+
+    samples = [
+        _ope_sample(action, float(i), float(i) * (2.0 if action == "a" else 1.0))
+        for i in range(30)
+        for action in ("a", "b")
+    ]
+    summary = _adaptive_ope_summary(
+        samples=samples,
+        action_space={"a", "b"},
+        target_policies={"always_a": "a"},
+        min_action_support=2,
+        propensity_floor=0.01,
+    )
+    assert summary["dr_crossfit_folds"] == 5
+    assert set(summary["ridge_alphas_selected"]) == {"a", "b"}
+    for alphas in summary["ridge_alphas_selected"].values():
+        assert set(alphas) <= set(ADAPTIVE_OPE_RIDGE_ALPHAS)  # RidgeCV choices, 24+ samples
+    assert summary["targets"]["always_a"]["dr_supported"] is True
+
+
+def test_ope_estimates_carry_case_bootstrap_intervals() -> None:
+    """Phase 2.3: OPE estimates had no uncertainty."""
+    from evals.analyze_results import _adaptive_ope_summary
+
+    samples = []
+    for case in range(12):
+        for action in ("a", "b"):
+            sample = _ope_sample(
+                action, float(case), float(case % 3) + (1.0 if action == "a" else 0.0)
+            )
+            sample["case_key"] = f"run\x1fc{case}"
+            samples.append(sample)
+    summary = _adaptive_ope_summary(
+        samples=samples,
+        action_space={"a", "b"},
+        target_policies={"always_a": "a"},
+        min_action_support=2,
+        propensity_floor=0.01,
+    )
+    target = summary["targets"]["always_a"]
+    ci = target["ope_ci"]
+    assert ci["available"] is True
+    assert ci["unit"] == "case"
+    assert ci["n_cases"] == 12
+    for estimator in ("ips", "snips", "dr"):
+        lower, upper = ci[estimator]
+        assert lower <= target[estimator] <= upper
+    again = _adaptive_ope_summary(
+        samples=samples,
+        action_space={"a", "b"},
+        target_policies={"always_a": "a"},
+        min_action_support=2,
+        propensity_floor=0.01,
+    )
+    assert again["targets"]["always_a"]["ope_ci"] == ci  # seeded
