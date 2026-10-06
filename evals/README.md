@@ -935,7 +935,10 @@ Resuming requires the same run settings: when the run settings fingerprint (whic
 patcher config, the case and condition selection, the record policy and `--seed`) differs from
 the existing results, the run aborts instead of writing records that would claim the old
 configuration (ORC-04). `--allow-settings-drift` resumes anyway; new records then carry fresh
-run metadata with `settings_drift_from_fingerprint`. `--seed` is always recorded, with
+run metadata with `settings_drift_from_fingerprint`, which links each settings generation to
+the one it replaced. A results file holding such a linked chain stays resumable: later
+invocations compare against the latest generation and reuse its metadata. An unlinked
+fingerprint change in the same file is still an error. `--seed` is always recorded, with
 `deterministic` as a separate flag, because it also seeds bandit exploration (ORC-05).
 
 For long-running units, enable richer in-flight visibility:
@@ -998,8 +1001,10 @@ Resume safety guardrails:
   warns so timestamp typos are easier to spot
 - if an existing `run_id` is missing `run_settings_fingerprint`, resume still aborts
   (cannot validate compatibility safely)
-- if an existing `run_id` has a different `run_settings_fingerprint`, the runner now prints
-  a warning and continues, reusing completed-unit state from existing records
+- if an existing `run_id` has a different `run_settings_fingerprint`, resume aborts unless
+  `--allow-settings-drift` is passed; with that option the runner prints a warning, continues,
+  and reuses completed-unit state from existing records. Subsequent invocations with those same
+  settings resume normally, because the drift record links back to the previous fingerprint
 - with an enabled decision-model role, the preflight resolves what the sidecar actually serves
   (`patcher_config.adaptive_decision_model_serving`: model id, revision, device, dtype,
   quantization, context limit) and resume aborts when it differs from the existing records'

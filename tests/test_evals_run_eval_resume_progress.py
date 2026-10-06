@@ -1635,3 +1635,114 @@ def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
     assert "missing run_settings_fingerprint" in capsys.readouterr().out
     assert _run_eval_main(["--allow-settings-drift", *argv]) != 0
     assert "missing run_settings_fingerprint" in capsys.readouterr().out
+
+
+def test_run_eval_resume_continues_after_permitted_settings_drift(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """ORC-04 (codex 1d#1): a linked drift history stays resumable on later invocations."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "drift_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    executed: list[tuple[str, str]] = []
+
+    def _run_once(*, case, condition, run_id, run_metadata, **_kwargs):
+        executed.append((case.case_id, condition.value))
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+
+    base_argv = ["--run-id", "drift-run", "--patcher", "null", "--k", "1"]
+    assert _run_eval_main([*base_argv, "--conditions", "base_repair"]) == 0
+    capsys.readouterr()
+
+    drifted = [*base_argv, "--conditions", "base_repair,layered_adaptive_gated"]
+    assert _run_eval_main(["--allow-settings-drift", *drifted]) == 0
+    out = capsys.readouterr().out
+    assert "Resume warning: run settings fingerprint mismatch for existing run_id" in out
+    assert executed == [("drift_case", "base_repair"), ("drift_case", "layered_adaptive_gated")]
+
+    # Third invocation: same settings as the drifted one. The results file now holds both
+    # fingerprints, which used to abort resume with "inconsistent run_settings_fingerprint".
+    assert _run_eval_main(drifted) == 0
+    out = capsys.readouterr().out
+    assert "Resume aborted" not in out
+    assert "inconsistent run_settings_fingerprint" not in out
+    assert "Resume warning: run settings fingerprint mismatch" not in out
+    assert "all planned case/condition units are already complete" in out
+    assert len(executed) == 2
+
+    # Fourth invocation: the chain extends from the drifted generation, so unfinished units
+    # still resume and run.
+    assert (
+        _run_eval_main(
+            [
+                "--allow-settings-drift",
+                *base_argv,
+                "--conditions",
+                "base_repair,layered_adaptive_gated,cot_repair",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "Resume aborted" not in out
+    assert executed[-1] == ("drift_case", "cot_repair")
+    assert "SKIP (resumed) drift_case/base_repair" in out
+
+    records = [
+        json.loads(line)
+        for line in (repo_root / "evals" / "results" / "drift-run.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    fingerprints = {str(record["run_metadata"]["run_settings_fingerprint"]) for record in records}
+    assert len(fingerprints) == 3
+    drift_links = {
+        str(record["run_metadata"].get("settings_drift_from_fingerprint") or "")
+        for record in records
+    } - {""}
+    assert len(drift_links) == 2
+    assert drift_links < fingerprints
+
+
+def test_run_eval_resume_rejects_an_unlinked_settings_change(tmp_path, monkeypatch) -> None:
+    """ORC-04: only an explicitly linked drift chain is resumable."""
+    from evals.run_state import _load_existing_run_state
+
+    results = tmp_path / "unlinked.jsonl"
+    rows = [
+        {
+            "run_id": "r",
+            "case_id": "c1",
+            "condition": "base_repair",
+            "attempt": 1,
+            "success": False,
+            "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-one"},
+        },
+        {
+            "run_id": "r",
+            "case_id": "c1",
+            "condition": "cot_repair",
+            "attempt": 1,
+            "success": False,
+            "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-two"},
+        },
+    ]
+    results.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="inconsistent run_settings_fingerprint"):
+        _load_existing_run_state(results_path=results, run_id="r", max_attempts_per_unit=1)

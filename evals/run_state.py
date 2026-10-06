@@ -62,21 +62,27 @@ def _load_existing_run_state(
 ]:
     """Scan an existing results JSONL to determine completed units.
 
+    ORC-04: a results file written across an ``--allow-settings-drift`` resume holds more
+    than one ``run_settings_fingerprint``. Each new generation declares the one it replaces
+    in ``settings_drift_from_fingerprint``, so such a chain is accepted and the *latest*
+    generation's fingerprint and metadata are returned; an unlinked change is still an error.
+
     Returns:
-        Tuple of (completed_unit_keys, first_run_metadata,
+        Tuple of (completed_unit_keys, latest_run_metadata,
         settings_fingerprint, records_count, trailing_tail_issue).
     """
     if not results_path.exists():
         return set(), None, None, 0, None
 
     per_unit_stats: dict[tuple[str, str], dict[str, Any]] = {}
-    first_run_metadata: dict[str, Any] | None = None
+    latest_run_metadata: dict[str, Any] | None = None
     settings_fingerprint: str | None = None
+    seen_fingerprints: set[str] = set()
     records_count = 0
     trailing_tail_issue: _TrailingResultsTailIssue | None = None
 
     def _consume_record(*, record: dict[str, Any], line_no: int) -> None:
-        nonlocal first_run_metadata, settings_fingerprint, records_count
+        nonlocal latest_run_metadata, settings_fingerprint, records_count
 
         record_run_id = record.get("run_id")
         if not isinstance(record_run_id, str) or not record_run_id:
@@ -116,13 +122,24 @@ def _load_existing_run_state(
         if isinstance(current_fingerprint, str):
             if settings_fingerprint is None:
                 settings_fingerprint = current_fingerprint
+                seen_fingerprints.add(current_fingerprint)
+                latest_run_metadata = dict(run_metadata)
             elif settings_fingerprint != current_fingerprint:
-                raise ValueError(
-                    f"{results_path}:{line_no}: inconsistent run_settings_fingerprint values"
+                drift_from = run_metadata.get("settings_drift_from_fingerprint")
+                linked = (
+                    isinstance(drift_from, str)
+                    and drift_from in seen_fingerprints
+                    and current_fingerprint not in seen_fingerprints
                 )
-
-        if first_run_metadata is None:
-            first_run_metadata = dict(run_metadata)
+                if not linked:
+                    raise ValueError(
+                        f"{results_path}:{line_no}: inconsistent run_settings_fingerprint values"
+                    )
+                settings_fingerprint = current_fingerprint
+                seen_fingerprints.add(current_fingerprint)
+                latest_run_metadata = dict(run_metadata)
+        elif latest_run_metadata is None:
+            latest_run_metadata = dict(run_metadata)
 
         unit_key = (case_id, condition)
         if record_type == EVAL_RECORD_TYPE_INFRA_EVENT:
@@ -205,7 +222,7 @@ def _load_existing_run_state(
     }
     return (
         completed_units,
-        first_run_metadata,
+        latest_run_metadata,
         settings_fingerprint,
         records_count,
         trailing_tail_issue,
