@@ -7133,6 +7133,65 @@ def test_att03_unrestricted_action_keeps_monolithic_file_context(tmp_path, monke
     assert "Project files:" in patcher.patch_prompts[0]
 
 
+def test_att06_delta_retry_does_not_claim_a_snapshot_it_never_delivered(
+    tmp_path, monkeypatch
+) -> None:
+    """ATT-06: the snapshot fields describe the delivered prompt, not the Stage-A grant.
+
+    Delta retry prompts omit the snapshot section entirely, so a granted snapshot on
+    attempt 2 must not be recorded as included.
+    """
+    patcher = _AdaptiveActionCapturePatcher(request_payload=dict(_ASK_FOR_EVERYTHING))
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_INVOKE_HELPER,
+        run_id="run-att06-delta",
+        k=2,
+        adaptive_helper_max_calls_per_case=4,
+        extra_run_kwargs={"adaptive_reveal_mode": "full", "retry_prompt_mode": "delta"},
+    )
+
+    first, second = records[0], records[1]
+    assert first["patch_meta"]["retry_delta_prompt"] is False
+    assert first["attempt_metadata"]["stage_b_snapshot_in_prompt"] is True
+    assert first["attempt_metadata"]["adaptive_snapshot_included"] is True
+    assert "Snapshot" in patcher.patch_prompts[0]
+
+    assert second["patch_meta"]["retry_delta_prompt"] is True
+    assert second["attempt_metadata"]["adaptive_snapshot_requested"] is True
+    assert second["attempt_metadata"]["stage_b_snapshot_in_prompt"] is False
+    assert second["attempt_metadata"]["adaptive_snapshot_included"] is False
+    assert second["attempt_metadata"]["evidence_chars_by_type"]["snapshot"] == 0
+
+
+def test_att06_compaction_replacing_the_snapshot_clears_the_inclusion_fields(
+    tmp_path, monkeypatch
+) -> None:
+    """ATT-06: successful compaction replaces the snapshot section, so it is not included."""
+    patcher = _AdaptiveActionCapturePatcher(
+        compacted_text="crash in buggy.py line 4; helper.value() returns 1 but test expects 2",
+        compact_meta={"llm_call_count": 1},
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_COMPACT_THEN_PATCH,
+        run_id="run-att06-compaction",
+        extra_run_kwargs={"adaptive_reveal_mode": "full"},
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+    assert attempt_meta["context_compaction_invoked"] is True
+    assert records[0]["patch_meta"]["context_compaction_success"] is True
+    assert "snapshot" in records[0]["patch_meta"]["context_compaction_replaced_sections"]
+    assert attempt_meta["stage_b_snapshot_in_prompt"] is False
+    assert attempt_meta["adaptive_snapshot_included"] is False
+    assert attempt_meta["evidence_chars_by_type"]["snapshot"] == 0
+
+
 def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
     tmp_path, monkeypatch
 ) -> None:

@@ -4635,6 +4635,21 @@ def _run_one_condition_attempts(
         include_project_files_in_prompt = stage_b_prompt_inputs.include_project_files
         compacted_context_for_prompt = stage_b_prompt_inputs.compacted_context
 
+        # ATT-06: both snapshot-inclusion fields describe the prompt that was delivered, so
+        # derive them from the assembled sections. Delta retries never carry a snapshot
+        # section, compaction can replace it, and the prompt budget can drop it -- all of
+        # which happen after the pre-assembly reveal decision.
+        stage_b_snapshot_in_prompt = bool(
+            include_snapshot_in_prompt
+            and stage_b_snapshot_for_prompt is not None
+            and prompt_budget_result.section_status.get("snapshot", "") not in {"", "dropped"}
+        )
+        if not stage_b_snapshot_in_prompt:
+            stage_b_snapshot_for_prompt = None
+            stage_b_snapshot_prompt_text = ""
+        if is_adaptive_condition:
+            adaptive_snapshot_included = stage_b_snapshot_in_prompt
+
         context_compaction_requested = native_prompt_result.context_compaction.requested
         context_compaction_request_reason = native_prompt_result.context_compaction.request_reason
         context_compaction_invoked = native_prompt_result.context_compaction.invoked
