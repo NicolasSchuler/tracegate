@@ -25,6 +25,13 @@ Hybrid adaptive+baseline attempts additionally record:
 `baseline_case_context.json` is versioned with `schema_version` and currently
 uses `v1`.
 
+Each record's `patch_meta.baseline_repo_state` carries the observed upstream checkout
+(BAS-05, BAS-14): `observed_commit`, `dirty` and `tree_patch_sha256`. The tree hash covers
+the tracked diff against `HEAD` plus a path/content digest of the untracked files, so editing
+an untracked module the upstream patches added (TraceCoder's `src/exact_test_context.py`, for
+example) changes it. Untracked files larger than 4 MiB contribute their size instead of a
+content hash.
+
 ## Case-information contract (`case_info_policy = neutral_v1`)
 
 Defined in `baselines/case_information.py` (review findings ATT-02 and BAS-07,

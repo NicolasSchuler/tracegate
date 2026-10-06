@@ -876,3 +876,29 @@ def test_bas03_record_reports_the_baseline_specific_generation_override(
     )
     assert payloads[0]["max_tokens"] == 8192
     assert payloads[0]["temperature"] == pytest.approx(0.9)
+
+
+def test_bas14_tree_hash_covers_untracked_file_contents(tmp_path: Path) -> None:
+    """codex 1e#10: editing an untracked upstream module changes the patched-tree hash."""
+    import subprocess
+
+    from baselines.adapter_base import observed_repo_state
+
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.email=t@e", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "main.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "main.py"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    added = repo / "exact_test_context.py"
+    added.write_text("def context():\n    return 'a'\n", encoding="utf-8")
+
+    first = observed_repo_state(repo)
+    # Same filename, different executable behaviour.
+    added.write_text("def context():\n    return 'b'\n", encoding="utf-8")
+    second = observed_repo_state(repo)
+
+    assert first["dirty"] is True
+    assert first["tree_patch_sha256"] != second["tree_patch_sha256"]
+    assert observed_repo_state(repo)["tree_patch_sha256"] == second["tree_patch_sha256"]

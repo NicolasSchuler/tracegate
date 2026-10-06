@@ -172,22 +172,54 @@ def _git_output(repo: Path, *args: str) -> bytes | None:
     return result.stdout
 
 
+#: Above this size an untracked file contributes its length instead of its content hash.
+_UNTRACKED_CONTENT_HASH_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _untracked_tree_digest(repo: Path, untracked: bytes) -> bytes:
+    """Deterministic path + content digest for the untracked files in *repo* (BAS-14).
+
+    The upstream patches add untracked modules (TraceCoder's ``src/exact_test_context.py``,
+    for example). Editing one changes executable behaviour without changing either
+    ``git diff HEAD`` or the file list, so the content has to be part of the identity.
+    """
+    lines: list[bytes] = []
+    for raw in sorted(untracked.decode("utf-8", "replace").splitlines()):
+        name = raw.strip()
+        if not name:
+            continue
+        path = repo / name
+        try:
+            if not path.is_file():
+                marker = "absent"
+            elif path.stat().st_size > _UNTRACKED_CONTENT_HASH_MAX_BYTES:
+                marker = f"size:{path.stat().st_size}"
+            else:
+                marker = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            marker = "unreadable"
+        lines.append(f"{name}\0{marker}".encode())
+    return b"\n".join(lines)
+
+
 def observed_repo_state(repo: Path) -> dict[str, Any]:
     """Record what is actually checked out (BAS-05, BAS-14).
 
-    ``tree_patch_sha256`` hashes the tracked diff against ``HEAD`` plus the untracked
-    file list, i.e. the applied upstream patches and normalizations, so two runs can be
-    compared even though the pinned commit alone doesn't identify the patched tree.
+    ``tree_patch_sha256`` hashes the tracked diff against ``HEAD`` plus a path/content
+    digest of the untracked files, i.e. the applied upstream patches and normalizations,
+    so two runs can be compared even though the pinned commit alone doesn't identify the
+    patched tree.
     """
     commit = (_git_output(repo, "rev-parse", "HEAD") or b"").decode("utf-8", "replace").strip()
     if not commit:
         return {"observed_commit": "", "dirty": None, "tree_patch_sha256": None}
     diff = _git_output(repo, "diff", "--binary", "HEAD") or b""
     untracked = _git_output(repo, "ls-files", "--others", "--exclude-standard") or b""
+    untracked_digest = _untracked_tree_digest(repo, untracked)
     return {
         "observed_commit": commit,
         "dirty": bool(diff.strip() or untracked.strip()),
-        "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked).hexdigest(),
+        "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked_digest).hexdigest(),
     }
 
 
