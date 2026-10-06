@@ -273,6 +273,12 @@ llmdebug supports multiple output formats to optimize for different use cases:
 token usage. The `get_latest_snapshot()` function auto-expands keys and normalizes
 DebugSession envelopes by default, so your code works identically regardless of format.
 
+Each snapshot is written as `<UTC timestamp>_<name>_<nonce>.<ext>`, next to a
+`.traceback.txt` sidecar. The `<name>` part keeps only `A-Z a-z 0-9 . _ -` (every other
+character becomes `_`) and is cut to 120 characters plus a hash of the full name, so long
+parametrized pytest node IDs stay within filesystem limits. The snapshot payload keeps the
+original name.
+
 ## Snapshot Enrichment
 
 Snapshots are automatically enriched with contextual data:

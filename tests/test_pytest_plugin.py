@@ -1474,3 +1474,21 @@ def test_hook_capture_exception_failure_debug_false(monkeypatch, capsys):
 
     stderr = capsys.readouterr().err
     assert "capture failed" not in stderr
+
+
+def test_long_parametrized_node_id_still_writes_a_snapshot(tmp_path):
+    """CAP-04: a node ID beyond the 255-byte filename limit must not lose the snapshot."""
+    snapshot = _run_pytest_and_get_snapshot(
+        tmp_path,
+        """
+import pytest
+
+@pytest.mark.parametrize("label", ["x" * 300])
+def test_long(label):
+    assert False, "fails"
+""",
+    )
+    assert "x" * 300 in snapshot["name"]
+    files = [p.name for p in (tmp_path / ".llmdebug").iterdir()]
+    assert files
+    assert max(len(name.encode("utf-8")) for name in files) <= 255

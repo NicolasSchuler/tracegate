@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import sys
 import uuid
 from collections.abc import Iterator
@@ -17,6 +18,7 @@ from filelock import FileLock, Timeout
 from . import _json as json
 from ._debug_session import normalize_snapshot_view
 from ._formatting import frame_file_label
+from ._hashing import xxh64_hexdigest_text
 from ._warnings import emit_warning
 from .config import SnapshotConfig
 from .state_db import list_snapshot_records, remove_snapshot_records, upsert_snapshot_record
@@ -37,6 +39,25 @@ def _directory_lock(out_dir: Path, timeout: float) -> Iterator[bool]:
     finally:
         if lock.is_locked:
             lock.release()
+
+
+# Keeps "<timestamp>_<name>_<nonce>.traceback.txt" far below the 255-byte filename limit.
+_SNAPSHOT_NAME_MAX_CHARS = 120
+_UNSAFE_NAME_CHAR = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _snapshot_file_name(name: str) -> str:
+    """Filesystem-safe form of a snapshot name: ``[A-Za-z0-9._-]``, at most 120 characters.
+
+    A longer name (e.g. a parametrized pytest node ID) is cut and suffixed with a hash of
+    the full name, so distinct long names stay distinguishable. The payload keeps the
+    original name.
+    """
+    safe = _UNSAFE_NAME_CHAR.sub("_", name) or "snapshot"
+    if len(safe) <= _SNAPSHOT_NAME_MAX_CHARS:
+        return safe
+    digest = xxh64_hexdigest_text(name)
+    return f"{safe[: _SNAPSHOT_NAME_MAX_CHARS - len(digest) - 1]}_{digest}"
 
 
 def _timestamp() -> str:
@@ -225,7 +246,7 @@ def write_bundle(payload: dict[str, Any], cfg: SnapshotConfig) -> Path:
             name_value = session_name if isinstance(session_name, str) else "snapshot"
         else:
             name_value = "snapshot"
-    name = name_value.replace(" ", "_").replace("/", "_")
+    name = _snapshot_file_name(name_value)
     # Add a short nonce to avoid same-second name collisions.
     base = f"{_timestamp()}_{name}_{uuid.uuid4().hex[:8]}"
 

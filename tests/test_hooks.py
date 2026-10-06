@@ -335,6 +335,40 @@ class TestInstallHooks:
         assert snapshot["name"] == "unraisable"
         assert snapshot["hook"] == "sys.unraisablehook"
 
+    @staticmethod
+    def _call_unraisable_hook(tmp_path: Path, exc: BaseException, obj: object) -> list[Any]:
+        forwarded: list[Any] = []
+        original = sys.unraisablehook
+        sys.unraisablehook = forwarded.append
+        try:
+            install_hooks(out_dir=str(tmp_path), pii_safe=False, hooks=("unraisable",))
+            try:
+                raise exc
+            except BaseException as raised:
+                tb = raised.__traceback__
+            unraisable = SimpleNamespace(
+                exc_type=type(exc), exc_value=exc, exc_traceback=tb, err_msg=None, object=obj
+            )
+            sys.unraisablehook(cast(Any, unraisable))
+        finally:
+            uninstall_hooks()
+            sys.unraisablehook = original
+        return forwarded
+
+    @pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(3)])
+    def test_unraisable_hook_skips_interrupts(self, tmp_path: Path, exc: BaseException):
+        """CAP-18: KeyboardInterrupt and SystemExit are never captured, as documented."""
+        forwarded = self._call_unraisable_hook(tmp_path, exc, None)
+
+        assert len(forwarded) == 1  # the original hook still runs
+        assert not list(tmp_path.glob("*.json"))
+
+    def test_unraisable_hook_records_falsy_objects(self, tmp_path: Path):
+        """CAP-18: an empty container is still the object, not "no object"."""
+        self._call_unraisable_hook(tmp_path, ValueError("in __del__"), [])
+
+        assert read_latest_snapshot(tmp_path)["object"] == "[]"
+
     def test_asyncio_handler_captures_snapshot(self, tmp_path: Path):
         import asyncio
 

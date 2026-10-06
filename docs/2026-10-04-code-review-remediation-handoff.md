@@ -372,8 +372,8 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 This phase is independent of Phases 1–3 and can run in parallel. Run `just bench-capture` before and after the capture-path changes, and include the numbers in the commit message.
 
 ### 4.1. Capture never silently fails
-- [ ] **CAP-01:** clamp ints outside the 64-bit range. **CAP-02:** `_safe_str`. **CAP-04, CAP-22:** bounded, sanitized filenames. **CAP-18:** unraisable-hook filter. **CAP-19:** `split_extra_context`.
-- [ ] Add a hostile-object fixture suite run end-to-end through `capture_exception`: broken `__str__`, `__repr__`, `__len__` and `__getattr__`; `2**70`; 300-character names; recursive containers; lazy objects.
+- [x] **CAP-01:** clamp ints outside the 64-bit range. **CAP-02:** `_safe_str`. **CAP-04, CAP-22:** bounded, sanitized filenames. **CAP-18:** unraisable-hook filter. **CAP-19:** `split_extra_context`. *(CAP-01 also covers pandas `head` cells, which bypassed `to_jsonlike`. A caller-supplied `extra` holding a wide int still raises, loudly; every internal producer goes through `to_jsonlike` or `safe_repr`.)*
+- [x] Add a hostile-object fixture suite run end-to-end through `capture_exception`: broken `__str__`, `__repr__`, `__len__` and `__getattr__`; `2**70`; 300-character names; recursive containers; lazy objects. *(`tests/test_capture_hostile.py`. It found one more abort: a `__getattribute__` raising a non-`AttributeError` escapes `hasattr`/`isinstance`, so `to_jsonlike` is now a per-value guard. Lazy-object `len()` calls are left for CAP-21 in 4.6.)*
 
 ### 4.2. Redaction
 - [ ] **CAP-20:** emit plain `str` keys. This is a prerequisite for key-aware matching, and since it changes the payload format, document it in `docs/configuration.md` and the changelog.

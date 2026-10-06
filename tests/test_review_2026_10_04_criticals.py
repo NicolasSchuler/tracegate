@@ -343,7 +343,6 @@ def test_dat03_cli_rejects_llmdebug_without_snapshot_dir(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="CAP-01")
 def test_cap01_big_int_local_does_not_abort_capture() -> None:
     from llmdebug import SnapshotConfig
     from llmdebug.capture import capture_exception

@@ -1,5 +1,7 @@
 """Tests for output and file management."""
 
+import re
+
 from llmdebug import _json as json
 from llmdebug.config import SnapshotConfig
 from llmdebug.output import get_latest_snapshot, write_bundle
@@ -482,3 +484,37 @@ def test_write_snapshot_debug_session_envelope_traceback(tmp_path, monkeypatch):
     tb_files = list(tmp_path.glob("*.traceback.txt"))
     assert len(tb_files) == 1
     assert "most recent call last" in tb_files[0].read_text()
+
+
+def test_snapshot_file_names_are_sanitized(tmp_path):
+    """CAP-22: only [A-Za-z0-9._-] reaches the file name; the payload keeps the name."""
+    cfg = SnapshotConfig(out_dir=str(tmp_path))
+    name = "dir/sub\\file\x00\x1b name::ü"
+    json_path = write_bundle({"name": name, "traceback": "tb", "frames": []}, cfg)
+
+    stem = json_path.name.removesuffix(".json")
+    assert re.fullmatch(r"[A-Za-z0-9._-]+", stem)
+    assert "_dir_sub_file___name___" in stem
+    assert json_path.parent == tmp_path
+    assert get_latest_snapshot(str(tmp_path))["name"] == name
+
+
+def test_long_snapshot_names_are_bounded_and_stay_distinct(tmp_path):
+    """CAP-04: long names are cut to 120 characters plus a hash of the full name."""
+    cfg = SnapshotConfig(out_dir=str(tmp_path))
+    first = write_bundle({"name": "n" * 300 + "a", "traceback": "tb", "frames": []}, cfg)
+    second = write_bundle({"name": "n" * 300 + "b", "traceback": "tb", "frames": []}, cfg)
+
+    for path in (first, second):
+        assert path.exists()
+        assert len(path.name) < 200
+        assert path.with_name(path.name.removesuffix(".json") + ".traceback.txt").exists()
+    # Same timestamp prefix and truncated text; the hash keeps them apart beyond the nonce.
+    assert first.name.split("_")[2] != second.name.split("_")[2]
+
+
+def test_short_names_keep_their_file_name(tmp_path):
+    cfg = SnapshotConfig(out_dir=str(tmp_path))
+    json_path = write_bundle({"name": "test_mod.py_test_case", "frames": []}, cfg)
+
+    assert "_test_mod.py_test_case_" in json_path.name

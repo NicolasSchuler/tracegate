@@ -38,6 +38,14 @@ def _warn(warnings: list[str], message: str) -> None:
     warnings.append(message)
 
 
+def _safe_str(value: object) -> str:
+    """``str(value)`` that never raises, like the stdlib ``traceback`` module."""
+    try:
+        return str(value)
+    except Exception as e:
+        return f"<str() failed: {type(e).__name__}>"
+
+
 try:  # Python 3.11+
     BaseExceptionGroup  # type: ignore[name-defined]  # noqa: B018
 except NameError:  # pragma: no cover - Python 3.10 fallback
@@ -91,17 +99,17 @@ def _summarize_exception(
     summary: dict[str, Any] = {
         "type": exc_type.__name__,
         "qualified_type": f"{exc_type.__module__}.{exc_type.__name__}",
-        "message": _clean(str(exc)),
+        "message": _clean(_safe_str(exc)),
     }
     try:
         if exc.args:
-            summary["args"] = [_clean(str(a)) for a in list(exc.args)[: cfg.max_items]]
+            summary["args"] = [_clean(_safe_str(a)) for a in list(exc.args)[: cfg.max_items]]
     except Exception as e:
         summary["args"] = [f"<serialization failed: {type(e).__name__}>"]
     try:
         notes = getattr(exc, "__notes__", None)
         if notes:
-            summary["notes"] = [_clean(str(n)) for n in list(notes)[: cfg.max_items]]
+            summary["notes"] = [_clean(_safe_str(n)) for n in list(notes)[: cfg.max_items]]
     except Exception as e:
         summary["notes"] = [f"<serialization failed: {type(e).__name__}>"]
 
@@ -523,8 +531,8 @@ def capture_exception(
         cfg: Snapshot configuration controlling redaction, frame depth,
             locals serialization, and output format.
         extra: Optional dict of additional context merged into the snapshot
-            envelope.  Keys ``"_trace"`` and ``"_eval"`` are reserved and
-            split into their own top-level payloads.
+            envelope.  Keys ``"trace"`` and ``"eval"`` (alias ``"eval_outcome"``)
+            are reserved and split into their own top-level payloads.
     """
     cfg = resolve_snapshot_config(cfg)
     warnings: list[str] = []
