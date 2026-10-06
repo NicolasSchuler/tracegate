@@ -1746,3 +1746,32 @@ def test_run_eval_resume_rejects_an_unlinked_settings_change(tmp_path, monkeypat
     results.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     with pytest.raises(ValueError, match="inconsistent run_settings_fingerprint"):
         _load_existing_run_state(results_path=results, run_id="r", max_attempts_per_unit=1)
+
+
+def test_run_eval_resume_rejects_an_older_record_schema(tmp_path) -> None:
+    """Resuming a pre-remediation results file would mix record generations in one run."""
+    from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION
+    from evals.run_state import _load_existing_run_state
+
+    results = tmp_path / "legacy.jsonl"
+    row = {
+        "schema_version": EVAL_RECORD_SCHEMA_VERSION - 1,
+        "run_id": "r",
+        "case_id": "c1",
+        "condition": "base_repair",
+        "attempt": 1,
+        "success": False,
+        "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-old"},
+    }
+    results.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="predates this harness"):
+        _load_existing_run_state(results_path=results, run_id="r", max_attempts_per_unit=1)
+
+    row["schema_version"] = EVAL_RECORD_SCHEMA_VERSION
+    results.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    completed, _metadata, fingerprint, count, _issue = _load_existing_run_state(
+        results_path=results, run_id="r", max_attempts_per_unit=1
+    )
+    assert completed == {("c1", "base_repair")}
+    assert fingerprint == "fp-old"
+    assert count == 1

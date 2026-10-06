@@ -11,6 +11,7 @@ from evals import _json as json
 from evals.eval_evidence import _xxh3_128_jsonlike
 from evals.eval_recording import _build_patcher_config, _resolve_llmdebug_snapshot_schema_version
 from evals.eval_types import (
+    EVAL_RECORD_SCHEMA_VERSION,
     EVAL_RECORD_TYPE_INFRA_EVENT,
     CaseSpec,
     Condition,
@@ -98,6 +99,18 @@ def _load_existing_run_state(
         condition = record.get("condition")
         if not isinstance(condition, str) or not condition:
             raise ValueError(f"{results_path}:{line_no}: condition must be a non-empty string")
+        record_schema_version = record.get("schema_version")
+        if (
+            record_schema_version is not None
+            and record_schema_version != EVAL_RECORD_SCHEMA_VERSION
+        ):
+            # Appending to a pre-remediation results file would mix record generations in
+            # one run, which analysis reads as a single run. Start a new --run-id instead.
+            raise ValueError(
+                f"{results_path}:{line_no}: schema_version={record_schema_version!r} predates "
+                f"this harness (schema_version={EVAL_RECORD_SCHEMA_VERSION}); resuming would "
+                "mix record generations. Use a new --run-id."
+            )
         record_type = _record_type(record)
         attempt = record.get("attempt")
         if not isinstance(attempt, int) or attempt < 0:
