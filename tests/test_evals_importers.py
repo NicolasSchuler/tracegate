@@ -1475,6 +1475,23 @@ class TestWriteCaseFilesEdgeCases:
         ("import numpy as np\nprint(np.random.rand(3))\n", ["unseeded_random"]),
         ("import numpy as np\nrng = np.random.default_rng(0)\nprint(rng.random())\n", []),
         ("import numpy as np\nrng = np.random.default_rng()\n", ["unseeded_random"]),
+        # 1h#1: entropy seeds, seeds that never execute, and cross-RNG seeds exempt nothing.
+        ("import random\nrandom.seed(None)\nprint(random.random())\n", ["unseeded_random"]),
+        (
+            "import random\n\n\ndef unused():\n    random.seed(0)\n\n\nprint(random.random())\n",
+            ["unseeded_random"],
+        ),
+        (
+            "import random\nimport numpy as np\nrandom.seed(0)\nprint(np.random.rand(3))\n",
+            ["unseeded_random"],
+        ),
+        ("import numpy as np\nrng = np.random.default_rng(seed=None)\n", ["unseeded_random"]),
+        ("import random\nprint(random.random())\nrandom.seed(0)\n", ["unseeded_random"]),
+        ("import random\n\n\ndef test_x():\n    random.seed(0)\n    return random.random()\n", []),
+        # 1h#2: a set reached through a local binding is still set iteration.
+        ("items = {'a', 'b', 'c'}\nfor x in items:\n    print(x)\n", ["set_iteration"]),
+        ("items = set('abc')\nprint([x for x in items])\n", ["set_iteration"]),
+        ("items = {'a', 'b', 'c'}\nprint(sorted(items))\n", []),
     ],
     ids=[
         "time-time",
@@ -1491,6 +1508,15 @@ class TestWriteCaseFilesEdgeCases:
         "numpy-random",
         "numpy-seeded-generator",
         "numpy-unseeded-generator",
+        "seed-none",
+        "seed-never-executes",
+        "python-seed-does-not-cover-numpy",
+        "generator-seed-none",
+        "seed-after-use",
+        "seeded-inside-the-test",
+        "bound-set-loop",
+        "bound-set-comprehension",
+        "sorted-bound-set",
     ],
 )
 def test_dat14_nondeterminism_reasons(code: str, reasons: list[str]) -> None:

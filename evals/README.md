@@ -179,8 +179,10 @@ current 1,828-case corpus limit what results can show. Changing them is a resear
   therefore restate per-category results and are not independent evidence that snapshots
   help where they "should".
 - *Run-to-run variance.* `python -m evals.importers.determinism` flags cases whose code uses
-  clocks, unseeded randomness, entropy sources, network modules or set iteration (DAT-14);
-  it flags 14 committed cases, which are kept until D12 decides.
+  clocks, unseeded randomness, entropy sources, network modules or set iteration (DAT-14).
+  A seed only exempts randomness when it is a non-`None` constant, for the same RNG, and
+  textually earlier in the same function or at module level; iterating a name bound to a set
+  counts as set iteration. It flags 25 committed cases, which are kept until D12 decides.
 
 ## SWE-Bench Pro (Contamination-free, multi-language, Docker-scored)
 
