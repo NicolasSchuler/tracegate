@@ -11,6 +11,7 @@ from .state_db import (
     count_rca_records,
     fetch_latest_rca_record,
     fetch_rca_history_records,
+    stored_rca_attempt_ids,
 )
 
 
@@ -48,3 +49,8 @@ def history(
 ) -> list[dict[str, Any]]:
     """Fetch RCA history, newest first."""
     return fetch_rca_history_records(out_dir, session_id=session_id, limit=limit)
+
+
+def stored_attempt_ids(*, out_dir: str, attempt_ids: list[str]) -> set[str]:
+    """Which of *attempt_ids* are already stored in SQLite."""
+    return stored_rca_attempt_ids(out_dir, attempt_ids)

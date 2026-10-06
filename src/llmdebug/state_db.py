@@ -17,6 +17,7 @@ STATE_DB_FILENAME = "llmdebug_state.sqlite3"
 _BUSY_TIMEOUT_MS = 30_000
 _WAL_RETRY_ATTEMPTS = 8
 _WAL_BASE_SLEEP_SEC = 0.01
+_ID_QUERY_CHUNK = 500
 _WAL_WARNED_PATHS: set[str] = set()
 _WAL_VERIFIED_PATHS: set[str] = set()
 
@@ -256,6 +257,33 @@ def count_rca_records(out_dir: str | Path) -> int:
     """Return the number of persisted RCA attempt records for ``out_dir``."""
     (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM rca_attempts", ()),))
     return int(rows[0][0]) if rows else 0
+
+
+def stored_rca_attempt_ids(out_dir: str | Path, attempt_ids: list[str]) -> set[str]:
+    """Which of *attempt_ids* already have a stored row.
+
+    The migration lets stored rows win over pending JSONL copies, so merged reads need
+    to know about every conflicting id, not just the ones on the page they fetched.
+    """
+    wanted = [value for value in dict.fromkeys(attempt_ids) if value]
+    if not wanted:
+        return set()
+    found: set[str] = set()
+    # Chunked to stay under SQLite's bound-parameter limit.
+    for start in range(0, len(wanted), _ID_QUERY_CHUNK):
+        chunk = wanted[start : start + _ID_QUERY_CHUNK]
+        placeholders = ",".join("?" * len(chunk))
+        (rows,) = _read_rows(
+            out_dir,
+            (
+                (
+                    f"SELECT attempt_id FROM rca_attempts WHERE attempt_id IN ({placeholders})",
+                    tuple(chunk),
+                ),
+            ),
+        )
+        found.update(str(row[0]) for row in rows)
+    return found
 
 
 def _require_text_field(record: Mapping[str, Any], key: str) -> str:
