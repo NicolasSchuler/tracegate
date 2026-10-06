@@ -6265,7 +6265,9 @@ def _run_one_condition_attempts(
                 _remove_entries_created_since(replay_attempt_dir, keep=replay_keep)
                 replay_attempt_dir.mkdir(parents=True, exist_ok=True)
                 if is_baseline_patcher:
-                    remove_adaptive_controller_sidecars(context_dir=replay_attempt_dir)
+                    # ATT-12: the adaptive controller sidecars predate the failed call, so
+                    # the cleanup above keeps them; removing them here would hand the
+                    # replayed baseline a different intervention than the first call.
                     _write_baseline_case_context(replay_attempt_dir, case)
                 _write_run_outputs(
                     replay_attempt_dir,

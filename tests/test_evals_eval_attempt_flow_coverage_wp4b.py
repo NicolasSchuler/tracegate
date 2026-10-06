@@ -440,6 +440,66 @@ class TestTransportRecoveryPaths:
         assert attempt_rows[0]["attempt"] == 1
         assert infra_rows[0]["patch_meta"]["infra_resume_eligible"] is True
 
+    def test_transport_replay_keeps_the_adaptive_controller_sidecars(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """codex 1f#9 / ATT-12: both propose calls must see the same controller guidance."""
+        from evals.adaptive_controller_packet import ADAPTIVE_CONTROLLER_SIDECAR_FILENAMES
+        from evals.patchers.base import PatchResult
+
+        seen_context: list[set[str]] = []
+
+        def _propose(*, prompt: str, context_dir: Path, cwd: Path, **_kw: Any) -> PatchResult:
+            del prompt, cwd
+            seen_context.append({path.name for path in Path(context_dir).iterdir()})
+            if len(seen_context) == 1:
+                return PatchResult(
+                    diff=None,
+                    meta={
+                        "error": "repair_failed",
+                        "exc": "InternalServerError: Error code: 503 - Loading model",
+                    },
+                )
+            return PatchResult(
+                diff="--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-pass\n+1\n",
+                meta={"status": "ok"},
+            )
+
+        patcher = SimpleNamespace(
+            name="baseline",
+            propose_patch=_propose,
+            probe_server_ready=lambda: (True, {"status": 200}),
+        )
+        gate = SimpleNamespace(
+            wait_if_open=lambda: None,
+            recover=lambda **_kw: {
+                "attempted": True,
+                "recovered": True,
+                "timed_out": False,
+                "wait_sec": 0.0,
+                "probe_attempts": [{"status": 200}],
+            },
+        )
+
+        _run_impl(
+            tmp_path,
+            "sidecar_replay",
+            run_eval.Condition.LAYERED_ADAPTIVE_GATED,
+            monkeypatch,
+            patcher=patcher,
+            inputs_overrides={
+                "openai_transport_recovery": True,
+                "transport_recovery_gate": gate,
+            },
+        )
+
+        assert len(seen_context) == 2
+        sidecars = set(ADAPTIVE_CONTROLLER_SIDECAR_FILENAMES)
+        assert sidecars <= seen_context[0]
+        assert seen_context[0] == seen_context[1]
+
     def test_baseline_repair_failed_timeout_leaves_only_infra_rows(
         self,
         tmp_path: Path,
