@@ -90,14 +90,43 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "The transitional grouped builder still mirrors AttemptMetadataRequest fields.",
         {"build_attempt_metadata_request": 26},
     ),
+    "evals/adaptive_progress.py": _FileArityDebt(
+        "Adaptive progress helpers (from run_eval, X-02) still take flattened attempt state.",
+        {
+            "_adaptive_progress_signal": 8,
+            "_apply_no_progress_token_cap_candidate": 7,
+            "_recompute_adaptive_progress_for_attempt_outcome": 11,
+        },
+    ),
+    "evals/attempt_proposal.py": _FileArityDebt(
+        "Proposal helpers (from run_eval, X-02) still take separate budget and context inputs.",
+        {
+            "_ensure_deterministic_seed_ack": 7,
+            "_plan_patch_with_snapshot_context": 7,
+            "_propose_patch_with_snapshot_context": 8,
+        },
+    ),
+    "evals/attempt_records.py": _FileArityDebt(
+        "Record builders (from run_eval, X-02) still mirror the flat JSONL record schema.",
+        {"_build_attempt_outcome_record": 16, "_build_infra_event_record": 13},
+    ),
+    "evals/attempt_usage.py": _FileArityDebt(
+        "Usage sync (from run_eval, X-02) still writes flattened patch metadata.",
+        {"_apply_usage_totals_to_patch_meta": 7},
+    ),
     "evals/attempt_verification.py": _FileArityDebt(
-        "Patch recovery still receives separate verifier and recovery controls.",
-        {"apply_diff_with_optional_recovery": 8},
+        "Patch recovery and metadata sync still receive separate verifier and recovery controls.",
+        {
+            "apply_diff_with_optional_recovery": 8,
+            "_sync_patch_sanitize_metadata": 7,
+            "_sync_patch_verifier_metadata": 8,
+            "_sync_patch_verifier_recovery_metadata": 14,
+            "_sync_syntax_preflight_metadata": 8,
+        },
     ),
     "evals/eval_attempt_flow.py": _FileArityDebt(
         "The attempt orchestrator still has local seams over flattened cycle state.",
         {
-            "_call_run_pytest_compat": 7,
             "_controller_runtime_evidence_inputs": 11,
             "_decide_adaptive_helper_recovery_topup": 16,
             "_resolve_stage_b_reveal_policy": 7,
@@ -195,6 +224,10 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Native Stage-B helpers still expose separate prompt and retry controls.",
         {"build_stage_b_prompt_with_budget": 7, "maybe_run_retry_plan_then_patch": 13},
     ),
+    "evals/patch_relevance.py": _FileArityDebt(
+        "The verifier scorer (from run_eval, X-02) still takes separate scope inputs.",
+        {"_score_patch_relevance": 8},
+    ),
     "evals/patchers/baseline_patcher.py": _FileArityDebt(
         "Baseline construction still exposes adapter-specific compatibility controls.",
         {"_hybrid_sidecars_active": 8, "build_baseline_patcher": 12},
@@ -222,6 +255,10 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Startup rendering still accepts independent run-state sections.",
         {"build_startup_sections": 12},
     ),
+    "evals/pytest_runner.py": _FileArityDebt(
+        "The pytest runner (from run_eval, X-02) mirrors run_pytest's public arguments.",
+        {"_run_pytest_local": 7, "_run_pytest_pooled": 7, "run_pytest": 8},
+    ),
     "evals/report_run_metrics.py": _FileArityDebt(
         "Metrics reporting still accepts independent run aggregates.",
         {"_print_report": 16},
@@ -230,32 +267,13 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         "Run-condition assembly still receives separate subsystem configs.",
         {"build_run_condition_inputs": 12},
     ),
-    "evals/run_eval.py": _FileArityDebt(
-        "Compatibility and orchestration seams still expose flattened attempt state.",
-        {
-            "_adaptive_progress_signal": 8,
-            "_apply_no_progress_token_cap_candidate": 7,
-            "_apply_usage_totals_to_patch_meta": 7,
-            "_build_attempt_outcome_record": 16,
-            "_build_infra_event_record": 13,
-            "_ensure_deterministic_seed_ack": 7,
-            "_plan_patch_with_snapshot_context": 7,
-            "_propose_patch_with_snapshot_context": 8,
-            "_recompute_adaptive_progress_for_attempt_outcome": 11,
-            "_run_pytest_local": 7,
-            "_run_pytest_pooled": 7,
-            "_score_patch_relevance": 8,
-            "_sync_patch_sanitize_metadata": 7,
-            "_sync_patch_verifier_metadata": 8,
-            "_sync_patch_verifier_recovery_metadata": 14,
-            "_sync_patcher_request_failure_metadata": 9,
-            "_sync_syntax_preflight_metadata": 8,
-            "run_pytest": 8,
-        },
-    ),
-    "evals/subprocess_monitor.py": _FileArityDebt(
+    "baselines/subprocess_monitor.py": _FileArityDebt(
         "Subprocess monitoring still exposes independent resource and callback controls.",
         {"run_monitored_subprocess": 10},
+    ),
+    "evals/transport_failures.py": _FileArityDebt(
+        "Request-failure sync (from run_eval, X-02) still writes flattened patch metadata.",
+        {"_sync_patcher_request_failure_metadata": 9},
     ),
     "evals/swebench/generate.py": _FileArityDebt(
         "SWE-Bench generation still exposes per-run backend and prompt controls.",

@@ -17,7 +17,7 @@ from baselines.pins import get_pinned_repo_commit
 from baselines.rlm.adapter import RLMAdapter
 from baselines.tracecoder.adapter import TraceCoderAdapter, _has_llmdebug_support
 from baselines.tracecoder.case_converter import convert_case
-from evals import run_eval
+from evals import baseline_runtime, run_eval
 from evals.patchers.baseline_patcher import build_baseline_patcher
 from tests._openai_stub_server import OpenAIStubServer
 
@@ -892,9 +892,9 @@ def test_run_eval_baseline_shorthand_reaches_openai_compat_stub_server(
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", isolated_root)
     monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
-    monkeypatch.setattr(run_eval, "_default_baseline_repo_dir", lambda _name: repo_dir)
+    monkeypatch.setattr(baseline_runtime, "_default_baseline_repo_dir", lambda _name: repo_dir)
     monkeypatch.setattr(
-        run_eval,
+        baseline_runtime,
         "_autodetect_baseline_python",
         lambda _name: str(python_executable),
     )

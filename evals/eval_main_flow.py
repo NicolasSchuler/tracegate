@@ -14,54 +14,78 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from evals import eval_main_support as legacy
+from evals.adaptive_budget_online_policy import (
+    AdaptiveBudgetPolicyController,
+    BudgetPolicyConfig,
+)
+from evals.adaptive_online_policy import (
+    AdaptiveOnlinePolicyController,
+    OnlinePolicyConfig,
+)
+from evals.attempt_usage import (
+    _completion_chars_from_response,
+    _format_progress_token_usage,
+    _nonnegative_int,
+    _record_token_usage_state,
+    _usage_token_counts_from_patch_meta,
+)
+from evals.baseline_runtime import (
+    _baseline_extra_from_args,
+    _baseline_patch_inventory,
+)
 from evals.decision_model.config import decision_model_settings_from_args
 from evals.decision_model.runtime import build_decision_model_binding
-from evals.eval_config import _parse_adaptive_online_action_score_biases
+from evals.eval_attempt_flow import execute_eval_unit_impl as _execute_eval_unit
+from evals.eval_config import (
+    _parse_adaptive_online_action_score_biases,
+    set_active_execution_config,
+)
+from evals.eval_containers import (
+    _EvalContainerPool,
+)
 from evals.eval_main_resume import prepare_main_resume
 from evals.eval_main_setup import MainFlowCliError, prepare_main_setup
-from evals.eval_main_support import (
-    AdaptiveBudgetPolicyController,
-    AdaptiveOnlinePolicyController,
-    BudgetPolicyConfig,
+from evals.eval_recording import (
+    _build_run_metadata,
+    _SynchronizedJsonlWriter,
+)
+from evals.eval_seams import EvalSeams, default_eval_seams
+from evals.eval_types import (
     CaseSpec,
     Condition,
     EvalUnitInputs,
-    OnlinePolicyConfig,
-    RunProgressSummary,
     UnitExecutionOutcome,
     _ActiveRunSettings,
-    _baseline_extra_from_args,
-    _baseline_patch_inventory,
-    _build_run_metadata,
-    _completion_chars_from_response,
-    _EvalContainerPool,
-    _execute_eval_unit,
-    _filter_attempt_records,
+    is_baseline_condition,
+)
+from evals.eval_types import RunConditionInputs as _RunConditionInputs
+from evals.native_stage_b_flow import openai_usable_prompt_tokens
+from evals.patcher_factory import (
+    _resolve_openai_context_window_for_run,
+)
+from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
+from evals.progress_display import (
+    DisplayRunSummary,
     _format_duration,
-    _format_progress_token_usage,
+    build_startup_sections,
+    create_run_display,
+)
+from evals.progress_output import (
+    RunProgressSummary,
+    _is_infra_interrupted_records,
+    build_progress_palette,
+    classify_failure_reason,
+)
+from evals.run_condition_builder import build_run_condition_inputs
+from evals.run_context import RunContext
+from evals.seed_derivation import derive_seed
+from evals.transport_failures import (
+    _filter_attempt_records,
     _is_transport_runtime_error,
-    _nonnegative_int,
     _OpenAITransportRecoveryGate,
     _record_is_transport_request_failure,
-    _record_token_usage_state,
-    _resolve_openai_context_window_for_run,
     _single_line_error,
-    _SynchronizedJsonlWriter,
-    _usage_token_counts_from_patch_meta,
-    build_progress_palette,
-    is_baseline_condition,
-    set_active_execution_config,
 )
-from evals.eval_main_support import (
-    RunConditionInputs as _RunConditionInputs,
-)
-from evals.native_stage_b_flow import openai_usable_prompt_tokens
-from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
-from evals.progress_display import DisplayRunSummary, build_startup_sections, create_run_display
-from evals.progress_output import _is_infra_interrupted_records, classify_failure_reason
-from evals.run_condition_builder import build_run_condition_inputs
-from evals.seed_derivation import derive_seed
 
 RunConditionInputs = _RunConditionInputs
 
@@ -101,19 +125,32 @@ def _per_condition_budget_configs(
     return out
 
 
+def _with_run_context(unit_inputs: EvalUnitInputs, run_context: RunContext) -> EvalUnitInputs:
+    return replace(
+        unit_inputs, run_condition=replace(unit_inputs.run_condition, run_context=run_context)
+    )
+
+
 def run_main_flow(
-    *, parser: argparse.ArgumentParser, args: argparse.Namespace, argv_tokens: list[str]
+    *,
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    argv_tokens: list[str],
+    seams: EvalSeams | None = None,
 ) -> int:
+    seams = seams if seams is not None else default_eval_seams()
     try:
         setup = prepare_main_setup(
             parser=parser,
             args=args,
             argv_tokens=argv_tokens,
+            seams=seams,
         )
         resume = prepare_main_resume(
             setup=setup,
             args=args,
             argv_tokens=argv_tokens,
+            seams=seams,
         )
     except MainFlowCliError as exc:
         print(str(exc))
@@ -194,7 +231,7 @@ def run_main_flow(
     run_token_usage_unavailable_records = 0
     jobs = int(args.jobs)
     try:
-        patcher = legacy.make_patcher(args)
+        patcher = seams.make_patcher(args)
     except BaseException:
         _close_run_results_io()
         display.close()
@@ -324,7 +361,7 @@ def run_main_flow(
             baseline_python = str(getattr(args, "baseline_python", "") or "").strip()
             if not baseline_python:
                 candidate = (
-                    legacy._REPO_ROOT / "baselines" / "envs" / baseline_name / "bin" / "python"
+                    seams.repo_root / "baselines" / "envs" / baseline_name / "bin" / "python"
                 )
                 if candidate.is_file():
                     baseline_python = str(candidate)
@@ -420,8 +457,6 @@ def run_main_flow(
             else ("loaded" if online_init_state_path else "fresh")
         )
 
-    legacy.set_active_policy_controllers(online=online_policy_controller, budget=None)
-
     try:
         budget_init_state_path = str(getattr(args, "adaptive_budget_init_state_path", "") or "")
         budget_policy_config = BudgetPolicyConfig.normalize(
@@ -496,17 +531,16 @@ def run_main_flow(
             else ("loaded" if budget_init_state_path else "fresh")
         )
 
-    legacy.set_active_policy_controllers(
-        online=online_policy_controller, budget=budget_policy_controller
-    )
-
     previous_execution_config = set_active_execution_config(execution_config)
-    previous_run_settings = legacy.set_active_run_settings(
-        _ActiveRunSettings(
+    # X-02: passed down explicitly instead of through run_eval module globals.
+    run_context = RunContext(
+        execution=execution_config,
+        settings=_ActiveRunSettings(
             deterministic=bool(args.deterministic),
             seed=args.seed if args.deterministic else None,
-        )
+        ),
     )
+    container_pool: _EvalContainerPool | None = None
     run_started = time.monotonic()
     completed_units = 0
     executed_units = 0
@@ -921,6 +955,7 @@ def run_main_flow(
         transport_recovery_gate=transport_recovery_gate,
         record_sink=_stream_result_record,
     )
+    shared_run_condition_inputs = replace(shared_run_condition_inputs, run_context=run_context)
     unit_progress_verbosity = str(args.progress_verbosity)
     if display.suppress_inline_progress and unit_progress_verbosity != "trace":
         unit_progress_verbosity = "off"
@@ -931,6 +966,7 @@ def run_main_flow(
         progress_verbosity=unit_progress_verbosity,
         progress_heartbeat_sec=float(args.progress_heartbeat_sec),
         unit_progress_callback=_on_unit_progress,
+        seams=seams,
     )
     unit_inputs_by_condition: dict[str, EvalUnitInputs] = {
         key: replace(
@@ -973,13 +1009,17 @@ def run_main_flow(
             style="info",
         )
         try:
-            legacy.set_active_container_pool(
-                _EvalContainerPool(
-                    size=pool_size,
-                    execution=execution_config,
-                    workdirs_host=artifacts_root / "workdirs",
-                )
+            container_pool = _EvalContainerPool(
+                size=pool_size,
+                execution=execution_config,
+                workdirs_host=artifacts_root / "workdirs",
             )
+            run_context = replace(run_context, container_pool=container_pool)
+            shared_unit_inputs = _with_run_context(shared_unit_inputs, run_context)
+            unit_inputs_by_condition = {
+                key: _with_run_context(unit_inputs, run_context)
+                for key, unit_inputs in unit_inputs_by_condition.items()
+            }
             display.add_event(
                 message=f"Container pool: {pool_size} container(s) ready",
                 style="success",
@@ -1099,12 +1139,11 @@ def run_main_flow(
                     ):
                         pass
     finally:
-        active_pool = legacy.set_active_container_pool(None)
-        if active_pool is not None:
-            active_pool.shutdown()
-        if legacy._ACTIVE_ONLINE_POLICY_CONTROLLER is not None:
+        if container_pool is not None:
+            container_pool.shutdown()
+        if online_policy_controller is not None:
             try:
-                legacy._ACTIVE_ONLINE_POLICY_CONTROLLER.close()
+                online_policy_controller.close()
             except Exception as exc:
                 display.add_event(
                     message=f"Online adaptive policy close warning: {type(exc).__name__}: {exc}",
@@ -1120,9 +1159,7 @@ def run_main_flow(
                     ),
                     style="warning",
                 )
-        legacy.set_active_policy_controllers(online=None, budget=None)
         _close_run_results_io()
-        legacy.set_active_run_settings(previous_run_settings)
         set_active_execution_config(previous_execution_config)
 
     total_elapsed = time.monotonic() - run_started

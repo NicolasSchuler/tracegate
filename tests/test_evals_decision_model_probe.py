@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
+from evals import pytest_runner
 from evals.decision_model import probe
 from evals.decision_model.client import SystemOneClient
 from evals.decision_model.config import (
@@ -515,8 +516,8 @@ def fake_pytest(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
             timeout_sec=timeout_sec,
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", fake_run_pytest)
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda _dir: (dict(SNAPSHOT), None))
+    monkeypatch.setattr(pytest_runner, "run_pytest", fake_run_pytest)
+    monkeypatch.setattr(pytest_runner, "read_latest_snapshot", lambda _dir: (dict(SNAPSHOT), None))
     return seen_workdirs
 
 

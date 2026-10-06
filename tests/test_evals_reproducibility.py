@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
 from llmdebug import _json as json
 
@@ -214,7 +214,7 @@ def test_run_one_condition_emits_current_schema_metadata(tmp_path, monkeypatch) 
 
     call_state = {"count": 0}
 
-    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format):
+    def _fake_run_pytest(cwd, python_args, condition, timeout_sec, output_format, **_kwargs):
         call_state["count"] += 1
         if call_state["count"] == 1:
             return run_eval.RunResult(
@@ -230,8 +230,8 @@ def test_run_one_condition_emits_current_schema_metadata(tmp_path, monkeypatch) 
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", lambda cwd, diff: (True, ""))
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", lambda cwd, diff: (True, ""))
 
     run_metadata = {
         "run_id": "run-meta",
@@ -294,7 +294,7 @@ def test_run_one_condition_aggregates_stage_a_and_patch_usage(tmp_path, monkeypa
     shutil.copytree(case.path, workdir)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -303,7 +303,9 @@ def test_run_one_condition_aggregates_stage_a_and_patch_usage(tmp_path, monkeypa
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(
+        eval_attempt_flow, "read_latest_snapshot", lambda *_args, **_kwargs: (None, None)
+    )
 
     records = run_eval.run_one_condition(
         case=case,
@@ -356,16 +358,23 @@ def test_run_one_condition_counts_stage_a_prompt_chars_for_helper_retries(
 ) -> None:
     case = _make_case(tmp_path)
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",
             stderr="",
         ),
     )
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(
+        eval_attempt_flow, "read_latest_snapshot", lambda *_args, **_kwargs: (None, None)
+    )
 
     single_records = run_eval.run_one_condition(
         case=case,
@@ -416,9 +425,14 @@ def test_run_one_condition_deterministic_requires_seed_ack(tmp_path, monkeypatch
     workdir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
-        lambda cwd, python_args, condition, timeout_sec, output_format: run_eval.RunResult(
+        lambda cwd,
+        python_args,
+        condition,
+        timeout_sec,
+        output_format,
+        **_kwargs: run_eval.RunResult(
             returncode=1,
             duration_sec=0.01,
             stdout="E   AssertionError: expected 2 got 1\n",

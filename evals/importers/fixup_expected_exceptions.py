@@ -18,16 +18,16 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from evals.run_eval import (
+from evals.case_loading import load_cases
+from evals.eval_config import (
     _REPO_ROOT,
-    Condition,
     add_execution_arguments,
-    apply_diff,
     build_execution_config_from_args,
-    load_cases,
-    run_pytest,
     set_active_execution_config,
 )
+from evals.eval_patches import apply_diff
+from evals.eval_types import Condition
+from evals.pytest_runner import run_pytest
 from evals.validate_cases import (
     expected_exception_in_output,
     extract_exception_candidates,

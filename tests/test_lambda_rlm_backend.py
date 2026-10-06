@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from baselines.controller_packet import parse_controller_packet
 from evals import lambda_rlm_backend
-from evals.adaptive_controller_packet import parse_controller_packet
 from llmdebug import _json as json
 
 

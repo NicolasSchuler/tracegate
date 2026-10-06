@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals.analyze_results import _derive_case_condition_rows, _load_and_group_records
+from evals.analysis_api import derive_case_condition_rows, load_and_group_records
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,8 +167,8 @@ def _cost_line(costs: dict[str, CaseCost], case_ids: list[str]) -> str:
 
 
 def _load_rows(*, path: Path) -> list[dict[str, Any]]:
-    grouped, _input_errors = _load_and_group_records([str(path)], strict_input=True)
-    return _derive_case_condition_rows(grouped)
+    grouped, _input_errors = load_and_group_records([str(path)], strict_input=True)
+    return derive_case_condition_rows(grouped)
 
 
 def _validate_single_run_id(

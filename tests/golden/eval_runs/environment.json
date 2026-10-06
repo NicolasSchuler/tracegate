@@ -1,0 +1,8 @@
+{
+  "executable": "/Users/nicolas/tracegate/.venv/bin/python",
+  "python": "3.13",
+  "repo_root": "/Users/nicolas/tracegate",
+  "run_root": "/Users/nicolas/.cache/tracegate-golden-eval",
+  "system": "Darwin",
+  "uv_lock_sha256": "1c62d52dcbb665ee52f06e05978722df890f28c31ea7b69965f809e7293c6101"
+}

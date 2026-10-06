@@ -16,7 +16,7 @@ from . import _json as json
 from .runtime_resolution import OPENAI_API_KEY_ENV_FALLBACKS, resolve_openai_api_key_from_env
 
 if TYPE_CHECKING:
-    from .adaptive_controller_packet import ControllerPacketV1
+    from baselines.controller_packet import ControllerPacketV1
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ENV_CLIENT_SCRIPT = _REPO_ROOT / "baselines" / "lambda_rlm" / "env_client.py"

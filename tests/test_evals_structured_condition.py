@@ -9,8 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, pytest_runner, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
+from evals.run_context import RunContext
 from llmdebug import _json as json
 
 
@@ -118,7 +119,7 @@ def test_structured_condition_uses_seed_bundle_without_project_dump(tmp_path, mo
     patcher = _CapturePromptPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -128,7 +129,9 @@ def test_structured_condition_uses_seed_bundle_without_project_dump(tmp_path, mo
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -173,7 +176,7 @@ def test_snapshot_artifact_cap_preserves_full_snapshot_for_patcher_context_file(
     snapshot_payload["exception"]["message"] = huge_message
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -183,7 +186,9 @@ def test_snapshot_artifact_cap_preserves_full_snapshot_for_patcher_context_file(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (snapshot_payload, None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (snapshot_payload, None),
     )
 
     records = run_eval.run_one_condition(
@@ -247,7 +252,7 @@ def test_structured_condition_retry_gate_blocks_same_signature_without_new_evide
     patcher = _SameEvidencePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -257,7 +262,9 @@ def test_structured_condition_retry_gate_blocks_same_signature_without_new_evide
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
     emitted_records: list[dict[str, object]] = []
 
@@ -305,7 +312,7 @@ def test_structured_condition_retry_gate_preserves_measured_attempt_wall_clock(
     measured_attempt_wall_secs = iter([0.2, 1.25, 0.3])  # attempt 1, gate block, attempt 2
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -315,10 +322,12 @@ def test_structured_condition_retry_gate_preserves_measured_attempt_wall_clock(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "_measure_attempt_wall_clock_sec",
         lambda _attempt_start: next(measured_attempt_wall_secs),
     )
@@ -385,7 +394,7 @@ def test_structured_condition_retry_gate_allows_retry_when_evidence_changes(
     patcher = _ChangingEvidencePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -395,7 +404,9 @@ def test_structured_condition_retry_gate_allows_retry_when_evidence_changes(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -458,7 +469,7 @@ def test_structured_history_mode_applies_retry_history_budget(tmp_path, monkeypa
     patcher = _ChangingEvidenceCapturePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -468,7 +479,9 @@ def test_structured_history_mode_applies_retry_history_budget(tmp_path, monkeypa
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -516,14 +529,14 @@ def test_run_pytest_enables_plugin_for_structured_snapshot_condition(tmp_path, m
             timeout_sec=None,
         )
 
-    monkeypatch.setattr(run_eval, "run_monitored_subprocess", _fake_run_monitored_subprocess)
+    monkeypatch.setattr(pytest_runner, "run_monitored_subprocess", _fake_run_monitored_subprocess)
     _ = run_eval.run_pytest(
         cwd=tmp_path,
         python_args=["-m", "pytest", "-q"],
         condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
         timeout_sec=1,
         output_format="json_compact",
-        execution=run_eval.ExecutionConfig(executor="local"),
+        run_context=RunContext(execution=run_eval.ExecutionConfig(executor="local")),
     )
 
     args = list(captured.get("args") or [])

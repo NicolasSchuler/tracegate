@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from evals.analyze_results import _derive_case_condition_rows, _load_and_group_records
+from evals.analysis_api import derive_case_condition_rows, load_and_group_records
 from evals.stats import analyze_paired_results, format_p_value, holm_bonferroni
 
 # ------------------------------------------------------------------
@@ -54,12 +54,12 @@ def _load_results(
     Returns a list of dicts, one per (run_id, case_id, condition) triple,
     with derived metrics (success, attempts, tokens, etc.).
     """
-    grouped, errors = _load_and_group_records(jsonl_paths, strict_input=strict)
+    grouped, errors = load_and_group_records(jsonl_paths, strict_input=strict)
     unreadable = int(errors.get("files_unreadable") or 0)
     if unreadable:
         # BAS-09: the counter is an int; len() on it raised TypeError instead of warning.
         print(f"Warning: {unreadable} unreadable file(s)", file=sys.stderr)
-    rows = _derive_case_condition_rows(grouped)
+    rows = derive_case_condition_rows(grouped)
     return rows
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from evals import run_eval
+from evals import eval_attempt_flow, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
 
 # ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@ class TestPreGateIntegration:
         patcher = _PreGateCapturePatcher()
 
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "run_pytest",
             lambda *args, **kwargs: run_eval.RunResult(
                 returncode=1,
@@ -371,7 +371,7 @@ class TestPreGateIntegration:
             ),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "read_latest_snapshot",
             lambda *_args, **_kwargs: (
                 _snapshot_payload("SyntaxError", "invalid syntax"),
@@ -414,7 +414,7 @@ class TestPreGateIntegration:
         patcher = _PreGateCapturePatcher()
 
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "run_pytest",
             lambda *args, **kwargs: run_eval.RunResult(
                 returncode=1,
@@ -424,7 +424,7 @@ class TestPreGateIntegration:
             ),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "read_latest_snapshot",
             lambda *_args, **_kwargs: (
                 _snapshot_payload("SyntaxError", "invalid syntax"),
@@ -465,7 +465,7 @@ class TestPreGateIntegration:
         patcher = _PreGateCapturePatcher()
 
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "run_pytest",
             lambda *args, **kwargs: run_eval.RunResult(
                 returncode=1,
@@ -475,7 +475,7 @@ class TestPreGateIntegration:
             ),
         )
         monkeypatch.setattr(
-            run_eval,
+            eval_attempt_flow,
             "read_latest_snapshot",
             lambda *_args, **_kwargs: (
                 _snapshot_payload("AssertionError", "expected 2 got 1"),

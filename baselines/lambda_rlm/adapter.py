@@ -23,11 +23,11 @@ from baselines.adapter_base import (
 )
 from baselines.case_schemas import LambdaRLMCaseInput
 from baselines.contracts import BaselineContract
-from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
-from evals.adaptive_controller_packet import (
+from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
+from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
 from llmdebug import _json as json
 
 from . import env_client as lambda_env_client

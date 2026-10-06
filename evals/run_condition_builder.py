@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from .eval_types import (
@@ -240,3 +241,45 @@ def build_run_condition_inputs(
         transport=transport,
         recording=recording,
     )
+
+
+_RUN_CONDITION_INPUT_FIELD_NAMES = frozenset(RunConditionInputs.__dataclass_fields__)
+
+
+_RUN_CONDITION_INPUT_REQUIRED_KEYS = frozenset(
+    {"patcher", "k", "output_format", "run_id", "include_files_context", "force_patch_attempt"}
+)
+
+
+def _build_run_condition_inputs_from_legacy_kwargs(
+    *,
+    legacy_kwargs: Mapping[str, Any],
+) -> RunConditionInputs:
+    missing_keys = sorted(
+        key for key in _RUN_CONDITION_INPUT_REQUIRED_KEYS if key not in legacy_kwargs
+    )
+    if missing_keys:
+        joined = ", ".join(missing_keys)
+        raise TypeError(f"run_one_condition() missing required input fields: {joined}")
+    unknown_keys = sorted(set(legacy_kwargs) - _RUN_CONDITION_INPUT_FIELD_NAMES)
+    if unknown_keys:
+        joined = ", ".join(unknown_keys)
+        raise TypeError(f"run_one_condition() received unknown input fields: {joined}")
+    return RunConditionInputs(**dict(legacy_kwargs))
+
+
+def _resolve_run_condition_inputs(
+    *,
+    inputs: RunConditionInputs | None,
+    legacy_kwargs: Mapping[str, Any],
+) -> RunConditionInputs:
+    if inputs is not None and legacy_kwargs:
+        legacy_keys = ", ".join(sorted(legacy_kwargs))
+        raise TypeError(
+            "run_one_condition() received both inputs=... and legacy keyword arguments: "
+            f"{legacy_keys}"
+        )
+    resolved = inputs or _build_run_condition_inputs_from_legacy_kwargs(legacy_kwargs=legacy_kwargs)
+    if resolved.patcher is None:
+        raise TypeError("run_one_condition() requires a patcher in inputs.patcher")
+    return resolved

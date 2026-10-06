@@ -80,6 +80,8 @@ swebench-generate-launch-*.log
 !quality/coverage_evals_baseline.json
 !quality/type_coverage_baseline.json
 !evals/cases/**/case.json
+!pyrightconfig.evals.json
+!tests/golden/eval_runs/environment.json
 .worktrees
 .playwright-mcp
 *.tex

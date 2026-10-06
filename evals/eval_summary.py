@@ -11,15 +11,15 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from evals.analyze_results import (
-    _derive_case_condition_rows,
-    _fmt_num_with_ci,
-    _is_external_baseline_condition,
-    _load_and_group_records,
-    _ope_target_order,
-    _print_input_errors,
-    _records_by_case_condition,
-    _summarize_bucket,
+from evals.analysis_api import (
+    derive_case_condition_rows,
+    fmt_num_with_ci,
+    is_external_baseline_condition,
+    load_and_group_records,
+    ope_target_order,
+    print_input_errors,
+    records_by_case_condition,
+    summarize_bucket,
 )
 from evals.eval_types import CONDITION_FAMILY_ADAPTIVE, condition_family
 
@@ -56,22 +56,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        grouped, input_errors = _load_and_group_records([str(results_path)], strict_input=True)
+        grouped, input_errors = load_and_group_records([str(results_path)], strict_input=True)
     except ValueError as exc:
         print(f"Input error: {exc}")
         return 2
 
     if not grouped:
-        _print_input_errors(input_errors)
+        print_input_errors(input_errors)
         print("No records found.")
         return 1
 
-    rows = _derive_case_condition_rows(grouped)
+    rows = derive_case_condition_rows(grouped)
     if not rows:
         print("No valid case-condition records found.")
         return 1
 
-    overall = _summarize_bucket(rows, records_by_case_condition=_records_by_case_condition(grouped))
+    overall = summarize_bucket(rows, records_by_case_condition=records_by_case_condition(grouped))
     _print_core_summary(
         run_id_requested=str(args.run_id),
         results_path=results_path,
@@ -251,7 +251,7 @@ def _print_condition_row(stats: dict[str, Any]) -> None:
             f"reasoning_coverage={reasoning_covered_cases}/{cases}"
         )
     print(row)
-    if not _is_external_baseline_condition(condition):
+    if not is_external_baseline_condition(condition):
         return
 
     flow_bits: list[str] = []
@@ -451,7 +451,7 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
     targets_raw = ope.get("targets")
     targets = targets_raw if isinstance(targets_raw, dict) else {}
     parts: list[str] = []
-    for target_name in _ope_target_order(ope, ordered_targets=ordered_targets):
+    for target_name in ope_target_order(ope, ordered_targets=ordered_targets):
         target = targets.get(target_name)
         if not isinstance(target, dict):
             continue
@@ -466,9 +466,9 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
         ci_raw = target.get("ope_ci")
         ci: dict[str, Any] = ci_raw if isinstance(ci_raw, dict) else {}
         parts.append(
-            f"{target_name}: ips={_fmt_num_with_ci(target.get('ips'), ci.get('ips'))}, "
-            f"snips={_fmt_num_with_ci(target.get('snips'), ci.get('snips'))}, "
-            f"dr={_fmt_num_with_ci(target.get('dr'), ci.get('dr'))}, "
+            f"{target_name}: ips={fmt_num_with_ci(target.get('ips'), ci.get('ips'))}, "
+            f"snips={fmt_num_with_ci(target.get('snips'), ci.get('snips'))}, "
+            f"dr={fmt_num_with_ci(target.get('dr'), ci.get('dr'))}, "
             f"ess={_fmt_num(target.get('effective_sample_size'))}"
             f"{diagnostics_fragment}"
         )

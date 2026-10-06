@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import _json as json
+from llmdebug import _json as json
 
 DRAIN_GRACE_SEC = 2.0
 """After the child exits, how long to wait for its pipes to close (ORC-03). A grandchild

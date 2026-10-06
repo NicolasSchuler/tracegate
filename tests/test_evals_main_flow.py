@@ -12,6 +12,7 @@ Focuses on high-impact uncovered paths:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -301,7 +302,7 @@ class TestPatcherCreationError:
         def _bad_patcher(args):
             raise RuntimeError("patcher init failed")
 
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", _bad_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", _bad_patcher)
 
         from evals.eval_main_flow import run_main_flow
 
@@ -340,7 +341,7 @@ class TestContextWindowResolutionError:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "openai"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
 
         def bad_resolve(**kw):
             raise ValueError("context window probe failed")
@@ -387,7 +388,7 @@ class TestOnlinePolicyConfigError:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "openai"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
         monkeypatch.setattr(
             "evals.eval_main_flow._resolve_openai_context_window_for_run",
             lambda **kw: (128000, {}),
@@ -436,7 +437,7 @@ class TestBudgetPolicyConfigError:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "openai"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
         monkeypatch.setattr(
             "evals.eval_main_flow._resolve_openai_context_window_for_run",
             lambda **kw: (128000, {}),
@@ -474,67 +475,70 @@ class TestBudgetPolicyConfigError:
 
 
 class TestFinallyCleanup:
+    """The run's ``finally`` block closes each controller and reports close errors."""
+
     def test_online_policy_close_warning_on_error(self, monkeypatch) -> None:
-        """When online policy controller.close() raises, a warning is shown."""
-        import evals.eval_main_flow as flow_mod
+        case = _FakeCaseSpec(case_id="c1")
+        cond = _FakeCondition(value="base_repair")
+        mock_display, flow_mod, _ = _wire_full_flow(
+            monkeypatch,
+            cases_and_conditions=[(case, cond)],
+            resumed={("c1", "base_repair")},
+            remaining=1,
+        )
+        mock_online_config = MagicMock()
+        mock_online_config.mode = "on"
+        monkeypatch.setattr(
+            flow_mod.OnlinePolicyConfig,
+            "normalize",
+            staticmethod(lambda **kw: mock_online_config),
+        )
+        mock_ctrl = MagicMock(load_error=None)
+        mock_ctrl.close.side_effect = RuntimeError("close failed")
+        monkeypatch.setattr(
+            "evals.eval_main_flow.AdaptiveOnlinePolicyController", lambda cfg: mock_ctrl
+        )
 
-        mock_controller = MagicMock()
-        mock_controller.close.side_effect = RuntimeError("close failed")
+        assert flow_mod.run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[]) == 0
 
-        # Set the global directly
-        original = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
-        run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = mock_controller
-        try:
-            mock_display = MagicMock()
-            # Simulate the cleanup code from lines 1006-1014
-            if run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER is not None:
-                try:
-                    run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER.close()
-                except Exception as exc:
-                    mock_display.add_event(
-                        message=(
-                            f"Online adaptive policy close warning: {type(exc).__name__}: {exc}"
-                        ),
-                        style="warning",
-                    )
-                run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = None
-
-            mock_display.add_event.assert_called_once()
-            msg = mock_display.add_event.call_args[1]["message"]
-            assert "close failed" in msg
-            assert mock_display.add_event.call_args[1]["style"] == "warning"
-        finally:
-            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = original
+        mock_ctrl.close.assert_called_once()
+        warnings = [
+            c[1]["message"]
+            for c in mock_display.add_event.call_args_list
+            if c[1].get("style") == "warning"
+        ]
+        assert "Online adaptive policy close warning: RuntimeError: close failed" in warnings
 
     def test_budget_policy_close_warning_on_error(self, monkeypatch) -> None:
-        """When budget policy controller.close() raises, a warning is shown."""
-        import evals.eval_main_flow as flow_mod
+        case = _FakeCaseSpec(case_id="c1")
+        cond = _FakeCondition(value="base_repair")
+        mock_display, flow_mod, _ = _wire_full_flow(
+            monkeypatch,
+            cases_and_conditions=[(case, cond)],
+            resumed={("c1", "base_repair")},
+            remaining=1,
+        )
+        mock_budget_config = MagicMock()
+        mock_budget_config.mode = "on"
+        monkeypatch.setattr(
+            flow_mod.BudgetPolicyConfig,
+            "normalize",
+            staticmethod(lambda **kw: mock_budget_config),
+        )
+        mock_ctrl = MagicMock(load_error=None)
+        mock_ctrl.close.side_effect = RuntimeError("budget close boom")
+        monkeypatch.setattr(
+            "evals.eval_main_flow.AdaptiveBudgetPolicyController", lambda cfg: mock_ctrl
+        )
 
-        mock_controller = MagicMock()
-        mock_controller.close.side_effect = RuntimeError("budget close boom")
+        assert flow_mod.run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[]) == 0
 
-        original = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
-        run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = mock_controller
-        try:
-            mock_display = MagicMock()
-            if run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER is not None:
-                try:
-                    run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER.close()
-                except Exception as exc:
-                    mock_display.add_event(
-                        message=(
-                            "Online adaptive budget policy close warning: "
-                            f"{type(exc).__name__}: {exc}"
-                        ),
-                        style="warning",
-                    )
-                run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = None
-
-            mock_display.add_event.assert_called_once()
-            msg = mock_display.add_event.call_args[1]["message"]
-            assert "budget close boom" in msg
-        finally:
-            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = original
+        warnings = [
+            c[1]["message"]
+            for c in mock_display.add_event.call_args_list
+            if c[1].get("style") == "warning"
+        ]
+        assert any("budget close boom" in message for message in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -613,7 +617,7 @@ class TestFullRunLoopAllResumed:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "test_patcher"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
         monkeypatch.setattr(
             "evals.eval_main_flow._resolve_openai_context_window_for_run",
             lambda **kw: (128000, {}),
@@ -657,25 +661,17 @@ class TestFullRunLoopAllResumed:
         mock_display, _flow_mod = self._setup_full_flow(monkeypatch)
 
         # Save originals for cleanup
-        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
-        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
 
-        try:
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
-            # Display should have been closed
-            mock_display.close.assert_called()
-        finally:
-            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
-            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
+        # Display should have been closed
+        mock_display.close.assert_called()
 
     def test_run_with_runtime_errors_returns_2(self, monkeypatch) -> None:
         """Drive through with a unit that yields a runtime error."""
@@ -710,7 +706,7 @@ class TestFullRunLoopAllResumed:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "test_patcher"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
         monkeypatch.setattr(
             "evals.eval_main_flow._resolve_openai_context_window_for_run",
             lambda **kw: (128000, {}),
@@ -769,23 +765,14 @@ class TestFullRunLoopAllResumed:
             lambda recs: recs or [],
         )
 
-        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
-        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
+        from evals.eval_main_flow import run_main_flow
 
-        try:
-            from evals.eval_main_flow import run_main_flow
-
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 2  # runtime errors -> exit 2
-        finally:
-            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
-            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 2  # runtime errors -> exit 2
 
     def test_run_with_successful_unit(self, monkeypatch) -> None:
         """Drive through with a successful unit execution."""
@@ -820,7 +807,7 @@ class TestFullRunLoopAllResumed:
 
         mock_patcher = MagicMock()
         mock_patcher.name = "test_patcher"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
         monkeypatch.setattr(
             "evals.eval_main_flow._resolve_openai_context_window_for_run",
             lambda **kw: (128000, {}),
@@ -896,23 +883,14 @@ class TestFullRunLoopAllResumed:
             lambda case_records: ("none", "none"),
         )
 
-        orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
-        orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
-        orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
+        from evals.eval_main_flow import run_main_flow
 
-        try:
-            from evals.eval_main_flow import run_main_flow
-
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
-        finally:
-            run_eval_mod._ACTIVE_RUN_SETTINGS = orig_settings
-            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = orig_online
-            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = orig_budget
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -967,7 +945,7 @@ def _wire_full_flow(
 
     mock_patcher = MagicMock()
     mock_patcher.name = "test_patcher"
-    monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+    monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
     monkeypatch.setattr(
         "evals.eval_main_flow._resolve_openai_context_window_for_run",
         lambda **kw: (128000, {}),
@@ -1008,27 +986,6 @@ def _wire_full_flow(
     return mock_display, flow_mod, merged
 
 
-def _run_with_cleanup(flow_mod, *, args_override=None):
-    """Context manager to save/restore legacy globals."""
-
-    class _Ctx:
-        def __enter__(self):
-            self.orig_settings = run_eval_mod._ACTIVE_RUN_SETTINGS
-            self.orig_online = run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER
-            self.orig_budget = run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER
-            self.orig_pool = getattr(run_eval_mod, "_ACTIVE_CONTAINER_POOL", None)
-            return self
-
-        def __exit__(self, *exc):
-            run_eval_mod._ACTIVE_RUN_SETTINGS = self.orig_settings
-            run_eval_mod._ACTIVE_ONLINE_POLICY_CONTROLLER = self.orig_online
-            run_eval_mod._ACTIVE_BUDGET_POLICY_CONTROLLER = self.orig_budget
-            run_eval_mod._ACTIVE_CONTAINER_POOL = self.orig_pool
-            return False
-
-    return _Ctx()
-
-
 # ---------------------------------------------------------------------------
 # Test: Transport fail-fast trigger (lines 597-618)
 # ---------------------------------------------------------------------------
@@ -1040,7 +997,7 @@ class TestTransportFailFast:
         case2 = _FakeCaseSpec(case_id="c2")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case1, cond), (case2, cond)],
         )
@@ -1065,16 +1022,15 @@ class TestTransportFailFast:
             lambda reason: True,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(transport_fail_fast_streak=1),
-                argv_tokens=[],
-            )
-            # Should abort with exit code 2
-            assert result == 2
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(transport_fail_fast_streak=1),
+            argv_tokens=[],
+        )
+        # Should abort with exit code 2
+        assert result == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1087,7 +1043,7 @@ class TestEarlyStopWarning:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1128,16 +1084,15 @@ class TestEarlyStopWarning:
             lambda case_records: ("budget", "budget_exceeded"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            # Should still complete but with exit code 0 (test failures
-            # aren't runtime errors)
+        run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        # Should still complete but with exit code 0 (test failures
+        # aren't runtime errors)
 
         # Check early-stop warning was displayed
         warning_calls = [
@@ -1200,14 +1155,13 @@ class TestCleanupWithActiveControllers:
             lambda cfg: mock_budget_ctrl,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
+        run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
 
         # Controllers should have been closed during cleanup
         mock_online_ctrl.close.assert_called_once()
@@ -1258,16 +1212,15 @@ class TestCleanupWithActiveControllers:
             lambda cfg: mock_budget_ctrl,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            # Should not raise despite close() errors
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        # Should not raise despite close() errors
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         # Check warning events
         warning_msgs = [
@@ -1324,7 +1277,7 @@ class TestBaselinePythonResolution:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1350,15 +1303,14 @@ class TestBaselinePythonResolution:
         monkeypatch.setattr("evals.eval_main_flow.prepare_main_setup", lambda **kw: setup)
         monkeypatch.setattr("evals.eval_main_flow.prepare_main_resume", lambda **kw: resume)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(patcher="baseline", baseline_name="test_bl"),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(patcher="baseline", baseline_name="test_bl"),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1372,7 +1324,7 @@ class TestTransportFailFastOnRecordFailure:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1408,15 +1360,14 @@ class TestTransportFailFastOnRecordFailure:
             lambda case_records: ("transport", "transport_failure"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(transport_fail_fast_streak=1),
-                argv_tokens=[],
-            )
-            assert result == 2  # fail-fast triggered
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(transport_fail_fast_streak=1),
+            argv_tokens=[],
+        )
+        assert result == 2  # fail-fast triggered
 
 
 class TestInterruptedInfraOutcome:
@@ -1424,7 +1375,7 @@ class TestInterruptedInfraOutcome:
         case = _FakeCaseSpec(case_id="infra_case")
         cond = _FakeCondition(value="intervenor")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1453,15 +1404,14 @@ class TestInterruptedInfraOutcome:
 
         monkeypatch.setattr("evals.eval_main_flow._execute_eval_unit", _mock_exec)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         mock_display.finish_unit.assert_called_with(
             case_id="infra_case",
@@ -1474,7 +1424,7 @@ class TestInterruptedInfraOutcome:
         case = _FakeCaseSpec(case_id="infra_attempt_case")
         cond = _FakeCondition(value="ldb")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1503,15 +1453,14 @@ class TestInterruptedInfraOutcome:
 
         monkeypatch.setattr("evals.eval_main_flow._execute_eval_unit", _mock_exec)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         mock_display.finish_unit.assert_called_with(
             case_id="infra_attempt_case",
@@ -1533,7 +1482,7 @@ class TestParallelExecution:
         case2 = _FakeCaseSpec(case_id="c2")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case1, cond), (case2, cond)],
         )
@@ -1569,22 +1518,21 @@ class TestParallelExecution:
             lambda case_records: ("none", "none"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(jobs=2),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(jobs=2),
+            argv_tokens=[],
+        )
+        assert result == 0
 
     def test_parallel_execution_with_exception(self, monkeypatch) -> None:
         """When a future raises an exception, it becomes a runtime error."""
         case1 = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case1, cond)],
         )
@@ -1594,15 +1542,14 @@ class TestParallelExecution:
 
         monkeypatch.setattr("evals.eval_main_flow._execute_eval_unit", _mock_exec)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(jobs=2),
-                argv_tokens=[],
-            )
-            assert result == 2
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(jobs=2),
+            argv_tokens=[],
+        )
+        assert result == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1616,7 +1563,7 @@ class TestContainerPoolSetup:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1662,15 +1609,14 @@ class TestContainerPoolSetup:
             lambda case_records: ("none", "none"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         # Should see warning about container pool failure
         warning_msgs = [
@@ -1714,15 +1660,14 @@ class TestPolicyControllerLoadError:
             lambda cfg: mock_ctrl,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         warning_msgs = [
             c[1]["message"]
@@ -1758,15 +1703,14 @@ class TestPolicyControllerLoadError:
             lambda cfg: mock_ctrl,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         warning_msgs = [
             c[1]["message"]
@@ -1786,7 +1730,7 @@ class TestContainerPoolSuccess:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -1830,15 +1774,14 @@ class TestContainerPoolSuccess:
             lambda case_records: ("none", "none"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
         # Container pool cleanup should have been called
         mock_pool.shutdown.assert_called_once()
@@ -1856,7 +1799,7 @@ class TestNonTransportErrorResetsStreak:
         case2 = _FakeCaseSpec(case_id="c2")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case1, cond), (case2, cond)],
         )
@@ -1892,16 +1835,15 @@ class TestNonTransportErrorResetsStreak:
             lambda reason: "transport" in reason,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(transport_fail_fast_streak=2),
-                argv_tokens=[],
-            )
-            # Should NOT trigger fail-fast (only 1 consecutive transport err)
-            assert result == 2  # still errors, but not fail-fast
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(transport_fail_fast_streak=2),
+            argv_tokens=[],
+        )
+        # Should NOT trigger fail-fast (only 1 consecutive transport err)
+        assert result == 2  # still errors, but not fail-fast
 
 
 # ---------------------------------------------------------------------------
@@ -1916,7 +1858,7 @@ class TestBuildRunMetadata:
         cond = _FakeCondition(value="base_repair")
 
         # Use _wire_full_flow then override resume
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1949,15 +1891,14 @@ class TestBuildRunMetadata:
             lambda **kw: {"run_id": "test", "patcher_config": {}},
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1970,7 +1911,7 @@ class TestSuppressInlineProgress:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -1980,15 +1921,14 @@ class TestSuppressInlineProgress:
         # Set suppress_inline_progress to True
         mock_display.suppress_inline_progress = True
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2002,7 +1942,7 @@ class TestParallelFailFastAbort:
         cases = [_FakeCaseSpec(case_id=f"c{i}") for i in range(4)]
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(c, cond) for c in cases],
         )
@@ -2023,15 +1963,14 @@ class TestParallelFailFastAbort:
             lambda reason: True,
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(jobs=2, transport_fail_fast_streak=1),
-                argv_tokens=[],
-            )
-            assert result == 2
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(jobs=2, transport_fail_fast_streak=1),
+            argv_tokens=[],
+        )
+        assert result == 2
 
 
 # ---------------------------------------------------------------------------
@@ -2064,15 +2003,14 @@ class TestOnlinePolicyControllerCreationError:
 
         monkeypatch.setattr("evals.eval_main_flow.AdaptiveOnlinePolicyController", _bad_ctrl)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            with pytest.raises(RuntimeError, match="controller init failed"):
-                run_main_flow(
-                    parser=_make_parser(),
-                    args=_make_args(),
-                    argv_tokens=[],
-                )
+        with pytest.raises(RuntimeError, match="controller init failed"):
+            run_main_flow(
+                parser=_make_parser(),
+                args=_make_args(),
+                argv_tokens=[],
+            )
         mock_display.close.assert_called()
 
 
@@ -2106,15 +2044,14 @@ class TestBudgetPolicyControllerCreationError:
 
         monkeypatch.setattr("evals.eval_main_flow.AdaptiveBudgetPolicyController", _bad_ctrl)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            with pytest.raises(RuntimeError, match="budget ctrl init failed"):
-                run_main_flow(
-                    parser=_make_parser(),
-                    args=_make_args(),
-                    argv_tokens=[],
-                )
+        with pytest.raises(RuntimeError, match="budget ctrl init failed"):
+            run_main_flow(
+                parser=_make_parser(),
+                args=_make_args(),
+                argv_tokens=[],
+            )
         mock_display.close.assert_called()
 
 
@@ -2129,7 +2066,7 @@ class TestAppendRecordsSafely:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -2161,15 +2098,14 @@ class TestAppendRecordsSafely:
             lambda case_records: ("none", "none"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2183,7 +2119,7 @@ class TestAdaptiveProgressStopEarlyReason:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        mock_display, flow_mod, _ = _wire_full_flow(
+        mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -2223,14 +2159,13 @@ class TestAdaptiveProgressStopEarlyReason:
             lambda case_records: ("stagnation", "adaptive_stop"),
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
+        run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
 
         # Verify the early stop warning mentions the adaptive progress note
         warning_calls = [
@@ -2255,7 +2190,7 @@ class TestBaselineConfigExtended:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
             resumed={("c1", "base_repair")},
@@ -2284,7 +2219,7 @@ class TestBaselineConfigExtended:
         mock_patcher = MagicMock()
         mock_patcher.name = "baseline"
         mock_patcher.repo_commit = "abc123"
-        monkeypatch.setattr(flow_mod.legacy, "make_patcher", lambda args: mock_patcher)
+        monkeypatch.setattr("evals.patcher_factory.make_patcher", lambda args: mock_patcher)
 
         # Mock _baseline_patch_inventory to return patches
         monkeypatch.setattr(
@@ -2301,21 +2236,20 @@ class TestBaselineConfigExtended:
         bl_dir.mkdir(parents=True)
         bl_python = bl_dir / "python"
         bl_python.write_text("#!/bin/sh\n")
-        monkeypatch.setattr(flow_mod.legacy, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr("evals.eval_seams.REPO_ROOT", tmp_path)
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(
-                    patcher="baseline",
-                    baseline_name="test_bl",
-                    baseline_process_timeout_sec=30.0,
-                ),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(
+                patcher="baseline",
+                baseline_name="test_bl",
+                baseline_process_timeout_sec=30.0,
+            ),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2329,7 +2263,7 @@ class TestTokenUsageUnavailable:
         case = _FakeCaseSpec(case_id="c1")
         cond = _FakeCondition(value="base_repair")
 
-        _mock_display, flow_mod, _ = _wire_full_flow(
+        _mock_display, _flow_mod, _ = _wire_full_flow(
             monkeypatch,
             cases_and_conditions=[(case, cond)],
         )
@@ -2371,15 +2305,14 @@ class TestTokenUsageUnavailable:
             lambda **kw: "unavailable",
         )
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            result = run_main_flow(
-                parser=_make_parser(),
-                args=_make_args(),
-                argv_tokens=[],
-            )
-            assert result == 0
+        result = run_main_flow(
+            parser=_make_parser(),
+            args=_make_args(),
+            argv_tokens=[],
+        )
+        assert result == 0
 
 
 # ---------------------------------------------------------------------------
@@ -2418,10 +2351,9 @@ class TestDecisionModelBinding:
         args = _make_args()
         args.adaptive_decision_model_role = "shadow"
 
-        with _run_with_cleanup(flow_mod):
-            from evals.eval_main_flow import run_main_flow
+        from evals.eval_main_flow import run_main_flow
 
-            run_main_flow(parser=_make_parser(), args=args, argv_tokens=[])
+        run_main_flow(parser=_make_parser(), args=args, argv_tokens=[])
 
         binding = captured["decision_model"]
         assert isinstance(binding, DecisionModelBinding)
@@ -2437,11 +2369,26 @@ class TestDecisionModelBinding:
 
 
 def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path) -> None:
+    """ORC-01/ORC-02, X-02: the run's settings and pool travel in the unit's RunContext."""
+    from types import SimpleNamespace
+
     from evals.eval_types import Condition, ExecutionConfig, RunResult, UnitExecutionOutcome
+    from evals.pytest_runner import run_pytest
 
     case = _FakeCaseSpec(case_id="c1")
     cond = _FakeCondition(value="base_repair")
-    _mock_display, flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
+    _mock_display, _flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
+
+    def _replace(obj, **changes):
+        # The real replace for RunContext; in place for the stubbed unit inputs.
+        if dataclasses.is_dataclass(obj) and type(obj).__dataclass_params__.frozen:
+            return dataclasses.replace(obj, **changes)
+        for name, value in changes.items():
+            setattr(obj, name, value)
+        return obj
+
+    monkeypatch.setattr("evals.eval_main_flow.replace", _replace)
+    monkeypatch.setattr("evals.eval_main_flow.EvalUnitInputs", lambda **kw: SimpleNamespace(**kw))
     setup = _FakeSetup(
         cases=[case],
         conditions=[cond],
@@ -2474,14 +2421,15 @@ def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path)
     monkeypatch.setattr("evals.eval_main_flow._EvalContainerPool", _FakePool)
 
     def _execute_unit(**kwargs):
-        # Inside a unit, exactly what the attempt flow does: the real run_pytest.
-        run_eval_mod.run_pytest(
+        # Inside a unit, exactly what the attempt flow does: the real run_pytest with the
+        # unit's run context.
+        run_pytest(
             tmp_path,
             ["-m", "pytest", "-q"],
             Condition.BASE_REPAIR,
             5,
             "json",
-            execution=ExecutionConfig(executor="testcontainers"),
+            run_context=kwargs["inputs"].run_condition.run_context,
         )
         outcome = MagicMock(spec=UnitExecutionOutcome)
         outcome.case = case
@@ -2497,21 +2445,19 @@ def test_run_main_flow_settings_and_pool_reach_run_pytest(monkeypatch, tmp_path)
         "evals.eval_main_flow.classify_failure_reason", lambda case_records: ("none", "none")
     )
 
-    with _run_with_cleanup(flow_mod):
-        from evals.eval_main_flow import run_main_flow
+    from evals.eval_main_flow import run_main_flow
 
-        run_main_flow(
-            parser=_make_parser(),
-            args=_make_args(deterministic=True, seed=1234),
-            argv_tokens=[],
-        )
+    run_main_flow(
+        parser=_make_parser(),
+        args=_make_args(deterministic=True, seed=1234),
+        argv_tokens=[],
+    )
 
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["PYTHONHASHSEED"] == "1234"  # ORC-01
     assert seen["pool"].acquired == 1  # ORC-02: the pool is used, not a one-shot container
     assert seen["shutdown"] is True
-    assert run_eval_mod._ACTIVE_CONTAINER_POOL is None
 
 
 def test_run_main_flow_starts_no_pool_without_opt_in(monkeypatch) -> None:
@@ -2520,7 +2466,7 @@ def test_run_main_flow_starts_no_pool_without_opt_in(monkeypatch) -> None:
 
     case = _FakeCaseSpec(case_id="c1")
     cond = _FakeCondition(value="base_repair")
-    _mock_display, flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
+    _mock_display, _flow_mod, _ = _wire_full_flow(monkeypatch, cases_and_conditions=[(case, cond)])
     setup = _FakeSetup(
         cases=[case], conditions=[cond], execution_config=ExecutionConfig(executor="testcontainers")
     )
@@ -2541,8 +2487,6 @@ def test_run_main_flow_starts_no_pool_without_opt_in(monkeypatch) -> None:
     monkeypatch.setattr(
         "evals.eval_main_flow.classify_failure_reason", lambda case_records: ("none", "none")
     )
-    with _run_with_cleanup(flow_mod):
-        from evals.eval_main_flow import run_main_flow
+    from evals.eval_main_flow import run_main_flow
 
-        run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[])
-    assert run_eval_mod._ACTIVE_CONTAINER_POOL is None
+    run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[])

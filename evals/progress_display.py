@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 from evals.eval_config import _resolved_args_for_lockfile
+from evals.eval_types import _PROGRESS_LEVEL_ORDER, _PROGRESS_PRINT_LOCK, PROGRESS_VERBOSITIES
 from evals.progress_output import humanize_failure_reason
 
 try:
@@ -1046,3 +1047,36 @@ def build_startup_sections(
         args=args,
         excluded_keys=displayed_arg_keys,
     )
+
+
+def _normalized_progress_verbosity(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    return text if text in PROGRESS_VERBOSITIES else "basic"
+
+
+def _progress_is_enabled(verbosity: str, level: str) -> bool:
+    normalized_verbosity = _normalized_progress_verbosity(verbosity)
+    normalized_level = _normalized_progress_verbosity(level)
+    return _PROGRESS_LEVEL_ORDER[normalized_verbosity] >= _PROGRESS_LEVEL_ORDER[normalized_level]
+
+
+def _progress_print(
+    *,
+    verbosity: str,
+    level: str,
+    message: str,
+    flush: bool = True,
+) -> None:
+    if not _progress_is_enabled(verbosity, level):
+        return
+    with _PROGRESS_PRINT_LOCK:
+        print(message, flush=flush)
+
+
+def _format_duration_precise(seconds: float | None) -> str:
+    if seconds is None:
+        return "unknown"
+    normalized = max(0.0, float(seconds))
+    if normalized < 60.0:
+        return f"{normalized:.2f}s"
+    return _format_duration(normalized)

@@ -6,14 +6,15 @@ from dataclasses import dataclass
 
 import pytest
 
-from evals import run_eval
+from baselines.subprocess_monitor import MonitoredSubprocessResult
+from evals import eval_attempt_flow, pytest_runner, run_eval
 from evals.patchers.base import PatchResult
-from evals.subprocess_monitor import MonitoredSubprocessResult
+from evals.run_context import RunContext
 
 
 def test_run_pytest_timeout_returns_structured_result(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        run_eval,
+        pytest_runner,
         "run_monitored_subprocess",
         lambda **_kwargs: MonitoredSubprocessResult(
             returncode=-9,
@@ -31,7 +32,7 @@ def test_run_pytest_timeout_returns_structured_result(tmp_path, monkeypatch) -> 
         condition=run_eval.Condition.BASE_REPAIR,
         timeout_sec=1,
         output_format="json_compact",
-        execution=run_eval.ExecutionConfig(executor="local"),
+        run_context=RunContext(execution=run_eval.ExecutionConfig(executor="local")),
     )
 
     assert result.returncode == run_eval.PYTEST_TIMEOUT_RETURNCODE
@@ -72,7 +73,7 @@ def test_run_pytest_monitored_local_preserves_output_and_emits_progress(
             stderr="AssertionError: expected 2 got 1\n",
         )
 
-    monkeypatch.setattr(run_eval, "run_monitored_subprocess", _fake_monitored_run)
+    monkeypatch.setattr(pytest_runner, "run_monitored_subprocess", _fake_monitored_run)
 
     result = run_eval.run_pytest(
         cwd=tmp_path,
@@ -80,7 +81,7 @@ def test_run_pytest_monitored_local_preserves_output_and_emits_progress(
         condition=run_eval.Condition.BASE_REPAIR,
         timeout_sec=2,
         output_format="json_compact",
-        execution=run_eval.ExecutionConfig(executor="local"),
+        run_context=RunContext(execution=run_eval.ExecutionConfig(executor="local")),
         progress_update=lambda event, payload: emitted.append((event, payload)),
         progress_phase_label="pytest: after patch",
     )
@@ -159,7 +160,7 @@ def test_run_one_condition_records_timeout_metadata(tmp_path, monkeypatch) -> No
             timeout_sec=1,
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -225,7 +226,7 @@ def test_run_one_condition_initial_success_records_attempt_wall_clock(
             timeout_sec=None,
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
 
     records = run_eval.run_one_condition(
         case=case,

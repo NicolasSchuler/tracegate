@@ -9,12 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from baselines.adapter_base import BaselineCaseContext, BaselineConfig, BaselineResult
+from baselines.controller_packet import parse_controller_packet
 from baselines.intervenor import env_client
 from baselines.intervenor.adapter import IntervenorAdapter
 from baselines.intervenor.case_converter import _build_prompt, _extract_entry_point, convert_case
 from baselines.intervenor.result_extractor import make_diff
 from baselines.openai_compat import OpenAICompatResponseError
-from evals.adaptive_controller_packet import parse_controller_packet
 
 
 @pytest.fixture()

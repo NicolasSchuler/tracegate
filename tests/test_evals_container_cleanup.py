@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from evals import run_eval
+from evals import eval_containers, run_eval
 
 
 class _FakeContainer:
@@ -46,7 +46,7 @@ def test_cleanup_stale_eval_containers_prunes_old_non_running(monkeypatch) -> No
     fresh = _FakeContainer(status="exited", created="2026-02-17T14:59:30.123456789Z")
     running = _FakeContainer(status="running", created="2026-02-17T13:00:00Z")
     client = _FakeDockerClient([stale, fresh, running])
-    monkeypatch.setattr(run_eval, "_docker_client_from_env", lambda: client)
+    monkeypatch.setattr(eval_containers, "_docker_client_from_env", lambda: client)
 
     removed, failed, error = run_eval.cleanup_stale_eval_containers(grace_sec=300, now_utc=now_utc)
 
@@ -76,7 +76,7 @@ def test_cleanup_stale_eval_containers_tolerates_remove_errors(monkeypatch) -> N
     )
     no_created_timestamp = _FakeContainer(status="exited", created=None)
     client = _FakeDockerClient([remove_fails, no_created_timestamp])
-    monkeypatch.setattr(run_eval, "_docker_client_from_env", lambda: client)
+    monkeypatch.setattr(eval_containers, "_docker_client_from_env", lambda: client)
 
     removed, failed, error = run_eval.cleanup_stale_eval_containers(grace_sec=300, now_utc=now_utc)
 
@@ -87,7 +87,7 @@ def test_cleanup_stale_eval_containers_tolerates_remove_errors(monkeypatch) -> N
 
 def test_cleanup_stale_eval_containers_reports_unavailable_client(monkeypatch) -> None:
     monkeypatch.setattr(
-        run_eval,
+        eval_containers,
         "_docker_client_from_env",
         lambda: (_ for _ in ()).throw(RuntimeError("no docker")),
     )

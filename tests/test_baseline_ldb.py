@@ -22,7 +22,7 @@ from baselines.ldb.case_converter import (
     convert_case,
 )
 from baselines.ldb.result_extractor import make_diff
-from evals.subprocess_monitor import MonitoredSubprocessResult
+from baselines.subprocess_monitor import MonitoredSubprocessResult
 
 
 @pytest.fixture()

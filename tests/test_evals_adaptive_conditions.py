@@ -16,7 +16,7 @@ from baselines.adapter_base import (
     BaselineConfig,
     BaselineResult,
 )
-from evals import eval_attempt_flow, run_eval
+from evals import attempt_proposal, eval_attempt_flow, run_eval
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -281,7 +281,9 @@ def test_adaptive_baseline_hybrid_writes_controller_packet_and_case_context(
     adapter = _HybridBaselineAdapter()
     patcher = BaselinePatcher(adapter=adapter, config=BaselineConfig())
 
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None))
+    monkeypatch.setattr(
+        eval_attempt_flow, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None)
+    )
     previous_execution = run_eval.set_active_execution_config(
         run_eval.ExecutionConfig(executor="local")
     )
@@ -342,7 +344,9 @@ def test_baseline_run_clears_stale_adaptive_sidecars_before_adapter_load(
     adapter = _HybridBaselineAdapter()
     patcher = BaselinePatcher(adapter=adapter, config=BaselineConfig())
 
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None))
+    monkeypatch.setattr(
+        eval_attempt_flow, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None)
+    )
     previous_execution = run_eval.set_active_execution_config(
         run_eval.ExecutionConfig(executor="local")
     )
@@ -393,9 +397,11 @@ def test_adaptive_baseline_hybrid_invokes_lambda_rlm_controller_backend(
     lambda_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     lambda_python.chmod(0o755)
 
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None))
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None)
+    )
+    monkeypatch.setattr(
+        eval_attempt_flow,
         "invoke_lambda_rlm_decomposition",
         lambda **_kwargs: LambdaRLMDecompositionResult(
             summary="First localize the return path, then keep the patch local.",
@@ -480,7 +486,9 @@ def test_adaptive_baseline_hybrid_lambda_rlm_uses_effective_baseline_default_mod
     lambda_python.chmod(0o755)
     observed: dict[str, object] = {}
 
-    monkeypatch.setattr(run_eval, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None))
+    monkeypatch.setattr(
+        eval_attempt_flow, "read_latest_snapshot", lambda _path: (_snapshot_payload(), None)
+    )
 
     def _fake_invoke_lambda_rlm_decomposition(**kwargs) -> LambdaRLMDecompositionResult:
         observed.update(kwargs)
@@ -494,7 +502,7 @@ def test_adaptive_baseline_hybrid_lambda_rlm_uses_effective_baseline_default_mod
         )
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "invoke_lambda_rlm_decomposition",
         _fake_invoke_lambda_rlm_decomposition,
     )
@@ -636,7 +644,7 @@ def test_adaptive_baseline_hybrid_acceptance_uses_helper_delegate_strict_retry(
         _FakeOpenAICompatPatcher,
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -646,7 +654,9 @@ def test_adaptive_baseline_hybrid_acceptance_uses_helper_delegate_strict_retry(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
     previous_execution = run_eval.set_active_execution_config(
         run_eval.ExecutionConfig(executor="local")
@@ -1489,9 +1499,11 @@ def _run_adaptive_delayed_credit_case(
     patcher = _AdaptiveDelayedCreditPatcher(patch_outcomes=patch_outcomes)
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
-    monkeypatch.setattr(run_eval, "run_pytest", _run_pytest_for_helper_fix)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _run_pytest_for_helper_fix)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     run_kwargs: dict[str, object] = {}
@@ -1550,10 +1562,12 @@ def _run_adaptive_verifier_case(
         apply_calls["count"] += 1
         return apply_result
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -1597,7 +1611,7 @@ def _run_adaptive_action_case(
     controller.decision_model = decision_model
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1612,7 +1626,7 @@ def _run_adaptive_action_case(
         else None
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (effective_snapshot_payload, None),
     )
@@ -1652,7 +1666,7 @@ def test_layered_adaptive_gated_invokes_helper_after_repeated_signature(
     patcher = _AdaptiveGatedCapturePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1662,7 +1676,9 @@ def test_layered_adaptive_gated_invokes_helper_after_repeated_signature(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -1707,7 +1723,7 @@ def test_adaptive_llm_discretion_decline_keeps_monolithic_attempt(tmp_path, monk
     patcher = _AdaptiveDiscretionDeclinePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -1717,7 +1733,9 @@ def test_adaptive_llm_discretion_decline_keeps_monolithic_attempt(tmp_path, monk
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2696,7 +2714,7 @@ def test_adaptive_openai_helper_response_mode_override(
     monkeypatch.setattr(OpenAICompatPatcher, "request_context", _fake_request_context)
     monkeypatch.setattr(OpenAICompatPatcher, "propose_patch", _fake_propose_patch)
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2706,7 +2724,9 @@ def test_adaptive_openai_helper_response_mode_override(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     patcher = OpenAICompatPatcher(
@@ -2747,7 +2767,7 @@ def test_adaptive_llm_discretion_invalid_response_counts_as_consult_without_cont
     patcher = _AdaptiveDiscretionInvalidPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2757,7 +2777,9 @@ def test_adaptive_llm_discretion_invalid_response_counts_as_consult_without_cont
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2801,7 +2823,7 @@ def test_adaptive_llm_discretion_attempt1_snapshot_denial_syncs_helper_reason(
     patcher = _AdaptiveDiscretionSnapshotGenericPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2811,7 +2833,9 @@ def test_adaptive_llm_discretion_attempt1_snapshot_denial_syncs_helper_reason(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2851,7 +2875,7 @@ def test_adaptive_llm_discretion_backend_unavailable_does_not_spend_helper_budge
     patcher = _AdaptiveDiscretionBackendUnavailablePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2861,7 +2885,9 @@ def test_adaptive_llm_discretion_backend_unavailable_does_not_spend_helper_budge
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2900,7 +2926,7 @@ def test_adaptive_llm_discretion_transport_failure_does_not_spend_helper_budget(
     patcher = _AdaptiveDiscretionTransportFailurePatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2910,7 +2936,9 @@ def test_adaptive_llm_discretion_transport_failure_does_not_spend_helper_budget(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2949,7 +2977,7 @@ def test_adaptive_llm_discretion_compat_reasoning_only_does_not_spend_helper_bud
     patcher = _AdaptiveDiscretionCompatReasoningOnlyPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -2959,7 +2987,9 @@ def test_adaptive_llm_discretion_compat_reasoning_only_does_not_spend_helper_bud
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -2999,7 +3029,7 @@ def test_adaptive_llm_discretion_caps_helper_calls_and_stops_on_no_progress(
     patcher = _AdaptiveGatedCapturePatcher(name="adaptive_discretion_cap")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -3009,7 +3039,9 @@ def test_adaptive_llm_discretion_caps_helper_calls_and_stops_on_no_progress(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3044,7 +3076,7 @@ def test_adaptive_llm_discretion_grants_one_budget_topup(tmp_path, monkeypatch) 
     patcher = _AdaptiveGatedCapturePatcher(name="adaptive_discretion_topup")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -3054,7 +3086,9 @@ def test_adaptive_llm_discretion_grants_one_budget_topup(tmp_path, monkeypatch) 
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3213,7 +3247,7 @@ def test_adaptive_llm_discretion_repair_failure_topup_forces_helper_invoke(
     )
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -3223,7 +3257,9 @@ def test_adaptive_llm_discretion_repair_failure_topup_forces_helper_invoke(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3287,7 +3323,7 @@ def test_adaptive_llm_discretion_topup_does_not_fire_when_pregate_skips(
     )
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -3297,7 +3333,7 @@ def test_adaptive_llm_discretion_topup_does_not_fire_when_pregate_skips(
         ),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (next(snapshots), None),
     )
@@ -3442,7 +3478,7 @@ def test_adaptive_reintroduces_stage_a_index_when_context_is_truncated(
     patcher = _AdaptiveGatedCapturePatcher(name="adaptive_index_fallback")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -3452,7 +3488,9 @@ def test_adaptive_reintroduces_stage_a_index_when_context_is_truncated(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3507,12 +3545,14 @@ def test_adaptive_postpatch_recompute_avoids_premature_stop_on_signature_change(
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "_build_failure_signature_for_attempt",
         lambda *, run, snapshot: (run.stdout or "").strip(),
     )
@@ -3565,10 +3605,12 @@ def test_adaptive_patch_verifier_rejects_test_only_patch_before_apply(
         apply_calls["count"] += 1
         return True, ""
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3650,8 +3692,8 @@ def test_patch_verifier_scope_all_enables_verifier_on_baseline_condition(
         apply_calls["count"] += 1
         return False, "simulated apply failure"
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
 
     records = run_eval.run_one_condition(
         case=case,
@@ -3746,10 +3788,12 @@ def test_adaptive_patch_verifier_allows_neighbor_patch_and_reaches_apply(
         apply_calls["count"] += 1
         return False, "simulated apply failure"
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
-    monkeypatch.setattr(run_eval, "apply_diff", _fake_apply_diff)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "apply_diff", _fake_apply_diff)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -3957,11 +4001,11 @@ def test_adaptive_patch_verifier_repair_skips_when_attempt_budget_is_exhausted(
     def _fake_remaining_attempt_budget(_deadline) -> float:
         return next(remaining_budget_values, 0.0)
 
-    monkeypatch.setattr(
-        run_eval,
-        "_remaining_attempt_propose_budget_sec",
-        _fake_remaining_attempt_budget,
-    )
+    # The attempt flow and the shared-budget proposal helpers both read the deadline.
+    for module in (eval_attempt_flow, attempt_proposal):
+        monkeypatch.setattr(
+            module, "_remaining_attempt_propose_budget_sec", _fake_remaining_attempt_budget
+        )
 
     records, run_calls, apply_calls = _run_adaptive_verifier_case(
         tmp_path=tmp_path,
@@ -4186,9 +4230,11 @@ def test_syntax_preflight_retries_within_same_attempt(tmp_path, monkeypatch) -> 
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4331,9 +4377,11 @@ def test_adaptive_baseline_syntax_preflight_retries_accumulate_bridge_timings(
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
     monkeypatch.setattr(
         eval_attempt_flow,
@@ -4416,9 +4464,11 @@ def test_syntax_preflight_exhaustion_marks_attempt_failed(tmp_path, monkeypatch)
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4485,9 +4535,9 @@ def test_syntax_preflight_fallthrough_runs_tests_on_exhaustion(tmp_path, monkeyp
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "read_latest_snapshot",
         lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
@@ -4575,9 +4625,11 @@ def test_syntax_preflight_clears_transient_patch_meta_between_cycles(tmp_path, m
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4649,9 +4701,11 @@ def test_patch_sanitize_reject_then_retry_success(tmp_path, monkeypatch) -> None
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4714,9 +4768,11 @@ def test_patch_sanitize_exhaustion_marks_attempt_failed(tmp_path, monkeypatch) -
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4788,9 +4844,11 @@ def test_patch_sanitize_disabled_allows_patch_to_apply(tmp_path, monkeypatch) ->
             stderr="",
         )
 
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     records = run_eval.run_one_condition(
@@ -4870,9 +4928,11 @@ def test_openai_response_mode_autoswitch_on_patch_sanitize_retry(tmp_path, monke
         )
 
     monkeypatch.setattr(OpenAICompatPatcher, "propose_patch", _fake_propose_patch)
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     patcher = OpenAICompatPatcher(
@@ -4972,9 +5032,11 @@ def test_openai_response_mode_autoswitch_on_syntax_preflight_retry(tmp_path, mon
         )
 
     monkeypatch.setattr(OpenAICompatPatcher, "propose_patch", _fake_propose_patch)
-    monkeypatch.setattr(run_eval, "run_pytest", _fake_run_pytest)
+    monkeypatch.setattr(eval_attempt_flow, "run_pytest", _fake_run_pytest)
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     patcher = OpenAICompatPatcher(
@@ -5021,7 +5083,7 @@ def test_adaptive_online_policy_shadow_keeps_baseline_action(tmp_path, monkeypat
     controller, events_path = _skip_biased_online_controller(tmp_path, mode="shadow")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5031,7 +5093,9 @@ def test_adaptive_online_policy_shadow_keeps_baseline_action(tmp_path, monkeypat
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5078,7 +5142,7 @@ def test_adaptive_online_policy_on_can_skip_helper(tmp_path, monkeypatch) -> Non
     controller, events_path = _skip_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5088,7 +5152,9 @@ def test_adaptive_online_policy_on_can_skip_helper(tmp_path, monkeypatch) -> Non
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5138,7 +5204,7 @@ def test_adaptive_online_policy_suppresses_update_for_invalid_helper_payload(
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5148,7 +5214,9 @@ def test_adaptive_online_policy_suppresses_update_for_invalid_helper_payload(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5189,7 +5257,7 @@ def test_adaptive_online_policy_suppresses_update_for_helper_backend_unavailable
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5199,7 +5267,9 @@ def test_adaptive_online_policy_suppresses_update_for_helper_backend_unavailable
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5240,7 +5310,7 @@ def test_adaptive_online_policy_suppresses_update_for_helper_transport_failure(
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5250,7 +5320,9 @@ def test_adaptive_online_policy_suppresses_update_for_helper_transport_failure(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5291,7 +5363,7 @@ def test_adaptive_online_policy_suppresses_update_for_helper_compat_reasoning_on
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5301,7 +5373,9 @@ def test_adaptive_online_policy_suppresses_update_for_helper_compat_reasoning_on
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5345,7 +5419,7 @@ def test_adaptive_online_policy_updates_for_helper_request_budget_exceeded(
     controller, events_path = _invoke_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5355,7 +5429,9 @@ def test_adaptive_online_policy_updates_for_helper_request_budget_exceeded(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5399,7 +5475,7 @@ def test_adaptive_stagnation_override_forces_helper_after_policy_skip(
     controller, _events_path = _skip_biased_online_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5409,7 +5485,9 @@ def test_adaptive_stagnation_override_forces_helper_after_policy_skip(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5469,7 +5547,7 @@ def _run_online_feature_vector_case(
     patcher = _AdaptiveDiscretionInvalidPatcher(name="adaptive_online_feature_keys")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5479,7 +5557,9 @@ def _run_online_feature_vector_case(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     return run_eval.run_one_condition(
@@ -5570,7 +5650,7 @@ def test_adaptive_online_policy_logging_failure_does_not_abort_attempt(
 
     monkeypatch.setattr(controller, "record_outcome", _raise_record_outcome)
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5580,7 +5660,9 @@ def test_adaptive_online_policy_logging_failure_does_not_abort_attempt(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5616,7 +5698,7 @@ def test_adaptive_budget_policy_shadow_keeps_baseline_budget(tmp_path, monkeypat
     controller, events_path = _increase_biased_budget_controller(tmp_path, mode="shadow")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5626,7 +5708,9 @@ def test_adaptive_budget_policy_shadow_keeps_baseline_budget(tmp_path, monkeypat
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5699,7 +5783,7 @@ def test_adaptive_budget_policy_on_applies_multiplier(tmp_path, monkeypatch) -> 
     controller, events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5709,7 +5793,9 @@ def test_adaptive_budget_policy_on_applies_multiplier(tmp_path, monkeypatch) -> 
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5806,7 +5892,7 @@ def test_adaptive_budget_policy_hierarchical_records_non_time_family_multiplier(
     )
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5816,7 +5902,9 @@ def test_adaptive_budget_policy_hierarchical_records_non_time_family_multiplier(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5877,7 +5965,7 @@ def test_adaptive_budget_policy_retry_gate_attempts_finalize_budget_bookkeeping(
     controller, events_path = _increase_biased_budget_controller(tmp_path, mode=mode)
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5887,7 +5975,9 @@ def test_adaptive_budget_policy_retry_gate_attempts_finalize_budget_bookkeeping(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -5938,7 +6028,7 @@ def test_adaptive_budget_policy_falls_back_when_budget_override_replace_fails(
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -5948,7 +6038,9 @@ def test_adaptive_budget_policy_falls_back_when_budget_override_replace_fails(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6003,7 +6095,7 @@ def test_adaptive_budget_policy_penalizes_request_budget_exceeded(tmp_path, monk
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6013,7 +6105,9 @@ def test_adaptive_budget_policy_penalizes_request_budget_exceeded(tmp_path, monk
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6056,7 +6150,7 @@ def test_adaptive_budget_feature_vector_excludes_case_metadata(tmp_path, monkeyp
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6066,7 +6160,9 @@ def test_adaptive_budget_feature_vector_excludes_case_metadata(tmp_path, monkeyp
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6127,7 +6223,7 @@ def test_adaptive_budget_policy_on_non_openai_patcher_still_applies_runner_contr
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6137,7 +6233,9 @@ def test_adaptive_budget_policy_on_non_openai_patcher_still_applies_runner_contr
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6184,7 +6282,7 @@ def test_adaptive_budget_policy_keeps_unlimited_helper_budget_unlimited(
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6194,7 +6292,9 @@ def test_adaptive_budget_policy_keeps_unlimited_helper_budget_unlimited(
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6231,7 +6331,7 @@ def test_adaptive_budget_policy_highest_tier_switches_response_mode(tmp_path, mo
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6241,7 +6341,9 @@ def test_adaptive_budget_policy_highest_tier_switches_response_mode(tmp_path, mo
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6277,7 +6379,7 @@ def test_adaptive_budget_policy_does_not_autoswitch_full_file_mode(tmp_path, mon
     controller, _events_path = _increase_biased_budget_controller(tmp_path, mode="on")
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,
@@ -6287,7 +6389,9 @@ def test_adaptive_budget_policy_does_not_autoswitch_full_file_mode(tmp_path, mon
         ),
     )
     monkeypatch.setattr(
-        run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
     )
 
     try:
@@ -6643,7 +6747,7 @@ def test_run_one_condition_strips_eval_only_artifacts_from_workdir_and_prompt(
     patcher = _CapturePromptPatcher()
 
     monkeypatch.setattr(
-        run_eval,
+        eval_attempt_flow,
         "run_pytest",
         lambda *args, **kwargs: run_eval.RunResult(
             returncode=1,

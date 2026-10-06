@@ -81,7 +81,7 @@ from .schema import (
 )
 from .state import DecisionStateInputs, build_decision_state, redact_terms_for_unit
 
-if TYPE_CHECKING:  # pragma: no cover - typing only, these imports pull in run_eval
+if TYPE_CHECKING:  # pragma: no cover - typing only, these imports pull in the harness
     from ..eval_types import CaseSpec, PreGateResult
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -406,13 +406,10 @@ def available_actions_for_attempt_one(
 
 def observe_case(case: CaseSpec, *, options: ProbeOptions) -> CaseObservation:
     """Run the failing test once in a neutral temp dir and build the attempt-1 state inputs."""
+    from ..adaptive_progress import _traceback_informativeness_pre_gate
     from ..eval_evidence import _strip_eval_only_case_artifacts
-    from ..run_eval import (
-        Condition,
-        _traceback_informativeness_pre_gate,
-        read_latest_snapshot,
-        run_pytest,
-    )
+    from ..eval_types import Condition
+    from ..pytest_runner import read_latest_snapshot, run_pytest
 
     with tempfile.TemporaryDirectory(prefix=_TEMP_DIR_PREFIX) as tmp:
         workdir = Path(tmp)
@@ -878,7 +875,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def select_cases(args: argparse.Namespace) -> list[CaseSpec]:
     """Load the cases directory and apply the selection filters, including the split."""
-    from ..run_eval import load_cases
+    from ..case_loading import load_cases
 
     cases_dir = Path(str(args.cases_dir))
     if not cases_dir.is_absolute():

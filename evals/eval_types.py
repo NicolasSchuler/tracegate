@@ -65,7 +65,9 @@ from evals.runtime_resolution import (
 )
 
 if TYPE_CHECKING:
+    from evals.eval_seams import EvalSeams
     from evals.patchers.payload_types import ContextRequestEntry, ContextRequestPayload
+    from evals.run_context import RunContext
 else:
     ContextRequestEntry = dict[str, Any]  # type: ignore[misc,assignment]
     ContextRequestPayload = dict[str, Any]  # type: ignore[misc,assignment]
@@ -935,6 +937,8 @@ class RunConditionInputs:
     openai_transport_recovery: bool = DEFAULT_OPENAI_TRANSPORT_RECOVERY_ENABLED
     record_sink: Callable[[dict[str, Any]], None] | None = None
     progress_update: Callable[[str, dict[str, Any] | None], None] | None = None
+    # Execution config, run settings and container pool shared by every pytest run.
+    run_context: RunContext | None = None
 
     @classmethod
     def from_components(
@@ -1249,6 +1253,8 @@ class EvalUnitInputs:
     progress_verbosity: str = "basic"
     progress_heartbeat_sec: float = DEFAULT_PROGRESS_HEARTBEAT_SEC
     unit_progress_callback: Callable[[str, str, str, dict[str, Any] | None], None] | None = None
+    # Run-level collaborators from run_eval; None means the flows' own defaults.
+    seams: EvalSeams | None = None
 
 
 _PROGRESS_LEVEL_ORDER = {"basic": 1, "detailed": 2, "trace": 3}

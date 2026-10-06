@@ -15,7 +15,7 @@ import pytest
 from baselines.adapter_base import BaselineConfig
 from baselines.intervenor.adapter import IntervenorAdapter
 from baselines.ldb.adapter import LDBAdapter
-from evals import run_eval
+from evals import baseline_runtime, run_eval
 
 
 def _write_executable(path: Path) -> Path:
@@ -290,6 +290,8 @@ def test_make_patcher_auto_detects_baseline_env_python(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -330,6 +332,8 @@ def test_make_patcher_lambda_rlm_forwards_baseline_extra(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -404,6 +408,8 @@ def test_make_patcher_rlm_forwards_baseline_extra(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -478,6 +484,8 @@ def test_make_patcher_tracecoder_forwards_shared_openai_compat_extra(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -536,6 +544,8 @@ def test_make_patcher_baseline_shorthand_auto_fills_repo_dir_and_env_python(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -576,6 +586,8 @@ def test_make_patcher_forwards_split_baseline_timeouts(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -613,6 +625,7 @@ def test_validate_external_baseline_runtime_accepts_auto_detected_env(
     repo_dir = _make_baseline_repo(repo_root, "LLMDebugger")
     env_python = _write_executable(repo_root / "baselines" / "envs" / "ldb" / "bin" / "python")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     resolved = run_eval._validate_external_baseline_runtime_requirements(
         baseline_name="ldb",
@@ -631,6 +644,7 @@ def test_validate_external_baseline_runtime_accepts_explicit_python(
     repo_dir = _make_baseline_repo(repo_root, "TraceCoder")
     explicit_python = _write_executable(tmp_path / "custom-env" / "bin" / "python")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     resolved = run_eval._validate_external_baseline_runtime_requirements(
         baseline_name="tracecoder",
@@ -648,6 +662,7 @@ def test_validate_external_baseline_runtime_rejects_missing_repo_dir(
     repo_root = tmp_path / "repo"
     env_python = _write_executable(repo_root / "baselines" / "envs" / "ldb" / "bin" / "python")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     with pytest.raises(ValueError, match=r"setup_repos\.sh"):
         run_eval._validate_external_baseline_runtime_requirements(
@@ -666,6 +681,7 @@ def test_validate_external_baseline_runtime_rejects_missing_default_env(
     repo_root = tmp_path / "repo"
     repo_dir = _make_baseline_repo(repo_root, "INTERVENOR")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     with pytest.raises(ValueError, match=r"setup_envs\.sh"):
         run_eval._validate_external_baseline_runtime_requirements(
@@ -682,6 +698,7 @@ def test_validate_external_baseline_runtime_rejects_missing_explicit_python(
     repo_root = tmp_path / "repo"
     repo_dir = _make_baseline_repo(repo_root, "lambda-RLM")
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     with pytest.raises(ValueError, match=r"setup_envs\.sh"):
         run_eval._validate_external_baseline_runtime_requirements(
@@ -705,6 +722,8 @@ def test_make_patcher_rejects_missing_baseline_env_before_build(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -748,6 +767,8 @@ def test_make_patcher_rewrites_stale_repo_local_baseline_paths(
         return object()
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
     monkeypatch.setattr(
         "evals.patchers.baseline_patcher.build_baseline_patcher",
         _fake_build_baseline_patcher,
@@ -806,6 +827,8 @@ def test_resolve_external_runtime_uses_manifest_repo_dir_when_default_repo_missi
     )
 
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    monkeypatch.setattr(baseline_runtime, "_REPO_ROOT", repo_root)
 
     resolved_repo, resolved_python = run_eval._resolve_external_baseline_runtime_requirements(
         baseline_name="lambda_rlm",
@@ -1205,7 +1228,7 @@ def test_ldb_adapter_uses_configured_python_executable(
         )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    from evals.subprocess_monitor import MonitoredSubprocessResult
+    from baselines.subprocess_monitor import MonitoredSubprocessResult
 
     def _fake_monitored_run(
         *,
