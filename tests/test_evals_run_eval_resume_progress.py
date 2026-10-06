@@ -1776,3 +1776,59 @@ def test_run_eval_resume_rejects_an_older_record_schema(tmp_path) -> None:
     assert completed == {("c1", "base_repair")}
     assert fingerprint == "fp-old"
     assert count == 1
+
+
+def test_resume_of_a_pre_remediation_run_is_rejected(tmp_path, monkeypatch, capsys) -> None:
+    """A v6-era run cannot be continued as a v7 run (LLM-02/LLM-22 bookkeeping).
+
+    Pre-remediation records carry a fingerprint computed without the keys this revision
+    added, so identical CLI arguments still abort the resume instead of mixing old and
+    new repair semantics under one run_id.
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    case = _make_case(repo_root, "case_only")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    def _run(*, case, condition, run_id, run_metadata, **_kwargs):
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run)
+    argv = [
+        "--run-id",
+        "legacy-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "base_repair",
+        "--k",
+        "1",
+    ]
+    assert _run_eval_main(argv) == 0
+    capsys.readouterr()
+
+    # Rewrite the results as a pre-remediation (v6) run with its own fingerprint.
+    results_path = repo_root / "evals" / "results" / "legacy-run.jsonl"
+    rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
+    for row in rows:
+        row["schema_version"] = 6
+        row["run_metadata"]["run_settings_fingerprint"] = "pre_remediation_fingerprint"
+    results_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=True) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    exit_code = _run_eval_main(argv)
+
+    # The record-schema guard (codex 1d#4) rejects the v6 rows before the fingerprint check.
+    assert exit_code != 0
+    assert "predates this harness" in capsys.readouterr().out
