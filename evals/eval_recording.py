@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from baselines.case_information import CASE_INFO_POLICY
 from baselines.openai_compat import normalize_compat_profile
 
 from . import _json as json
@@ -287,6 +288,7 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "native_baseline_mode": str(getattr(args, "native_baseline_mode", "") or ""),
+        "case_info_policy": CASE_INFO_POLICY,
         "prompt_retry_reflection": bool(getattr(args, "prompt_retry_reflection", False)),
         "prompt_adaptive_stage_b_cot": bool(getattr(args, "prompt_adaptive_stage_b_cot", False)),
         "prompt_repair_method_scaffold": bool(

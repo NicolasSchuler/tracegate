@@ -83,7 +83,6 @@ def _intervenor_case_dict(
             case_id="test_case",
             python_args=("-m", "pytest", "-q", "test_buggy.py"),
             timeout_sec=10,
-            description="Multiply two numbers.",
         ),
     ).to_dict()
 
@@ -260,7 +259,6 @@ class TestIntervenorBehavioralConformance:
                 case_id="passing",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply.",
             ),
         ).to_dict()
 

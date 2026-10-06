@@ -69,6 +69,7 @@ Primary CLI:
 python -m evals.swebench.cli generate-lite \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --instance-ids-file <optional> \
   --openai-base-url http://localhost:<port> \
@@ -94,6 +95,14 @@ python -m evals.swebench.cli prepare-scoring-smoke \
   --run-dir /path/to/evals/swebench_runs/<id> \
   --max-instances 2
 ```
+
+`--snapshot-dir` is required whenever the `llmdebug` condition is requested: it
+holds one `<instance_id>.txt|.md|.json` llmdebug artifact per instance, and
+generation fails fast without it (DAT-03). `run_metadata.json` records
+`prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
+Prompts carry only the issue text by default; `--include-hints` (Lite) and
+`--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
+which are not part of the official task (DAT-01, DAT-02).
 
 Local Docker convenience wrapper:
 
@@ -166,6 +175,7 @@ Primary CLI:
 python -m evals.swebench_pro.cli generate-pro \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --openai-base-url http://localhost:<port> \
   --openai-model <model_alias> \
@@ -1288,8 +1298,8 @@ uv run python -m evals.eval_summary <run_id>
 ```
 
 This summary command reads `evals/results/<run_id>.jsonl` and enforces strict
-schema validation (`schema_version=6`; legacy `schema_version=5` records are
-still accepted during the digest migration).
+schema validation (`schema_version=7`; `schema_version=6` and legacy
+`schema_version=5` records are still accepted).
 
 ```bash
 uv run python -m evals.analyze_results evals/results/*.jsonl --out evals/results/summary.json
@@ -1303,9 +1313,19 @@ uv run python -m evals.analyze_results \
 ```
 
 `evals.analyze_results` now enforces strict schema validation for current
-`schema_version=6` records and still accepts legacy `schema_version=5` outputs
-from the pre-xxhash digest format. Older harness versions remain unsupported
-and should be regenerated with the current harness before analysis.
+`schema_version=7` records and still accepts `schema_version=6` and legacy
+`schema_version=5` outputs (the pre-xxhash digest format). Older harness versions remain
+unsupported and should be regenerated with the current harness before analysis.
+
+#### Record schema versions
+
+- **7** (2026-10-04 code review remediation; see
+  `docs/2026-10-04-code-review-findings.md`). Records written after the review fixes. Changes
+  in record meaning versus v6: baselines no longer receive case descriptions or labels
+  (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07). Later review fixes extend
+  this list.
+- **6**: xxh3_128 prompt/evidence hash fields.
+- **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
 `record_type="infra_event"` and `note="infra_transport_failure"`. These stay in the main
 results JSONL for outage diagnostics, but resume logic, selection tools, and analysis ignore

@@ -893,14 +893,20 @@ class TestBaselinePatcher:
             encoding="utf-8",
         )
 
-        patcher.propose_patch(prompt="ignored", context_dir=context_dir, cwd=stub_case)
+        result = patcher.propose_patch(prompt="ignored", context_dir=context_dir, cwd=stub_case)
 
         assert adapter.seen_case_context is not None
         assert adapter.seen_case_context.case_id == "stub_case"
         assert adapter.seen_case_context.python_args == ("-m", "pytest", "-q", "test_buggy.py")
         assert adapter.seen_case_context.timeout_sec == 17
-        assert adapter.seen_case_context.description == "stub description"
         assert adapter.seen_case_context.schema_version == BASELINE_CONTRACT_VERSION
+        # ATT-02 / D1: dataset labels in an older context file are dropped, not forwarded.
+        assert not hasattr(adapter.seen_case_context, "description")
+        assert result.meta is not None
+        assert result.meta["case_info_policy"] == "neutral_v1"
+        assert result.meta["baseline_case_context_issues"] == [
+            "hidden_case_fields_dropped:description,category,difficulty,snapshot_dependency"
+        ]
 
     def test_propose_patch_preserves_case_context_schema_version(
         self,
@@ -1002,8 +1008,6 @@ class TestBaselinePatcher:
         assert adapter.seen_case_context.case_id == stub_case.name
         assert adapter.seen_case_context.python_args == ("-m", "pytest")
         assert adapter.seen_case_context.timeout_sec == 0
-        assert adapter.seen_case_context.description is None
-        assert adapter.seen_case_context.category == "logic"
         assert result.meta is not None
         assert result.meta["baseline_case_context_status"] == "loaded_with_warnings"
         assert result.meta["baseline_case_context_issues"] == [
@@ -1011,7 +1015,7 @@ class TestBaselinePatcher:
             "case_id_invalid_type:int",
             "python_args_dropped_items:1",
             "timeout_sec_invalid_value:'bad-timeout'",
-            "description_invalid_type:list",
+            "hidden_case_fields_dropped:description,category",
         ]
 
     def test_propose_patch_loads_case_context_with_blank_schema_and_defaults(

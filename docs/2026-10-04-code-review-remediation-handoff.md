@@ -180,10 +180,10 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 **Goal:** every recorded outcome means what it says, and every arm gets comparable inputs and budgets. Sub-phases are ordered by priority; 1A–1D can be split across branches.
 
 ### 1A. Information parity and leakage (D1, D2)
-- [ ] **ATT-02:** apply D1 to `baseline_case_context.json` (`evals/eval_attempt_flow.py:2498`, `:5940`) and to the adapters' converters. Remove fix hints from `description` at import time (`quixbugs_importer.py:334`, `pyresbugs_importer.py:393-396`). Record a `case_info_policy` value in run metadata.
-- [ ] **BAS-07:** define one case-information contract, covering which files and which test source each arm sees. Implement it in all five adapters, and record each arm's prompt artifacts per record.
-- [ ] **DAT-01, DAT-02:** apply D2 in both `generate.py` files and update the prompt test.
-- [ ] **DAT-03:** fail fast when the `llmdebug` condition runs without `--snapshot-dir`. Record `snapshot_dir` and per-instance snapshot hits and misses in `run_metadata.json`. Fix the README examples.
+- [x] **ATT-02:** apply D1 to `baseline_case_context.json` (`evals/eval_attempt_flow.py:2498`, `:5940`) and to the adapters' converters. Remove fix hints from `description` at import time (`quixbugs_importer.py:334`, `pyresbugs_importer.py:393-396`). Record a `case_info_policy` value in run metadata.
+- [x] **BAS-07:** define one case-information contract, covering which files and which test source each arm sees. Implement it in all five adapters, and record each arm's prompt artifacts per record.
+- [x] **DAT-01, DAT-02:** apply D2 in both `generate.py` files and update the prompt test.
+- [x] **DAT-03:** fail fast when the `llmdebug` condition runs without `--snapshot-dir`. Record `snapshot_dir` and per-instance snapshot hits and misses in `run_metadata.json`. Fix the README examples.
 - **Acceptance:**
   - A test renders every arm's model-facing input from one fixture case with a sentinel description. The sentinel is absent from all arms, or present in all of them, per D1.
   - A CLI test covers the missing `--snapshot-dir` failure.

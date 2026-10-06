@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from baselines.adapter_base import BaselineCaseIncompatibleError
+from baselines.case_information import TEST_SOURCE_ASSERTS, case_information_record
 from baselines.case_schemas import LDBCaseInput
 
 
@@ -40,7 +41,6 @@ def convert_case(
     case_dir: Path,
     *,
     case_id: str | None = None,
-    description: str = "",
 ) -> LDBCaseInput:
     """Convert an llmdebug case directory into a strict LDB input row."""
     resolved_case_id = str(case_id or case_dir.name)
@@ -63,7 +63,6 @@ def convert_case(
         case_id=resolved_case_id,
         buggy_code=buggy_code,
         test_code=test_code,
-        description=description,
     )
 
     return LDBCaseInput.from_dict(
@@ -74,8 +73,11 @@ def convert_case(
             "test": lowered.check_function,
             "seed": buggy_code,
             "given_tests": lowered.given_tests,
-            "description": description,
             "dataset_type": "llmdebug",
+            "case_information": case_information_record(
+                test_source_exposure=TEST_SOURCE_ASSERTS,
+                prompt_files=("buggy.py", "test_buggy.py"),
+            ),
         }
     )
 
@@ -120,18 +122,11 @@ def _extract_entry_point(  # pyright: ignore[reportUnusedFunction]
     return import_match or "solution"
 
 
-def _build_prompt(buggy_code: str, description: str, entry_point: str) -> str:
+def _build_prompt(buggy_code: str, entry_point: str) -> str:
     """Build the callable signature/docstring prompt LDB expects."""
     try:
         tree = ast.parse(buggy_code)
     except SyntaxError:
-        if description:
-            return textwrap.dedent(
-                f"""\
-                def {entry_point}():
-                    \"\"\"{description}\"\"\"
-                """
-            )
         return f"def {entry_point}():"
 
     for node in ast.walk(tree):
@@ -149,18 +144,8 @@ def _build_prompt(buggy_code: str, description: str, entry_point: str) -> str:
                 if lines[body_index].strip().endswith(('"""', "'''")):
                     break
                 body_index += 1
-        elif description:
-            indent = " " * 4
-            prompt_lines.append(f'{indent}"""{description}"""')
         return "\n".join(prompt_lines)
 
-    if description:
-        return textwrap.dedent(
-            f"""\
-            def {entry_point}():
-                \"\"\"{description}\"\"\"
-            """
-        )
     return f"def {entry_point}():"
 
 
@@ -176,7 +161,6 @@ def _lower_case(
     case_id: str,
     buggy_code: str,
     test_code: str,
-    description: str = "",
 ) -> _LoweredLDBCase:
     try:
         buggy_tree = ast.parse(buggy_code)
@@ -295,7 +279,7 @@ def _lower_case(
 
     return _LoweredLDBCase(
         entry_point=entry_point,
-        prompt=_build_prompt(buggy_code, description, entry_point),
+        prompt=_build_prompt(buggy_code, entry_point),
         given_tests=given_tests,
         check_function=check_function,
     )

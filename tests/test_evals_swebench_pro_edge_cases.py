@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import CONDITION_BASELINE, CONDITION_LLMDEBUG, PredictionRecord
 from evals.swebench_pro.generate import _build_prompt_pro, _stringify_field
 from evals.swebench_pro.io import (
@@ -110,20 +111,26 @@ class TestUnicodeBuildPromptPro:
 
     def test_chinese_characters_in_problem_statement(self) -> None:
         row = _make_row(problem_statement="修复这个错误：变量未定义")  # noqa: RUF001
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "修复这个错误：变量未定义" in prompt  # noqa: RUF001
 
     def test_emoji_in_problem_statement(self) -> None:
         row = _make_row(problem_statement="Fix the 🐛 bug in 📦 package")
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "🐛" in prompt
         assert "📦" in prompt
 
     def test_rtl_text_in_problem_statement(self) -> None:
         row = _make_row(problem_statement="إصلاح الخطأ في البرنامج")
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "إصلاح الخطأ في البرنامج" in prompt
 
@@ -133,7 +140,9 @@ class TestUnicodeBuildPromptPro:
             requirements="パッケージ>=1.0",
             interface="def lösung(входные_данные: str) -> str: ...",
         )
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "日本語テスト" in prompt
         assert "パッケージ>=1.0" in prompt
@@ -264,7 +273,9 @@ class TestEmptyMissingFields:
             fail_to_pass=None,
             pass_to_pass=None,
         )
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "Fix the Pro bug." in prompt
         assert "Requirements:" not in prompt
@@ -281,7 +292,9 @@ class TestEmptyMissingFields:
             fail_to_pass="",
             pass_to_pass="",
         )
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "Requirements:" not in prompt
         assert "Interface:" not in prompt
@@ -289,7 +302,9 @@ class TestEmptyMissingFields:
 
     def test_empty_problem_statement(self) -> None:
         row = _make_row(problem_statement="")
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         # Prompt still includes structural elements
         assert "Repository: demo/pro-repo" in prompt
@@ -298,21 +313,27 @@ class TestEmptyMissingFields:
 
     def test_whitespace_only_problem_statement(self) -> None:
         row = _make_row(problem_statement="   \n  \t  ")
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "Repository: demo/pro-repo" in prompt
         assert "Issue:" in prompt
 
     def test_empty_fail_to_pass_string(self) -> None:
         row = _make_row(fail_to_pass="", pass_to_pass="")
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "Fail-to-pass tests:" not in prompt
         assert "Pass-to-pass tests:" not in prompt
 
     def test_empty_list_fail_to_pass(self) -> None:
         row = _make_row(fail_to_pass=[], pass_to_pass=[])
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_BASELINE, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_BASELINE, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         assert "Fail-to-pass tests:" not in prompt
         assert "Pass-to-pass tests:" not in prompt
@@ -325,11 +346,13 @@ class TestEmptyMissingFields:
             fail_to_pass=None,
             pass_to_pass=None,
         )
-        prompt = _build_prompt_pro(row=row, condition=CONDITION_LLMDEBUG, snapshot_dir=None)
+        prompt = _build_prompt_pro(
+            row=row, condition=CONDITION_LLMDEBUG, prompt_inputs=PromptInputs(snapshot_dir=None)
+        )
 
         # llmdebug section still appears
         assert "llmdebug runtime evidence" in prompt
-        assert "No snapshot directory was provided" in prompt
+        assert "No instance-specific snapshot artifact was found." in prompt
 
 
 # ===========================================================================

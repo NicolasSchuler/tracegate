@@ -7,6 +7,7 @@ removing the marker is part of the fix commit.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -109,17 +110,63 @@ def test_att01_conftest_exit_status_hack_is_not_a_success(tmp_path: Path) -> Non
 _SENTINEL = "SENTINEL-ROOT-CAUSE-off-by-one-in-loop"
 
 
-@pytest.mark.xfail(strict=True, reason="ATT-02")
-def test_att02_baseline_case_context_omits_case_description(tmp_path: Path) -> None:
-    from evals.eval_attempt_flow import build_baseline_case_context_payload
+def test_att02_baseline_inputs_omit_case_description(tmp_path: Path) -> None:
+    """Every baseline arm's model-facing input is free of dataset descriptions/labels."""
+    import json
 
-    case = _make_failing_case(tmp_path)
-    case.description = _SENTINEL
-    case.category = "SENTINEL-CATEGORY"
-    payload = build_baseline_case_context_payload(case)
-    rendered = repr(payload)
-    assert _SENTINEL not in rendered
-    assert "SENTINEL-CATEGORY" not in rendered
+    from baselines.intervenor.case_converter import convert_case as intervenor_convert
+    from baselines.lambda_rlm.case_converter import convert_case as lambda_convert
+    from baselines.ldb.case_converter import convert_case as ldb_convert
+    from baselines.rlm.case_converter import convert_case as rlm_convert
+    from baselines.tracecoder.case_converter import convert_case as tracecoder_convert
+    from evals.eval_attempt_flow import _write_baseline_case_context
+    from evals.patchers.baseline_patcher import _load_baseline_case_context
+
+    case = dataclasses.replace(
+        _make_failing_case(tmp_path), description=_SENTINEL, category="SENTINEL-CATEGORY"
+    )
+    (case.path / "case.json").write_text(
+        json.dumps({"description": _SENTINEL, "category": "SENTINEL-CATEGORY"}),
+        encoding="utf-8",
+    )
+    attempt_dir = tmp_path / "attempt"
+    attempt_dir.mkdir()
+    _write_baseline_case_context(attempt_dir, case)
+    context_file = attempt_dir / "baseline_case_context.json"
+    assert _SENTINEL not in context_file.read_text(encoding="utf-8")
+
+    # Even a context file that still carries the labels must not leak them.
+    context_file.write_text(
+        json.dumps(
+            {
+                "case_id": case.case_id,
+                "python_args": list(case.python_args),
+                "description": _SENTINEL,
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = _load_baseline_case_context(context_file, default_case_id=case.case_id)
+    assert loaded.case_context is not None
+    assert any("hidden_case_fields_dropped" in issue for issue in loaded.issues)
+    context = loaded.case_context
+
+    workdir = tmp_path / "work"
+    shutil.copytree(case.path, workdir)
+    (workdir / "case.json").unlink()
+    inputs = [
+        ldb_convert(workdir, case_id=case.case_id),
+        intervenor_convert(workdir, case_context=context),
+        tracecoder_convert(workdir, case_context=context),
+        lambda_convert(workdir, case_context=context),
+        rlm_convert(workdir, case_context=context),
+    ]
+    for converted in inputs:
+        rendered = repr(converted.to_dict())
+        assert _SENTINEL not in rendered
+        assert "SENTINEL-CATEGORY" not in rendered
+        assert converted.case_information is not None
+        assert converted.case_information["case_info_policy"] == "neutral_v1"
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +295,6 @@ def test_sta02_repeated_runs_do_not_inflate_significance() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="DAT-03")
 def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path) -> None:
     from evals.swebench.generate import generate_lite_predictions
 
@@ -259,9 +305,33 @@ def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path
             openai_base_url="http://127.0.0.1:9",
             openai_model="stub",
             openai_api_key=None,
-            snapshot_dir=None,
             root=tmp_path,
         )
+
+
+@pytest.mark.parametrize("cli_module", ["evals.swebench.cli", "evals.swebench_pro.cli"])
+def test_dat03_cli_rejects_llmdebug_without_snapshot_dir(
+    cli_module: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import importlib
+
+    cli = importlib.import_module(cli_module)
+    command = "generate-lite" if cli_module == "evals.swebench.cli" else "generate-pro"
+    exit_code = cli.main(
+        [
+            command,
+            "--run-id",
+            "dat03-cli",
+            "--conditions",
+            "baseline,llmdebug",
+            "--openai-base-url",
+            "http://127.0.0.1:9",
+            "--openai-model",
+            "stub",
+        ]
+    )
+    assert exit_code == 1
+    assert "--snapshot-dir" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

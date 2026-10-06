@@ -56,14 +56,17 @@ class TestCaseConverter:
             case_id="my_case",
             python_args=("-m", "pytest", "-q", "test_buggy.py"),
             timeout_sec=11,
-            description="Multiply two numbers.",
         )
 
         result = convert_case(simple_case, case_context=context)
 
         assert result.task_id == "my_case"
         assert result.entry_point == "multiply"
-        assert result.description == "Multiply two numbers."
+        assert result.case_information == {
+            "case_info_policy": "neutral_v1",
+            "test_source_exposure": "full",
+            "prompt_files": ["buggy.py", "test_buggy.py"],
+        }
         assert result.python_args == ["-m", "pytest", "-q", "test_buggy.py"]
         assert result.timeout_sec == 11
         assert result.buggy_code == (simple_case / "buggy.py").read_text(encoding="utf-8")
@@ -79,7 +82,6 @@ class TestCaseConverter:
                 case_id="canonical_case_id",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=11,
-                description="Multiply two numbers.",
             ),
         )
 
@@ -91,15 +93,17 @@ class TestCaseConverter:
     def test_extract_entry_point_falls_back_to_import(self) -> None:
         assert _extract_entry_point("x = 1\n", "from buggy import transform\n") == "transform"
 
-    def test_build_prompt_uses_signature_and_description(self) -> None:
+    def test_build_prompt_uses_signature_and_full_test_source(self) -> None:
+        test_code = "def test_multiply():\n    assert multiply(2, 3) == 6\n"
         prompt = _build_prompt(
             'def multiply(a, b):\n    """Multiply values."""\n    return a * b\n',
-            "Multiply two numbers.",
+            test_code,
             "multiply",
         )
         assert "Primary symbol: multiply" in prompt
         assert "Definition:" in prompt
-        assert "Description: Multiply two numbers." in prompt
+        assert "Reference tests (test_buggy.py):\n" + test_code in prompt
+        assert "Description:" not in prompt
 
     def test_render_learner_prompt_appends_output_contract_by_default(self, tmp_path: Path) -> None:
         repo = _make_intervenor_repo(tmp_path)
@@ -233,7 +237,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         prompts: list[str] = []
@@ -320,7 +323,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         observed: list[tuple[str, int]] = []
@@ -365,7 +367,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
 
@@ -642,7 +643,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -762,7 +762,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -882,7 +881,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q"),
                 timeout_sec=15,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         case_input["llmdebug_controller_packet"] = {
@@ -1045,7 +1043,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
 
@@ -1118,7 +1115,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         responses = iter(
@@ -1167,7 +1163,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         prompts: list[str] = []
@@ -1236,7 +1231,6 @@ class TestIntervenorAdapter:
                 case_id="passing_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         monkeypatch.setattr(adapter, "_build_client", lambda config: object())
@@ -1266,7 +1260,6 @@ class TestIntervenorAdapter:
                 case_id="my_case",
                 python_args=("-m", "pytest", "-q", "test_buggy.py"),
                 timeout_sec=10,
-                description="Multiply two numbers.",
             ),
         ).to_dict()
         responses = iter(

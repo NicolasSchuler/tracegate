@@ -251,6 +251,7 @@ Generate paired predictions against a local endpoint:
 python -m evals.swebench.cli generate-lite \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --instance-ids-file <optional> \
   --openai-base-url http://127.0.0.1:12000/v1 \

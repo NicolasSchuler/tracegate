@@ -792,6 +792,7 @@ See [local_docker_eval_runbook.md](local_docker_eval_runbook.md#4-swe-bench-lite
 python -m evals.swebench.cli generate-lite \
   --run-id <id> \
   --conditions baseline,llmdebug \
+  --snapshot-dir <dir_with_instance_snapshots> \
   --max-instances <n|0> \
   --instance-ids-file <optional> \
   --openai-base-url http://127.0.0.1:12000/v1 \

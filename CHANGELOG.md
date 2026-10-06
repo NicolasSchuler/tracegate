@@ -9,6 +9,8 @@
 
 ### Bug Fixes
 
+- SWE-Bench Lite/Pro generation: the `llmdebug` condition now fails fast without `--snapshot-dir` (it previously equaled `baseline`), and `run_metadata.json` records `prompt_policy` and per-run `snapshot_coverage` (DAT-03). Prompts no longer include `hints_text` or the FAIL_TO_PASS/PASS_TO_PASS test IDs by default; `--include-hints` / `--include-test-ids` restore them (DAT-01, DAT-02, D2).
+- Stop sending dataset case descriptions and labels (`description`, `category`, `difficulty`, `snapshot_dependency`) to the external baselines; only the native conditions were blind to them (ATT-02, D1). Every baseline now also sees the test source, and each record carries `case_info_policy` and `case_information` (BAS-07). Importers no longer embed bug-type or fault text in `description`.
 - Apply `SnapshotConfig` redaction-profile defaults on the config-first capture path, preserve explicit overrides, and provide intent-aware frozen-config updates.
 - Compare both line and branch coverage in no-regression quality checks.
 - Stop feeding oracle case labels (`case_difficulty_ord`, `case_snapshot_dependency_ord`, `case_bug_source_imported`) to the helper policy by default; `--adaptive-online-include-case-labels` restores the old behavior.

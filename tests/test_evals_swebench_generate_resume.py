@@ -14,6 +14,7 @@ from evals.swebench.io import (
     read_predictions,
     write_predictions,
 )
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import CONDITION_BASELINE, PredictionRecord
 
 
@@ -83,7 +84,7 @@ def test_generate_for_condition_resumes_from_existing_predictions(tmp_path: Path
         patcher=cast(OpenAICompatPatcher, _StubPatcher()),
         model_label="stub-model::baseline",
         resume=True,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=1,
         openai_async=False,
         **_HEALTH_KWARGS,
@@ -128,7 +129,7 @@ def test_generate_for_condition_resume_no_existing_file(tmp_path: Path) -> None:
         patcher=cast(OpenAICompatPatcher, _StubPatcher()),
         model_label="stub-model::baseline",
         resume=True,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=1,
         openai_async=False,
         **_HEALTH_KWARGS,
@@ -174,7 +175,7 @@ def test_generate_for_condition_resume_all_already_done(tmp_path: Path) -> None:
         patcher=cast(OpenAICompatPatcher, _StubPatcher()),
         model_label="stub-model::baseline",
         resume=True,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=1,
         openai_async=False,
         **_HEALTH_KWARGS,

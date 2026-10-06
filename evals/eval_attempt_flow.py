@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from baselines.contracts import BASELINE_CONTRACT_VERSION
+from baselines.case_information import build_baseline_case_context_payload
 from evals import _json as json
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
@@ -1154,6 +1154,16 @@ def execute_eval_unit_impl(
         runtime_error=runtime_error,
         records_streamed=persisted_records_count > 0,
     )
+
+
+def _write_baseline_case_context(attempt_dir: Path, case: CaseSpec) -> None:
+    """Write the neutral baseline case context (ATT-02: no dataset labels or descriptions)."""
+    payload = build_baseline_case_context_payload(
+        case_id=case.case_id,
+        python_args=case.python_args,
+        timeout_sec=case.timeout_sec,
+    )
+    (attempt_dir / "baseline_case_context.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def run_one_condition_impl(
@@ -2499,21 +2509,7 @@ def run_one_condition_impl(
         attempt_dir.mkdir(parents=True, exist_ok=True)
         if is_baseline_patcher:
             remove_adaptive_controller_sidecars(context_dir=attempt_dir)
-            (attempt_dir / "baseline_case_context.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": BASELINE_CONTRACT_VERSION,
-                        "case_id": case.case_id,
-                        "python_args": list(case.python_args),
-                        "timeout_sec": int(case.timeout_sec),
-                        "description": case.description,
-                        "category": case.category,
-                        "difficulty": case.difficulty,
-                        "snapshot_dependency": case.snapshot_dependency,
-                    }
-                ),
-                encoding="utf-8",
-            )
+            _write_baseline_case_context(attempt_dir, case)
 
         _write_run_outputs(
             attempt_dir,
@@ -6035,21 +6031,7 @@ def run_one_condition_impl(
                 replay_attempt_dir.mkdir(parents=True, exist_ok=True)
                 if is_baseline_patcher:
                     remove_adaptive_controller_sidecars(context_dir=replay_attempt_dir)
-                    (replay_attempt_dir / "baseline_case_context.json").write_text(
-                        json.dumps(
-                            {
-                                "schema_version": BASELINE_CONTRACT_VERSION,
-                                "case_id": case.case_id,
-                                "python_args": list(case.python_args),
-                                "timeout_sec": int(case.timeout_sec),
-                                "description": case.description,
-                                "category": case.category,
-                                "difficulty": case.difficulty,
-                                "snapshot_dependency": case.snapshot_dependency,
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
+                    _write_baseline_case_context(replay_attempt_dir, case)
                 _write_run_outputs(
                     replay_attempt_dir,
                     replay_current,

@@ -7,6 +7,7 @@ import base64
 from pathlib import Path
 
 from baselines.adapter_base import BaselineCaseContext
+from baselines.case_information import TEST_SOURCE_FULL, case_information_record
 from baselines.case_schemas import LambdaRLMCaseInput
 
 _SKIP_DIR_NAMES = {
@@ -29,7 +30,6 @@ def convert_case(
     test_path = case_dir / "test_buggy.py"
     buggy_code = buggy_path.read_text(encoding="utf-8")
     test_code = test_path.read_text(encoding="utf-8")
-    description = case_context.description if case_context and case_context.description else ""
     files = _package_case_files(case_dir)
     return LambdaRLMCaseInput.from_dict(
         {
@@ -37,7 +37,6 @@ def convert_case(
             "entry_point": _extract_entry_point(buggy_code, test_code),
             "buggy_code": buggy_code,
             "test": test_code,
-            "description": description,
             "python_args": list(case_context.python_args) if case_context else [],
             "timeout_sec": int(case_context.timeout_sec)
             if case_context and case_context.timeout_sec
@@ -46,11 +45,11 @@ def convert_case(
             "prompt_context": _build_prompt_context(
                 files=files,
                 entry_point=_extract_entry_point(buggy_code, test_code),
-                description=description,
             ),
-            "category": case_context.category if case_context else None,
-            "difficulty": case_context.difficulty if case_context else None,
-            "snapshot_dependency": case_context.snapshot_dependency if case_context else None,
+            "case_information": case_information_record(
+                test_source_exposure=TEST_SOURCE_FULL,
+                prompt_files=_prompt_file_paths(files),
+            ),
         }
     )
 
@@ -82,14 +81,11 @@ def _build_prompt_context(
     *,
     files: list[dict[str, str]],
     entry_point: str,
-    description: str,
 ) -> str:
     sections = [
         "You are repairing buggy.py so the provided tests pass.",
         f"Primary symbol: {entry_point}",
     ]
-    if description:
-        sections.append(f"Description: {description}")
     rendered_files: list[str] = []
     omitted_paths: list[str] = []
     ordered_paths = list(_PRIMARY_PROMPT_FILES) + sorted(
@@ -116,6 +112,16 @@ def _build_prompt_context(
     if omitted_paths:
         sections.append("Omitted non-UTF8 files: " + ", ".join(omitted_paths))
     return "\n\n".join(section for section in sections if section.strip())
+
+
+def _prompt_file_paths(files: list[dict[str, str]]) -> list[str]:
+    """Paths ``_build_prompt_context`` renders into the prompt (UTF-8 Python files)."""
+    return [
+        str(row.get("path") or "")
+        for row in files
+        if str(row.get("path") or "").endswith(".py")
+        and str(row.get("encoding") or "utf-8") == "utf-8"
+    ]
 
 
 def _package_case_files(case_dir: Path) -> list[dict[str, str]]:

@@ -14,6 +14,11 @@ import textwrap
 from pathlib import Path
 
 from baselines.adapter_base import BaselineCaseContext
+from baselines.case_information import (
+    TEST_SOURCE_FULL,
+    case_information_record,
+    render_reference_tests,
+)
 from baselines.case_schemas import IntervenorCaseInput
 
 _SKIP_DIR_NAMES = {
@@ -36,16 +41,18 @@ def convert_case(
     buggy_code = buggy_path.read_text(encoding="utf-8")
     test_code = test_path.read_text(encoding="utf-8")
     entry_point = _extract_entry_point(buggy_code, test_code)
-    description = case_context.description if case_context and case_context.description else ""
 
     return IntervenorCaseInput.from_dict(
         {
             "task_id": case_id,
             "entry_point": entry_point,
-            "prompt": _build_prompt(buggy_code, description, entry_point),
+            "prompt": _build_prompt(buggy_code, test_code, entry_point),
             "buggy_code": buggy_code,
             "test": test_code,
-            "description": description,
+            "case_information": case_information_record(
+                test_source_exposure=TEST_SOURCE_FULL,
+                prompt_files=("buggy.py", "test_buggy.py"),
+            ),
             "python_args": list(case_context.python_args) if case_context else [],
             "timeout_sec": int(case_context.timeout_sec) if case_context else 0,
             "files": _package_case_files(case_dir),
@@ -77,8 +84,16 @@ def _extract_entry_point(buggy_code: str, test_code: str) -> str:
     return "solution"
 
 
-def _build_prompt(buggy_code: str, description: str, entry_point: str) -> str:
-    """Build compact task context appended to the learner prompt."""
+def _build_prompt(buggy_code: str, test_code: str, entry_point: str) -> str:
+    """Build the task context appended to the learner prompt.
+
+    Includes the full test source so INTERVENOR sees the same test information as
+    the native conditions (``baselines.case_information``).
+    """
+    return _symbol_context(buggy_code, entry_point) + "\n\n" + render_reference_tests(test_code)
+
+
+def _symbol_context(buggy_code: str, entry_point: str) -> str:
     try:
         tree = ast.parse(buggy_code)
     except SyntaxError:
@@ -97,14 +112,9 @@ def _build_prompt(buggy_code: str, description: str, entry_point: str) -> str:
         docstring = ast.get_docstring(node, clean=False)
         if docstring:
             prompt_lines.append(textwrap.indent(f'"""{docstring}"""', "    "))
-        if description:
-            prompt_lines.append(f"Description: {description}")
         return "\n".join(prompt_lines)
 
-    parts = [f"Primary symbol: {entry_point}"]
-    if description:
-        parts.append(f"Description: {description}")
-    return "\n".join(parts)
+    return f"Primary symbol: {entry_point}"
 
 
 def _package_case_files(case_dir: Path) -> list[dict[str, str]]:

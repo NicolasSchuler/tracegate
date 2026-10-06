@@ -25,6 +25,31 @@ Hybrid adaptive+baseline attempts additionally record:
 `baseline_case_context.json` is versioned with `schema_version` and currently
 uses `v1`.
 
+## Case-information contract (`case_info_policy = neutral_v1`)
+
+Defined in `baselines/case_information.py` (review findings ATT-02 and BAS-07,
+decision D1). It fixes which case data any arm may see:
+
+- `baseline_case_context.json` carries only `case_id`, `python_args`,
+  `timeout_sec` and `case_info_policy`. Dataset-derived labels (`description`,
+  `category`, `difficulty`, `snapshot_dependency`) stay in `case.json` for
+  analysis and never reach a model. The loader drops them from older context
+  files and records `hidden_case_fields_dropped:<fields>` in
+  `baseline_case_context_issues`.
+- Every arm sees the buggy source and the test source. The native conditions,
+  INTERVENOR, TraceCoder, lambda-RLM and RLM see the full `test_buggy.py`
+  (`test_source_exposure = "full"`). LDB's converter only accepts plain-assert
+  test bodies and passes them as its visible tests, so LDB sees the assertions
+  (`test_source_exposure = "asserts"`).
+- Each record's `patch_meta` carries `case_info_policy` and
+  `case_information` (`case_info_policy`, `test_source_exposure`,
+  `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
+  the run-level policy.
+
+Runs recorded before this contract gave the baselines `case.description`
+(often a root-cause statement or bug-type label) while the native conditions
+never saw it; see the 2026-10-04 review findings before comparing them.
+
 ## Current Integrations
 
 | Baseline | Fidelity | Repair Scope | Prompt Contract |

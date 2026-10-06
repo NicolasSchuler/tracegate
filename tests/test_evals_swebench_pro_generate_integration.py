@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from evals.patchers.base import PatchResult
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import (
     CONDITION_BASELINE,
     CONDITION_LLMDEBUG,
@@ -139,6 +140,7 @@ def test_generate_pro_predictions_end_to_end(
         max_instances=3,
         root=root,
         **_COMMON_OPENAI_KWARGS,
+        prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
     )
 
     # -- Summary assertions --
@@ -211,6 +213,7 @@ def test_generate_pro_predictions_single_condition(
             conditions="baseline",
             root=root,
             **_COMMON_OPENAI_KWARGS,
+            prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
         )
 
 
@@ -258,6 +261,7 @@ def test_generate_pro_predictions_with_resume(
         resume=True,
         root=root,
         **_COMMON_OPENAI_KWARGS,
+        prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
     )
 
     assert summary.instance_count == 5
@@ -310,6 +314,7 @@ def test_generate_pro_predictions_empty_patches(
         max_instances=5,
         root=root,
         **_COMMON_OPENAI_KWARGS,
+        prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
     )
 
     for cs in summary.condition_summaries:
@@ -353,6 +358,7 @@ def test_generate_pro_predictions_all_fail(tmp_path: Path, monkeypatch: pytest.M
             max_instances=3,
             root=root,
             **_COMMON_OPENAI_KWARGS,
+            prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
         )
 
 
@@ -377,6 +383,7 @@ def test_handoff_after_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         max_instances=3,
         root=root,
         **_COMMON_OPENAI_KWARGS,
+        prompt_inputs=PromptInputs(snapshot_dir=tmp_path),
     )
 
     run_dir = summary.run_dir

@@ -17,6 +17,7 @@ from evals.swebench.generate import (
     _propose_prediction,
     _select_instance_ids,
 )
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import PredictionRecord
 
 
@@ -154,7 +155,7 @@ def test_propose_prediction_returns_record_on_success(tmp_path: Path) -> None:
         instance_id="inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-model",
         workspace_root=tmp_path,
@@ -177,7 +178,7 @@ def test_propose_prediction_marks_empty_patch(tmp_path: Path) -> None:
         instance_id="inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-model",
         workspace_root=tmp_path,
@@ -198,7 +199,7 @@ def test_propose_prediction_captures_patcher_exception(tmp_path: Path) -> None:
         instance_id="inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-model",
         workspace_root=tmp_path,
@@ -395,7 +396,9 @@ def test_build_prompt_includes_pass_to_pass_section() -> None:
         "FAIL_TO_PASS": None,
         "PASS_TO_PASS": "test_something",
     }
-    prompt = _build_prompt(row=row, condition="baseline", snapshot_dir=None)
+    prompt = _build_prompt(
+        row=row, condition="baseline", prompt_inputs=PromptInputs(include_test_ids=True)
+    )
     assert "Pass-to-pass tests:" in prompt
     assert "test_something" in prompt
 
@@ -470,7 +473,7 @@ async def test_propose_prediction_async_captures_exception(
         instance_id="inst-1",
         row=dict(_SAMPLE_ROW),
         condition="baseline",
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test-model",
         workspace_root=tmp_path,
@@ -516,7 +519,7 @@ def test_generate_for_condition_single_job_counts(monkeypatch, tmp_path: Path) -
         patcher=patcher,
         model_label="test",
         resume=False,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=1,
         openai_async=False,
         max_request_errors=25,
@@ -569,7 +572,7 @@ async def test_generate_for_condition_async_counts(
         selected_ids=["a", "b"],
         rows_by_id=rows_by_id,
         existing_map=existing_map,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         patcher=patcher,
         model_label="test",
         workspace_root=ws,
@@ -615,7 +618,7 @@ async def test_generate_for_condition_async_cancels_on_error(
             selected_ids=ids,
             rows_by_id=rows_by_id,
             existing_map={},
-            snapshot_dir=None,
+            prompt_inputs=PromptInputs(snapshot_dir=None),
             patcher=patcher,
             model_label="test",
             workspace_root=ws,

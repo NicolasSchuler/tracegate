@@ -336,7 +336,8 @@ def import_quixbugs(
             continue
 
         metadata: dict[str, Any] = {
-            "description": f"QuixBugs: {program_name} (1-line bug in classic algorithm)",
+            # Neutral by design (ATT-02): no bug-shape hints in the description.
+            "description": f"QuixBugs: {program_name}",
             "category": category,
             "difficulty": "easy",
             "snapshot_dependency": snapshot_dep,

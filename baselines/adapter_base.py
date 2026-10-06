@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from baselines.case_information import CASE_INFO_POLICY
 from baselines.contracts import BASELINE_CONTRACT_VERSION, BaselineContract
 
 if TYPE_CHECKING:
@@ -157,16 +158,17 @@ class BaselineConfig:
 
 @dataclass(frozen=True)
 class BaselineCaseContext:
-    """Runner-provided case metadata that is stripped from the patcher workdir."""
+    """Runner-provided case metadata that is stripped from the patcher workdir.
+
+    Dataset-derived labels (description, category, difficulty, snapshot dependency)
+    are deliberately absent: see ``baselines.case_information``.
+    """
 
     case_id: str
     python_args: tuple[str, ...]
     timeout_sec: int
     schema_version: str = BASELINE_CONTRACT_VERSION
-    description: str | None = None
-    category: str | None = None
-    difficulty: str | None = None
-    snapshot_dependency: str | None = None
+    case_info_policy: str = CASE_INFO_POLICY
 
 
 class BaselineCaseIncompatibleError(RuntimeError):

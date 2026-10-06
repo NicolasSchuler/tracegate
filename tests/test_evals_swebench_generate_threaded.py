@@ -9,6 +9,7 @@ from evals.patchers.base import PatchResult
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
 from evals.swebench.generate import _generate_for_condition
 from evals.swebench.io import ensure_run_layout, read_predictions
+from evals.swebench.prompt_policy import PromptInputs
 from evals.swebench.types import CONDITION_BASELINE
 
 
@@ -56,7 +57,7 @@ def test_generate_for_condition_threaded_produces_all_predictions(tmp_path: Path
         patcher=cast(OpenAICompatPatcher, _StubPatcher()),
         model_label="stub-model::baseline",
         resume=False,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=4,
         openai_async=False,
         max_request_errors=25,
@@ -103,7 +104,7 @@ def test_generate_for_condition_threaded_handles_mixed_errors(tmp_path: Path) ->
         patcher=cast(OpenAICompatPatcher, _MixedPatcher()),
         model_label="stub-model::baseline",
         resume=False,
-        snapshot_dir=None,
+        prompt_inputs=PromptInputs(snapshot_dir=None),
         jobs=3,
         openai_async=False,
         max_request_errors=25,

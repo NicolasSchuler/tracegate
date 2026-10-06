@@ -380,10 +380,9 @@ def import_pyresbugs(
         project = str(row.get("Project", "") or "")
 
         metadata = {
-            "description": (
-                f"PyResBugs #{idx}: {fault_acronym} in {project}"
-                + (f" — {nl_desc}" if nl_desc else "")
-            ),
+            # Neutral by design (ATT-02); the fault type and description are analysis-only.
+            "description": f"PyResBugs #{idx} in {project}",
+            "source_fault_description": nl_desc,
             "category": category,
             "difficulty": difficulty,
             "snapshot_dependency": snapshot_dep,
