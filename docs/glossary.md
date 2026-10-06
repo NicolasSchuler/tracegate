@@ -72,7 +72,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **Redaction Profile** — A privacy preset (`dev`, `ci`, `prod`) that configures default redaction behavior; profiles are additive and explicit `redact`/`redact_*` options always take precedence. See: [Configuration Reference § Redaction Profiles](configuration.md#redaction-profiles).
 
-**Schema Version** — The semantic version string (currently `"2.1"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. The major part changes on breaking envelope changes; readers accept any `2.x`. `2.1` emits string dict keys in locals as plain strings instead of their `repr`. See: [README § Output](../README.md#output).
+**Schema Version** — The semantic version string (currently `"2.1"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. The major part changes on breaking envelope changes; readers accept any `2.x`. `2.1` emits string dict keys in locals as plain strings instead of their `repr`, and counts array `anomalies` on the original array instead of the up-cast float32 copy (so large `float64` values no longer report false `inf`, and CuPy arrays are covered). See: [README § Output](../README.md#output).
 
 **Session ID** — A stable string identifier (`<resolved_out_dir>::<scope>`) derived from the output directory and pytest node ID (or snapshot name). Used to correlate RCA attempts across retries for the same test or code region. See: [`rca_identity.py`](../src/llmdebug/rca_identity.py).
 

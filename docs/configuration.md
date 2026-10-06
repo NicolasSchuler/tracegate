@@ -341,13 +341,18 @@ Locals are serialized to JSON-safe values. A local and its direct elements are e
 are emitted as-is (`{"k": "v"}`); other key types use their `repr` (`{1: "a"}` becomes
 `{"1": "a"}`), and a key that collides with an earlier one gets a stable `#2`, `#3` suffix.
 Sets of up to 1,000 elements are previewed in `repr` order; larger sets show their
-smallest elements in natural order (or a bounded sample if the elements don't compare),
-so a huge set isn't rendered in full just to be truncated. `locals_meta` records `len`
-only for built-in containers, arrays and pandas objects: calling `len()` on arbitrary
-objects runs user code (a lazy ORM query set executes its query).
+smallest elements in natural order (or in canonical `repr` order if the elements don't
+compare), so a huge set isn't rendered in full just to be truncated. The `...[TRUNC]`
+marker follows the set's own size, so a preview is never silently incomplete.
+`locals_meta` records `len` only for built-in containers (whose `__len__` is the
+built-in one), arrays and pandas objects: calling `len()` on arbitrary objects runs
+user code (a lazy ORM query set executes its query).
 Snapshots before schema `2.1` wrote every key as its `repr` (`{"'k'": "v"}`). Integers
-outside the 64-bit range are stored as their `repr` string, and a value that can't be
-introspected becomes `"<serialization failed: <ErrorType>>"` without affecting the rest.
+outside the 64-bit range are stored as their `repr` string (including inside pandas
+preview cells and column labels), and a value that can't be introspected becomes
+`"<serialization failed: <ErrorType>>"` without affecting the rest. Schema `2.1` also
+counts array `anomalies` (NaN/Inf) on the original array rather than the up-cast copy, so
+large `float64` values no longer report false `inf`, and CuPy arrays get counts at all.
 
 ### Coverage Notes
 

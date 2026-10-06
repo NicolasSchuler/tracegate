@@ -675,9 +675,7 @@ def _write_jsonl(tmp_path: Path, rows: list[dict[str, object]]) -> None:
     )
 
 
-def test_merged_reads_break_equal_timestamps_by_append_order(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_merged_reads_break_equal_timestamps_by_append_order(tmp_path: Path, monkeypatch) -> None:
     """RCA-05: `_now_utc` drops microseconds, so same-second appends are the common case."""
     monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
     out_dir = str(tmp_path)
