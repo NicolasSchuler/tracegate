@@ -1342,7 +1342,8 @@ def test_analyze_adaptive_off_policy_dr_support_threshold_override(tmp_path) -> 
     for attempt, (action, propensity, reward) in enumerate(payloads, start=1):
         record = _record(
             run_id="run_ope_threshold",
-            case_id="case_ope_threshold",
+            # codex 2-3#2: cross-fitting folds are per case, so one case cannot be split.
+            case_id=f"case_ope_threshold_{attempt}",
             attempt=attempt,
             success=False,
             helper_invoked=action == "invoke_helper",
@@ -1442,7 +1443,8 @@ def test_analyze_adaptive_off_policy_zero_support_target_ips_snips_none(tmp_path
 
 def test_analyze_adaptive_off_policy_dr_stratifies_by_feature_scaling_profile(tmp_path) -> None:
     records = []
-    # Three copies per stratum so every cross-fitting fold (STA-11) keeps both actions.
+    # Three cases per stratum so every cross-fitting fold (STA-11) keeps both actions;
+    # folds are assigned per case, so copies of one case would not cross-fit (codex 2-3#2).
     payloads = [
         ("v1", "invoke_helper", 0.5, 0.4, {"bias": 1.0, "attempt_frac": 0.2}),
         ("v1", "skip_helper", 0.6, 0.1, {"bias": 1.0, "attempt_frac": 0.8}),
@@ -1452,7 +1454,7 @@ def test_analyze_adaptive_off_policy_dr_stratifies_by_feature_scaling_profile(tm
     for attempt, (profile, action, propensity, reward, features) in enumerate(payloads, start=1):
         record = _record(
             run_id="run_ope_mixed_profiles",
-            case_id="case_ope_mixed_profiles",
+            case_id=f"case_ope_mixed_profiles_{attempt}",
             attempt=attempt,
             success=False,
             helper_invoked=action == "invoke_helper",
@@ -1752,3 +1754,104 @@ def test_analyze_adaptive_reward_distribution_diagnostics_roll_up(tmp_path) -> N
     assert summary["adaptive_budget_reward_p90"] == pytest.approx(1.8)
     assert summary["adaptive_budget_reward_max"] == pytest.approx(2.0)
     assert summary["adaptive_budget_reward_std"] == pytest.approx(0.816496580927726)
+
+
+def _online_ope_record(
+    *, run_id: str, case_id: str, attempt: int, action: str, reward: float
+) -> dict[str, object]:
+    record = _record(
+        run_id=run_id,
+        case_id=case_id,
+        attempt=attempt,
+        success=False,
+        helper_invoked=action == "invoke_helper",
+        helper_reason="llm_requested_helper",
+    )
+    record["condition"] = "layered_adaptive_llm"
+    payload = {
+        "adaptive_online_policy_mode": "on",
+        "adaptive_online_policy_algo": "linucb",
+        "adaptive_online_decision_id": f"{run_id}-{case_id}-{attempt}",
+        "adaptive_online_action_selected": action,
+        "adaptive_online_action_applied": action,
+        "adaptive_online_behavior_action": action,
+        "adaptive_online_propensity": 0.5,
+        "adaptive_online_behavior_propensity": 0.5,
+        "adaptive_online_reward_scope": "helper_local_v1",
+        "adaptive_online_reward": reward,
+        "adaptive_online_feature_vector": {"bias": 1.0},
+    }
+    record["attempt_metadata"].update(payload)
+    record["patch_meta"].update(payload)
+    return record
+
+
+def _run_online_ope_cli(
+    tmp_path, *, runs: int, seed: int, name: str, cases: int = 2
+) -> dict[str, object]:
+    """Run the analyzer CLI over *runs* identical runs of *cases* cases, return its summary."""
+    from evals.analyze_results import main as analyze_main
+
+    records = [
+        _online_ope_record(
+            run_id=f"run{run_no}",
+            case_id=f"case{case}",
+            attempt=attempt,
+            action=action,
+            reward=float(case) + (1.0 if action == "invoke_helper" else 0.0),
+        )
+        for run_no in range(runs)
+        for case in range(cases)
+        # One attempt per action, so the two decisions are not duplicates of one attempt.
+        for attempt, action in ((1, "invoke_helper"), (2, "skip_helper"))
+    ]
+    jsonl = tmp_path / f"{name}.jsonl"
+    jsonl.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+    out = tmp_path / f"{name}.json"
+    assert (
+        analyze_main(
+            [
+                str(jsonl),
+                "--adaptive-ope-min-action-support",
+                "1",
+                "--bootstrap-seed",
+                str(seed),
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_analyze_adaptive_ope_bootstrap_clusters_repeated_runs_of_a_case(tmp_path, capsys) -> None:
+    """STA-02: repeating identical runs must not narrow the OPE interval (codex 2-3#1)."""
+    once = _run_online_ope_cli(tmp_path, runs=1, seed=42, name="ope_once")
+    twenty = _run_online_ope_cli(tmp_path, runs=20, seed=42, name="ope_twenty")
+    capsys.readouterr()
+
+    def interval(summary: dict[str, object]) -> dict[str, object]:
+        conditions = summary["overall"]["layered_adaptive_llm"]
+        return conditions["adaptive_online_ope"]["targets"]["always_invoke_helper"]["ope_ci"]
+
+    assert interval(once)["n_cases"] == 2
+    assert interval(twenty)["n_cases"] == 2  # not 40
+    assert interval(twenty)["snips"] == interval(once)["snips"]
+
+
+def test_analyze_adaptive_ope_bootstrap_uses_the_recorded_seed(tmp_path, capsys) -> None:
+    """STA-05/STA-07: --bootstrap-seed was recorded but the OPE bootstrap stayed on 42."""
+    seven = _run_online_ope_cli(tmp_path, runs=1, cases=10, seed=7, name="ope_seed7")
+    ninety_nine = _run_online_ope_cli(tmp_path, runs=1, cases=10, seed=99, name="ope_seed99")
+    capsys.readouterr()
+
+    def interval(summary: dict[str, object]) -> dict[str, object]:
+        conditions = summary["overall"]["layered_adaptive_llm"]
+        return conditions["adaptive_online_ope"]["targets"]["always_invoke_helper"]["ope_ci"]
+
+    for summary, expected in ((seven, 7), (ninety_nine, 99)):
+        assert summary["analysis_config"]["bootstrap_seed"] == expected
+        # The effective OPE seed, not the DEFAULT_BOOTSTRAP_SEED it used to report.
+        assert interval(summary)["seed"] == expected
+        assert interval(summary)["available"] is True

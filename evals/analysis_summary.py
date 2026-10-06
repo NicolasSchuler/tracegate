@@ -23,6 +23,7 @@ from evals.analysis_usage import (
     _is_external_baseline_condition,
     _mean_prompt_chars_by_condition,
 )
+from evals.stats import DEFAULT_BOOTSTRAP_SEED
 
 
 def _summarize_bucket(
@@ -31,6 +32,7 @@ def _summarize_bucket(
     records_by_case_condition: dict[tuple[str, str, str], list[dict[str, Any]]] | None = None,
     adaptive_ope_min_action_support: int = ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
     adaptive_ope_propensity_floor: float = ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Compute per-condition success rates and aggregate metrics for a bucket.
 
@@ -565,6 +567,7 @@ def _summarize_bucket(
                 adaptive_ope_min_action_support=min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
                 include_condition_only_counts=True,
+                bootstrap_seed=bootstrap_seed,
             ),
         }
     out["condition_matrix"] = [
@@ -645,6 +648,7 @@ def _summarize_bucket(
             adaptive_ope_min_action_support=min_action_support,
             adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
             include_condition_only_counts=False,
+            bootstrap_seed=bootstrap_seed,
         )
     )
     out["adaptive_rollup_conditions"] = sorted({str(row["condition"]) for row in adaptive_rows})

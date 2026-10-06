@@ -11,9 +11,14 @@ from evals.analysis_ope import (
     ADAPTIVE_ONLINE_TARGET_POLICIES,
     _adaptive_ope_summary_from_records,
 )
-from evals.analysis_ope_support import ADAPTIVE_BUDGET_ACTIONS, ADAPTIVE_ONLINE_ACTIONS
+from evals.analysis_ope_support import (
+    ADAPTIVE_BUDGET_ACTIONS,
+    ADAPTIVE_ONLINE_ACTIONS,
+    OpeSummarySettings,
+)
 from evals.analysis_rows import _records_for_rows
 from evals.eval_types import CONDITION_FAMILY_ADAPTIVE, condition_family
+from evals.stats import DEFAULT_BOOTSTRAP_SEED
 
 
 def _has_adaptive_telemetry(row: dict[str, Any]) -> bool:
@@ -30,6 +35,7 @@ def _adaptive_rollup_metrics(
     adaptive_ope_min_action_support: int,
     adaptive_ope_propensity_floor: float,
     include_condition_only_counts: bool,
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Aggregate adaptive helper, online-policy, and budget-policy metrics.
 
@@ -409,21 +415,24 @@ def _adaptive_rollup_metrics(
                 patch_verifier_recovery_terminal_note_counts_total[note] += int(value)
 
     scoped_records = _records_for_rows(rows, records_by_case_condition=records_by_case_condition)
+    ope_settings = OpeSummarySettings(
+        min_action_support=adaptive_ope_min_action_support,
+        propensity_floor=adaptive_ope_propensity_floor,
+        bootstrap_seed=int(bootstrap_seed),
+    )
     adaptive_online_ope = _adaptive_ope_summary_from_records(
         records=scoped_records,
         prefix="adaptive_online",
         action_space=ADAPTIVE_ONLINE_ACTIONS,
         target_policies=ADAPTIVE_ONLINE_TARGET_POLICIES,
-        min_action_support=adaptive_ope_min_action_support,
-        propensity_floor=adaptive_ope_propensity_floor,
+        settings=ope_settings,
     )
     adaptive_budget_ope = _adaptive_ope_summary_from_records(
         records=scoped_records,
         prefix="adaptive_budget",
         action_space=ADAPTIVE_BUDGET_ACTIONS,
         target_policies=ADAPTIVE_BUDGET_TARGET_POLICIES,
-        min_action_support=adaptive_ope_min_action_support,
-        propensity_floor=adaptive_ope_propensity_floor,
+        settings=ope_settings,
     )
     adaptive_online_reward_std = _stddev(adaptive_online_reward_values_total)
     adaptive_online_reward_min = min(adaptive_online_reward_values_total, default=None)

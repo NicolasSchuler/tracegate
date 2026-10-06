@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from evals.analysis_ope_support import OpeSummarySettings
 from evals.analyze_results import (
     _RIDGECV_MIN_SAMPLES,
     ADAPTIVE_OPE_RIDGE_ALPHA,
@@ -379,8 +380,10 @@ def test_sta11_summary_reports_the_alphas_actually_used() -> None:
         samples=samples,
         action_space={"a", "b"},
         target_policies={"always_a": "a"},
-        min_action_support=2,
-        propensity_floor=0.01,
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.01,
+        ),
     )
     assert summary["dr_crossfit_folds"] == 5
     assert set(summary["ridge_alphas_selected"]) == {"a", "b"}
@@ -405,8 +408,10 @@ def test_ope_estimates_carry_case_bootstrap_intervals() -> None:
         samples=samples,
         action_space={"a", "b"},
         target_policies={"always_a": "a"},
-        min_action_support=2,
-        propensity_floor=0.01,
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.01,
+        ),
     )
     target = summary["targets"]["always_a"]
     ci = target["ope_ci"]
@@ -420,8 +425,10 @@ def test_ope_estimates_carry_case_bootstrap_intervals() -> None:
         samples=samples,
         action_space={"a", "b"},
         target_policies={"always_a": "a"},
-        min_action_support=2,
-        propensity_floor=0.01,
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.01,
+        ),
     )
     assert again["targets"]["always_a"]["ope_ci"] == ci  # seeded
 
@@ -440,8 +447,10 @@ def test_zero_support_targets_report_no_ips_interval() -> None:
         action_space={"a", "b"},
         # No sample ever chose "b", so the deterministic target has no behavior support.
         target_policies={"always_b": "b"},
-        min_action_support=2,
-        propensity_floor=0.01,
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.01,
+        ),
     )
     target = summary["targets"]["always_b"]
 
@@ -483,3 +492,61 @@ def test_zero_support_stochastic_targets_report_no_ips_interval() -> None:
     ci = target["ope_ci"]
     assert ci["ips"] is None
     assert ci["snips"] is None
+
+
+def _case_ope_sample(case: str, action: str, x: float, reward: float) -> dict[str, object]:
+    sample = _ope_sample(action, x, reward)
+    sample["case_key"] = case
+    return sample
+
+
+def test_crossfit_folds_hold_out_whole_cases() -> None:
+    """STA-11: positional folds left other rows of a held-out case in training (codex 2-3#2)."""
+    from evals.analyze_results import _crossfit_reward_models
+
+    def crossfit(outlier: float) -> object:
+        samples = [
+            _case_ope_sample(f"c{case}", "a", float(case) + float(row), float(case))
+            for case in range(6)
+            for row in (0, 1)
+        ]
+        samples[1]["reward"] = outlier  # the second row of case c0
+        return _crossfit_reward_models(
+            samples=samples, action_space={"a"}, min_action_support=1, ridge_alpha=0.1
+        )
+
+    baseline = crossfit(0.0)
+    perturbed = crossfit(1000.0)
+    # Both rows of c0 are held out together, so neither row's model may see the outlier.
+    for index in (0, 1):
+        assert np.allclose(baseline.per_sample[index]["a"], perturbed.per_sample[index]["a"])
+    # Other cases train on c0 and must notice it.
+    assert not np.allclose(baseline.per_sample[2]["a"], perturbed.per_sample[2]["a"])
+
+
+def test_ope_intervals_use_the_requested_bootstrap_seed() -> None:
+    """STA-05/STA-07: --bootstrap-seed reached analysis_config but not the OPE bootstrap."""
+    from evals.analyze_results import _adaptive_ope_summary
+
+    samples = [
+        _case_ope_sample(f"c{case}", action, float(case), float(case % 3))
+        for case in range(12)
+        for action in ("a", "b")
+    ]
+
+    def interval(seed: int) -> dict[str, object]:
+        summary = _adaptive_ope_summary(
+            samples=samples,
+            action_space={"a", "b"},
+            target_policies={"always_a": "a"},
+            settings=OpeSummarySettings(
+                min_action_support=2, propensity_floor=0.01, bootstrap_seed=seed
+            ),
+        )
+        return summary["targets"]["always_a"]["ope_ci"]
+
+    seven = interval(7)
+    ninety_nine = interval(99)
+    assert seven["seed"] == 7
+    assert ninety_nine["seed"] == 99
+    assert seven["snips"] != ninety_nine["snips"]

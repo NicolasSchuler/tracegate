@@ -8,6 +8,7 @@ from typing import Any
 
 from evals.adaptive_online_policy import ONLINE_POLICY_ACTIONS
 from evals.analysis_numeric import _as_float_or_none
+from evals.stats import DEFAULT_BOOTSTRAP_SEED
 
 # Conservative default remains unchanged; now exposed as an analyzer CLI flag for reproducibility.
 ADAPTIVE_OPE_MIN_ACTION_SUPPORT = 2
@@ -40,6 +41,46 @@ SUPPORT_WARNING_UNSUPPORTED_MASS = "unsupported_target_mass"
 
 # Ties in the greedy target and the baseline fallback resolve in controller action order.
 _ONLINE_ACTION_RANK = {action: index for index, action in enumerate(ONLINE_POLICY_ACTIONS)}
+
+
+@dataclass(frozen=True)
+class OpeSummarySettings:
+    """Analysis-only estimator knobs of one OPE summary.
+
+    Grouped so the summary entry points stay within the signature budget while carrying
+    the bootstrap seed the CLI asked for (STA-05, STA-07).
+    """
+
+    min_action_support: int = ADAPTIVE_OPE_MIN_ACTION_SUPPORT
+    propensity_floor: float = ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED
+
+
+DEFAULT_OPE_SUMMARY_SETTINGS = OpeSummarySettings()
+
+
+@dataclass(frozen=True)
+class TargetOpeSettings:
+    """Estimator settings shared by the deterministic and per-sample OPE targets."""
+
+    action_space: set[str]
+    min_action_support: int
+    ridge_alpha: float
+    propensity_floor: float
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED
+
+
+def _sample_case_keys(samples: list[dict[str, Any]]) -> list[str]:
+    """One clustering key per sample: the case it came from (STA-02).
+
+    Every run of a case belongs to the same cluster — repeating a run does not add an
+    independent observation, so neither the bootstrap nor cross-fitting may split it.
+    Samples with no recorded case fall back to a key of their own.
+    """
+    return [
+        str(sample.get("case_key") or "") or f"\x00sample{idx}"
+        for idx, sample in enumerate(samples)
+    ]
 
 
 def _metadata_with_fallback(

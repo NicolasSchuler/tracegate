@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from evals import analyze_results as ar
+from evals.analysis_ope_support import OpeSummarySettings
 
 
 def _record(
@@ -766,8 +767,10 @@ def test_analyze_ope_and_statistics_helpers(
             "always_skip": "skip_helper",
             "always_invoke_helper": "invoke_helper",
         },
-        min_action_support=1,
-        propensity_floor=0.2,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.2,
+        ),
     )
     assert ope_summary["sample_count"] == 3
     assert ope_summary["action_counts"]["invoke_helper"] == 1
@@ -794,8 +797,14 @@ def test_analyze_ope_and_statistics_helpers(
         )
     )
 
+    # codex 2-3#2: folds are assigned by case, so replicas must stand for distinct cases.
+    distinct_case_samples = [
+        {**sample, "case_key": f"{sample['case_key']}-copy{copy_idx}"}
+        for copy_idx in range(3)
+        for sample in samples
+    ]
     dr, reason = ar._stratified_doubly_robust_estimate(
-        samples=samples * 3,  # enough per stratum for cross-fitting (STA-11)
+        samples=distinct_case_samples,  # enough cases per stratum for cross-fitting (STA-11)
         target_action="invoke_helper",
         action_space={"invoke_helper", "skip_helper", "none"},
         min_action_support=1,
@@ -824,11 +833,13 @@ def test_analyze_ope_and_statistics_helpers(
     unsupported = ar._deterministic_target_ope(
         samples=samples,
         target_action="missing",
-        action_space={"invoke_helper", "skip_helper", "none"},
         action_counts={"invoke_helper": 1, "skip_helper": 1, "none": 1},
-        min_action_support=1,
-        ridge_alpha=0.1,
-        propensity_floor=0.2,
+        settings=ar.TargetOpeSettings(
+            action_space={"invoke_helper", "skip_helper", "none"},
+            min_action_support=1,
+            ridge_alpha=0.1,
+            propensity_floor=0.2,
+        ),
     )
     assert unsupported["dr_supported"] is False
     assert unsupported["dr_reason"] == "target_action_out_of_space"
@@ -1127,8 +1138,10 @@ def test_sta12_missing_propensity_is_dropped_and_counted() -> None:
         samples=samples,
         action_space={"invoke_helper", "skip_helper"},
         target_policies={"always_invoke": "invoke_helper"},
-        min_action_support=1,
-        propensity_floor=0.01,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.01,
+        ),
     )
     assert summary["sample_count"] == 2
     assert summary["propensity_missing_dropped"] == 1

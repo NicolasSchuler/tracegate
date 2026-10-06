@@ -124,6 +124,8 @@ from evals.analysis_ope_support import (  # noqa: F401  # noqa: E402, F401
     ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
     ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
     ADAPTIVE_OPE_RAW_PROPENSITY_FLOOR,
+    OpeSummarySettings,
+    TargetOpeSettings,
     _action_counts_for_samples,
     _action_rates_for_counts,
     _coerce_feature_values,
@@ -315,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     if adaptive_ope_min_action_support < 1:
         print("Input error: --adaptive-ope-min-action-support must be >= 1")
         return 2
+    bootstrap_seed = int(args.bootstrap_seed)
     adaptive_ope_propensity_floor = float(args.adaptive_ope_propensity_floor)
     if not (0.0 < adaptive_ope_propensity_floor <= 1.0):
         print("Input error: --adaptive-ope-propensity-floor must be in (0, 1]")
@@ -354,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             records_by_case_condition=records_by_case_condition,
             adaptive_ope_min_action_support=adaptive_ope_min_action_support,
             adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+            bootstrap_seed=bootstrap_seed,
         ),
         "by_category": {
             key: _summarize_bucket(
@@ -361,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
                 records_by_case_condition=records_by_case_condition,
                 adaptive_ope_min_action_support=adaptive_ope_min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+                bootstrap_seed=bootstrap_seed,
             )
             for key, bucket_rows in sorted(by_category.items())
         },
@@ -370,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
                 records_by_case_condition=records_by_case_condition,
                 adaptive_ope_min_action_support=adaptive_ope_min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+                bootstrap_seed=bootstrap_seed,
             )
             for key, bucket_rows in sorted(by_difficulty.items())
         },
@@ -379,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
                 records_by_case_condition=records_by_case_condition,
                 adaptive_ope_min_action_support=adaptive_ope_min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+                bootstrap_seed=bootstrap_seed,
             )
             for key, bucket_rows in sorted(by_snapshot_dependency.items())
         },
@@ -388,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
                 records_by_case_condition=records_by_case_condition,
                 adaptive_ope_min_action_support=adaptive_ope_min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+                bootstrap_seed=bootstrap_seed,
             )
             for key, bucket_rows in sorted(by_bug_source.items())
         },
@@ -397,13 +405,14 @@ def main(argv: list[str] | None = None) -> int:
                 records_by_case_condition=records_by_case_condition,
                 adaptive_ope_min_action_support=adaptive_ope_min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
+                bootstrap_seed=bootstrap_seed,
             )
             for key, bucket_rows in sorted(by_contamination_risk.items())
         },
         "analysis_config": {
             "adaptive_ope_min_action_support": adaptive_ope_min_action_support,
             "adaptive_ope_propensity_floor": adaptive_ope_propensity_floor,
-            "bootstrap_seed": int(args.bootstrap_seed),
+            "bootstrap_seed": bootstrap_seed,
             "bootstrap_method": BOOTSTRAP_METHOD,
         },
         "input_errors": input_errors,
@@ -417,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             aggregation=args.aggregation,
             pair_a=str(args.stats_pair_a),
             pair_b=str(args.stats_pair_b),
-            seed=int(args.bootstrap_seed),
+            seed=bootstrap_seed,
         )
         summary["statistics"] = stats_result
         _print_stats(stats_result)

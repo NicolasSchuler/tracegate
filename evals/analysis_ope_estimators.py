@@ -12,8 +12,10 @@ from sklearn.linear_model import RidgeCV
 
 from evals.analysis_numeric import _mean
 from evals.analysis_ope_support import (
+    TargetOpeSettings,
     _action_counts_for_samples,
     _estimator_agreement_summary,
+    _sample_case_keys,
     _samples_by_feature_scaling_profile,
     _sanitize_propensity,
     _support_warning_for_target,
@@ -173,19 +175,29 @@ def _crossfit_reward_models(
     """K-fold cross-fitting: each sample's predictions come from the other folds' models.
 
     The DR reward model used to be fitted on the same samples whose residuals form the
-    correction term. Folds are assigned by position (``index % K``), so results are
-    deterministic. With fewer than two samples there is nothing to cross-fit and every
-    sample gets an empty model set, which makes DR unsupported.
+    correction term. Folds are assigned by *case* (sorted case order modulo K), never by
+    row position, so every attempt and every repeated run of a case is held out together
+    and nothing of a case remains in its own training set (STA-11, STA-02). With fewer
+    than two cases there is nothing to cross-fit and every sample gets an empty model
+    set, which makes DR unsupported.
     """
     feature_names = _ope_feature_names(samples)
-    folds = min(ADAPTIVE_OPE_CROSSFIT_FOLDS, len(samples))
+    case_keys = _sample_case_keys(samples)
+    distinct_cases = sorted(set(case_keys))
+    folds = min(ADAPTIVE_OPE_CROSSFIT_FOLDS, len(distinct_cases))
     if folds < 2:
         return CrossFitModels(feature_names, [{} for _ in samples], {})
+    fold_of_case = {case: index % folds for index, case in enumerate(distinct_cases)}
+    sample_folds = [fold_of_case[case] for case in case_keys]
     fold_models: list[dict[str, np.ndarray]] = []
     alphas: dict[str, list[float]] = defaultdict(list)
     for fold in range(folds):
         fitted = _fit_action_reward_models(
-            samples=[sample for idx, sample in enumerate(samples) if idx % folds != fold],
+            samples=[
+                sample
+                for sample, sample_fold in zip(samples, sample_folds, strict=True)
+                if sample_fold != fold
+            ],
             action_space=action_space,
             min_action_support=min_action_support,
             ridge_alpha=ridge_alpha,
@@ -196,7 +208,7 @@ def _crossfit_reward_models(
             alphas[action].append(alpha)
     return CrossFitModels(
         feature_names=feature_names,
-        per_sample=[fold_models[idx % folds] for idx in range(len(samples))],
+        per_sample=[fold_models[sample_fold] for sample_fold in sample_folds],
         alphas=dict(alphas),
     )
 
@@ -218,17 +230,18 @@ def _deterministic_target_ope(
     *,
     samples: list[dict[str, Any]],
     target_action: str,
-    action_space: set[str],
     action_counts: dict[str, int],
-    min_action_support: int,
-    ridge_alpha: float,
-    propensity_floor: float,
+    settings: TargetOpeSettings,
 ) -> dict[str, Any]:
     """Compute IPS, SNIPS, and DR estimates for a deterministic target.
 
     The target policy always selects *target_action*.  Returns a dict
     with IPS, SNIPS, DR, effective sample size, and support info.
     """
+    action_space = settings.action_space
+    min_action_support = settings.min_action_support
+    ridge_alpha = settings.ridge_alpha
+    propensity_floor = settings.propensity_floor
     total = len(samples)
     matched = 0
     weighted_reward_sum = 0.0
@@ -284,7 +297,9 @@ def _deterministic_target_ope(
         "support_warning": support_warning,
         "dr_supported": dr is not None,
         "dr_reason": dr_reason if dr is None else "",
-        "ope_ci": _ope_case_bootstrap(samples, weights=weights, dr_terms=dr_terms),
+        "ope_ci": _ope_case_bootstrap(
+            samples, weights=weights, dr_terms=dr_terms, seed=settings.bootstrap_seed
+        ),
     }
     result.update(_estimator_agreement_summary(result))
     return result
@@ -298,16 +313,18 @@ def _ope_case_bootstrap(
     *,
     weights: list[float],
     dr_terms: list[float] | None,
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """95% percentile bootstrap over cases for IPS, SNIPS and DR (Phase 2.3).
 
-    Off-policy estimates carried no uncertainty. Cases are resampled with their
-    samples; the cross-fitted reward models are held fixed, so DR resamples its
-    per-sample terms. Seeded with ``DEFAULT_BOOTSTRAP_SEED``.
+    Off-policy estimates carried no uncertainty. One cluster per *case*, holding all of
+    its attempts and all of its repeated runs together, so repeating a run cannot narrow
+    the interval (STA-02); the cross-fitted reward models are held fixed, so DR resamples
+    its per-sample terms. Seeded with the analysis bootstrap seed (STA-05, STA-07).
     """
     by_case: dict[str, list[int]] = defaultdict(list)
-    for idx, sample in enumerate(samples):
-        by_case[str(sample.get("case_key") or idx)].append(idx)
+    for idx, case_key in enumerate(_sample_case_keys(samples)):
+        by_case[case_key].append(idx)
     cases = [by_case[key] for key in sorted(by_case)]
     if len(cases) < 2:
         return {"available": False, "n_cases": len(cases)}
@@ -325,7 +342,7 @@ def _ope_case_bootstrap(
             for idx in cases
         ]
     )
-    rng = np.random.default_rng(DEFAULT_BOOTSTRAP_SEED)
+    rng = np.random.default_rng(int(seed))
     draws = totals[rng.integers(0, len(cases), size=(OPE_BOOTSTRAP_RESAMPLES, len(cases)))].sum(
         axis=1
     )
@@ -351,7 +368,7 @@ def _ope_case_bootstrap(
         "n_cases": len(cases),
         "n_bootstrap": OPE_BOOTSTRAP_RESAMPLES,
         "method": BOOTSTRAP_METHOD,
-        "seed": DEFAULT_BOOTSTRAP_SEED,
+        "seed": int(seed),
         "ips": ips_interval,
         "snips": snips_interval,
         "dr": dr_interval,

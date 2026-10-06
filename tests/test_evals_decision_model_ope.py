@@ -14,6 +14,7 @@ import pytest
 
 from evals import analyze_results as ar
 from evals import eval_summary as es
+from evals.analysis_ope_support import OpeSummarySettings
 
 _ONLINE_ACTION_SPACE = set(ar.ADAPTIVE_ONLINE_ACTIONS)
 _TWO_ACTIONS = {"skip_helper", "invoke_helper"}
@@ -128,11 +129,8 @@ def test_stochastic_one_hot_target_matches_deterministic_target() -> None:
     deterministic = ar._deterministic_target_ope(
         samples=samples,
         target_action="skip_helper",
-        action_space=set(_TWO_ACTIONS),
         action_counts=ar._action_counts_for_samples(samples=samples, action_space=_TWO_ACTIONS),
-        min_action_support=2,
-        ridge_alpha=ar.ADAPTIVE_OPE_RIDGE_ALPHA,
-        propensity_floor=1e-3,
+        settings=_settings(),
     )
 
     for key in ("ips", "snips", "effective_sample_size", "matched_samples", "total_samples"):
@@ -419,8 +417,10 @@ def test_summary_omits_decision_model_targets_without_advice() -> None:
         samples=samples,
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["target_order"] == list(ar.ADAPTIVE_ONLINE_TARGET_POLICY_ORDER)
@@ -456,8 +456,10 @@ def test_summary_adds_decision_model_targets_with_advice() -> None:
         samples=samples,
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["decision_model_sample_count"] == 2
@@ -526,8 +528,10 @@ def test_adaptive_ope_samples_correct_shadow_mode_propensity() -> None:
         samples=samples,
         action_space=set(_ONLINE_ACTION_SPACE),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
     assert summary["shadow_corrected_samples"] == 1
     # Without the fix the stale shadow row would carry weight 4 instead of 1.
@@ -647,8 +651,10 @@ def test_summary_from_records_derives_decision_model_targets() -> None:
         prefix="adaptive_online",
         action_space=set(_ONLINE_ACTION_SPACE),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["sample_count"] == 2
@@ -704,8 +710,10 @@ def test_renderers_include_decision_model_targets() -> None:
         ],
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     analyzer_line = ar._format_ope_targets(
@@ -731,8 +739,10 @@ def test_renderers_unchanged_without_decision_model_targets() -> None:
         ],
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     line = ar._format_ope_targets(summary, ordered_targets=ar.ADAPTIVE_ONLINE_TARGET_POLICY_ORDER)
@@ -775,8 +785,10 @@ def test_shadow_records_flag_target_mass_without_behavior_support() -> None:
         prefix="adaptive_online",
         action_space=set(_ONLINE_ACTION_SPACE),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=2,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.005,
+        ),
     )
     target = summary["targets"][ar.DECISION_MODEL_TARGET_STOCHASTIC]
 

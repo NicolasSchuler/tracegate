@@ -191,7 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_context["ope_settings"] = ope_settings
     condition_summary = summarize_bucket(
-        rows, records_by_case_condition=records_by_case_condition(grouped), **ope_settings
+        rows,
+        records_by_case_condition=records_by_case_condition(grouped),
+        # STA-05/STA-07: --seed drives the OPE bootstrap of this report too.
+        bootstrap_seed=int(args.seed),
+        **ope_settings,
     )
     primary_rows = _filter_rows_by_snapshot_dependency(rows, primary_slice)
     required_rows = _filter_rows_by_snapshot_dependency(rows, {"required"})

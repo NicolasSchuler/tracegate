@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -19,6 +18,7 @@ from evals.analysis_ope_estimators import (
 from evals.analysis_ope_support import (
     _ONLINE_ACTION_RANK,
     SUPPORT_WARNING_UNSUPPORTED_MASS,
+    TargetOpeSettings,
     _action_counts_for_samples,
     _coerce_feature_values,
     _estimator_agreement_summary,
@@ -56,14 +56,9 @@ DECISION_MODEL_TARGET_KINDS: tuple[tuple[str, str], ...] = (
 )
 
 
-@dataclass(frozen=True)
-class StochasticTargetOpeSettings:
-    """Estimator settings shared by the per-sample (stochastic) OPE targets."""
-
-    action_space: set[str]
-    min_action_support: int
-    ridge_alpha: float
-    propensity_floor: float
+# The deterministic and per-sample targets share one settings object (evals/analysis_ope_support);
+# this name stays for the existing callers and the analyze_results re-export.
+StochasticTargetOpeSettings = TargetOpeSettings
 
 
 def _decision_model_advice_ok(sample: Mapping[str, Any]) -> bool:
@@ -294,7 +289,9 @@ def _stochastic_target_ope(
         "dr_supported": dr is not None,
         "dr_reason": dr_reason if dr is None else "",
         "mean_action_probabilities": _mean_target_action_probabilities(target_distributions),
-        "ope_ci": _ope_case_bootstrap(samples, weights=weights, dr_terms=dr_terms),
+        "ope_ci": _ope_case_bootstrap(
+            samples, weights=weights, dr_terms=dr_terms, seed=settings.bootstrap_seed
+        ),
     }
     result.update(_estimator_agreement_summary(result))
     return result
