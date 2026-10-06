@@ -226,8 +226,34 @@ def test_dict_serialization(cfg):
     d = {"a": 1, "b": "hello"}
     result = to_jsonlike(d, cfg)
     assert isinstance(result, dict)
-    assert result["'a'"] == 1
-    assert result["'b'"] == "hello"
+    assert result == {"a": 1, "b": "hello"}
+
+
+def test_dict_keys_plain_str_and_repr_otherwise(cfg):
+    """CAP-20: str keys are emitted as-is; other key types keep their repr."""
+    from enum import Enum
+
+    class Color(str, Enum):
+        RED = "red"
+
+    result = to_jsonlike({"k": 1, 2: "two", (1, 2): "pair", None: 0, Color.RED: "c"}, cfg)
+
+    # A str-based enum member is a str, so it renders as its plain string value.
+    assert result == {"k": 1, "2": "two", "(1, 2)": "pair", "None": 0, "red": "c"}
+    assert all(type(key) is str for key in result)
+
+
+def test_dict_key_collisions_keep_every_entry(cfg):
+    """CAP-20: {1: ..., "1": ...} would collide as "1"; the second gets a stable suffix."""
+    assert to_jsonlike({1: "int", "1": "str"}, cfg) == {"1": "int", "1#2": "str"}
+
+
+def test_long_str_keys_are_truncated(cfg):
+    result = to_jsonlike({"k" * (cfg.max_str + 50): 1}, cfg)
+
+    (key,) = result
+    assert key.endswith("...[TRUNC]")
+    assert len(key) <= cfg.max_str
 
 
 @pytest.mark.skipif(not _has_module("numpy"), reason="numpy not installed")
@@ -337,6 +363,56 @@ def test_compile_redactors_treats_unresolved_patterns_as_empty() -> None:
     assert compile_redactors(None) == []
 
 
+def test_compile_redactors_results_are_independent_lists() -> None:
+    """CAP-07: a caller mutating its list must not change what the next caller gets."""
+    first = compile_redactors(("alpha",))
+    first.clear()
+
+    assert [rx.pattern for rx in compile_redactors(("alpha",))] == ["alpha"]
+
+
+def test_compile_redactors_alternating_configs() -> None:
+    a, b = ("a1", "a2"), ("b1",)
+    for _ in range(3):
+        assert [rx.pattern for rx in compile_redactors(a)] == ["a1", "a2"]
+        assert [rx.pattern for rx in compile_redactors(b)] == ["b1"]
+
+
+def test_compile_redactors_skips_invalid_patterns(capsys: pytest.CaptureFixture[str]) -> None:
+    compiled = compile_redactors(("ok", "(unclosed"))
+
+    assert [rx.pattern for rx in compiled] == ["ok"]
+    assert "invalid redaction pattern '(unclosed'" in capsys.readouterr().err
+
+
+def test_compile_redactors_is_consistent_across_threads() -> None:
+    """CAP-07: concurrent captures with different configs each get their own patterns."""
+    import threading
+
+    configs = [tuple(f"t{i}_{j}" for j in range(3)) for i in range(6)]
+    mismatches: list[int] = []
+
+    def worker(index: int) -> None:
+        mine = configs[index]
+        for _ in range(500):
+            if [rx.pattern for rx in compile_redactors(mine)] != list(mine):
+                mismatches.append(index)
+                return
+
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(len(configs))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous)
+
+    assert mismatches == []
+
+
 def test_redact_text_basic():
     """Test direct redact_text function with simple pattern."""
     redactors = compile_redactors(("password",))
@@ -375,8 +451,9 @@ def test_serialize_locals_redacts_password():
     result = serialize_locals(local_vars, cfg, redactors)
     assert "password" in result
     assert "secret_key" in result
-    assert result["password"] == "[REDACTED]:hunter2"
-    assert result["secret_key"] == "[REDACTED]:abc123"
+    # CAP-03: the whole value of a secret-named local is replaced, not just the match.
+    assert result["password"] == "[REDACTED]"
+    assert result["secret_key"] == "[REDACTED]"
     assert result["username"] == "alice"
 
 
@@ -395,9 +472,9 @@ def test_serialize_locals_redacts_nested_dict():
     }
 
     result = serialize_locals(local_vars, cfg, redactors)
-    database = result["config"]["'database'"]
-    assert database["'password'"] == "[REDACTED]123"
-    assert database["'host'"] == "localhost"
+    database = result["config"]["database"]
+    assert database["password"] == "[REDACTED]"  # CAP-03: secret-named key
+    assert database["host"] == "localhost"
 
 
 def test_serialize_locals_redacts_in_arrays():
@@ -456,17 +533,18 @@ def test_serialize_locals_default_avoids_key_collision() -> None:
     result = serialize_locals(local_vars, cfg, redactors)
 
     assert set(result.keys()) == {"api_key", "secret_token"}
-    assert result["api_key"] == "[REDACTED]=value"
-    assert result["secret_token"] == "[REDACTED]=value"
+    assert result["api_key"] == "[REDACTED]"
+    assert result["secret_token"] == "[REDACTED]"
 
 
 def test_serialize_locals_redact_keys_preserves_collisions() -> None:
-    cfg = SnapshotConfig(redact=("api_key|secret_token",), redact_keys=True)
+    # Non-secret names, so the values stay visible and show which entry got the suffix.
+    cfg = SnapshotConfig(redact=("user_id|order_id",), redact_keys=True)
     redactors = compile_redactors(cfg.redact)
 
     local_vars = {
-        "api_key": "alpha",
-        "secret_token": "beta",
+        "user_id": "alpha",
+        "order_id": "beta",
     }
     result = serialize_locals(local_vars, cfg, redactors)
 
@@ -549,7 +627,7 @@ def test_redact_jsonlike_nested_dict():
     inner = outer["inner"]
     assert isinstance(inner, dict)
 
-    assert inner["password"] == "[REDACTED]=hunter2"
+    assert inner["password"] == "[REDACTED]"  # CAP-03: secret-named key
     assert inner["safe"] == "ok"
     # Keys preserved by default
     assert "password" in inner
@@ -567,14 +645,15 @@ def test_redact_jsonlike_nested_list():
 def test_redact_jsonlike_tuple_set_and_frozenset() -> None:
     redactors = compile_redactors(("secret",))
     data = {
-        "items_tuple": ("secret", "safe"),
+        # Three items: ("secret", value) would be a secret-named pair and redact "safe".
+        "items_tuple": ("secret", "safe", "more"),
         "items_set": {"safe", "secret"},
         "items_frozenset": frozenset({"secret", "safe"}),
     }
 
     result = redact_jsonlike(data, redactors)
 
-    assert result["items_tuple"] == ["[REDACTED]", "safe"]
+    assert result["items_tuple"] == ["[REDACTED]", "safe", "more"]
     assert sorted(result["items_set"]) == ["[REDACTED]", "safe"]
     assert sorted(result["items_frozenset"]) == ["[REDACTED]", "safe"]
 
@@ -594,7 +673,7 @@ def test_redact_jsonlike_keys_preserved_by_default():
 
     assert isinstance(result, dict)
     assert "password_field" in result
-    assert result["password_field"] == "[REDACTED]_value"
+    assert result["password_field"] == "[REDACTED]"  # CAP-03: secret-named key
 
 
 def test_redact_jsonlike_keys_redacted_when_opted_in():
@@ -606,12 +685,13 @@ def test_redact_jsonlike_keys_redacted_when_opted_in():
     assert isinstance(result, dict)
     assert "password_field" not in result
     assert "[REDACTED]_field" in result
-    assert result["[REDACTED]_field"] == "[REDACTED]_value"
+    assert result["[REDACTED]_field"] == "[REDACTED]"  # CAP-03: secret-named key
 
 
 def test_redact_jsonlike_key_collisions_are_preserved() -> None:
-    redactors = compile_redactors(("api_key|secret_token",))
-    data = {"api_key": "first", "secret_token": "second"}
+    # Non-secret names, so the values stay visible and show which entry got the suffix.
+    redactors = compile_redactors(("user_id|order_id",))
+    data = {"user_id": "first", "order_id": "second"}
     result = redact_jsonlike(data, redactors, redact_keys=True)
 
     assert isinstance(result, dict)

@@ -456,17 +456,25 @@ def test_apply_export_redaction_redacted_mode_redacts() -> None:
     assert result["source"]["out_dir"] is None
 
 
-def test_apply_export_redaction_redacted_mode_no_redactors() -> None:
-    """When profile has no patterns, should deepcopy without calling redact_jsonlike."""
-    payload: dict[str, Any] = {
-        "exception": {"message": "plain"},
-        "source": {},
-        "export_mode": "redacted",
-    }
-    # Use a profile that produces no patterns
-    with patch("llmdebug.export_artifact.compile_redactors", return_value=[]):
-        result = apply_export_redaction(payload, export_mode="redacted", redaction_profile=None)
-    assert result["exception"]["message"] == "plain"
+@pytest.mark.parametrize("profile", [None, "dev"])
+def test_apply_export_redaction_refuses_redacted_mode_without_redactors(
+    profile: str | None,
+) -> None:
+    """CAP-06: an export that redacts nothing must not be labelled "redacted"."""
+    payload: dict[str, Any] = {"exception": {"message": "token sk-live-secret"}, "source": {}}
+
+    with pytest.raises(ValueError, match="redacted export needs a redaction profile"):
+        apply_export_redaction(payload, export_mode="redacted", redaction_profile=profile)
+
+
+def test_apply_export_redaction_refuses_when_patterns_compile_to_nothing() -> None:
+    payload: dict[str, Any] = {"exception": {"message": "plain"}, "source": {}}
+
+    with (
+        patch("llmdebug.export_artifact.compile_redactors", return_value=[]),
+        pytest.raises(ValueError, match="redacted export"),
+    ):
+        apply_export_redaction(payload, export_mode="redacted", redaction_profile="ci")
 
 
 def test_apply_export_redaction_non_redacted_mode_preserves_profile() -> None:

@@ -1415,7 +1415,10 @@ unsupported and should be regenerated with the current harness before analysis.
   cut off at `max_tokens` is recorded as `note="truncated_response"` (patcher error
   `truncated_response`) instead of being repaired into a patch or recorded as
   `no_patch_proposed` (LLM-02), and model diffs are taken from every fenced block with
-  reasoning stripped, the last diff per file winning (LLM-01, LLM-04).
+  reasoning stripped, the last diff per file winning (LLM-01, LLM-04). Run metadata records
+  `llmdebug_snapshot_schema_version`, the debug-session schema the pytest plugin wrote for
+  snapshot-based conditions, and the settings fingerprint includes it, so resuming a run
+  across a snapshot-format change counts as settings drift.
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.

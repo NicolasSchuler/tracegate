@@ -63,7 +63,7 @@ def test_build_debug_session_minimal() -> None:
         llmdebug_version="2.1.0",
         snapshot={"exception": {"type": "ValueError"}, "frames": []},
     )
-    assert payload["schema_version"] == "2.0"
+    assert payload["schema_version"] == "2.1"
     assert payload["kind"] == "llmdebug.debug_session"
     assert payload["session"]["name"] == "unit_test"
     assert payload["snapshot"]["exception"]["type"] == "ValueError"
@@ -504,7 +504,7 @@ def test_module_level_lines_covered_via_reload() -> None:
     importlib.reload(mod)
 
     # Sanity-check the reloaded module exposes the expected public API.
-    assert mod.DEBUG_SESSION_SCHEMA_VERSION == "2.0"
+    assert mod.DEBUG_SESSION_SCHEMA_VERSION == "2.1"
     assert mod.DEBUG_SESSION_KIND == "llmdebug.debug_session"
     assert callable(mod.split_extra_context)
     assert callable(mod.build_debug_session)

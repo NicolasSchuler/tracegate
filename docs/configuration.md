@@ -219,6 +219,23 @@ explicitly disable profile patterns, and use `True`/`False` to explicitly
 override a profile boolean. The resulting `SnapshotConfig` attributes are
 always concrete tuples and booleans.
 
+Whenever any redaction pattern is active (`ci`, `prod`, `pii_safe=True`, or a custom
+`redact`), values are also redacted by **name**: a local variable, function argument, object
+attribute or dict key whose name contains `password`, `passwd`, `passphrase`, `secret`,
+`credential`, `private_key`, `api_key`/`access_key`, an `access`/`auth`/`refresh`/`bearer`/
+`session`/`csrf`/`api` token, `authorization` or `cookie` (case-insensitive, `_`/`-`
+optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
+`locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
+treated as secrets, because they are too common in ordinary code. A two-item list or tuple
+whose first item is such a name (a header or form field like `("password", value)`) has its
+second item replaced. `llmdebug.PII_PATTERNS` also covers URL userinfo
+(`postgres://user:pw@host` and `https://TOKEN@host` become `…://[REDACTED]@host`) and
+secret-named keys inside text such as the `repr` of a nested dict, including escaped,
+`b''`-prefixed and truncated values. The patterns are bounded so redacting megabytes of
+captured output stays linear. Source snippets and the frame `code` line are source code and
+are not redacted.
+`dev`, no profile, or `redact=()` turn all of this off.
+
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a
 redaction profile or override so inherited-versus-explicit intent remains
 unambiguous:
@@ -292,6 +309,17 @@ Snapshots are automatically enriched with contextual data:
 - **Async context**: asyncio task name and state
 - **Log records**: recent log entries (opt-in via `capture_logs=True`)
 - **Capture config**: frames, locals_mode, truncation limits, redaction patterns
+
+### Locals Format
+
+Locals are serialized to JSON-safe values. A local and its direct elements are expanded
+(containers cut at `max_items`, strings at `max_str`); anything nested deeper becomes its
+`repr`. Dict keys that are strings
+are emitted as-is (`{"k": "v"}`); other key types use their `repr` (`{1: "a"}` becomes
+`{"1": "a"}`), and a key that collides with an earlier one gets a stable `#2`, `#3` suffix.
+Snapshots before schema `2.1` wrote every key as its `repr` (`{"'k'": "v"}`). Integers
+outside the 64-bit range are stored as their `repr` string, and a value that can't be
+introspected becomes `"<serialization failed: <ErrorType>>"` without affecting the rest.
 
 ### Coverage Notes
 

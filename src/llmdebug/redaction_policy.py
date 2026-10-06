@@ -8,13 +8,41 @@ from typing import Any, Literal, cast
 
 RedactionProfile = Literal["dev", "ci", "prod"]
 
-# Built-in PII-focused patterns used by safer profiles and production paths.
+# CAP-03: names that mark their value as a secret, as a regex alternation. Bare "key" and
+# "token" are left out: they are too common in ordinary code (dict keys, tokenizers).
+SENSITIVE_NAMES = (
+    r"password|passwd|passphrase|secret|credential|private[_-]?key"
+    r"|(?:api|access)[_-]?key|(?:access|auth|refresh|bearer|session|csrf|api)[_-]?token"
+    r"|authorization|cookie"
+)
+
+# A Python/JSON string literal with escapes and an optional b/r/u prefix; the closing quote is
+# optional so a value cut by truncation is still covered to its end.
+_QUOTED_VALUE = r"""[bru]{0,2}(?:'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)"""
+
+# Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
+# that can follow a match start is bounded, so redacting long text (captured stdout, big
+# tracebacks) stays linear.
 PII_PATTERNS: tuple[str, ...] = (
     r"(?i)password\s*[:=]\s*\S+",
     r"(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[:=]\s*\S+",
     r"(?i)bearer\s+\S+",
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
+    # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
+    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") before its "@" is
+    # redacted too, since it may be userinfo, and so is an authority longer than any real
+    # host (fail closed). Runs before the email pattern, which would otherwise take
+    # "TOKEN@github.com" together with the host.
+    r"(?<=://)[^\s/]{1,512}(?=@)|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)"
+    r"|(?<=://)[^\s/]{513,}",
+    # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
+    r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
+    # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
+    # The name suffix is bounded because it overlaps later names; whitespace can't, so the
+    # separator padding is unbounded without becoming quadratic.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,128}['\"]?\s*[:=]\s*"
+    r"(?:" + _QUOTED_VALUE + r"|[^\s,;}\])]+)",
 )
 
 _VALID_PROFILES = {"dev", "ci", "prod"}

@@ -297,13 +297,16 @@ def apply_export_redaction(
 
     policy = resolve_redaction_policy(redaction_profile=normalized_profile)
     redactors = compile_redactors(policy.patterns)
-    if redactors:
-        redacted = cast(
-            dict[str, Any],
-            redact_jsonlike(payload, redactors, redact_keys=policy.redact_keys),
+    if not redactors:
+        # CAP-06: an artifact labelled "redacted" must have had redaction applied.
+        raise ValueError(
+            "redacted export needs a redaction profile with patterns (ci or prod), "
+            f"got {normalized_profile!r}"
         )
-    else:
-        redacted = deepcopy(payload)
+    redacted = cast(
+        dict[str, Any],
+        redact_jsonlike(payload, redactors, redact_keys=policy.redact_keys),
+    )
     if not policy.redact_traceback:
         _restore_path_value(redacted, payload, key_name="traceback")
     if not policy.redact_exception_strings:

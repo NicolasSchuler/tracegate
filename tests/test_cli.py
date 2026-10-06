@@ -710,6 +710,34 @@ class TestExport:
         assert manifest["primary_snapshot"]["ref"] == "previous"
         assert manifest["compare_snapshot"]["ref"] == "latest"
 
+    def test_export_redacted_mode_rejects_the_dev_profile(
+        self, tmp_path: Path, sample_snapshot: dict
+    ) -> None:
+        """CAP-06: dev redacts nothing, so a "redacted" export with it is a usage error."""
+        write_bundle(sample_snapshot, SnapshotConfig(out_dir=str(tmp_path), output_format="json"))
+        output_path = tmp_path / "out.json"
+
+        result = CliRunner(mix_stderr=False).invoke(
+            main,
+            [
+                "export",
+                "--format",
+                "json",
+                "--mode",
+                "redacted",
+                "--redaction-profile",
+                "dev",
+                "--output",
+                str(output_path),
+                "--dir",
+                str(tmp_path),
+            ],
+        )
+
+        assert result.exit_code == 2
+        assert "dev redacts nothing" in result.stderr
+        assert not output_path.exists()
+
     def test_export_bundle_defaults_to_redacted_ci_and_writes_compare_artifacts(
         self, tmp_path: Path, sample_snapshot: dict
     ) -> None:

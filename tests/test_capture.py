@@ -236,7 +236,7 @@ def test_capture_writes_debug_session_envelope(tmp_path):
     latest = tmp_path / "latest.json"
     raw = json.loads(latest.read_text(encoding="utf-8"))
 
-    assert raw["schema_version"] == "2.0"
+    assert raw["schema_version"] == "2.1"
     assert raw["kind"] == "llmdebug.debug_session"
     assert raw["session"]["name"] == "failing_for_envelope"
     assert raw["snapshot"]["exception"]["type"] == "ValueError"
@@ -606,7 +606,7 @@ def test_function_args_with_positional_only_and_varargs_kwonly_kwargs(tmp_path):
     assert args["b"] == 20
     assert args["c"] == 99
     assert args["args"] == [30, 40]
-    assert args["kwargs"] == {"'z'": 7}
+    assert args["kwargs"] == {"z": 7}
 
 
 def test_function_args_with_positional_only_varargs_kwargs(tmp_path):
@@ -628,7 +628,7 @@ def test_function_args_with_positional_only_varargs_kwargs(tmp_path):
     args = crash_frame["args"]
     assert args["a"] == 1
     assert args["args"] == [2, 3]
-    assert args["kwargs"] == {"'x'": 10, "'y'": 20}
+    assert args["kwargs"] == {"x": 10, "y": 20}
 
 
 def test_function_args_disabled(tmp_path):
@@ -678,7 +678,7 @@ def test_function_args_with_varargs(tmp_path):
     args = crash_frame["args"]
     assert args["a"] == 1
     assert args["args"] == [2, 3]
-    assert args["kwargs"] == {"'x'": 10, "'y'": 20}  # Keys get repr'd
+    assert args["kwargs"] == {"x": 10, "y": 20}  # str keys stay plain (CAP-20)
 
 
 def test_function_args_with_self(tmp_path):

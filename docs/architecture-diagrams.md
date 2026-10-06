@@ -48,7 +48,7 @@ eval framework, and adaptive online learning.
 │  SNAPSHOT ENVELOPE  (output.py + _debug_session.py)                        │
 │                                                                            │
 │  DebugSession {                                                            │
-│    schema_version: "2.0",                                                  │
+│    schema_version: "2.1",                                                  │
 │    session: {                                                              │
 │      snapshot:  { exception, frames[], traceback, crash_frame_index }      │
 │      context:   { env, git, async, recent_logs, pytest, coverage }         │

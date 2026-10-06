@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import re
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from re import Pattern
 from typing import Any, cast
 
 from .config import SnapshotConfig
+from .redaction_policy import SENSITIVE_NAMES
 
 JsonLike = None | bool | int | float | str | dict[str, Any] | list[Any]
 
@@ -43,18 +45,20 @@ class LocalsSerializationBundle:
     truncated_keys: int
 
 
-_last_redactor_patterns: tuple[str | Pattern[str], ...] | None = None
-_last_redactor_result: list[Pattern[str]] = []
-
-
 def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[Pattern[str]]:
-    """Compile regex patterns for redaction."""
-    global _last_redactor_patterns, _last_redactor_result
-    normalized_patterns = patterns or ()
-    if normalized_patterns is _last_redactor_patterns:
-        return _last_redactor_result
+    """Compile regex patterns for redaction; invalid patterns are reported and skipped."""
+    # A fresh list per call: callers may mutate it without touching the shared cache.
+    return list(_compile_redactors_cached(tuple(patterns or ())))
+
+
+# lru_cache keeps its bookkeeping consistent across threads (threading.excepthook can capture
+# concurrently); the former one-slot cache stored patterns and result in two statements (CAP-07).
+@functools.lru_cache(maxsize=32)
+def _compile_redactors_cached(
+    patterns: tuple[str | Pattern[str], ...],
+) -> tuple[Pattern[str], ...]:
     compiled: list[Pattern[str]] = []
-    for p in normalized_patterns:
+    for p in patterns:
         if isinstance(p, str):
             try:
                 compiled.append(re.compile(p))
@@ -64,15 +68,29 @@ def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[P
                 sys.stderr.write(f"llmdebug: invalid redaction pattern {p!r}: {e}\n")
         else:
             compiled.append(p)
-    _last_redactor_patterns = normalized_patterns
-    _last_redactor_result = compiled
-    return compiled
+    return tuple(compiled)
+
+
+REDACTED = "[REDACTED]"
+
+# CAP-03: matched against local-variable names and dict keys whenever any redaction pattern
+# is active; the value under a matching name is replaced whole.
+SENSITIVE_NAME_PATTERN = re.compile(f"(?i){SENSITIVE_NAMES}")
+
+
+def is_sensitive_name(name: str) -> bool:
+    """Whether a variable or key name marks its value as a secret."""
+    return SENSITIVE_NAME_PATTERN.search(name) is not None
+
+
+def _is_sensitive_pair_name(first: Any) -> bool:
+    return isinstance(first, str) and is_sensitive_name(first)
 
 
 def redact_text(text: str, redactors: list[Pattern[str]]) -> str:
     """Apply redaction patterns to text."""
     for rx in redactors:
-        text = rx.sub("[REDACTED]", text)
+        text = rx.sub(REDACTED, text)
     return text
 
 
@@ -107,16 +125,22 @@ def redact_jsonlike(
     """Recursively redact only string leaf values in JSON-like data.
 
     This avoids the fragile serialize-then-regex-then-parse flow, where
-    aggressive patterns can corrupt JSON structure.
+    aggressive patterns can corrupt JSON structure. When any redactor is
+    active, the whole value under a dict key with a sensitive name (see
+    :func:`is_sensitive_name`) is replaced, whatever its type, and so is the
+    second item of a ``[name, value]`` pair (a header or form field).
     """
     if isinstance(value, str):
         return redact_text(value, redactors)
-    if isinstance(value, tuple):
-        tuple_items = cast(tuple[Any, ...], value)
-        return [
+    if isinstance(value, (tuple, list)):
+        sequence = cast(list[Any] | tuple[Any, ...], value)
+        items: list[Any] = [
             redact_jsonlike(cast(JsonLike, item), redactors, redact_keys=redact_keys)
-            for item in tuple_items
+            for item in sequence
         ]
+        if redactors and len(items) == 2 and _is_sensitive_pair_name(sequence[0]):
+            items[1] = REDACTED
+        return items
     if isinstance(value, (set, frozenset)):
         ordered_items = sorted(
             cast(set[Any] | frozenset[Any], value), key=_stable_redaction_sort_key
@@ -125,13 +149,15 @@ def redact_jsonlike(
             redact_jsonlike(cast(JsonLike, item), redactors, redact_keys=redact_keys)
             for item in ordered_items
         ]
-    if isinstance(value, list):
-        return [redact_jsonlike(item, redactors, redact_keys=redact_keys) for item in value]
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():
             redacted_key = redact_text(key, redactors) if redact_keys else key
-            redacted_item = redact_jsonlike(item, redactors, redact_keys=redact_keys)
+            redacted_item: JsonLike
+            if redactors and is_sensitive_name(str(key)):
+                redacted_item = REDACTED
+            else:
+                redacted_item = redact_jsonlike(item, redactors, redact_keys=redact_keys)
             if redact_keys:
                 _insert_redacted_key(out, redacted_key, redacted_item)
             else:
@@ -757,7 +783,9 @@ def _jsonlike_dict(x: dict[Any, Any], cfg: SnapshotConfig, depth: int) -> JsonLi
         if i >= cfg.max_items:
             _insert_redacted_key(out, "...[TRUNC]", f"+{len(x) - cfg.max_items} more keys")
             break
-        key = safe_repr(k, cfg)
+        # str keys stay plain (str.__str__ also unwraps str subclasses); others use repr.
+        # A collision such as {1: ..., "1": ...} keeps both entries as "1" and "1#2".
+        key = truncate_str(str.__str__(k), cfg.max_str) if isinstance(k, str) else safe_repr(k, cfg)
         _insert_redacted_key(out, key, to_jsonlike(v, cfg, depth + 1))
     return out
 
@@ -826,10 +854,12 @@ def serialize_locals(
     return result
 
 
+def _local_type_name(value: Any) -> str:
+    return f"{type(value).__module__}.{type(value).__name__}"
+
+
 def _build_local_metadata_entry(value: Any) -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "type": f"{type(value).__module__}.{type(value).__name__}",
-    }
+    entry: dict[str, Any] = {"type": _local_type_name(value)}
     try:
         entry["len"] = len(value)  # type: ignore[arg-type]
     except Exception:  # nosec B110 — safe serialization fallback
@@ -873,6 +903,11 @@ def serialize_locals_bundle(
     for i, (key, value) in enumerate(local_vars.items()):
         if i >= cfg.max_items:
             break
+        if redactors and is_sensitive_name(str(key)):
+            # Never repr a secret, and keep its length out of the metadata.
+            values[key] = REDACTED
+            metadata[str(key)] = {"type": _local_type_name(value)}
+            continue
         values[key] = _serialize_local_value(value, cfg)
         metadata[str(key)] = _build_local_metadata_entry(value)
 

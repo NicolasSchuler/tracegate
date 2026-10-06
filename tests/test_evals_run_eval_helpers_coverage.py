@@ -732,9 +732,15 @@ class TestRunStateRepair:
         assert len(fingerprint) > 0
         # ORC-05: the seed drives bandit exploration even without --deterministic.
         args.seed = 8
+        reseeded = run_eval._build_run_settings_fingerprint(
+            args=args, cases=cases, conditions=conditions
+        )
+        assert reseeded != fingerprint
+        # CAP-20: a snapshot-format change is settings drift for resume.
+        monkeypatch.setattr(run_eval, "_resolve_llmdebug_snapshot_schema_version", lambda: "9.9")
         assert (
             run_eval._build_run_settings_fingerprint(args=args, cases=cases, conditions=conditions)
-            != fingerprint
+            != reseeded
         )
 
 

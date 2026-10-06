@@ -14,7 +14,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **Crash Frame Index** — The zero-based integer index into the `frames` array pointing to the crash frame. When the `crash` detail level is selected, only this frame is retained; all other frames are stripped. See: [`detail_filter.py`](../src/llmdebug/detail_filter.py).
 
-**Debug Session** — The versioned JSON envelope (`kind: "llmdebug.debug_session"`, `schema_version: "2.0"`) that wraps every snapshot with session metadata; the on-disk contract for all consumers. See: [README § Output](../README.md#output).
+**Debug Session** — The versioned JSON envelope (`kind: "llmdebug.debug_session"`, `schema_version: "2.1"`) that wraps every snapshot with session metadata; the on-disk contract for all consumers. See: [README § Output](../README.md#output).
 
 **Debug Snapshot** — A structured JSON capture of an exception event containing the exception chain, prioritized stack frames, typed locals, and optional context (git, env, coverage). See: [README § Features](../README.md#features).
 
@@ -72,7 +72,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **Redaction Profile** — A privacy preset (`dev`, `ci`, `prod`) that configures default redaction behavior; profiles are additive and explicit `redact`/`redact_*` options always take precedence. See: [Configuration Reference § Redaction Profiles](configuration.md#redaction-profiles).
 
-**Schema Version** — The semantic version string (currently `"2.0"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. Incremented on breaking format changes to enable forward-compatible tooling. See: [README § Output](../README.md#output).
+**Schema Version** — The semantic version string (currently `"2.1"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. The major part changes on breaking envelope changes; readers accept any `2.x`. `2.1` emits string dict keys in locals as plain strings instead of their `repr`. See: [README § Output](../README.md#output).
 
 **Session ID** — A stable string identifier (`<resolved_out_dir>::<scope>`) derived from the output directory and pytest node ID (or snapshot name). Used to correlate RCA attempts across retries for the same test or code region. See: [`rca_identity.py`](../src/llmdebug/rca_identity.py).
 
