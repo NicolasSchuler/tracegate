@@ -1459,9 +1459,13 @@ Runtime accounting now records canonical per-attempt wall-clock time as
 prefers this field when present across all attempts for a case-condition unit and
 falls back to legacy cumulative/before/after duration fields for backward compatibility.
 When resumed runs append duplicate attempt rows for the same
-`(run_id, case_id, condition, attempt)`, the analyzer resolves them with
-**last-write-wins** and reports `duplicate_attempt_rows_seen` /
-`duplicate_attempt_rows_resolved` under input diagnostics.
+`(run_id, case_id, condition, attempt)`, every reader resolves them through the one
+resolver in `evals/case_outcome.py` (`resolve_duplicate_attempt`): a real outcome beats a
+resume-eligible `unit_runtime_error` row, and otherwise **last-write-wins**. Input
+diagnostics report `duplicate_attempt_rows_seen`, `duplicate_attempt_rows_resolved` and
+`duplicate_attempt_rows_conflicting` — equal-priority rows that disagree about `success`,
+where no recorded field says which superseded the other. Those are warned about and
+`--strict-input` rejects them.
 For adaptive OPE, DR reward models are fit separately per
 `*_feature_scaling_profile`; mixed-profile buckets still report IPS/SNIPS on the pooled
 samples and now expose the contributing `feature_scaling_profiles` in the summary.

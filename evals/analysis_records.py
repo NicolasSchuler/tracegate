@@ -8,7 +8,7 @@ from typing import Any
 
 from evals import _json as json
 from evals.analysis_numeric import _as_int, _expand_paths
-from evals.case_outcome import is_resume_eligible
+from evals.case_outcome import resolve_duplicate_attempt
 from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION, normalize_condition_name
 
 # v7 marks the 2026-10-04 review semantics (see evals/README.md, "Record schema versions").
@@ -133,6 +133,7 @@ def _load_and_group_records(
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
         "duplicate_attempt_rows_resolved": 0,
+        "duplicate_attempt_rows_conflicting": 0,
     }
     deduped_records: dict[tuple[str, str, str, int], dict[str, Any]] = {}
     for src in _expand_paths(paths):
@@ -186,8 +187,18 @@ def _load_and_group_records(
                 previous = deduped_records.get(dedup_key)
                 if previous is not None:
                     input_errors["duplicate_attempt_rows_seen"] += 1
-                    # A resumed attempt's real outcome beats its runtime-error row.
-                    if is_resume_eligible(record) and not is_resume_eligible(previous):
+                    # DAT-24: one resolver for this reader and case_outcome.scored_attempts.
+                    resolution = resolve_duplicate_attempt(previous, record)
+                    if resolution.conflicting:
+                        input_errors["duplicate_attempt_rows_conflicting"] += 1
+                        if strict_input:
+                            raise ValueError(
+                                f"{src}:{line_no}: conflicting duplicate of "
+                                f"{case_id}/{condition} attempt {attempt}: "
+                                f"success={bool(previous.get('success'))} and "
+                                f"success={bool(record.get('success'))} with equal priority"
+                            )
+                    if resolution.keep is previous:
                         continue
                 if record.get("condition") != condition:
                     record = {**record, "condition": condition}

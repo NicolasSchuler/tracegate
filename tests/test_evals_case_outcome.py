@@ -62,6 +62,42 @@ def test_duplicate_attempt_prefers_the_real_outcome(real_first: bool) -> None:
     assert scored_attempts(rows) == [real]
 
 
+@pytest.mark.parametrize("success_first", [True, False])
+def test_conflicting_equal_priority_duplicates_resolve_the_same_in_both_readers(
+    tmp_path: Any, success_first: bool
+) -> None:
+    """DAT-24: both readers share one resolver and report the conflict (codex 2-1#1)."""
+    from evals import _json as json
+    from evals.analysis_records import _load_and_group_records
+    from tests.test_evals_analyze_grouping import _record
+
+    def record(success: bool) -> dict[str, Any]:
+        return _record(
+            run_id="r1",
+            case_id="c1",
+            condition="base_repair",
+            attempt=1,
+            success=success,
+            category="logic_error",
+            difficulty="easy",
+            snapshot_dependency="helpful",
+        )
+
+    ordered = [record(True), record(False)] if success_first else [record(False), record(True)]
+    results = tmp_path / "results.jsonl"
+    results.write_text("".join(json.dumps(r) + "\n" for r in ordered), encoding="utf-8")
+
+    grouped, input_errors = _load_and_group_records([str(results)])
+    assert input_errors["duplicate_attempt_rows_conflicting"] == 1
+    loaded = grouped[("r1", "c1", "base_repair")]
+    # The one surviving row is the same one the case-outcome reader keeps.
+    assert [row["success"] for row in loaded] == [bool(ordered[-1]["success"])]
+    assert [row["success"] for row in scored_attempts(ordered)] == [bool(ordered[-1]["success"])]
+
+    with pytest.raises(ValueError, match="conflicting duplicate"):
+        _load_and_group_records([str(results)], strict_input=True)
+
+
 def test_case_outcomes_groups_by_run_case_and_stripped_condition() -> None:
     rows = [
         _row(1, True),

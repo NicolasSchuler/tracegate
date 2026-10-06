@@ -292,6 +292,7 @@ def _print_input_errors(input_errors: Any) -> None:
     records_schema_invalid = int(input_errors.get("records_schema_invalid", 0))
     duplicate_attempt_rows_seen = int(input_errors.get("duplicate_attempt_rows_seen", 0))
     duplicate_attempt_rows_resolved = int(input_errors.get("duplicate_attempt_rows_resolved", 0))
+    duplicate_conflicting = int(input_errors.get("duplicate_attempt_rows_conflicting", 0))
     if (
         files_unreadable == 0
         and json_lines_invalid == 0
@@ -313,8 +314,15 @@ def _print_input_errors(input_errors: Any) -> None:
         print(
             "- dedup: "
             f"duplicate_attempt_rows_seen={duplicate_attempt_rows_seen}, "
-            f"duplicate_attempt_rows_resolved={duplicate_attempt_rows_resolved}"
+            f"duplicate_attempt_rows_resolved={duplicate_attempt_rows_resolved}, "
+            f"duplicate_attempt_rows_conflicting={duplicate_conflicting}"
         )
+        if duplicate_conflicting:
+            # DAT-24: equal-priority rows that disagree; the later one won.
+            print(
+                f"- warning: {duplicate_conflicting} duplicate attempt row(s) disagree about "
+                "success with no recorded order; rerun with --strict-input to reject them"
+            )
 
 
 def _ope_target_order(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]) -> list[str]:
