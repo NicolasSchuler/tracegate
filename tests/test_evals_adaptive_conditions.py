@@ -7291,3 +7291,93 @@ def test_bas07_native_manifest_lists_only_staged_file_evidence(tmp_path, monkeyp
     manifest = records[0]["patch_meta"]["case_information"]
     assert manifest["prompt_files"] == ["test_buggy.py"]
     assert manifest["test_source_exposure"] == "full"
+
+
+@dataclass
+class _RetryGateUsagePatcher:
+    """Reports usage on every served call so totals can be compared against it."""
+
+    name: str = "openai"
+    max_propose_sec: float = 10.0
+    max_tokens: int = 400
+    response_mode: str = "edits"
+    served: list[dict[str, int]] = field(default_factory=list)
+
+    def _usage_meta(self, prompt_tokens: int, completion_tokens: int) -> dict[str, Any]:
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        self.served.append(dict(usage))
+        return {"llm_call_count": 1, "usage": dict(usage)}
+
+    def request_context(self, *, prompt: str, context_dir, cwd) -> ContextRequestResult:
+        del prompt, context_dir, cwd
+        return ContextRequestResult(
+            request_json={
+                "need_more_context": True,
+                "requests": [{"type": "file", "path": "buggy.py"}],
+                "sufficiency_rationale": "need buggy file",
+            },
+            raw_response='{"need_more_context":true,"requests":[{"type":"file","path":"buggy.py"}]}',
+            meta=self._usage_meta(30, 6),
+        )
+
+    def propose_patch(self, *, prompt: str, context_dir, cwd) -> PatchResult:
+        del prompt, context_dir, cwd
+        return PatchResult(diff=None, meta={"reason": "no_diff", **self._usage_meta(70, 14)})
+
+
+def test_att05_retry_gate_block_usage_is_kept_in_the_scored_rows(tmp_path, monkeypatch) -> None:
+    """codex 1f#2: a gate block is unscored but paid for, so its usage must survive."""
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "workdir_retry_gate_usage"
+    context_dir = tmp_path / "context_retry_gate_usage"
+    shutil.copytree(case.path, workdir)
+    patcher = _RetryGateUsagePatcher()
+
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "run_pytest",
+        lambda *args, **kwargs: run_eval.RunResult(
+            returncode=1,
+            duration_sec=0.01,
+            stdout="tests/test_buggy.py::test_f\nE   AssertionError: expected 2 got 1\n",
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
+    )
+
+    records = run_eval.run_one_condition(
+        case=case,
+        condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
+        workdir=workdir,
+        context_dir_base=context_dir,
+        patcher=patcher,
+        k=2,
+        output_format="json_compact",
+        run_id="run-retry-gate-usage",
+        include_files_context=False,
+        force_patch_attempt=False,
+        adaptive_gate_policy="aggressive",
+        adaptive_max_helper_calls=3,
+    )
+
+    blocks = [r for r in records if r["note"] == "retry_gate_no_new_evidence"]
+    scored = [r for r in records if r.get("record_type", "attempt") != "infra_event"]
+    assert len(blocks) == 1
+    block_tokens = blocks[0]["attempt_metadata"]["tokens_total"]
+    assert block_tokens > 0
+
+    served_total = sum(usage["total_tokens"] for usage in patcher.served)
+    scored_total = sum(r["attempt_metadata"]["tokens_total"] for r in scored)
+    # Every token the stub served is accounted for by the rows analysis actually reads.
+    assert scored_total == served_total
+    assert blocks[0]["patch_meta"]["retry_gate_usage_carried_forward"] is True
+    carried = [r["attempt_metadata"]["retry_gate_carried_tokens_total"] for r in scored]
+    assert sum(carried) == block_tokens

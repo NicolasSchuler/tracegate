@@ -1361,6 +1361,65 @@ def _fold_tep_learning_usage(
     attempt_metadata["token_usage_missing_segments"] = list(missing_segments)
 
 
+def _accumulate_retry_gate_carry(
+    carry: dict[str, Any],
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    attempt_wall_sec: float,
+) -> None:
+    """Remember what an unscored retry-gate block paid for (ATT-05).
+
+    The block row is an ``infra_event`` that analysis discards, so its Stage-A, planning
+    and compaction calls would otherwise be free in every cost total.
+    """
+    reasoning_tokens, _applicable, reasoning_available = _reasoning_usage_segment_from_meta(
+        patch_meta,
+        default_llm_calls=_nonnegative_int(attempt_metadata.get("llm_call_count"), default=0),
+    )
+    for key in ("llm_call_count", "tokens_prompt", "tokens_completion", "tokens_total"):
+        carry[key] = _nonnegative_int(carry.get(key), default=0) + _nonnegative_int(
+            attempt_metadata.get(key), default=0
+        )
+    carry[KEY_PROMPT_CHARS_TOTAL] = _nonnegative_int(
+        carry.get(KEY_PROMPT_CHARS_TOTAL), default=0
+    ) + _nonnegative_int(attempt_metadata.get(KEY_PROMPT_CHARS_TOTAL), default=0)
+    carry["completion_chars_total"] = _nonnegative_int(
+        carry.get("completion_chars_total"), default=0
+    ) + _nonnegative_int(attempt_metadata.get("completion_chars_total"), default=0)
+    carry["tokens_reasoning"] = (
+        _nonnegative_int(carry.get("tokens_reasoning"), default=0) + reasoning_tokens
+    )
+    carry["reasoning_token_usage_available"] = bool(
+        carry.get("reasoning_token_usage_available", True)
+    ) and bool(reasoning_available)
+    carry["token_usage_available"] = bool(carry.get("token_usage_available", True)) and bool(
+        attempt_metadata.get("token_usage_available")
+    )
+    carry["blocks"] = _nonnegative_int(carry.get("blocks"), default=0) + 1
+    carry["wall_sec"] = max(0.0, float(carry.get("wall_sec") or 0.0)) + max(
+        0.0, float(attempt_wall_sec)
+    )
+
+
+def _retry_gate_carry_usage_meta(carry: dict[str, Any]) -> dict[str, Any] | None:
+    """Render the carry as an LLM-call meta so the shared aggregation can read it."""
+    calls = _nonnegative_int(carry.get("llm_call_count"), default=0)
+    if not calls and not _nonnegative_int(carry.get("tokens_total"), default=0):
+        return None
+    return {
+        "llm_call_count": calls,
+        "token_usage_available": bool(carry.get("token_usage_available", True)),
+        "tokens_reasoning": _nonnegative_int(carry.get("tokens_reasoning"), default=0),
+        "reasoning_token_usage_available": bool(carry.get("reasoning_token_usage_available", True)),
+        "usage": {
+            "prompt_tokens": _nonnegative_int(carry.get("tokens_prompt"), default=0),
+            "completion_tokens": _nonnegative_int(carry.get("tokens_completion"), default=0),
+            "total_tokens": _nonnegative_int(carry.get("tokens_total"), default=0),
+        },
+    }
+
+
 def _unit_runtime_error_record(
     *,
     case: CaseSpec,
@@ -2913,6 +2972,9 @@ def _run_one_condition_attempts(
     # ───────────────────────────────────────────────────────────────────────
     retry_gate_consecutive_blocks = 0
     retry_gate_blocks_pending = 0
+    # ATT-05: an unscored block is still paid for. Its usage waits here for the next
+    # scored row instead of disappearing with the discarded infra_event rows.
+    retry_gate_carry: dict[str, Any] = {}
     while scored_attempts_consumed < k:
         attempt = scored_attempts_consumed + 1
         _resolve_expired_pending_online_credits(current_attempt=attempt)
@@ -5674,6 +5736,42 @@ def _run_one_condition_attempts(
             attempt_tokens_prompt += retry_plan_tokens_prompt
             attempt_tokens_completion += retry_plan_tokens_completion
             attempt_tokens_total += retry_plan_tokens_total
+        # ATT-05: the unscored retry-gate blocks before this attempt were paid for; their
+        # usage joins this scored row, which is the only row analysis will read.
+        retry_gate_carry_meta = _retry_gate_carry_usage_meta(retry_gate_carry)
+        retry_gate_carried_calls = _nonnegative_int(
+            retry_gate_carry.get("llm_call_count"), default=0
+        )
+        if retry_gate_carry_meta is not None:
+            attempt_llm_calls += retry_gate_carried_calls
+            attempt_tokens_prompt += _nonnegative_int(
+                retry_gate_carry.get("tokens_prompt"), default=0
+            )
+            attempt_tokens_completion += _nonnegative_int(
+                retry_gate_carry.get("tokens_completion"), default=0
+            )
+            attempt_tokens_total += _nonnegative_int(
+                retry_gate_carry.get("tokens_total"), default=0
+            )
+            initial_prompt_chars_total += _nonnegative_int(
+                retry_gate_carry.get(KEY_PROMPT_CHARS_TOTAL), default=0
+            )
+            initial_completion_chars_total += _nonnegative_int(
+                retry_gate_carry.get("completion_chars_total"), default=0
+            )
+        for key, value in (
+            ("retry_gate_carried_llm_call_count", retry_gate_carried_calls),
+            (
+                "retry_gate_carried_tokens_total",
+                _nonnegative_int(retry_gate_carry.get("tokens_total"), default=0),
+            ),
+        ):
+            attempt_metadata[key] = value
+            patch_meta[key] = value
+        patch_meta["retry_gate_carried_wall_sec"] = max(
+            0.0, float(retry_gate_carry.get("wall_sec") or 0.0)
+        )
+        retry_gate_carry.clear()
         attempt_tokens_reasoning, reasoning_token_usage_available = (
             _combine_reasoning_usage_segments(
                 (
@@ -5688,6 +5786,7 @@ def _run_one_condition_attempts(
                     retry_plan_meta if retry_plan_meta else None,
                     1 if (retry_plan_invoked and is_openai_patcher) else 0,
                 ),
+                (retry_gate_carry_meta, retry_gate_carried_calls),
                 (patch_meta, 1 if is_openai_patcher else 0),
             )
         )
@@ -5994,6 +6093,15 @@ def _run_one_condition_attempts(
                 patch_meta["retry_gate_previous_evidence_fingerprint"] = prev_evidence_fingerprint
                 attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
                 cumulative_runtime_sec += attempt_wall_sec
+                # ATT-05: this row is unscored, so analysis drops it. Hand its paid work
+                # to the next scored row rather than losing it.
+                _accumulate_retry_gate_carry(
+                    retry_gate_carry,
+                    attempt_metadata=attempt_metadata,
+                    patch_meta=patch_meta,
+                    attempt_wall_sec=attempt_wall_sec,
+                )
+                patch_meta["retry_gate_usage_carried_forward"] = True
                 pending_credit = _finalize_adaptive_policy_attempt(
                     note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     success=False,
