@@ -1069,3 +1069,50 @@ def test_depth_limit_repr_falls_back_to_redacted_when_nothing_can_be_rendered() 
     cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
 
     assert _past_depth_limit(_Weird("m", {"v": _Unreprable()}), cfg) == "'[REDACTED]'"
+
+
+def test_series_preview_cells_are_normalized_without_pandas() -> None:
+    """CAP-01: object cells hold arbitrary values, so normalization has to recurse.
+
+    A stub stands in for pandas so the normalization is covered wherever the suite runs;
+    `tests/test_capture_hostile.py` drives the same code through real frames.
+    """
+
+    class Series:
+        __module__ = "pandas.core.series"
+
+        def __init__(self, values: list[object]) -> None:
+            self._values = values
+            self.shape = (len(values),)
+            self.name = "cells"
+            self.dtype = "object"
+
+        def head(self, _rows: int) -> Series:
+            return self
+
+        def tolist(self) -> list[object]:
+            return list(self._values)
+
+        def __len__(self) -> int:
+            return len(self._values)
+
+    cells: list[object] = [
+        {"id": 2**70},
+        [2**70, "ok"],
+        {"ok": True},
+        {"a": {"b": {"c": 1}}},
+        [[[1]]],
+        ("t", 2**70),
+    ]
+    summary = to_jsonlike(Series(cells), SnapshotConfig())
+
+    assert isinstance(summary, dict)
+    assert summary["head"] == [
+        {"id": repr(2**70)},
+        [repr(2**70), "ok"],
+        {"ok": True},
+        # Two levels in, a container becomes its repr instead of recursing without bound.
+        {"a": {"b": "{'c': 1}"}},
+        [["[1]"]],
+        ["t", repr(2**70)],
+    ]

@@ -232,7 +232,9 @@ def open_state_db_readonly(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
     which also makes reading a legacy (unversioned) database in a non-writable directory
     fail instead of returning the records it holds.
     """
-    path = state_db_path(out_dir)
+    # Absolute: `as_uri()` rejects a relative path, and ``out_dir`` is usually relative
+    # (the CLI default is ".llmdebug").
+    path = state_db_path(out_dir).resolve()
     conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=30.0)
     try:
         busy_timeout = read_env_int("LLMDEBUG_DB_BUSY_TIMEOUT_MS", _BUSY_TIMEOUT_MS, minimum=0)

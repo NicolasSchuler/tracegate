@@ -857,3 +857,26 @@ def test_find_all_snapshots_rescans_when_a_stale_row_balances_a_missing_one(
     entries = find_all_snapshots(str(tmp_path), limit=1)
 
     assert [str(entry["name"]) for entry in entries] == ["new"]
+
+
+def test_index_covers_disk_without_snapshot_files(tmp_path: Path) -> None:
+    """RCA-03: an empty directory has nothing the index could be missing."""
+    from llmdebug.snapshot_index import index_covers_disk
+
+    assert index_covers_disk(str(tmp_path)) is True
+
+
+def test_index_covers_disk_treats_an_unreadable_index_as_not_covering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """RCA-03: an index that cannot be read cannot be trusted either."""
+    import llmdebug.snapshot_index as snapshot_index
+
+    (tmp_path / "snap.json").write_text("{}", encoding="utf-8")
+
+    def _boom(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr(snapshot_index, "list_snapshot_records", _boom)
+
+    assert snapshot_index.index_covers_disk(str(tmp_path)) is False

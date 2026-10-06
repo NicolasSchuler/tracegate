@@ -100,6 +100,10 @@ def test_wide_ints_nested_in_pandas_previews(tmp_path: Path) -> None:
     def boom() -> None:
         frame = pd.DataFrame({"a": [{"id": 2**70}, {"id": 1}]})  # noqa: F841 - captured local
         listed = pd.DataFrame({"a": [[2**70, 1]]})  # noqa: F841 - captured local
+        flagged = pd.DataFrame({"a": [{"ok": True}]})  # noqa: F841 - captured local
+        deep = pd.DataFrame(  # noqa: F841 - captured local
+            {"a": [{"b": {"c": {"d": 1}}}], "b": [[[[1]]]]}
+        )
         series = pd.Series([{"id": 2**70}])  # noqa: F841 - captured local
         raise ValueError("nested pandas wide ints")
 
@@ -108,7 +112,12 @@ def test_wide_ints_nested_in_pandas_previews(tmp_path: Path) -> None:
     local_vars = _crash_locals(snapshot)
     assert local_vars["frame"]["head"][0] == [{"id": repr(2**70)}]
     assert local_vars["listed"]["head"][0] == [[repr(2**70), 1]]
+    assert local_vars["flagged"]["head"][0] == [{"ok": True}]
     assert local_vars["series"]["head"] == [{"id": repr(2**70)}]
+    # Two levels in, a container becomes its repr instead of recursing without bound.
+    deep_dict, deep_list = local_vars["deep"]["head"][0]
+    assert deep_dict == {"b": {"c": "{'d': 1}"}}
+    assert deep_list == [["[1]"]]
 
 
 def test_wide_int_pandas_column_labels_are_normalized(tmp_path: Path) -> None:

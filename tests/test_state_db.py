@@ -953,3 +953,35 @@ def test_count_snapshot_records_without_a_database_creates_nothing(tmp_path: Pat
 
     assert count_snapshot_records(tmp_path / "missing") == 0
     assert not (tmp_path / "missing").exists()
+
+
+def test_stored_rca_attempt_ids_without_candidates_does_not_query(tmp_path: Path) -> None:
+    from llmdebug.state_db import stored_rca_attempt_ids
+
+    assert stored_rca_attempt_ids(tmp_path, []) == set()
+    assert stored_rca_attempt_ids(tmp_path, ["", "  "]) == set()
+    assert not state_db_path(tmp_path).exists()
+
+
+def test_file_identity_falls_back_to_the_path_when_stat_fails(tmp_path: Path) -> None:
+    """RCA-16: a database that vanished between open and stat still needs a cache key."""
+    missing = tmp_path / "gone.sqlite3"
+
+    assert state_db._file_identity(missing) == str(missing)
+
+
+def test_reads_accept_a_relative_out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RCA-02: the read-only connection needs a file URI, which a relative path has none of."""
+    from llmdebug.state_db import count_rca_records, count_snapshot_records
+
+    out_dir = tmp_path / ".llmdebug"
+    out_dir.mkdir()
+    upsert_snapshot_record(
+        str(out_dir),
+        {"path": str(out_dir / "s.json"), "mtime": 1.0, "name": "n"},
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert count_snapshot_records(".llmdebug") == 1
+    assert count_rca_records(".llmdebug") == 0
+    assert [row["name"] for row in list_snapshot_records(".llmdebug")] == ["n"]

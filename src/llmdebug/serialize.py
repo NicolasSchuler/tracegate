@@ -620,6 +620,21 @@ def _preview_cell(value: Any, cfg: SnapshotConfig, depth: int = 0) -> Any:
     return value
 
 
+def _add_dataframe_columns(summary: dict[str, Any], df: Any, cfg: SnapshotConfig) -> None:
+    """Record the listed column labels and whether they were cut (CAP-01, CAP-13).
+
+    Labels are arbitrary objects too, so they get the same normalization as preview
+    cells: a wide-integer column label used to break the JSON encoder.
+    """
+    try:
+        columns = list(cast(list[Any], df.columns))
+        summary["columns"] = [_preview_cell(column, cfg) for column in columns[: cfg.max_items]]
+        if len(columns) > cfg.max_items:
+            summary["columns_truncated"] = True
+    except Exception as e:
+        summary["columns"] = f"<error: {type(e).__name__}>"
+
+
 def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     """Summarize a pandas DataFrame."""
     summary: dict[str, Any] = {"__dataframe__": True}
@@ -629,15 +644,7 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     except Exception as e:
         summary["shape"] = f"<error: {type(e).__name__}>"
 
-    try:
-        # Labels are arbitrary objects too: a wide-integer column label broke the encoder.
-        summary["columns"] = [
-            _preview_cell(column, cfg) for column in list(df.columns)[: cfg.max_items]
-        ]
-        if len(df.columns) > cfg.max_items:
-            summary["columns_truncated"] = True
-    except Exception as e:
-        summary["columns"] = f"<error: {type(e).__name__}>"
+    _add_dataframe_columns(summary, df, cfg)
 
     try:
         dtypes_raw = getattr(df, "dtypes", None)

@@ -80,6 +80,24 @@ class TestDuplicateShortKeyGuard:
         with pytest.raises(ValueError, match="duplicate short-key values"):
             spec.loader.exec_module(module)
 
+    def test_reused_retired_short_key_raises_on_import(self, tmp_path: Path) -> None:
+        """CAP-17: a retired short key reused by a new entry would decode old files wrongly."""
+        assert compact_keys_module.__file__ is not None
+        source = Path(compact_keys_module.__file__).read_text(encoding="utf-8")
+        bad_source = source.replace('"timestamp_utc": "_ts",', '"timestamp_utc": "_st",', 1)
+        assert bad_source != source
+
+        temp_module = tmp_path / "reused_compact_keys.py"
+        temp_module.write_text(bad_source, encoding="utf-8")
+
+        spec = importlib.util.spec_from_file_location("reused_compact_keys", temp_module)
+        assert spec is not None
+        assert spec.loader is not None
+
+        module = importlib.util.module_from_spec(spec)
+        with pytest.raises(ValueError, match="reuses retired short keys"):
+            spec.loader.exec_module(module)
+
     def test_actual_key_map_passes_guard(self) -> None:
         """The shipped KEY_MAP must not trigger the guard."""
         reverse = {v: k for k, v in KEY_MAP.items()}
