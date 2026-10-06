@@ -30,6 +30,12 @@ _S = {
     "session": "tok-0123",
     "header": "k1",
     "ctx": "ctx-secret",
+    # Values used by the truncated-URL and header-field regressions.
+    "basic": "dXNlcjpwYXNz",
+    "cookie": "sid-0ead",
+    "at_dsn": "postgres://admin:p@ssword-0123456789abcdef@db:5432/app",
+    "hyphen": "hunter-9",
+    "quoted": "alpha beta gamma",
 }
 
 
@@ -203,6 +209,30 @@ def test_ordinary_names(name: str) -> None:
         ('{"apiKey": "abc"}', '{"[REDACTED]}'),
         ("SECRET_KEY=xyz rest", "[REDACTED] rest"),
         ("tokens = [1]; key: 2", "tokens = [1]; key: 2"),
+        # Quoted multi-word values: the whole literal goes, not just its first word.
+        ('password="alpha beta gamma"', "[REDACTED]"),
+        ("api_key='alpha beta gamma'", "[REDACTED]"),
+        # Composite values inside a repr: one level of container is consumed whole.
+        ("{'password': ['alpha', 'beta']}", "{'[REDACTED]}"),
+        ("{'api_key': {'v': 'alpha'}, 'n': 1}", "{'[REDACTED], 'n': 1}"),
+        # Hyphenated secret names, as `is_sensitive_name` already accepted them.
+        ("{'secret-key': 'hunter2'}", "{'[REDACTED]}"),
+        ('{"secret-key": "hunter2"}', '{"[REDACTED]}'),
+        ("secret-key: hunter2 rest", "[REDACTED] rest"),
+        # Header fields whose value contains whitespace or ";"-separated pairs.
+        ("Authorization: Basic dXNlcjpwYXNz", "[REDACTED]"),
+        ("Cookie: first=alpha; second=beta", "[REDACTED]"),
+        ("{'Authorization': 'Basic abc', 'Accept': 'json'}", "{'[REDACTED], 'Accept': 'json'}"),
+        # A quoted name/value pair, as in the repr of a header list.
+        ("['Authorization', 'Basic abc']", "[[REDACTED]]"),
+        ("('password', 'alpha beta')", "([REDACTED])"),
+        # A truncated authority is redacted whole even when the password contains "@".
+        ("postgres://admin:p@ss-secret...[TRUNC]", "postgres://[REDACTED]...[TRUNC]"),
+        (
+            "{'dsn': 'postgres://admin:p@ss...[TRUNC]'}",
+            "{'dsn': 'postgres://[REDACTED]...[TRUNC]'}",
+        ),
+        ("https://host/a...[TRUNC]", "https://host/a...[TRUNC]"),
     ],
 )
 def test_text_patterns(text: str, expected: str) -> None:
@@ -243,3 +273,105 @@ def test_secret_name_value_pairs(tmp_path: Path) -> None:
     local_vars = snapshot["frames"][0]["locals"]
     assert local_vars["form"] == [["username", "bob"], ["password", "[REDACTED]"]]
     assert local_vars["headers"] == [["Authorization", "[REDACTED]"], ["Accept", "json"]]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Authorization: " + "a" * 100_000,
+        "cookie=" + "a;" * 50_000,
+        "{'secret-key': '" + "x" * 100_000,
+        "['api_key', '" + "x" * 100_000,
+        "password: [" + "x" * 100_000,
+        "password: {" + "x" * 100_000,
+        "://" + "a" * 100_000 + "...[TRUNC]",
+        "://" + "a...[TRUNC]" * 10_000,
+        "'secret" + "-k" * 50_000,
+    ],
+)
+def test_new_patterns_stay_linear_on_adversarial_input(text: str) -> None:
+    """The header-field, container-value and pair patterns must stay linear-time."""
+    from llmdebug.redaction_policy import PII_PATTERNS
+
+    redactors = compile_redactors(PII_PATTERNS)
+    started = time.perf_counter()
+    redact_text(text, redactors)
+
+    assert time.perf_counter() - started < 1.0
+
+
+def _capture_locals(
+    tmp_path: Path, body: Any, profile: str | None = "prod", **extra_cfg: Any
+) -> tuple[dict[str, Any], str]:
+    """Capture one frame through ``capture_exception`` and return its locals plus raw text."""
+    try:
+        body()
+    except ValueError as exc:
+        cfg = SnapshotConfig(
+            out_dir=str(tmp_path),
+            redaction_profile=profile,  # type: ignore[arg-type]
+            include_git=False,
+            output_format="json",
+            **extra_cfg,
+        )
+        path = capture_exception("deep", exc, exc.__traceback__, cfg)
+    snapshot = get_latest_snapshot(str(tmp_path))
+    assert snapshot is not None
+    return snapshot["frames"][0]["locals"], path.read_text(encoding="utf-8")
+
+
+def test_truncated_url_authority_with_at_sign_in_password(tmp_path: Path) -> None:
+    """Truncation can remove the host separator, leaving an "@" inside the password."""
+
+    def boom() -> None:
+        dsn = _S["at_dsn"]  # noqa: F841 - ordinary name, only the text pattern sees it
+        raise ValueError("dsn")
+
+    local_vars, raw = _capture_locals(tmp_path, boom, max_str=40)
+
+    # "password" itself appears in the echoed config patterns, so match the secret suffix.
+    assert "ssword-0" not in raw
+    assert local_vars["dsn"] == "postgres://[REDACTED]...[TRUNC]"
+
+
+def test_hyphenated_sensitive_key_in_serialized_text(tmp_path: Path) -> None:
+    """``secret-key`` is sensitive structurally; the text matcher used to reject the hyphen."""
+
+    def boom() -> None:
+        deep = {"a": {"b": {"secret-key": _S["hyphen"], "host": "h"}}}  # noqa: F841
+        payload = '{"secret-key": "' + _S["hyphen"] + '"}'  # noqa: F841
+        shallow = {"secret-key": _S["hyphen"]}  # noqa: F841
+        raise ValueError("hyphen")
+
+    local_vars, raw = _capture_locals(tmp_path, boom)
+
+    assert _S["hyphen"] not in raw
+    assert local_vars["shallow"]["secret-key"] == "[REDACTED]"
+    assert local_vars["payload"] == '{"[REDACTED]}'
+
+
+def test_quoted_and_header_field_values_in_an_exception_message(tmp_path: Path) -> None:
+    """Exception strings are redacted in ``prod``; the legacy patterns cut values short."""
+
+    def boom() -> None:
+        raise ValueError(
+            f'password="{_S["quoted"]}" Authorization: Basic {_S["basic"]} '
+            f"Cookie: sid={_S['cookie']}; theme=dark"
+        )
+
+    try:
+        boom()
+    except ValueError as exc:
+        cfg = SnapshotConfig(
+            out_dir=str(tmp_path),
+            redaction_profile="prod",
+            include_git=False,
+            source_mode="none",
+            output_format="json",
+        )
+        path = capture_exception("msg", exc, exc.__traceback__, cfg)
+    raw = path.read_text(encoding="utf-8")
+
+    for name in ("quoted", "basic", "cookie"):
+        assert _S[name] not in raw, name
+    assert "beta gamma" not in raw

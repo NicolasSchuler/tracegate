@@ -16,35 +16,62 @@ SENSITIVE_NAMES = (
     r"|authorization|cookie"
 )
 
+# Secret-name suffix after one of SENSITIVE_NAMES, e.g. the "-key" of "secret-key". Hyphens
+# are included so text matching accepts the same names as `is_sensitive_name`. Bounded
+# because the suffix class overlaps the names themselves.
+_NAME_SUFFIX = r"[\w-]{0,128}"
+
 # A Python/JSON string literal with escapes and an optional b/r/u prefix; the closing quote is
 # optional so a value cut by truncation is still covered to its end.
 _QUOTED_VALUE = r"""[bru]{0,2}(?:'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)"""
 
+# One level of bracketed container, so a composite value is consumed whole instead of up to
+# its first comma: {'password': ['alpha', 'beta']} must not keep "beta". Each inner class
+# excludes its own brackets and is bounded, so matching stays linear.
+_CONTAINER_VALUE = r"\[[^\[\]\r\n]{0,1024}\]|\{[^{}\r\n]{0,1024}\}|\([^()\r\n]{0,1024}\)"
+
+# A bare value, up to the delimiter that ends it in a repr or JSON rendering.
+_BARE_VALUE = r"[^\s,;}\])]+"
+
+_SECRET_VALUE = f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_BARE_VALUE})"
+
+# Header fields whose value is whitespace- or ";"-separated, so one token is not the whole
+# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". Their value is consumed up
+# to the structural delimiters of a surrounding repr/JSON object, which stay readable.
+_AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
+
 # Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
 # that can follow a match start is bounded, so redacting long text (captured stdout, big
-# tracebacks) stays linear.
+# tracebacks) stays linear. The order matters: `redact_text` applies them in sequence, and a
+# pattern that consumes a longer value must run before one that would stop inside it.
 PII_PATTERNS: tuple[str, ...] = (
-    r"(?i)password\s*[:=]\s*\S+",
-    r"(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[:=]\s*\S+",
+    # Authorization/Cookie fields first: the generic assignment pattern below would stop at
+    # the space in "Basic dXNlcjpwYXNz" and leave the credential behind.
+    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*[^\r\n,}\])]{0,4096}",
+    # A secret-named name/value assignment, in a log line, an exception message or the repr
+    # of a nested dict: password="a b", {'secret-key': 'hunter2'}, api_key: ['a', 'b'].
+    # This one pattern replaces the former `password\s*[:=]\s*\S+` pair, which matched first
+    # and cut quoted multi-word values off after their first word.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]?\s*[:=]\s*" + _SECRET_VALUE,
+    # A quoted secret name followed by a quoted value: the repr of a header or form pair,
+    # ['Authorization', 'Basic dXNlcjpwYXNz'], which has no ":"/"=" separator.
+    r"(?i)['\"](?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]\s*,\s*" + _SECRET_VALUE,
     r"(?i)bearer\s+\S+",
     # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
     # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
-    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") before its "@" is
-    # redacted too, since it may be userinfo, and so is an authority longer than any real
-    # host (fail closed). Runs before the email pattern, which would otherwise take
-    # "TOKEN@github.com" together with the host.
-    # The long-authority branch comes first: otherwise the userinfo branch would redact only
-    # the part before an early "@" of an over-long authority.
-    r"(?<=://)[^\s/]{513,}|(?<=://)[^\s/]{1,512}(?=@)"
-    r"|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)",
+    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") is redacted whole,
+    # since it may be userinfo, and so is an authority longer than any real host (fail
+    # closed). Runs before the email pattern, which would otherwise take "TOKEN@github.com"
+    # together with the host.
+    # Branch order is the fail-closed order: a truncated or over-long authority must win over
+    # ordinary userinfo matching, which would otherwise stop at an "@" inside the password
+    # ("postgres://admin:p@ss...[TRUNC]") or before the real host of an over-long authority.
+    r"(?<=://)[^\s/]{513,}"
+    r"|(?<=://)[^\s/]{1,512}(?=\.\.\.\[TRUNC\])"
+    r"|(?<=://)[^\s/]{1,512}(?=@)",
     # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
     r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
-    # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
-    # The name suffix is bounded because it overlaps later names; whitespace can't, so the
-    # separator padding is unbounded without becoming quadratic.
-    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,128}['\"]?\s*[:=]\s*"
-    r"(?:" + _QUOTED_VALUE + r"|[^\s,;}\])]+)",
 )
 
 _VALID_PROFILES = {"dev", "ci", "prod"}

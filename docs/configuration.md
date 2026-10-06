@@ -228,12 +228,18 @@ optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
 `locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
 treated as secrets, because they are too common in ordinary code. A two-item list or tuple
 whose first item is such a name (a header or form field like `("password", value)`) has its
-second item replaced. `llmdebug.PII_PATTERNS` also covers URL userinfo
-(`postgres://user:pw@host` and `https://TOKEN@host` become `…://[REDACTED]@host`) and
-secret-named keys inside text such as the `repr` of a nested dict, including escaped,
-`b''`-prefixed and truncated values. The patterns are bounded so redacting megabytes of
-captured output stays linear. Source snippets and the frame `code` line are source code and
-are not redacted.
+second item replaced.
+
+`llmdebug.PII_PATTERNS` additionally covers, inside text such as a log line, an exception
+message or a `repr`: URL userinfo (`postgres://user:pw@host` and `https://TOKEN@host`
+become `…://[REDACTED]@host`; an over-long or truncation-cut authority is redacted whole,
+even when the password contains `@`), secret-named assignments including quoted multi-word
+values, hyphenated names (`secret-key`), one level of container value, escaped, `b''`-prefixed
+and truncated values, quoted name/value pairs (`['Authorization', 'Basic …']`), and the
+complete value of an `authorization`/`cookie` field (`Cookie: a=1; b=2`), which stops only
+at the structural delimiters of a surrounding object. The patterns are bounded so redacting
+megabytes of captured output stays linear. Source snippets and the frame `code` line are
+source code and are not redacted.
 `dev`, no profile, or `redact=()` turn all of this off.
 
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a
