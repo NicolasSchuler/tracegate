@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +26,8 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
+    require_pinned_commit,
 )
 from baselines.case_schemas import IntervenorCaseInput
 from baselines.contracts import BaselineContract
@@ -35,6 +37,7 @@ from baselines.openai_compat import (
     compat_config_from_extra,
     normalize_chat_completion_response,
     require_final_content,
+    usage_include_extra_body,
 )
 from baselines.pins import get_pinned_repo_commit
 from evals.adaptive_controller_packet import (
@@ -185,10 +188,6 @@ def _accumulate_usage(total: dict[str, int], delta: dict[str, int]) -> dict[str,
     return merged
 
 
-def _usage_extra_body() -> dict[str, Any]:
-    return {"usage": {"include": True}}
-
-
 def _coerce_subprocess_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
@@ -321,8 +320,55 @@ def _reported_char_metrics(
     }
 
 
+def _keep_progress_on_generation_failure(
+    *,
+    exc: BaseException,
+    current_code: str,
+    original_code: str,
+    failure: BaselineResult,
+) -> BaselineResult:
+    """BAS-10: a failed model call keeps earlier attempts' candidate and usage.
+
+    Compatibility errors keep their ``openai_compat_reasoning_only`` label; anything else
+    (timeouts, transport errors) is recorded as ``generation_failed`` with the exception.
+    """
+    candidate = current_code if current_code != original_code else None
+    if isinstance(exc, OpenAICompatResponseError):
+        return replace(failure, repaired_code=candidate)
+    meta = dict(failure.meta)
+    meta.pop("compat_message", None)
+    meta.pop("compat_meta", None)
+    meta["error"] = "generation_failed"
+    meta["generation_exc"] = f"{type(exc).__name__}: {exc}"
+    return replace(failure, repaired_code=candidate, meta=meta)
+
+
+def _generation_temperature(config: BaselineConfig | None) -> float:
+    """Shared D4 temperature; INTERVENOR's own default is 0.0 (BAS-03)."""
+    if config is None or config.generation.temperature is None:
+        return 0.0
+    return float(config.generation.temperature)
+
+
+def _generation_max_tokens(config: BaselineConfig | None, adapter_default: int) -> int:
+    """Shared D4 completion cap when set, else the teacher/learner default (BAS-04)."""
+    if config is None or config.generation.max_completion_tokens is None:
+        return int(adapter_default)
+    return int(config.generation.max_completion_tokens)
+
+
+def _generation_seed_kwargs(config: BaselineConfig | None) -> dict[str, Any]:
+    if config is None or config.generation.seed is None:
+        return {}
+    return {"seed": int(config.generation.seed)}
+
+
 class IntervenorAdapter(BaselineAdapter):
     """Adapter for the INTERVENOR teacher-learner debugging baseline."""
+
+    retry_context_prompt_field = "prompt"
+
+    honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
@@ -373,6 +419,12 @@ class IntervenorAdapter(BaselineAdapter):
         self._teacher_prompt_template = teacher_prompt_path.read_text(encoding="utf-8")
         self._learner_prompt_template = learner_prompt_path.read_text(encoding="utf-8")
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
+        require_pinned_commit(
+            name=self.name,
+            observed_commit=self.repo_commit,
+            pinned_commit=get_pinned_repo_commit(self.name),
+        )
 
     def validate_extra_config(self, config: BaselineConfig) -> None:
         from baselines.extra_configs import IntervenorExtraConfig
@@ -581,7 +633,13 @@ class IntervenorAdapter(BaselineAdapter):
                     },
                 )
 
+            deadline_exceeded = False
             for attempt_idx in range(1, config.max_attempts + 1):
+                deadline_sec = float(config.process_timeout_sec or 0.0)
+                if deadline_sec > 0 and time.perf_counter() - started_at >= deadline_sec:
+                    # BAS-08: one wall-clock deadline for the whole run_repair call.
+                    deadline_exceeded = True
+                    break
                 failure_summary = self._format_failure_feedback(precheck)
                 self._emit_runtime_progress(
                     phase_label="baseline: intervenor teacher",
@@ -607,22 +665,27 @@ class IntervenorAdapter(BaselineAdapter):
                             )
                         )
                     )
-                except OpenAICompatResponseError as exc:
-                    return self._compatibility_failure_result(
-                        error_meta=exc.meta,
-                        error_message=str(exc),
-                        attempts=attempt_summaries,
-                        iterations_used=attempt_idx - 1,
-                        llm_call_count=llm_call_count,
-                        llm_duration_sec=llm_duration_sec,
-                        eval_duration_sec=eval_duration_sec,
-                        usage_available=usage_available,
-                        accumulated_usage=accumulated_usage,
-                        usage_reported_call_count=usage_reported_call_count,
-                        usage_missing_call_count=usage_missing_call_count,
-                        prompt_chars_total=prompt_chars_total,
-                        completion_chars_total=completion_chars_total,
-                        started_at=started_at,
+                except Exception as exc:  # BAS-10: keep the last candidate and usage
+                    return _keep_progress_on_generation_failure(
+                        exc=exc,
+                        current_code=current_code,
+                        original_code=original_code,
+                        failure=self._compatibility_failure_result(
+                            error_meta=getattr(exc, "meta", {}),
+                            error_message=str(exc),
+                            attempts=attempt_summaries,
+                            iterations_used=attempt_idx - 1,
+                            llm_call_count=llm_call_count,
+                            llm_duration_sec=llm_duration_sec,
+                            eval_duration_sec=eval_duration_sec,
+                            usage_available=usage_available,
+                            accumulated_usage=accumulated_usage,
+                            usage_reported_call_count=usage_reported_call_count,
+                            usage_missing_call_count=usage_missing_call_count,
+                            prompt_chars_total=prompt_chars_total,
+                            completion_chars_total=completion_chars_total,
+                            started_at=started_at,
+                        ),
                     )
                 llm_call_count += 1
                 llm_duration_sec += teacher_duration_sec
@@ -662,22 +725,27 @@ class IntervenorAdapter(BaselineAdapter):
                             )
                         )
                     )
-                except OpenAICompatResponseError as exc:
-                    return self._compatibility_failure_result(
-                        error_meta=exc.meta,
-                        error_message=str(exc),
-                        attempts=attempt_summaries,
-                        iterations_used=attempt_idx - 1,
-                        llm_call_count=llm_call_count,
-                        llm_duration_sec=llm_duration_sec,
-                        eval_duration_sec=eval_duration_sec,
-                        usage_available=usage_available,
-                        accumulated_usage=accumulated_usage,
-                        usage_reported_call_count=usage_reported_call_count,
-                        usage_missing_call_count=usage_missing_call_count,
-                        prompt_chars_total=prompt_chars_total,
-                        completion_chars_total=completion_chars_total,
-                        started_at=started_at,
+                except Exception as exc:  # BAS-10: keep the last candidate and usage
+                    return _keep_progress_on_generation_failure(
+                        exc=exc,
+                        current_code=current_code,
+                        original_code=original_code,
+                        failure=self._compatibility_failure_result(
+                            error_meta=getattr(exc, "meta", {}),
+                            error_message=str(exc),
+                            attempts=attempt_summaries,
+                            iterations_used=attempt_idx - 1,
+                            llm_call_count=llm_call_count,
+                            llm_duration_sec=llm_duration_sec,
+                            eval_duration_sec=eval_duration_sec,
+                            usage_available=usage_available,
+                            accumulated_usage=accumulated_usage,
+                            usage_reported_call_count=usage_reported_call_count,
+                            usage_missing_call_count=usage_missing_call_count,
+                            prompt_chars_total=prompt_chars_total,
+                            completion_chars_total=completion_chars_total,
+                            started_at=started_at,
+                        ),
                     )
                 llm_call_count += 1
                 llm_duration_sec += learner_duration_sec
@@ -830,14 +898,14 @@ class IntervenorAdapter(BaselineAdapter):
         return BaselineResult(
             repaired_code=current_code if current_code != original_code else None,
             success=False,
-            iterations_used=config.max_attempts,
+            iterations_used=len(attempt_summaries) if deadline_exceeded else config.max_attempts,
             token_usage=(
                 accumulated_usage
                 if usage_available and llm_call_count > 0 and accumulated_usage
                 else {}
             ),
             meta={
-                "error": "max_attempts_exhausted",
+                "error": "deadline_exceeded" if deadline_exceeded else "max_attempts_exhausted",
                 "attempts": attempt_summaries,
                 "last_feedback": self._format_failure_feedback(precheck),
                 "test_stdout_tail": precheck.stdout[-2000:],
@@ -862,6 +930,7 @@ class IntervenorAdapter(BaselineAdapter):
             base_url=base_url or None,
             api_key=config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
             timeout=config.api_timeout_sec,
+            max_retries=int(config.generation.transport_max_retries),  # BAS-11
         )
 
     def _generate_text(
@@ -887,9 +956,10 @@ class IntervenorAdapter(BaselineAdapter):
             {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0,
-                "max_tokens": max_tokens,
-                "extra_body": _usage_extra_body(),
+                "temperature": _generation_temperature(config),
+                "max_tokens": _generation_max_tokens(config, max_tokens),
+                **_generation_seed_kwargs(config),
+                "extra_body": usage_include_extra_body(config.api_base_url if config else ""),
             },
             compat_config=compat_config,
             base_url=str(config.api_base_url if config else ""),
@@ -927,7 +997,10 @@ class IntervenorAdapter(BaselineAdapter):
         payload = {
             "model": model,
             "prompt": prompt,
-            "max_tokens": max_tokens,
+            "max_tokens": _generation_max_tokens(config, max_tokens),
+            "temperature": _generation_temperature(config),
+            "seed": config.generation.seed,
+            "max_retries": int(config.generation.transport_max_retries),
             "base_url": config.api_base_url,
             "api_key": config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
             "timeout_sec": config.api_timeout_sec,

@@ -56,6 +56,7 @@ from evals.eval_main_support import (
 from evals.eval_main_support import (
     RunConditionInputs as _RunConditionInputs,
 )
+from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
 from evals.progress_display import DisplayRunSummary, build_startup_sections, create_run_display
 from evals.progress_output import _is_infra_interrupted_records, classify_failure_reason
 from evals.run_condition_builder import build_run_condition_inputs
@@ -264,6 +265,11 @@ def run_main_flow(
         if existing_fingerprint is not None:
             # ORC-04: resumed with --allow-settings-drift; keep the link to the old settings.
             run_metadata["settings_drift_from_fingerprint"] = existing_fingerprint
+    baseline_adapter = getattr(patcher, "adapter", None)
+    if isinstance(patcher, BaselinePatcher) and baseline_adapter is not None:
+        run_metadata["baseline_case_support"] = baseline_case_support(
+            baseline_adapter, [(case.case_id, case.path) for case in setup.cases]
+        )
     if config_state.config_paths:
         run_metadata.setdefault("config_files", list(config_state.config_paths))
     if resolved_config_lock_path is not None:

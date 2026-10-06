@@ -2198,3 +2198,24 @@ class TestRLMAdapter:
         assert len(seen_requests) == 2
         assert "extra_body" not in seen_requests[0]
         assert seen_requests[1]["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_bas13_failed_import_smoke_keeps_the_candidate(tmp_path: Path) -> None:
+    import sys
+
+    from baselines.rlm.env_client import _write_buggy_candidate
+
+    (tmp_path / "buggy.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    rejections: list[dict[str, object]] = []
+    smoke_failures: list[dict[str, object]] = []
+    message = _write_buggy_candidate(
+        workspace_dir=tmp_path,
+        content="raise RuntimeError('boom at import')\n\ndef f():\n    return 2\n",
+        test_python=sys.executable,
+        rejections=rejections,
+        import_smoke_failures=smoke_failures,
+    )
+    assert "importing it failed" in message
+    assert "return 2" in (tmp_path / "buggy.py").read_text(encoding="utf-8")
+    assert rejections == []
+    assert len(smoke_failures) == 1

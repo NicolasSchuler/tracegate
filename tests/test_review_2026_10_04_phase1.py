@@ -309,3 +309,138 @@ def test_derive_seed_is_stable_and_separates_streams() -> None:
     assert derive_seed(1, "helper") != derive_seed(1, "budget")
     assert derive_seed(1, "helper") != derive_seed(2, "helper")
     assert 0 <= derive_seed(123, "x", 4) < 2**63
+
+
+def test_bas01_baseline_case_support_counts_convertible_cases(tmp_path: Path) -> None:
+    from baselines.ldb.adapter import LDBAdapter
+    from evals.patchers.baseline_patcher import baseline_case_support
+
+    simple = tmp_path / "simple"
+    simple.mkdir()
+    (simple / "buggy.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (simple / "test_buggy.py").write_text(
+        "from buggy import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        encoding="utf-8",
+    )
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "buggy.py").write_text("def add(a, b:\n", encoding="utf-8")
+    (broken / "test_buggy.py").write_text("from buggy import add\n", encoding="utf-8")
+
+    support = baseline_case_support(LDBAdapter(), [("simple", simple), ("broken", broken)])
+    assert support == {
+        "baseline": "ldb",
+        "total_cases": 2,
+        "convertible_cases": 1,
+        "incompatible_reasons": {"buggy_syntax_error": 1},
+    }
+
+
+def test_bas01_condition_summary_excludes_unsupported_cases() -> None:
+    from evals.analyze_results import _derive_case_condition_rows, _summarize_bucket
+
+    def _record(case_id: str, success: bool, **patch_meta: Any) -> dict[str, Any]:
+        return {
+            "run_id": "r",
+            "case_id": case_id,
+            "condition": "ldb",
+            "attempt": 1,
+            "success": success,
+            "patch_meta": patch_meta,
+        }
+
+    rows = _derive_case_condition_rows(
+        {
+            ("r", "c1", "ldb"): [_record("c1", True)],
+            ("r", "c2", "ldb"): [
+                _record("c2", False, baseline_supported=False, compatibility_reason="x")
+            ],
+        }
+    )
+    summary = _summarize_bucket(rows)["ldb"]
+    assert summary["success_rate"] == 1.0
+    assert summary["baseline_unsupported_cases"] == 1
+
+
+def test_d4_every_baseline_gets_one_generation_contract(tmp_path: Path) -> None:
+    """BAS-03/04/08/11: one config, recorded per record with an honest enforcement flag."""
+    from baselines.adapter_base import BaselineGenerationSettings
+    from evals.patchers.baseline_patcher import get_adapter_registry
+
+    generation = BaselineGenerationSettings(
+        temperature=0.0, seed=5, max_completion_tokens=2048, transport_max_retries=6
+    )
+    enforced = {}
+    for name, adapter_cls in sorted(get_adapter_registry().items()):
+        adapter = adapter_cls()
+        enforced[name] = generation.record(
+            enforced=bool(getattr(adapter, "honours_generation_contract", False))
+        )
+    assert {name: record["enforced"] for name, record in enforced.items()} == {
+        "intervenor": True,
+        "lambda_rlm": True,
+        "ldb": False,
+        "rlm": True,
+        "tracecoder": False,
+    }
+    assert {record["max_completion_tokens"] for record in enforced.values()} == {2048}
+    assert generation.to_env() == {
+        "TRACEGATE_BASELINE_TEMPERATURE": "0.0",
+        "TRACEGATE_BASELINE_SEED": "5",
+        "TRACEGATE_BASELINE_MAX_TOKENS": "2048",
+    }
+
+
+def test_d4_intervenor_request_uses_the_shared_contract() -> None:
+    from baselines.adapter_base import BaselineConfig, BaselineGenerationSettings
+    from baselines.intervenor import adapter as intervenor
+
+    config = BaselineConfig(
+        generation=BaselineGenerationSettings(
+            temperature=0.3, seed=9, max_completion_tokens=1000, transport_max_retries=4
+        )
+    )
+    assert intervenor._generation_temperature(config) == 0.3
+    assert intervenor._generation_max_tokens(config, 6144) == 1000
+    assert intervenor._generation_seed_kwargs(config) == {"seed": 9}
+    legacy = BaselineConfig()
+    assert intervenor._generation_temperature(legacy) == 0.0
+    assert intervenor._generation_max_tokens(legacy, 6144) == 6144
+
+
+def test_bas12_tracecoder_test_timeout_falls_back_to_process_timeout() -> None:
+    from baselines.adapter_base import BaselineConfig
+    from baselines.tracecoder.adapter import _case_test_timeout_sec
+
+    config = BaselineConfig(process_timeout_sec=600)
+    assert _case_test_timeout_sec({"timeout_sec": 12}, config) == 12
+    assert _case_test_timeout_sec({}, config) == 600
+    assert _case_test_timeout_sec({"timeout_sec": 0}, config) == 600
+
+
+def test_bas05_bas14_observed_repo_state_and_pin_check(tmp_path: Path) -> None:
+    import subprocess
+
+    from baselines.adapter_base import observed_repo_state, require_pinned_commit
+
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.email=t@e", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "main.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "main.py"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+
+    clean = observed_repo_state(repo)
+    assert len(clean["observed_commit"]) == 40
+    assert clean["dirty"] is False
+    (repo / "main.py").write_text("x = 2\n", encoding="utf-8")
+    patched = observed_repo_state(repo)
+    assert patched["dirty"] is True
+    assert patched["tree_patch_sha256"] != clean["tree_patch_sha256"]
+    assert observed_repo_state(tmp_path)["observed_commit"] == ""
+
+    require_pinned_commit(name="x", observed_commit="", pinned_commit="abc")  # no git: skip
+    require_pinned_commit(name="x", observed_commit="abc", pinned_commit="abc")
+    with pytest.raises(RuntimeError, match="not the pinned commit"):
+        require_pinned_commit(name="x", observed_commit="def", pinned_commit="abc")

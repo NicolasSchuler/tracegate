@@ -19,6 +19,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
 )
 from baselines.case_schemas import LambdaRLMCaseInput
 from baselines.contracts import BaselineContract
@@ -123,8 +124,19 @@ def _is_guard_stop_reason(stop_reason: str) -> bool:
     return str(stop_reason or "").strip() in _GUARD_STOP_REASONS
 
 
+_TERMINAL_ENV_ERRORS = frozenset({"openai_compat_reasoning_only", "timeout", "env_client_failed"})
+
+
+def _env_failure_error(exc: BaseException) -> str:
+    return "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "env_client_failed"
+
+
 class RLMAdapter(BaselineAdapter):
     """Adapter for the standalone upstream RLM baseline."""
+
+    retry_context_prompt_field = "prompt_context"
+
+    honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
@@ -173,6 +185,7 @@ class RLMAdapter(BaselineAdapter):
         if config.python_executable is not None and not config.python_executable.is_file():
             raise RuntimeError(f"RLM python executable not found: {config.python_executable}")
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
         expected_compatibility = get_expected_env_client_compatibility(self.name)
         declared_compatibility = str(getattr(rlm_env_client, "_COMPATIBLE_WITH", "") or "").strip()
         if declared_compatibility != expected_compatibility:
@@ -392,17 +405,21 @@ class RLMAdapter(BaselineAdapter):
                     failure_feedback_max_chars=extra_config.baseline_rlm_failure_feedback_max_chars,
                 )
                 prompt_chars_total += len(prompt_context) + len(root_prompt)
-                env_result = self._invoke_rlm(
-                    prompt_context=prompt_context,
-                    root_prompt=root_prompt,
-                    work_dir=work_dir,
-                    python_args=python_args,
-                    test_timeout_sec=test_timeout_sec,
-                    config=config,
-                    timeout_sec=generation_timeout_sec,
-                )
+                try:
+                    env_result = self._invoke_rlm(
+                        prompt_context=prompt_context,
+                        root_prompt=root_prompt,
+                        work_dir=work_dir,
+                        python_args=python_args,
+                        test_timeout_sec=test_timeout_sec,
+                        config=config,
+                        timeout_sec=generation_timeout_sec,
+                    )
+                except (subprocess.TimeoutExpired, RuntimeError) as exc:
+                    # BAS-10: keep earlier attempts' candidate, usage and metrics.
+                    env_result = {"error": _env_failure_error(exc), "compat_message": str(exc)}
                 env_error = str(env_result.get("error") or "").strip()
-                if env_error == "openai_compat_reasoning_only":
+                if env_error in _TERMINAL_ENV_ERRORS:
                     metrics = self._build_metrics(
                         prompt_chars_total=prompt_chars_total,
                         completion_chars_total=completion_chars_total,
@@ -533,7 +550,9 @@ class RLMAdapter(BaselineAdapter):
                 if isinstance(call_finish_reason_counts, dict) and call_finish_reason_counts:
                     attempt_summary["call_finish_reason_counts"] = {
                         str(key): int(value)
-                        for key, value in cast(dict[object, object], call_finish_reason_counts).items()
+                        for key, value in cast(
+                            dict[object, object], call_finish_reason_counts
+                        ).items()
                         if isinstance(key, str) and isinstance(value, int)
                     }
                 call_records = call_summary.get("call_records")
@@ -920,6 +939,11 @@ class RLMAdapter(BaselineAdapter):
         }
         if config.extra.get("baseline_rlm_max_total_tokens") is not None:
             payload["max_total_tokens"] = int(config.extra["baseline_rlm_max_total_tokens"])
+        # D4: the shared generation contract unless the baseline-specific knob is set.
+        if config.generation.temperature is not None:
+            payload["temperature"] = float(config.generation.temperature)
+        if config.generation.max_completion_tokens is not None:
+            payload["max_tokens"] = int(config.generation.max_completion_tokens)
         for source_key, target_key in (
             ("baseline_rlm_temperature", "temperature"),
             ("baseline_rlm_top_p", "top_p"),

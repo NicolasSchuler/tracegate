@@ -182,7 +182,6 @@ def test_att02_baseline_inputs_omit_case_description(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="BAS-01")
 def test_bas01_unsupported_baseline_rows_are_excluded_from_pairs() -> None:
     from evals.analyze_results import _derive_case_condition_rows
     from evals.stats import analyze_paired_results

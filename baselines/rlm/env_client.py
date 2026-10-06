@@ -320,9 +320,7 @@ def _call_summary_from_clients(created_clients: list[object]) -> dict[str, Any]:
                     "finish_reason": str(raw_record.get("finish_reason") or ""),
                     "input_chars": int(raw_record.get("input_chars") or 0),
                     "output_chars": int(raw_record.get("output_chars") or 0),
-                    "compat_profile_applied": str(
-                        raw_record.get("compat_profile_applied") or ""
-                    ),
+                    "compat_profile_applied": str(raw_record.get("compat_profile_applied") or ""),
                     "enable_thinking": bool(raw_record.get("enable_thinking", False)),
                     "content_present": bool(raw_record.get("content_present", False)),
                     "reasoning_present": bool(raw_record.get("reasoning_present", False)),
@@ -348,9 +346,7 @@ def _call_summary_from_clients(created_clients: list[object]) -> dict[str, Any]:
                     empty_reasoning_only_call_count += 1
         raw_events = getattr(client, "compat_recovery_events", None)
         if isinstance(raw_events, list):
-            compat_recovery_events.extend(
-                event for event in raw_events if isinstance(event, dict)
-            )
+            compat_recovery_events.extend(event for event in raw_events if isinstance(event, dict))
     return {
         "call_records": call_records,
         "call_finish_reason_counts": dict(sorted(finish_reason_counts.items())),
@@ -483,9 +479,7 @@ def _install_tracking(
                         request_meta=request_meta,
                     )
                     try:
-                        response = self.client.chat.completions.create(
-                            **retry_plan.request_kwargs
-                        )
+                        response = self.client.chat.completions.create(**retry_plan.request_kwargs)
                     except Exception as retry_exc:
                         retry_compat_exc = self._known_request_validation_error(
                             retry_exc,
@@ -643,6 +637,41 @@ def _install_tracking(
     return rlm_core_mod.RLM, RLMLogger, created_clients
 
 
+def _write_buggy_candidate(
+    *,
+    workspace_dir: Path,
+    content: str,
+    test_python: str,
+    rejections: list[dict[str, Any]],
+    import_smoke_failures: list[dict[str, Any]],
+) -> str:
+    """Write a candidate ``buggy.py``; the import smoke test is telemetry only (BAS-13).
+
+    RLM used to be the only arm whose candidates were rolled back when importing
+    ``buggy.py`` failed or took more than 10 s, and 830 cases call code at import time.
+    """
+    target = workspace_dir / "buggy.py"
+    text = str(content or "")
+    previous_text = target.read_text(encoding="utf-8", errors="replace")
+    rejection_reason = _rejected_write_reason(text)
+    if rejection_reason:
+        rejections.append({"reason": rejection_reason, "detail": _truncate(text, max_chars=200)})
+        return f"Rejected write_buggy_py(content): {rejection_reason}"
+    target.write_text(text, encoding="utf-8")
+    import_failure = _import_smoke_failure(
+        python_executable=test_python, workspace_dir=workspace_dir
+    )
+    if import_failure:
+        import_smoke_failures.append(
+            {"detail": import_failure, "previous_chars": len(previous_text)}
+        )
+        return (
+            f"Wrote {len(text)} characters to buggy.py "
+            f"(note: importing it failed: {_truncate(import_failure, max_chars=300)})"
+        )
+    return f"Wrote {len(text)} characters to buggy.py"
+
+
 def main(argv: list[str]) -> int:
     global _REPAIR_FINAL_ANSWER_OVERRIDE
     if len(argv) != 3:
@@ -697,6 +726,7 @@ def main(argv: list[str]) -> int:
     subcall_count = 0
     max_depth_reached = 0
     workspace_write_rejections: list[dict[str, Any]] = []
+    workspace_import_smoke_failures: list[dict[str, Any]] = []
     workspace_tests_passed = False
 
     def _record_tool(name: str) -> None:
@@ -720,33 +750,13 @@ def main(argv: list[str]) -> int:
 
     def write_buggy_py(content: str) -> str:
         _record_tool("write_buggy_py")
-        target = workspace_dir / "buggy.py"
-        text = str(content or "")
-        previous_text = target.read_text(encoding="utf-8", errors="replace")
-        rejection_reason = _rejected_write_reason(text)
-        if rejection_reason:
-            workspace_write_rejections.append(
-                {
-                    "reason": rejection_reason,
-                    "detail": _truncate(text, max_chars=200),
-                }
-            )
-            return f"Rejected write_buggy_py(content): {rejection_reason}"
-        target.write_text(text, encoding="utf-8")
-        import_failure = _import_smoke_failure(
-            python_executable=test_python,
+        return _write_buggy_candidate(
             workspace_dir=workspace_dir,
+            content=content,
+            test_python=test_python,
+            rejections=workspace_write_rejections,
+            import_smoke_failures=workspace_import_smoke_failures,
         )
-        if import_failure:
-            target.write_text(previous_text, encoding="utf-8")
-            workspace_write_rejections.append(
-                {
-                    "reason": "import_smoke_failed",
-                    "detail": import_failure,
-                }
-            )
-            return "Rejected write_buggy_py(content): import_smoke_failed"
-        return f"Wrote {len(text)} characters to buggy.py"
 
     def run_case_tests() -> str:
         global _REPAIR_FINAL_ANSWER_OVERRIDE
@@ -982,6 +992,7 @@ def main(argv: list[str]) -> int:
                     "test_run_count": int(tool_call_counts.get("run_case_tests", 0)),
                     "last_test_result": last_test_result,
                     "write_rejection_count": len(workspace_write_rejections),
+                    "import_smoke_failure_count": len(workspace_import_smoke_failures),
                     "last_write_rejection": (
                         workspace_write_rejections[-1] if workspace_write_rejections else {}
                     ),

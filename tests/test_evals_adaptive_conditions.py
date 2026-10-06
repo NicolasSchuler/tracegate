@@ -4275,7 +4275,8 @@ def test_adaptive_baseline_syntax_preflight_retries_accumulate_bridge_timings(
     adapter = _RetryTimingBaselineAdapter()
     patcher = BaselinePatcher(adapter=adapter, config=BaselineConfig())
     sidecar_timings = iter(((0.1, 0.15), (0.2, 0.25)))
-    perf_counter_values = iter((0.0, 0.2, 0.2, 0.5, 1.0, 1.4, 1.4, 1.9))
+    # Per propose call: conversion start/end, sidecar start/end, run_repair start/end (BAS-08).
+    perf_counter_values = iter((0.0, 0.2, 0.2, 0.5, 0.5, 0.6, 1.0, 1.4, 1.4, 1.9, 1.9, 2.0))
     run_calls = {"count": 0}
 
     def _fake_write_controller_sidecars_for_cycle(**kwargs: object) -> _FakeSidecarWriteResult:

@@ -29,7 +29,9 @@ read them but should treat missing keys as normal.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import logging
+import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -138,6 +140,9 @@ class BaselineConfig:
     repo_dir: Path = Path(".")
     python_executable: Path | None = None
     extra: dict[str, Any] = field(default_factory=_empty_any_dict)
+    generation: BaselineGenerationSettings = field(
+        default_factory=lambda: BaselineGenerationSettings()
+    )
 
     def __post_init__(self) -> None:
         process_timeout = self.process_timeout_sec
@@ -154,6 +159,81 @@ class BaselineConfig:
         object.__setattr__(self, "api_timeout_sec", max(0.0, float(api_timeout)))
         object.__setattr__(self, "process_timeout_sec", max(0.0, float(process_timeout)))
         object.__setattr__(self, "timeout_sec", max(0.0, float(process_timeout)))
+
+
+def _git_output(repo: Path, *args: str) -> bytes | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, timeout=10
+        )
+    except Exception:
+        return None
+    return result.stdout
+
+
+def observed_repo_state(repo: Path) -> dict[str, Any]:
+    """Record what is actually checked out (BAS-05, BAS-14).
+
+    ``tree_patch_sha256`` hashes the tracked diff against ``HEAD`` plus the untracked
+    file list, i.e. the applied upstream patches and normalizations, so two runs can be
+    compared even though the pinned commit alone doesn't identify the patched tree.
+    """
+    commit = (_git_output(repo, "rev-parse", "HEAD") or b"").decode("utf-8", "replace").strip()
+    if not commit:
+        return {"observed_commit": "", "dirty": None, "tree_patch_sha256": None}
+    diff = _git_output(repo, "diff", "--binary", "HEAD") or b""
+    untracked = _git_output(repo, "ls-files", "--others", "--exclude-standard") or b""
+    return {
+        "observed_commit": commit,
+        "dirty": bool(diff.strip() or untracked.strip()),
+        "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked).hexdigest(),
+    }
+
+
+def require_pinned_commit(*, name: str, observed_commit: str, pinned_commit: str) -> None:
+    """Fail setup when the checkout is not the pinned upstream commit (BAS-05)."""
+    if observed_commit and observed_commit != pinned_commit:
+        raise RuntimeError(
+            f"{name} repo is at {observed_commit}, not the pinned commit {pinned_commit}. "
+            "Re-run baselines/setup_repos.sh or update baselines/pins.py."
+        )
+
+
+@dataclass(frozen=True)
+class BaselineGenerationSettings:
+    """Generation contract shared with the native conditions (decision D4, BAS-03/04/11).
+
+    ``None`` fields keep an adapter's own default, which ``enforced_by`` reports. Adapters
+    that run upstream code with hard-coded sampling (LDB, TraceCoder) receive the values
+    as ``TRACEGATE_BASELINE_*`` environment variables but can't honour them until their
+    upstream patches read those.
+    """
+
+    temperature: float | None = None
+    seed: int | None = None
+    max_completion_tokens: int | None = None
+    transport_max_retries: int = 0
+    transport_retry_backoff_sec: float = 1.0
+
+    def to_env(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        if self.temperature is not None:
+            out["TRACEGATE_BASELINE_TEMPERATURE"] = repr(float(self.temperature))
+        if self.seed is not None:
+            out["TRACEGATE_BASELINE_SEED"] = str(int(self.seed))
+        if self.max_completion_tokens is not None:
+            out["TRACEGATE_BASELINE_MAX_TOKENS"] = str(int(self.max_completion_tokens))
+        return out
+
+    def record(self, *, enforced: bool) -> dict[str, Any]:
+        """Per-record description of the effective contract."""
+        return {
+            "temperature": self.temperature,
+            "seed": self.seed,
+            "max_completion_tokens": self.max_completion_tokens,
+            "transport_max_retries": int(self.transport_max_retries),
+            "enforced": bool(enforced),
+        }
 
 
 @dataclass(frozen=True)
@@ -206,6 +286,15 @@ class BaselineAdapter(ABC):
       against ``buggy.py``.  The default implementation uses ``difflib``
       and should work for most baselines; override only if necessary.
     """
+
+    honours_generation_contract: bool = False
+    """Whether ``run_repair`` applies ``BaselineConfig.generation`` itself (decision D4)."""
+
+    retry_context_prompt_field: str | None = None
+    """Free-text ``case_input`` field the harness may extend with retry context (BAS-02)."""
+
+    repo_state: dict[str, Any] | None = None
+    """Observed upstream checkout, set by ``setup`` (``observed_repo_state``; BAS-05/14)."""
 
     #: Fallback model used when the harness does not configure one.
     default_model: str = ""

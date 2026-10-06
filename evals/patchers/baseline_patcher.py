@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -30,10 +32,15 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineCaseIncompatibleError,
     BaselineConfig,
+    BaselineGenerationSettings,
     BaselineResult,
 )
 from baselines.case_information import CASE_INFO_POLICY, MODEL_HIDDEN_CASE_FIELDS
 from baselines.contracts import BASELINE_CONTRACT_VERSION
+from baselines.openai_compat import (
+    BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+    BASELINE_OPENAI_ENABLE_THINKING_DEFAULT,
+)
 from evals.adaptive_controller_packet import (
     HYBRID_GUIDANCE_MODE_FAIR_V1,
     HYBRID_GUIDANCE_MODE_FIXED_V1,
@@ -563,6 +570,77 @@ def _infer_repair_contract(result: BaselineResult) -> tuple[str, list[str]]:
     return "unknown", []
 
 
+_RETRY_CONTEXT_MAX_CHARS = 2_000
+_ATTEMPT_DIR_RE = re.compile(r"attempt_(\d+)$")
+
+
+def _inject_retry_context(
+    *,
+    case_input: dict[str, Any],
+    context_dir: Path,
+    prompt_field: str | None,
+    meta: dict[str, Any],
+) -> None:
+    """Give retry attempts the failure the native retry prompt carries (BAS-02, D4).
+
+    On attempt 2+ the tail of the failing pytest output is appended to the adapter's own
+    task prompt; adapters without a free-text prompt field (LDB) record that they could
+    not consume it.
+    """
+    match = _ATTEMPT_DIR_RE.search(context_dir.name)
+    attempt = int(match.group(1)) if match else 1
+    meta["baseline_retry_context_attempt"] = attempt
+    if attempt <= 1:
+        meta["baseline_retry_context_consumed"] = False
+        return
+    output_path = context_dir / "pytest_before_combined.txt"
+    output = (
+        output_path.read_text(encoding="utf-8", errors="replace") if output_path.is_file() else ""
+    )
+    section = (
+        f"\n\nAttempt {attempt}: the previous repair attempt did not pass the tests. "
+        "Current test output (tail):\n" + output[-_RETRY_CONTEXT_MAX_CHARS:].rstrip() + "\n"
+    )
+    case_input["llmdebug_retry_context"] = {"attempt": attempt, "test_output_tail": section}
+    consumed = bool(prompt_field) and isinstance(case_input.get(str(prompt_field)), str)
+    if consumed:
+        case_input[str(prompt_field)] = str(case_input[str(prompt_field)]) + section
+    meta["baseline_retry_context_consumed"] = consumed
+
+
+def baseline_case_support(
+    adapter: BaselineAdapter, case_dirs: Sequence[tuple[str, Path]]
+) -> dict[str, Any]:
+    """Count the cases *adapter* can convert (BAS-01, D3).
+
+    Recorded in run metadata so a baseline's comparison states its N explicitly; the
+    incompatible cases are excluded from its success rate and paired statistics.
+    """
+    reasons: dict[str, int] = {}
+    convertible = 0
+    for case_id, case_dir in case_dirs:
+        try:
+            adapter.convert_case(
+                case_dir,
+                case_context=BaselineCaseContext(
+                    case_id=case_id, python_args=("-m", "pytest", "-q"), timeout_sec=0
+                ),
+            )
+        except BaselineCaseIncompatibleError as exc:
+            reasons[exc.reason] = reasons.get(exc.reason, 0) + 1
+        except Exception as exc:  # converter bug: count it, don't hide it
+            key = f"conversion_error:{type(exc).__name__}"
+            reasons[key] = reasons.get(key, 0) + 1
+        else:
+            convertible += 1
+    return {
+        "baseline": adapter.name,
+        "total_cases": len(case_dirs),
+        "convertible_cases": convertible,
+        "incompatible_reasons": dict(sorted(reasons.items())),
+    }
+
+
 class BaselinePatcher(Patcher):
     """Patcher that delegates to an external baseline adapter.
 
@@ -597,10 +675,15 @@ class BaselinePatcher(Patcher):
                     self.config.extra.get("baseline_openai_compat_profile") or "auto"
                 ),
                 allow_reasoning_fallback=bool(
-                    self.config.extra.get("baseline_openai_allow_reasoning_fallback", True)
+                    self.config.extra.get(
+                        "baseline_openai_allow_reasoning_fallback",
+                        BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+                    )
                 ),
                 enable_thinking=bool(
-                    self.config.extra.get("baseline_openai_enable_thinking", True)
+                    self.config.extra.get(
+                        "baseline_openai_enable_thinking", BASELINE_OPENAI_ENABLE_THINKING_DEFAULT
+                    )
                 ),
                 name=f"{self.adapter.name}_stage_a_helper",
             )
@@ -670,6 +753,12 @@ class BaselinePatcher(Patcher):
             ),
         }
         meta["case_info_policy"] = CASE_INFO_POLICY
+        repo_state = getattr(self.adapter, "repo_state", None)
+        if isinstance(repo_state, dict):
+            meta["baseline_repo_state"] = dict(repo_state)
+        meta["baseline_generation"] = self.config.generation.record(
+            enforced=bool(getattr(self.adapter, "honours_generation_contract", False))
+        )
         contract = self.adapter.contract()
         meta.update(contract.to_dict())
         if not meta.get("contract_version"):
@@ -762,6 +851,12 @@ class BaselinePatcher(Patcher):
             meta["adaptive_verifier_report_loaded"] = True
         elif verifier_report_error:
             meta["adaptive_verifier_report_error"] = verifier_report_error
+        _inject_retry_context(
+            case_input=case_input,
+            context_dir=context_dir,
+            prompt_field=getattr(self.adapter, "retry_context_prompt_field", None),
+            meta=meta,
+        )
         hybrid_sidecars_active = _hybrid_sidecars_active(
             controller_packet=controller_packet,
             controller_packet_error=controller_packet_error,
@@ -784,6 +879,9 @@ class BaselinePatcher(Patcher):
 
         # 2. Run the baseline's repair loop.
         result: BaselineResult
+        repair_started = time.perf_counter()
+        deadline_sec = float(self.config.process_timeout_sec or 0.0)
+        meta["baseline_deadline_sec"] = deadline_sec
         try:
             self.adapter.set_progress_callback(self._current_progress_callback())
             result = self.adapter.run_repair(case_input, self.config)
@@ -793,6 +891,12 @@ class BaselinePatcher(Patcher):
             return PatchResult(diff=None, meta=cast(PatcherMeta, meta))
         finally:
             self.adapter.set_progress_callback(None)
+            # BAS-08: one observed wall clock per run_repair, comparable across adapters.
+            repair_wall_sec = time.perf_counter() - repair_started
+            meta["baseline_run_repair_wall_sec"] = repair_wall_sec
+            meta["baseline_deadline_exceeded"] = bool(
+                deadline_sec > 0 and repair_wall_sec > deadline_sec
+            )
 
         meta["iterations_used"] = result.iterations_used
         meta["baseline_success"] = result.success
@@ -844,7 +948,7 @@ def build_baseline_patcher(
     max_attempts: int = 2,
     api_timeout_sec: float | None = None,
     process_timeout_sec: float | None = None,
-    timeout_sec: float | None = 300.0,
+    generation: BaselineGenerationSettings | None = None,
     extra: dict[str, Any] | None = None,
     strict_extra_config: bool = True,
 ) -> BaselinePatcher:
@@ -871,8 +975,8 @@ def build_baseline_patcher(
         max_attempts=max_attempts,
         api_timeout_sec=api_timeout_sec,
         process_timeout_sec=process_timeout_sec,
-        timeout_sec=timeout_sec,
         repo_dir=Path(repo_dir),
+        generation=generation if generation is not None else BaselineGenerationSettings(),
         python_executable=Path(python_executable).expanduser() if python_executable else None,
         extra={**(extra or {}), "baseline_strict_extra_config": bool(strict_extra_config)},
     )

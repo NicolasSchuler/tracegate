@@ -11,7 +11,11 @@ import logging
 from dataclasses import dataclass, fields
 from typing import Any, cast
 
-from baselines.openai_compat import normalize_compat_profile
+from baselines.openai_compat import (
+    BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+    BASELINE_OPENAI_ENABLE_THINKING_DEFAULT,
+    normalize_compat_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +80,23 @@ class OpenAICompatExtraConfig:
     """Shared OpenAI-compatible compatibility controls."""
 
     baseline_openai_compat_profile: str = "auto"
-    baseline_openai_allow_reasoning_fallback: bool = True
-    baseline_openai_enable_thinking: bool = True
+    baseline_openai_allow_reasoning_fallback: bool = (
+        BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT
+    )
+    baseline_openai_enable_thinking: bool = BASELINE_OPENAI_ENABLE_THINKING_DEFAULT
     baseline_hybrid_guidance_mode: str = "tuned_v1"
 
 
 def _shared_openai_compat_kwargs(extra: dict[str, Any], *, adapter_name: str) -> dict[str, Any]:
-    enable_thinking = bool(extra.get("baseline_openai_enable_thinking", True))
-    allow_reasoning_fallback = bool(extra.get("baseline_openai_allow_reasoning_fallback", True))
+    enable_thinking = bool(
+        extra.get("baseline_openai_enable_thinking", BASELINE_OPENAI_ENABLE_THINKING_DEFAULT)
+    )
+    allow_reasoning_fallback = bool(
+        extra.get(
+            "baseline_openai_allow_reasoning_fallback",
+            BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
+        )
+    )
     if enable_thinking and not allow_reasoning_fallback:
         allow_reasoning_fallback = True
     return {

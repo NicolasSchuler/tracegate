@@ -46,6 +46,45 @@ decision D1). It fixes which case data any arm may see:
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
   the run-level policy.
 
+## Generation contract (decision D4, BAS-03/04/08/11)
+
+`run_eval` builds one `BaselineGenerationSettings` from the native flags and passes it to
+every adapter through `BaselineConfig.generation`: `--openai-temperature`, `--seed`,
+`--openai-max-tokens` (one completion cap) and `--openai-transport-max-retries`.
+Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
+
+| Adapter | Enforced | How |
+|---|---|---|
+| INTERVENOR | yes | request temperature, `max_tokens`, `seed`; client `max_retries` |
+| lambda-RLM, RLM | yes | env-client payload `temperature` and `max_tokens` |
+| LDB, TraceCoder | no | `TRACEGATE_BASELINE_*` environment variables; the upstream patches still hard-code their own sampling until they read them |
+
+Each record's `patch_meta.baseline_generation` holds the effective values and `enforced`.
+`process_timeout_sec` is one wall-clock deadline per `run_repair` call: INTERVENOR stops
+iterating when it is reached (`error="deadline_exceeded"`), and every record carries
+`baseline_deadline_sec`, `baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
+TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
+(BAS-12).
+
+## Retry context (BAS-02, decision D4)
+
+`BaselinePatcher.propose_patch` ignores the harness repair prompt, so each harness attempt used
+to restart cold while the native conditions saw the previous failure. On attempt 2+ the patcher
+now injects `case_input["llmdebug_retry_context"]` and appends the same text (the attempt number
+and the tail of the failing pytest output) to the adapter's free-text task field
+(`retry_context_prompt_field`: INTERVENOR `prompt`, TraceCoder `complete_prompt`,
+lambda-RLM/RLM `prompt_context`). LDB's prompt is a function stub with no such field, so
+records carry `baseline_retry_context_consumed=false` there.
+
+## Unsupported cases (BAS-01, decision D3)
+
+A baseline that can't represent a case (for example LDB's converter rejects subprocess-driven,
+class-based or multi-file cases) records `error="case_incompatible"` and
+`baseline_supported=False`. The analysis drops those rows from the baseline's success rate and
+from paired statistics, so the comparison runs on the convertible subset and reports
+`baseline_unsupported_cases`. `run_metadata.baseline_case_support` records `total_cases`,
+`convertible_cases` and `incompatible_reasons` for the run's case selection.
+
 Runs recorded before this contract gave the baselines `case.description`
 (often a root-cause statement or bug-type label) while the native conditions
 never saw it; see the 2026-10-04 review findings before comparing them.

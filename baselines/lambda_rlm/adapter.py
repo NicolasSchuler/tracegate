@@ -19,6 +19,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
 )
 from baselines.case_schemas import LambdaRLMCaseInput
 from baselines.contracts import BaselineContract
@@ -97,8 +98,19 @@ def _char_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
     return total_calls, input_chars, output_chars, total_chars
 
 
+_TERMINAL_ENV_ERRORS = frozenset({"openai_compat_reasoning_only", "timeout", "env_client_failed"})
+
+
+def _env_failure_error(exc: BaseException) -> str:
+    return "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "env_client_failed"
+
+
 class LambdaRLMAdapter(BaselineAdapter):
     """Adapter for a raw lambda-RLM repair baseline."""
+
+    retry_context_prompt_field = "prompt_context"
+
+    honours_generation_contract = True
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
@@ -147,6 +159,7 @@ class LambdaRLMAdapter(BaselineAdapter):
                 f"lambda-RLM python executable not found: {config.python_executable}"
             )
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
         expected_compatibility = get_expected_env_client_compatibility(self.name)
         declared_compatibility = str(
             getattr(lambda_env_client, "_COMPATIBLE_WITH", "") or ""
@@ -353,13 +366,17 @@ class LambdaRLMAdapter(BaselineAdapter):
                     failure_feedback_max_chars=extra_config.baseline_lambda_failure_feedback_max_chars,
                 )
                 prompt_chars_total += len(prompt)
-                env_result = self._invoke_lambda(
-                    prompt=prompt,
-                    config=config,
-                    timeout_sec=generation_timeout_sec,
-                )
+                try:
+                    env_result = self._invoke_lambda(
+                        prompt=prompt,
+                        config=config,
+                        timeout_sec=generation_timeout_sec,
+                    )
+                except (subprocess.TimeoutExpired, RuntimeError) as exc:
+                    # BAS-10: keep earlier attempts' candidate, usage and metrics.
+                    env_result = {"error": _env_failure_error(exc), "compat_message": str(exc)}
                 env_error = str(env_result.get("error") or "").strip()
-                if env_error == "openai_compat_reasoning_only":
+                if env_error in _TERMINAL_ENV_ERRORS:
                     metrics = self._build_metrics(
                         prompt_chars_total=prompt_chars_total,
                         completion_chars_total=completion_chars_total,
@@ -470,7 +487,9 @@ class LambdaRLMAdapter(BaselineAdapter):
                 if isinstance(call_finish_reason_counts, dict) and call_finish_reason_counts:
                     attempt_summary["call_finish_reason_counts"] = {
                         str(key): int(value)
-                        for key, value in cast(dict[object, object], call_finish_reason_counts).items()
+                        for key, value in cast(
+                            dict[object, object], call_finish_reason_counts
+                        ).items()
                         if isinstance(key, str) and isinstance(value, int)
                     }
                 call_records = call_summary.get("call_records")
@@ -744,6 +763,11 @@ class LambdaRLMAdapter(BaselineAdapter):
         force_task_type = config.extra.get("baseline_lambda_force_task_type")
         if force_task_type:
             payload["force_task_type"] = str(force_task_type)
+        # D4: the shared generation contract unless the baseline-specific knob is set.
+        if config.generation.temperature is not None:
+            payload["temperature"] = float(config.generation.temperature)
+        if config.generation.max_completion_tokens is not None:
+            payload["max_tokens"] = int(config.generation.max_completion_tokens)
         for key in (
             "baseline_lambda_temperature",
             "baseline_lambda_top_p",
@@ -853,12 +877,8 @@ class LambdaRLMAdapter(BaselineAdapter):
             "stopped_reason": str(stopped_reason or "unknown"),
             "method_instrumentation": False,
             "method_two_step_repair": False,
-            "internal_task_detection_call_count": max(
-                0, int(internal_task_detection_call_count)
-            ),
-            "internal_repl_llm_query_call_count": max(
-                0, int(internal_repl_llm_query_call_count)
-            ),
+            "internal_task_detection_call_count": max(0, int(internal_task_detection_call_count)),
+            "internal_repl_llm_query_call_count": max(0, int(internal_repl_llm_query_call_count)),
             "internal_length_finish_count": max(0, int(internal_length_finish_count)),
             "internal_compat_recovery_count": max(0, int(internal_compat_recovery_count)),
             "internal_planned_decomposition_attempt_count": max(

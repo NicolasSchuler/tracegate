@@ -1090,3 +1090,57 @@ class TestLambdaRLMRepairExtraction:
         # verify the prompt behavior through the contract test above.
         assert adapter._is_valid_python("def f(): pass")
         assert not adapter._is_valid_python("This is prose, not code.")
+
+
+def test_bas10_timeout_keeps_last_candidate_and_usage(
+    lambda_case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    repo = _make_lambda_repo(tmp_path)
+    adapter = LambdaRLMAdapter()
+    config = BaselineConfig(repo_dir=repo, model="test-model", max_attempts=2, process_timeout_sec=30)
+    adapter.setup(config)
+    case_input = convert_case(
+        lambda_case,
+        case_context=BaselineCaseContext(
+            case_id="lambda_case", python_args=("-m", "pytest", "-q"), timeout_sec=15
+        ),
+    ).to_dict()
+    outcomes = iter(
+        [
+            _CommandOutcome(returncode=1, stdout="", stderr="assert", duration_sec=0.1),
+            _CommandOutcome(returncode=1, stdout="", stderr="still wrong", duration_sec=0.1),
+        ]
+    )
+    monkeypatch.setattr(adapter, "_run_case_tests", lambda **_kw: next(outcomes))
+    calls = {"count": 0}
+
+    def _invoke(**_kwargs: object) -> dict[str, object]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "response": "def compute(value):\n    return value * 3\n",
+                "raw_response": "def compute(value):\n    return value * 3\n",
+                "execution_time": 0.2,
+                "usage_summary": {
+                    "total_calls": 1,
+                    "total_input_tokens": 50,
+                    "total_output_tokens": 10,
+                },
+                "char_summary": {
+                    "total_calls": 1,
+                    "total_input_chars": 300,
+                    "total_output_chars": 40,
+                },
+                "plan_metadata": {},
+                "call_summary": {},
+            }
+        raise subprocess.TimeoutExpired(cmd="lambda", timeout=30)
+
+    monkeypatch.setattr(adapter, "_invoke_lambda", _invoke)
+    result = adapter.run_repair(case_input, config)
+
+    assert result.meta["error"] == "timeout"
+    assert result.repaired_code is not None and "value * 3" in result.repaired_code
+    assert result.token_usage["prompt_tokens"] == 50

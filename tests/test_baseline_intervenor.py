@@ -451,7 +451,7 @@ class TestIntervenorAdapter:
         }
         assert duration_sec >= 0.0
         assert meta == {}
-        assert observed["kwargs"]["extra_body"] == {"usage": {"include": True}}
+        assert observed["kwargs"]["extra_body"] == {}  # BAS-17: only for OpenRouter
 
     def test_env_client_requests_usage_and_maps_input_output_tokens(
         self,
@@ -499,11 +499,13 @@ class TestIntervenorAdapter:
                 base_url: str | None = None,
                 api_key: str | None = None,
                 timeout: float | None = None,
+                max_retries: int | None = None,
             ) -> None:
                 observed["constructor"] = {
                     "base_url": base_url,
                     "api_key": api_key,
                     "timeout": timeout,
+                    "max_retries": max_retries,
                 }
                 self.chat = SimpleNamespace(completions=_ChatCompletions())
 
@@ -524,8 +526,9 @@ class TestIntervenorAdapter:
             "base_url": "http://127.0.0.1:9999/v1",
             "api_key": "sk-test",
             "timeout": 7.0,
+            "max_retries": 0,
         }
-        assert observed["kwargs"]["extra_body"] == {"usage": {"include": True}}
+        assert observed["kwargs"]["extra_body"] == {}  # BAS-17: only for OpenRouter
         assert json.loads(response_path.read_text(encoding="utf-8")) == {
             "text": "patched",
             "meta": {},
@@ -559,6 +562,11 @@ class TestIntervenorAdapter:
             model="test-model",
             api_base_url="http://127.0.0.1:9999",
             api_key="sk-test",
+            # BAS-19: the shared default enables the reasoning fallback; disable it here.
+            extra={
+                "baseline_openai_enable_thinking": False,
+                "baseline_openai_allow_reasoning_fallback": False,
+            },
         )
 
         with pytest.raises(OpenAICompatResponseError, match="reasoning but no final answer"):
@@ -586,6 +594,8 @@ class TestIntervenorAdapter:
                     "base_url": "http://127.0.0.1:9999",
                     "api_key": "sk-test",
                     "timeout_sec": 7,
+                    "baseline_openai_enable_thinking": False,
+                    "baseline_openai_allow_reasoning_fallback": False,
                 }
             ),
             encoding="utf-8",
@@ -1296,3 +1306,36 @@ class TestIntervenorAdapter:
         diff = IntervenorAdapter().extract_diff(simple_case, result)
         assert diff is not None
         assert "+    return a * b" in diff
+
+
+def test_bas10_generation_failure_keeps_candidate_and_usage() -> None:
+    from baselines.adapter_base import BaselineResult
+    from baselines.intervenor.adapter import _keep_progress_on_generation_failure
+
+    failure = BaselineResult(
+        repaired_code=None,
+        success=False,
+        iterations_used=1,
+        token_usage={"prompt_tokens": 30, "completion_tokens": 5, "total_tokens": 35},
+        meta={"error": "openai_compat_reasoning_only", "compat_message": "x", "metrics": {}},
+    )
+    kept = _keep_progress_on_generation_failure(
+        exc=TimeoutError("read timed out"),
+        current_code="def f():\n    return 2\n",
+        original_code="def f():\n    return 1\n",
+        failure=failure,
+    )
+    assert kept.repaired_code == "def f():\n    return 2\n"
+    assert kept.token_usage["total_tokens"] == 35
+    assert kept.meta["error"] == "generation_failed"
+    assert "TimeoutError" in kept.meta["generation_exc"]
+    assert "compat_message" not in kept.meta
+
+
+def test_bas17_usage_extra_body_only_for_endpoints_that_support_it() -> None:
+    from baselines.openai_compat import usage_include_extra_body
+
+    assert usage_include_extra_body("https://openrouter.ai/api/v1") == {"usage": {"include": True}}
+    assert usage_include_extra_body("http://127.0.0.1:8080/v1") == {}
+    assert usage_include_extra_body("https://api.openai.com/v1") == {}
+    assert usage_include_extra_body("https://evil-openrouter.ai.example.com") == {}

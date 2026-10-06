@@ -26,6 +26,8 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    observed_repo_state,
+    require_pinned_commit,
 )
 from baselines.case_schemas import LDBCaseInput
 from baselines.contracts import BaselineContract
@@ -51,6 +53,7 @@ _API_ERROR_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _UPSTREAM_LOCAL_MODELS = frozenset({"starcoder", "codellama"})
+_UPSTREAM_GPT_MODEL_RE = re.compile(r"gpt-4[a-z0-9.-]*|gpt-3\.5-turbo[a-z0-9.-]*")
 
 
 def _resolve_repo_commit(repo: Path) -> str:
@@ -73,7 +76,10 @@ def _resolve_upstream_model_selector(requested_model: str | None) -> tuple[str, 
         return "gpt-4", None
 
     lowered = raw_model.lower()
-    if "gpt-4" in lowered or "gpt-3.5" in lowered or lowered in _UPSTREAM_LOCAL_MODELS:
+    # BAS-16: only genuine GPT-4/3.5 names or upstream local models select an upstream
+    # client by name; anything else (e.g. "my-gpt-4-finetune") routes through the GPT path
+    # with the real model id forwarded for outbound requests.
+    if _UPSTREAM_GPT_MODEL_RE.fullmatch(lowered) or lowered in _UPSTREAM_LOCAL_MODELS:
         return raw_model, raw_model
 
     # Upstream LDB only recognizes a narrow model-name set, so keep its GPT path
@@ -469,6 +475,12 @@ class LDBAdapter(BaselineAdapter):
             )
             raise RuntimeError(msg)
         self.repo_commit = _resolve_repo_commit(repo)
+        self.repo_state = observed_repo_state(repo)
+        require_pinned_commit(
+            name=self.name,
+            observed_commit=self.repo_commit,
+            pinned_commit=get_pinned_repo_commit(self.name),
+        )
 
     def validate_extra_config(self, config: BaselineConfig) -> None:
         from baselines.extra_configs import LDBExtraConfig
@@ -550,6 +562,7 @@ class LDBAdapter(BaselineAdapter):
 
             # Build the LDB subprocess command.
             env = os.environ.copy()
+            env.update(config.generation.to_env())  # D4; upstream doesn't read these yet
             env["OPENAI_API_KEY"] = config.api_key or env.get("OPENAI_API_KEY", "sk-placeholder")
             if config.api_base_url:
                 env["OPENAI_BASE_URL"] = config.api_base_url
@@ -604,12 +617,14 @@ class LDBAdapter(BaselineAdapter):
             ]
 
             # Add port if base URL has one.
+            cli_port: int | None = None
             if config.api_base_url:
                 try:
                     from urllib.parse import urlparse
 
                     parsed = urlparse(config.api_base_url)
                     if parsed.port:
+                        cli_port = int(parsed.port)
                         cmd.extend(["--port", str(parsed.port)])
                 except Exception:
                     pass
@@ -664,12 +679,20 @@ class LDBAdapter(BaselineAdapter):
                 )
 
             # Parse LDB output.
-            return self._parse_output(
+            result = self._parse_output(
                 log_dir=log_dir,
                 stdout=monitored.stdout,
                 stderr=monitored.stderr,
                 returncode=monitored.returncode,
             )
+            # BAS-16: record how the request was routed.
+            result.meta["ldb_model_routing"] = {
+                "cli_model": cli_model_name,
+                "requested_model": requested_model_name,
+                "base_url": config.api_base_url,
+                "cli_port": cli_port,
+            }
+            return result
 
     def _build_timeout_result(
         self,
@@ -745,6 +768,8 @@ class LDBAdapter(BaselineAdapter):
             )
 
         # Read the last line of the first output file.
+        last_row_metrics: dict[str, Any] | None = None
+        last_row_usage: dict[str, int] = {}
         for jsonl_file in jsonl_files:
             try:
                 lines = jsonl_file.read_text(encoding="utf-8").strip().splitlines()
@@ -832,53 +857,52 @@ class LDBAdapter(BaselineAdapter):
                     - normalized_eval_duration_sec,
                 )
 
+                # BAS-15: metrics describe the attempt whether or not it found a repair.
+                metrics = {
+                    "llm_call_count": normalized_llm_call_count,
+                    "llm_duration_sec": normalized_llm_duration_sec,
+                    "eval_duration_sec": normalized_eval_duration_sec,
+                    "internal_total_duration_sec": normalized_processing_time_seconds,
+                    "orchestration_duration_sec": orchestration_duration_sec,
+                    "usage_available": bool(usage_available and usage),
+                    "is_passing": is_passing,
+                    **test_feedback_summary,
+                    **({"usage_source": "provider_reported"} if usage_available and usage else {}),
+                }
+                if isinstance(prompt_chars_total, int):
+                    metrics["prompt_chars_total"] = max(0, prompt_chars_total)
+                    metrics["chars_input"] = max(0, prompt_chars_total)
+                if isinstance(completion_chars_total, int):
+                    metrics["completion_chars_total"] = max(0, completion_chars_total)
+                    metrics["chars_output"] = max(0, completion_chars_total)
+                if isinstance(chars_total, int):
+                    metrics["chars_total"] = max(0, chars_total)
+                elif isinstance(prompt_chars_total, int) and isinstance(
+                    completion_chars_total, int
+                ):
+                    metrics["chars_total"] = max(0, prompt_chars_total) + max(
+                        0, completion_chars_total
+                    )
+                if isinstance(reported_prompt_chars, int):
+                    metrics["reported_chars_prompt"] = max(0, reported_prompt_chars)
+                if isinstance(reported_completion_chars, int):
+                    metrics["reported_chars_completion"] = max(0, reported_completion_chars)
+                if isinstance(reported_chars_total, int):
+                    metrics["reported_chars_total"] = max(0, reported_chars_total)
+                elif isinstance(reported_prompt_chars, int) and isinstance(
+                    reported_completion_chars, int
+                ):
+                    metrics["reported_chars_total"] = max(0, reported_prompt_chars) + max(
+                        0, reported_completion_chars
+                    )
+                if sidecar_metrics:
+                    merged_metrics = dict(metrics)
+                    merged_metrics.update(sidecar_metrics)
+                    metrics = merged_metrics
+                last_row_metrics = metrics
+                last_row_usage = sidecar_usage if sidecar_usage else usage
                 if repaired:
                     meta["ldb_output_file"] = str(jsonl_file)
-                    metrics = {
-                        "llm_call_count": normalized_llm_call_count,
-                        "llm_duration_sec": normalized_llm_duration_sec,
-                        "eval_duration_sec": normalized_eval_duration_sec,
-                        "internal_total_duration_sec": normalized_processing_time_seconds,
-                        "orchestration_duration_sec": orchestration_duration_sec,
-                        "usage_available": bool(usage_available and usage),
-                        "is_passing": is_passing,
-                        **test_feedback_summary,
-                        **(
-                            {"usage_source": "provider_reported"}
-                            if usage_available and usage
-                            else {}
-                        ),
-                    }
-                    if isinstance(prompt_chars_total, int):
-                        metrics["prompt_chars_total"] = max(0, prompt_chars_total)
-                        metrics["chars_input"] = max(0, prompt_chars_total)
-                    if isinstance(completion_chars_total, int):
-                        metrics["completion_chars_total"] = max(0, completion_chars_total)
-                        metrics["chars_output"] = max(0, completion_chars_total)
-                    if isinstance(chars_total, int):
-                        metrics["chars_total"] = max(0, chars_total)
-                    elif isinstance(prompt_chars_total, int) and isinstance(
-                        completion_chars_total, int
-                    ):
-                        metrics["chars_total"] = max(0, prompt_chars_total) + max(
-                            0, completion_chars_total
-                        )
-                    if isinstance(reported_prompt_chars, int):
-                        metrics["reported_chars_prompt"] = max(0, reported_prompt_chars)
-                    if isinstance(reported_completion_chars, int):
-                        metrics["reported_chars_completion"] = max(0, reported_completion_chars)
-                    if isinstance(reported_chars_total, int):
-                        metrics["reported_chars_total"] = max(0, reported_chars_total)
-                    elif isinstance(reported_prompt_chars, int) and isinstance(
-                        reported_completion_chars, int
-                    ):
-                        metrics["reported_chars_total"] = max(0, reported_prompt_chars) + max(
-                            0, reported_completion_chars
-                        )
-                    if sidecar_metrics:
-                        merged_metrics = dict(metrics)
-                        merged_metrics.update(sidecar_metrics)
-                        metrics = merged_metrics
                     meta["metrics"] = metrics
                     if (
                         str(meta.get("compat_message") or "").strip()
@@ -903,13 +927,15 @@ class LDBAdapter(BaselineAdapter):
                 continue
 
         meta["error"] = "no_solution_in_output"
-        if sidecar_metrics:
+        if last_row_metrics is not None:
+            meta["metrics"] = last_row_metrics
+        elif sidecar_metrics:
             meta["metrics"] = sidecar_metrics
         return BaselineResult(
             repaired_code=None,
             success=False,
             iterations_used=int(sidecar_iterations or 0),
-            token_usage=sidecar_usage if sidecar_usage else {},
+            token_usage=last_row_usage or (sidecar_usage if sidecar_usage else {}),
             meta=meta,
         )
 
