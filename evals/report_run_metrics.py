@@ -540,6 +540,12 @@ def _paired_success_cost_frame(
     condition_a: str,
     condition_b: str,
 ) -> pl.DataFrame:
+    """One row per run in which both conditions ran the case (STA-02, codex 2-2#1/#3).
+
+    Kept at run level: a token budget has to be applied to each run's real cost before
+    the runs of a case are averaged, and a run only carries cost information when both
+    conditions reported tokens in that same run.
+    """
     normalized: list[dict[str, Any]] = []
     for row in rows:
         run_id = str(row.get("run_id") or "")
@@ -591,17 +597,49 @@ def _paired_success_cost_frame(
             .alias("b_tokens"),
         )
         .drop_nulls(["a_success", "b_success"])
-        # STA-02: one row per case. Success becomes the case's success fraction over its
-        # runs (1/0 for a single run) and tokens the mean over runs that reported them.
+        .sort(["case_id", "run_id"])
+    )
+
+
+def _case_success_cost_frame(paired_runs: pl.DataFrame, *, thresholds: list[int]) -> pl.DataFrame:
+    """Aggregate token-covered runs to one row per case (STA-02).
+
+    Success becomes the case's success fraction and tokens its mean cost over the runs in
+    which *both* conditions reported tokens, and each fixed-budget indicator is evaluated
+    against the run's own cost before being averaged. Averaging first would credit a
+    budget to a case whose successful run never met it (codex 2-2#1), and mixing runs
+    that reported only one side's tokens would manufacture a token-covered pair out of
+    two independent means (codex 2-2#3).
+    """
+    indicators = [
+        pl.when(pl.col(f"{side}_tokens") <= float(threshold))
+        .then(pl.col(f"{side}_success").cast(pl.Float64))
+        .otherwise(0.0)
+        .alias(_within_budget_column(side, threshold))
+        for threshold in thresholds
+        for side in ("a", "b")
+    ]
+    return (
+        paired_runs.with_columns(indicators)
         .group_by("case_id")
         .agg(
             pl.col("a_success").cast(pl.Float64).mean(),
             pl.col("b_success").cast(pl.Float64).mean(),
             pl.col("a_tokens").mean(),
             pl.col("b_tokens").mean(),
+            pl.len().alias("token_covered_runs"),
+            *(
+                pl.col(_within_budget_column(side, threshold)).mean()
+                for threshold in thresholds
+                for side in ("a", "b")
+            ),
         )
         .sort("case_id")
     )
+
+
+def _within_budget_column(side: str, threshold: int) -> str:
+    return f"{side}_within_{int(threshold)}"
 
 
 def _compute_dual_objective_summary(
@@ -620,12 +658,12 @@ def _compute_dual_objective_summary(
         n_bootstrap=n_bootstrap,
         seed=seed,
     )
-    paired = _paired_success_cost_frame(
+    paired_runs = _paired_success_cost_frame(
         rows=rows,
         condition_a=condition_a,
         condition_b=condition_b,
     )
-    if paired.is_empty():
+    if paired_runs.is_empty():
         return {
             "available": False,
             "error": "No matched A/B pairs found.",
@@ -633,14 +671,18 @@ def _compute_dual_objective_summary(
             "fixed_budget_thresholds": fixed_budget_thresholds,
         }
 
-    matched_pairs = paired.height
-    covered = paired.drop_nulls(["a_tokens", "b_tokens"])
+    matched_pairs = paired_runs["case_id"].n_unique()
+    # codex 2-2#3: a run carries cost information only when both conditions measured it.
+    covered_runs = paired_runs.drop_nulls(["a_tokens", "b_tokens"])
+    covered = _case_success_cost_frame(covered_runs, thresholds=fixed_budget_thresholds)
     covered_pairs = covered.height
     result: dict[str, Any] = {
         "available": True,
         "effect": effect,
         "matched_pairs": matched_pairs,
+        "matched_runs": paired_runs.height,
         "token_covered_pairs": covered_pairs,
+        "token_covered_runs": covered_runs.height,
         "token_coverage_rate": (covered_pairs / float(matched_pairs))
         if matched_pairs > 0
         else None,
@@ -660,6 +702,7 @@ def _compute_dual_objective_summary(
 
     a_tokens = covered["a_tokens"].cast(pl.Float64).to_list()
     b_tokens = covered["b_tokens"].cast(pl.Float64).to_list()
+    # Success over the same token-covered runs the cost means use, not over every run.
     a_success = covered["a_success"].cast(pl.Float64).to_list()
     b_success = covered["b_success"].cast(pl.Float64).to_list()
     token_pairs = list(zip(a_tokens, b_tokens, strict=True))
@@ -698,15 +741,13 @@ def _compute_dual_objective_summary(
     }
     fixed_budget_rows: list[dict[str, Any]] = []
     for threshold in fixed_budget_thresholds:
-        a_under = sum(
-            success
-            for success, token_total in zip(a_success, a_tokens, strict=True)
-            if token_total <= float(threshold)
+        # codex 2-2#1: per-run indicators, averaged per case; a 10k-token success and a
+        # 1k-token failure must not read as 50% success inside a 6k-token budget.
+        a_under = float(
+            covered[_within_budget_column("a", threshold)].cast(pl.Float64).sum() or 0.0
         )
-        b_under = sum(
-            success
-            for success, token_total in zip(b_success, b_tokens, strict=True)
-            if token_total <= float(threshold)
+        b_under = float(
+            covered[_within_budget_column("b", threshold)].cast(pl.Float64).sum() or 0.0
         )
         coverage = covered_pairs if covered_pairs > 0 else None
         fixed_budget_rows.append(
