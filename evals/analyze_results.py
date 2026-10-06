@@ -3032,6 +3032,11 @@ def _retry_gate_counts(records: list[dict[str, Any]]) -> tuple[int, int]:
         patch_meta = record.get("patch_meta")
         if not isinstance(patch_meta, dict):
             continue
+        # ATT-05: unscored blocks are infra events; the next scored attempt counts them.
+        blocks_before = patch_meta.get("retry_gate_blocks_before")
+        if isinstance(blocks_before, int) and blocks_before > 0:
+            attempts += blocks_before
+            blocks += blocks_before
         evaluated = patch_meta.get("retry_gate_evaluated")
         blocked = patch_meta.get("retry_gate_blocked")
         if isinstance(evaluated, bool):

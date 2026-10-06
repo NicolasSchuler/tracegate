@@ -1048,15 +1048,17 @@ def test_run_eval_streamed_retry_gate_record_is_persisted_once(
         ]
     )
     assert exit_code == 0
-    assert patcher.propose_calls == 1
+    assert patcher.propose_calls == 2  # ATT-05 / D9: the blocked attempt is retried once
 
     results_path = repo_root / "evals" / "results" / "streamed-retry-gate.jsonl"
     rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 2
+    assert len(rows) == 3
     assert rows[0]["attempt"] == 1
     assert rows[1]["attempt"] == 2
     assert rows[1]["note"] == "retry_gate_no_new_evidence"
+    assert rows[1]["record_type"] == "infra_event"
     assert rows[1]["patch_meta"]["retry_gate_blocked"] is True
+    assert rows[2]["attempt"] == 2 and rows[2].get("record_type", "attempt") == "attempt"
     out = capsys.readouterr().out
     assert "DONE retry_gate_case/layered_adaptive_gated status=failed" in out
 

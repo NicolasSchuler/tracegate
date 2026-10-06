@@ -764,6 +764,7 @@ def run_post_attempt_learning(
     if not callable(getattr(patcher, "generate_json", None)):
         return {"enabled": False, "reason": "generate_json_unavailable"}
 
+    call_metas: list[dict[str, Any]] = []
     updates: dict[str, Any] = {
         "enabled": True,
         "beta_before": float(controller.state.beta),
@@ -800,6 +801,7 @@ def run_post_attempt_learning(
             max_tokens=1024,
             operation_name=f"tep_{node_id}_critic_free",
         )
+        call_metas.append(dict(getattr(free_result, "meta", None) or {}))
         nudged_result = patcher.generate_json(
             system_prompt=TEP_CRITIC_SYSTEM_PROMPT,
             prompt=_render_critic_prompt(
@@ -819,6 +821,7 @@ def run_post_attempt_learning(
             max_tokens=1024,
             operation_name=f"tep_{node_id}_critic_nudged",
         )
+        call_metas.append(dict(getattr(nudged_result, "meta", None) or {}))
         free_critic = TepCriticResult.from_payload(free_result.payload)
         nudged_critic = TepCriticResult.from_payload(nudged_result.payload)
         update_result = patcher.generate_json(
@@ -838,6 +841,7 @@ def run_post_attempt_learning(
             max_tokens=1536,
             operation_name=f"tep_{node_id}_update",
         )
+        call_metas.append(dict(getattr(update_result, "meta", None) or {}))
         decision = controller.apply_candidate_update(
             node_id=node_id,
             case_id=case_id,
@@ -854,6 +858,8 @@ def run_post_attempt_learning(
             "nudged_summary": nudged_critic.summary,
         }
     updates["beta_after"] = float(controller.state.beta)
+    # POL-02: every critic/update call is a real LLM call the attempt must pay for.
+    updates["llm_call_metas"] = call_metas
     return updates
 
 

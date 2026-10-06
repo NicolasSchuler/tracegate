@@ -271,11 +271,18 @@ class TestTransportRecoveryPaths:
             if call_count["n"] == 1:
                 return PatchResult(
                     diff="--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-pass\n+1\n",
-                    meta={"error": "request_failed", "status": 503},
+                    meta={
+                        "error": "request_failed",
+                        "exc": "ConnectionError: connection refused",
+                        "usage": {"prompt_tokens": 30, "completion_tokens": 0},
+                    },
                 )
             return PatchResult(
                 diff="--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-pass\n+1\n",
-                meta={"status": "ok"},
+                meta={
+                    "status": "ok",
+                    "usage": {"prompt_tokens": 40, "completion_tokens": 8, "total_tokens": 48},
+                },
             )
 
         patcher = SimpleNamespace(
@@ -285,6 +292,7 @@ class TestTransportRecoveryPaths:
             max_propose_sec=30,
             max_tokens=4096,
             propose_patch=_propose,
+            probe_server_ready=lambda **_kw: True,
         )
 
         gate = SimpleNamespace(
@@ -312,6 +320,14 @@ class TestTransportRecoveryPaths:
         )
         assert isinstance(result, list)
         assert len(result) >= 1
+        # ATT-15: the replayed attempt pays for the failed first call too.
+        attempt_records = [r for r in result if r.get("record_type", "attempt") == "attempt"]
+        patch_meta = attempt_records[-1]["patch_meta"]
+        assert patch_meta["transport_recovery_first_call_usage"] == {
+            "prompt_tokens": 30,
+            "completion_tokens": 0,
+        }
+        assert patch_meta["usage"]["prompt_tokens"] == 70
 
     def test_transport_recovery_failed_no_replay(
         self,

@@ -832,3 +832,53 @@ def test_stage_a_outside_file_request_uses_fallback_and_does_not_leak_secret(
                 content = str(msg.get("content", ""))
                 assert secret_marker not in content, "Secret leaked into LLM request"
                 assert "../secret.txt" not in content, "Outside path leaked into LLM request"
+
+
+def test_attempt_usage_equals_sum_of_served_llm_calls(tmp_path) -> None:
+    """Phase 1F acceptance: every LLM call the attempt made is in its recorded total."""
+    import shutil
+
+    from evals.eval_types import Condition
+
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "work"
+    shutil.copytree(case.path, workdir)
+    no_diff_body = {
+        "choices": [{"message": {"content": "I am not sure yet."}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+    }
+    patch_body = _diff_response_body()
+    patch_body["usage"] = {"prompt_tokens": 23, "completion_tokens": 5, "total_tokens": 28}
+    bodies = [no_diff_body, patch_body]
+    with OpenAIStubServer() as server:
+        for body in bodies:
+            server.enqueue_json(method="POST", path="/v1/chat/completions", body=body)
+        patcher = OpenAICompatPatcher(base_url=server.base_url, model="demo", api_key="local")
+        previous = run_eval.set_active_execution_config(run_eval.ExecutionConfig(executor="local"))
+        try:
+            records = run_eval.run_one_condition(
+                case=case,
+                condition=Condition.BASE_REPAIR,
+                workdir=workdir,
+                context_dir_base=tmp_path / "ctx",
+                patcher=patcher,
+                k=1,
+                output_format="json_compact",
+                run_id="usage-acceptance",
+                include_files_context=True,
+                force_patch_attempt=False,
+                patch_verifier_scope="disabled",
+            )
+        finally:
+            run_eval.set_active_execution_config(previous)
+        served = len(server.requests)
+
+    # Requests beyond the enqueued bodies get stub 404s (no usage); the patcher retries
+    # them, and those calls must be counted too.
+    attempt = next(r for r in records if int(r.get("attempt", 0)) == 1)
+    meta = attempt["attempt_metadata"]
+    served_bodies = bodies[:served]
+    assert served >= 2
+    assert meta["llm_call_count"] == served
+    assert meta["tokens_total"] == sum(b["usage"]["total_tokens"] for b in served_bodies)
+    assert meta["tokens_prompt"] == sum(b["usage"]["prompt_tokens"] for b in served_bodies)

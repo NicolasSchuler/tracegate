@@ -168,6 +168,7 @@ from evals.eval_evidence import (
     _render_evidence_index,
     _render_evidence_items,
     _strip_eval_only_case_artifacts,
+    _xxh3_128_text,
     build_fallback_context_bundle,
     deny_fallback_for_restricted_action,
     evidence_chars_by_type,
@@ -254,6 +255,8 @@ from evals.eval_types import (
     CONTEXT_PROTOCOLS,
     CONTEXT_RECOVERY_FAILURE_KINDS,
     CONTEXT_RECOVERY_PROMPT_BUDGET,
+    EVAL_RECORD_TYPE_ATTEMPT,
+    EVAL_RECORD_TYPE_INFRA_EVENT,
     HELPER_FULL_SNAPSHOT_ACTIONS,
     HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
@@ -271,6 +274,7 @@ from evals.eval_types import (
     PATCH_VERIFIER_SCOPE_DISABLED,
     PROMPT_ORDER_MODES,
     RETRY_CONTEXT_MODES,
+    RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
     RETRY_PROMPT_MODES,
     SNAPSHOT_FRAME_PRUNING_MODES,
     AdaptiveProgressState,
@@ -314,7 +318,7 @@ from evals.policy_feature_scaling import (
     scale_feature_mapping,
 )
 from evals.stage_a_contract import StageARequestPayloadModel, normalize_stage_a_request_payload
-from evals.token_counting import estimate_text_token_count
+from evals.token_counting import estimate_text_token_count, merge_llm_call_usage
 from evals.toon_llm_encoder import estimate_token_savings
 
 # Preserve the historical eval_attempt_flow helper surface for downstream imports.
@@ -780,6 +784,8 @@ def execute_eval_unit_impl(
 
     runtime_error: str | None = None
     case_records: list[dict[str, Any]] | None = None
+    emitted_records: list[dict[str, Any]] = []
+    unit_patcher: Any = patcher_override
     observed_records_count = 0
     persisted_records_count = 0
     progress_state_lock = threading.Lock()
@@ -992,6 +998,7 @@ def execute_eval_unit_impl(
     def _on_record(record: dict[str, Any]) -> None:
         nonlocal observed_records_count
         nonlocal persisted_records_count
+        emitted_records.append(record)
         with progress_state_lock:
             observed_records_count += 1
             progress_state["observed_records_count"] = int(observed_records_count)
@@ -1126,6 +1133,7 @@ def execute_eval_unit_impl(
         )
 
         patcher = patcher_override if patcher_override is not None else make_patcher(patcher_args)
+        unit_patcher = patcher
         _update_progress_state("run_one_condition")
         if hasattr(patcher, "set_progress_callback"):
             patcher.set_progress_callback(_on_progress_update)
@@ -1162,6 +1170,21 @@ def execute_eval_unit_impl(
         if not keep_workdirs:
             shutil.rmtree(workdir, ignore_errors=True)
 
+    if runtime_error is not None:
+        # ATT-08 / ORC-17: a unit that dies still leaves a terminal record, so it stays in
+        # its condition's denominator, and the outcome carries what it already streamed.
+        _on_record(
+            _unit_runtime_error_record(
+                case=case,
+                condition=condition,
+                run_inputs=run_inputs,
+                patcher=unit_patcher,
+                emitted_records=emitted_records,
+                runtime_error=runtime_error,
+            )
+        )
+        case_records = list(emitted_records)
+
     return UnitExecutionOutcome(
         case=case,
         condition=condition,
@@ -1170,6 +1193,124 @@ def execute_eval_unit_impl(
         runtime_error=runtime_error,
         records_streamed=persisted_records_count > 0,
     )
+
+
+def _remove_entries_created_since(root: Path, *, keep: set[Path]) -> None:
+    """Delete files and directories under *root* that are not in *keep* (deepest first)."""
+    if not root.exists():
+        return
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path in keep:
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+
+
+def _note_propose_prompt(
+    *,
+    prompt_text: str,
+    attempt_metadata: dict[str, Any],
+    attempt_dir: Path,
+    record_prompt: str,
+) -> None:
+    """Record a prompt that was actually sent for a patch (ATT-11).
+
+    ``prompt.txt`` / ``prompt_xxh3_128`` describe the prompt before the syntax-retry and
+    recovery cycles; the deciding call can differ. Every sent prompt's hash is kept, the
+    last one is the final prompt, and with ``--record-prompt full`` it is written too.
+    """
+    digest = _xxh3_128_text(prompt_text)
+    hashes = [str(item) for item in attempt_metadata.get("propose_prompt_xxh3_128s") or []]
+    hashes.append(digest)
+    attempt_metadata["propose_prompt_xxh3_128s"] = hashes
+    attempt_metadata["final_prompt_xxh3_128"] = digest
+    attempt_metadata["final_prompt_chars"] = len(prompt_text)
+    if str(record_prompt) == "full":
+        final_path = attempt_dir / "prompt_final.txt"
+        final_path.write_text(prompt_text, encoding="utf-8")
+        attempt_metadata["final_prompt_path"] = str(final_path)
+
+
+def _fold_tep_learning_usage(
+    *,
+    learning: dict[str, Any],
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+) -> None:
+    """Add TEP critic/update calls to the attempt's usage (POL-02).
+
+    They run after the propose-path aggregation, so token, latency and reward accounting
+    used to miss up to 12 calls per attempt.
+    """
+    metas = learning.pop("llm_call_metas", None) or []
+    calls = sum(_llm_call_count_from_meta(meta, default=1) for meta in metas)
+    prompt = completion = total = 0
+    for meta in metas:
+        meta_prompt, meta_completion, meta_total = _usage_token_counts_from_patch_meta(meta)
+        prompt += meta_prompt
+        completion += meta_completion
+        total += meta_total
+    learning["llm_call_count"] = calls
+    learning["tokens_prompt"] = prompt
+    learning["tokens_completion"] = completion
+    learning["tokens_total"] = total
+    patch_meta["tep_learning_llm_call_count"] = calls
+    patch_meta["tep_learning_tokens_total"] = total
+    if not calls:
+        return
+    for key, value in (
+        ("llm_call_count", calls),
+        ("tokens_prompt", prompt),
+        ("tokens_completion", completion),
+        ("tokens_total", total),
+    ):
+        attempt_metadata[key] = _nonnegative_int(attempt_metadata.get(key), default=0) + value
+
+
+def _unit_runtime_error_record(
+    *,
+    case: CaseSpec,
+    condition: Condition,
+    run_inputs: RunConditionInputs,
+    patcher: Any,
+    emitted_records: list[dict[str, Any]],
+    runtime_error: str,
+) -> dict[str, Any]:
+    """Terminal record for a unit that raised (ATT-08).
+
+    It is a failed scored attempt numbered after the last emitted one, unless the unit had
+    already used all ``k`` attempts; then it is an ``infra_event`` that doesn't count.
+    """
+    k = max(1, int(run_inputs.k))
+    last_attempt = max((int(r.get("attempt") or 0) for r in emitted_records), default=0)
+    attempt = last_attempt + 1
+    metadata = {
+        **_empty_attempt_metadata(attempt=attempt),
+        "max_attempts": k,
+        "attempt_ordinal_label": f"{attempt}/{k}",
+        "token_usage_available": False,
+    }
+    record = _build_base_record(
+        case=case,
+        condition=condition,
+        run_id=str(run_inputs.run_id),
+        attempt=attempt,
+        patcher_name=str(getattr(patcher, "name", "") or ""),
+        run_metadata=dict(run_inputs.run_metadata or {}),
+        attempt_metadata=metadata,
+        model_metadata=_build_model_metadata(patcher=patcher, patch_meta=None),
+    )
+    record["success"] = False
+    record["note"] = "unit_runtime_error"
+    # Resume still retries the unit: the record doesn't mark it complete.
+    record["patch_meta"] = {"unit_runtime_error": runtime_error, "infra_resume_eligible": True}
+    if attempt > k:
+        record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
+    else:
+        record["record_type"] = EVAL_RECORD_TYPE_ATTEMPT
+    return record
 
 
 def _write_baseline_case_context(attempt_dir: Path, case: CaseSpec) -> None:
@@ -1198,6 +1339,33 @@ def run_one_condition_impl(
     and adaptive policy updates.  Returns a list of JSONL-ready records.
     """
     resolved_inputs = _resolve_run_condition_inputs(inputs=inputs, legacy_kwargs=legacy_kwargs)
+    deferred_records: list[dict[str, Any]] = []
+    try:
+        return _run_one_condition_attempts(
+            case=case,
+            condition=condition,
+            workdir=workdir,
+            context_dir_base=context_dir_base,
+            resolved_inputs=resolved_inputs,
+            deferred_records=deferred_records,
+        )
+    except BaseException:
+        # ORC-10: records held back for credit resolution must not vanish with the unit.
+        if resolved_inputs.record_sink is not None:
+            for record in deferred_records:
+                resolved_inputs.record_sink(record)
+        raise
+
+
+def _run_one_condition_attempts(
+    *,
+    case: CaseSpec,
+    condition: Condition,
+    workdir: Path,
+    context_dir_base: Path,
+    resolved_inputs: RunConditionInputs,
+    deferred_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     patcher = resolved_inputs.patcher
     k = int(resolved_inputs.k)
     output_format = resolved_inputs.output_format
@@ -1355,7 +1523,7 @@ def run_one_condition_impl(
     progress_update = resolved_inputs.progress_update
 
     records: list[dict[str, Any]] = []
-    deferred_record_sink_queue: list[dict[str, Any]] = []
+    deferred_record_sink_queue = deferred_records
     deferred_record_sink_pending_ids: set[int] = set()
     scored_attempts_consumed = 0
 
@@ -1560,7 +1728,12 @@ def run_one_condition_impl(
 
         transport_recovery_gate.wait_if_open()
         replay_result = invoke()
-        replay_meta = _result_meta_dict(replay_result)
+        # ATT-15: the failed first call is paid for too; keep it next to the replay's usage.
+        replay_meta = merge_llm_call_usage(_result_meta_dict(replay_result), result_meta)
+        replay_meta["transport_recovery_first_call_llm_call_count"] = int(
+            result_meta.get("llm_call_count") or 1
+        )
+        replay_meta["transport_recovery_first_call_usage"] = dict(result_meta.get("usage") or {})
         replay_meta["transport_recovery_operation"] = operation_name
         replay_meta["transport_recovery_attempted"] = True
         replay_meta["transport_recovery_recovered"] = True
@@ -2507,6 +2680,8 @@ def run_one_condition_impl(
     # Trigger 6 also requires adaptive_stop_triggered but uses a separate
     # break path at the bottom of the loop body.
     # ───────────────────────────────────────────────────────────────────────
+    retry_gate_consecutive_blocks = 0
+    retry_gate_blocks_pending = 0
     while scored_attempts_consumed < k:
         attempt = scored_attempts_consumed + 1
         _resolve_expired_pending_online_credits(current_attempt=attempt)
@@ -5814,7 +5989,16 @@ def run_one_condition_impl(
                 prev_evidence_fingerprint = str(
                     previous_failure_context.get("evidence_fingerprint") or ""
                 )
-            if prev_evidence_fingerprint and prev_evidence_fingerprint == evidence_fingerprint:
+            if (
+                prev_evidence_fingerprint
+                and prev_evidence_fingerprint == evidence_fingerprint
+                and retry_gate_consecutive_blocks >= RETRY_GATE_MAX_CONSECUTIVE_BLOCKS
+            ):
+                # ATT-05 / D9: never block twice in a row; propose a patch instead.
+                patch_meta["retry_gate_reason"] = "block_cap_reached"
+            elif prev_evidence_fingerprint and prev_evidence_fingerprint == evidence_fingerprint:
+                retry_gate_consecutive_blocks += 1
+                retry_gate_blocks_pending += 1
                 patch_meta["retry_gate_blocked"] = True
                 patch_meta["retry_gate_reason"] = "same_signature_without_new_evidence"
                 patch_meta["retry_gate_previous_evidence_fingerprint"] = prev_evidence_fingerprint
@@ -5844,9 +6028,12 @@ def run_one_condition_impl(
                     cumulative_runtime_sec=cumulative_runtime_sec,
                     attempt_wall_clock_sec=attempt_wall_sec,
                 )
+                # ATT-05 / D9: a block proposes no patch, so it is a non-scored event and
+                # the scored attempt is retried (the next record reuses this number).
+                record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
+                patch_meta["retry_gate_unscored_block"] = True
                 _queue_pending_online_credit(pending_credit=pending_credit, record=record)
                 _append_record(record, defer_sink=pending_credit is not None)
-                _mark_scored_attempt_consumed()
                 _capture_attempt_history(
                     attempt=attempt,
                     note="retry_gate_no_new_evidence",
@@ -5863,6 +6050,9 @@ def run_one_condition_impl(
                     run=current,
                 )
                 continue
+        retry_gate_consecutive_blocks = 0
+        patch_meta["retry_gate_blocks_before"] = retry_gate_blocks_pending
+        retry_gate_blocks_pending = 0
 
         should_write_adaptive_baseline_sidecars = is_baseline_patcher and is_adaptive_condition
         syntax_state = make_syntax_preflight_state(
@@ -6106,14 +6296,23 @@ def run_one_condition_impl(
                     ),
                 )
             cycle_prompt = prompt + syntax_retry_feedback
+            _note_propose_prompt(
+                prompt_text=cycle_prompt,
+                attempt_metadata=attempt_metadata,
+                attempt_dir=attempt_dir,
+                record_prompt=record_prompt,
+            )
             propose_invoke_count = 0
+            # ATT-12: a transport replay removes only what the failed call created.
+            pre_propose_entries = set(attempt_dir.rglob("*"))
 
             def _rebuild_attempt_dir_for_transport_replay(
                 *,
                 replay_attempt_dir=attempt_dir,
                 replay_current=current,
+                replay_keep=pre_propose_entries,
             ) -> None:
-                shutil.rmtree(replay_attempt_dir, ignore_errors=True)
+                _remove_entries_created_since(replay_attempt_dir, keep=replay_keep)
                 replay_attempt_dir.mkdir(parents=True, exist_ok=True)
                 if is_baseline_patcher:
                     remove_adaptive_controller_sidecars(context_dir=replay_attempt_dir)
@@ -6452,6 +6651,12 @@ def run_one_condition_impl(
                     is_delta_retry=is_delta_retry,
                 )
                 recovery_prompt = recovery_budget_result.prompt + syntax_retry_feedback
+                _note_propose_prompt(
+                    prompt_text=recovery_prompt,
+                    attempt_metadata=attempt_metadata,
+                    attempt_dir=attempt_dir,
+                    record_prompt=record_prompt,
+                )
                 recovery_patch_start = time.perf_counter()
                 recovery_patch = _run_openai_operation_with_transport_recovery(
                     patcher_for_attempt=patcher_for_attempt,
@@ -6635,6 +6840,12 @@ def run_one_condition_impl(
                 )
                 no_diff_recovery_prompt = (
                     no_diff_recovery_budget_result.prompt + syntax_retry_feedback
+                )
+                _note_propose_prompt(
+                    prompt_text=no_diff_recovery_prompt,
+                    attempt_metadata=attempt_metadata,
+                    attempt_dir=attempt_dir,
+                    record_prompt=record_prompt,
                 )
                 no_diff_recovery_start = time.perf_counter()
                 no_diff_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7060,6 +7271,12 @@ def run_one_condition_impl(
                         )
                         verifier_recovery_prompt = (
                             verifier_recovery_budget_result.prompt + syntax_retry_feedback
+                        )
+                        _note_propose_prompt(
+                            prompt_text=verifier_recovery_prompt,
+                            attempt_metadata=attempt_metadata,
+                            attempt_dir=attempt_dir,
+                            record_prompt=record_prompt,
                         )
                         verifier_recovery_start = time.perf_counter()
                         verifier_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7964,6 +8181,11 @@ def run_one_condition_impl(
                 cwd=workdir,
                 case_id=case.case_id,
                 node_packets=tep_node_packets,
+            )
+            _fold_tep_learning_usage(
+                learning=adaptive_tep_learning,
+                attempt_metadata=attempt_metadata,
+                patch_meta=patch_meta,
             )
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning

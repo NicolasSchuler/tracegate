@@ -278,14 +278,19 @@ def test_structured_condition_retry_gate_blocks_same_signature_without_new_evide
         record_sink=emitted_records.append,
     )
 
-    assert len(records) == 2
-    assert len(emitted_records) == 2
-    assert patcher.propose_calls == 1
+    # ATT-05 / D9: the block is an unscored event; attempt 2 is retried once and proposes.
+    assert len(records) == 3
+    assert len(emitted_records) == 3
+    assert patcher.propose_calls == 2
     assert records[1]["note"] == "retry_gate_no_new_evidence"
+    assert records[1]["record_type"] == "infra_event"
     assert records[1]["patch_meta"]["retry_gate_blocked"] is True
     assert int(records[1]["attempt_metadata"]["retry_history_chars"] or 0) > 0
     assert emitted_records[1]["note"] == "retry_gate_no_new_evidence"
     assert emitted_records[1]["attempt"] == 2
+    assert records[2]["attempt"] == 2
+    assert records[2]["patch_meta"]["retry_gate_reason"] == "block_cap_reached"
+    assert records[2]["patch_meta"]["retry_gate_blocks_before"] == 1
 
 
 def test_structured_condition_retry_gate_preserves_measured_attempt_wall_clock(
@@ -297,7 +302,7 @@ def test_structured_condition_retry_gate_preserves_measured_attempt_wall_clock(
     context_dir = tmp_path / "context_retry_wall_clock"
     shutil.copytree(case.path, workdir)
     patcher = _SameEvidencePatcher()
-    measured_attempt_wall_secs = iter([0.2, 1.25])
+    measured_attempt_wall_secs = iter([0.2, 1.25, 0.3])  # attempt 1, gate block, attempt 2
 
     monkeypatch.setattr(
         run_eval,
@@ -334,7 +339,7 @@ def test_structured_condition_retry_gate_preserves_measured_attempt_wall_clock(
         adaptive_max_helper_calls=2,
     )
 
-    assert len(records) == 2
+    assert len(records) == 3  # ATT-05 / D9: attempt 1, unscored gate block, attempt 2
     assert records[1]["note"] == "retry_gate_no_new_evidence"
     assert records[1]["attempt_wall_clock_sec"] == 1.25
     assert records[1]["cumulative_runtime_sec"] == records[0]["cumulative_runtime_sec"] + 1.25

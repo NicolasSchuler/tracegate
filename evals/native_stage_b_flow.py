@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from evals.token_counting import merge_llm_call_usage
+
 from .eval_prompts import _apply_prompt_budget, _build_stage_b_prompt_sections
 from .eval_types import (
     OPENAI_CONTEXT_WINDOW_CHARS_PER_TOKEN,
@@ -289,7 +291,9 @@ def maybe_run_retry_plan_then_patch(
     if retry_plan_succeeded and tep_equilibrium_check and tep_equilibrium_max_iterations > 1:
         for _eq_round in range(tep_equilibrium_max_iterations - 1):
             prev_plan = retry_plan_text
-            new_raw, _, _ = run_plan_patch(planning_prompt_result.prompt)
+            new_raw, _, new_meta = run_plan_patch(planning_prompt_result.prompt)
+            # ATT-09: every re-plan round is paid for, not just the first call.
+            retry_plan_meta = merge_llm_call_usage(retry_plan_meta, new_meta)
             new_plan = str(new_raw or "").strip()
             tep_eq_iterations += 1
             if not new_plan:
