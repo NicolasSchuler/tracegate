@@ -108,7 +108,13 @@ def _print_core_summary(
     for stats in condition_matrix:
         _print_condition_row(stats)
 
-    print("\nPairwise Uplift Matrix")
+    basis = str(overall.get("uplift_attempt_budget_basis") or "own_budget")
+    scope = (
+        f"within common k={overall.get('common_attempt_k')} attempts"
+        if basis == "common_k"
+        else "own attempt budgets"
+    )
+    print(f"\nPairwise Uplift Matrix ({scope})")
     pairwise = _pairwise_uplifts(overall)
     if not pairwise:
         print("- none")

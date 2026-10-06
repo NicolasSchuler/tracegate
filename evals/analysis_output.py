@@ -224,7 +224,7 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
         )
     pairwise_uplifts = bucket.get("pairwise_uplifts")
     if isinstance(pairwise_uplifts, list) and pairwise_uplifts:
-        print(f"{prefix}- pairwise_uplifts:")
+        print(f"{prefix}- pairwise_uplifts ({_attempt_budget_note(bucket)}):")
         for entry in pairwise_uplifts:
             if not isinstance(entry, dict):
                 continue
@@ -238,7 +238,10 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
                     f"{'' if entry.get('case_sets_match', True) else ', case sets differ'})"
                 )
     uplift = bucket.get("uplift_success_rate")
-    print(f"{prefix}- uplift_success_rate: {_fmt_signed_percent(uplift)}")
+    print(
+        f"{prefix}- uplift_success_rate: {_fmt_signed_percent(uplift)} "
+        f"({_attempt_budget_note(bucket)})"
+    )
     print(
         f"{prefix}- mean_prompt_chars_stage_b: {_fmt_num(bucket.get('mean_prompt_chars_stage_b'))}"
     )
@@ -280,6 +283,13 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
         f"{int(bucket.get('patch_attempts') or 0)} "
         f"({_fmt_percent(bucket.get('test_touch_attempt_rate'))})"
     )
+
+
+def _attempt_budget_note(bucket: dict[str, Any]) -> str:
+    """How the compared outcomes were scored (STA-13, D12)."""
+    if str(bucket.get("uplift_attempt_budget_basis") or "") != "common_k":
+        return "own attempt budgets"
+    return f"within common k={bucket.get('common_attempt_k')} attempts"
 
 
 def _print_input_errors(input_errors: Any) -> None:

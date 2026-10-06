@@ -989,7 +989,7 @@ def test_analyze_ope_and_statistics_helpers(
     printed = capsys.readouterr().out
     assert "Overall:" in printed
     assert "By category:" in printed
-    assert "pairwise_uplifts:" in printed
+    assert "pairwise_uplifts (own attempt budgets):" in printed
     assert "Input diagnostics:" in printed
 
     stats = {

@@ -53,9 +53,19 @@ def _summarize_bucket(
         int(row.get("attempts_budget") or 0) for row in rows if int(row.get("attempts_budget") or 0)
     ]
     common_attempt_k = min(attempt_budgets) if attempt_budgets else None
-    case_rates = {
-        condition: _case_success_rates([row for row in condition_rows if comparison_eligible(row)])
+    # STA-13 / D12: every uplift is compared at the bucket's common attempt budget; the
+    # own-budget rates stay as per-condition descriptives (codex 2-2#4).
+    eligible_rows = {
+        condition: [row for row in condition_rows if comparison_eligible(row)]
         for condition, condition_rows in by_condition.items()
+    }
+    case_rates = {
+        condition: _case_success_rates(rows_of_condition, within_attempts=common_attempt_k)
+        for condition, rows_of_condition in eligible_rows.items()
+    }
+    case_rates_own_budget = {
+        condition: _case_success_rates(rows_of_condition)
+        for condition, rows_of_condition in eligible_rows.items()
     }
 
     out: dict[str, Any] = {}
@@ -579,9 +589,20 @@ def _summarize_bucket(
             key=lambda item: item[0],
         )
     ]
-    out["pairwise_uplifts"] = _pairwise_uplifts(case_rates)
+    out["pairwise_uplifts"] = _pairwise_uplifts(
+        case_rates,
+        own_budget_rates=case_rates_own_budget,
+        common_attempt_k=common_attempt_k,
+    )
 
     out["uplift_success_rate"] = _matched_uplift(case_rates, "base_repair", "layered_adaptive_llm")
+    out["uplift_success_rate_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_llm"
+    )
+    out["uplift_attempt_budget_basis"] = (
+        "common_k" if common_attempt_k is not None else "own_budget"
+    )
+    out["common_attempt_k"] = common_attempt_k
     stage_b_prompt_values = [
         float(row["stage_b_prompt_chars_mean"])
         for row in rows
@@ -677,5 +698,11 @@ def _summarize_bucket(
     )
     out["uplift_layered_llm_vs_base"] = _matched_uplift(
         case_rates, "base_repair", "layered_adaptive_llm"
+    )
+    out["uplift_layered_gated_vs_base_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_gated"
+    )
+    out["uplift_layered_llm_vs_base_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_llm"
     )
     return out

@@ -9,7 +9,7 @@ Condition Effectiveness & Efficiency
 - base_repair: 6/12 (50.0%), median_attempts=1, mean_tokens_total=525 (token coverage 100.0% of attempts), mean_llm_calls=1.50, mean_runtime_sec=n/a
 - layered_adaptive_llm: 4/8 (50.0%), median_attempts=1, mean_tokens_total=475 (token coverage 75.0% of attempts), mean_llm_calls=1.50, mean_runtime_sec=n/a, missing 2/6 cases
 
-Pairwise Uplift Matrix
+Pairwise Uplift Matrix (within common k=3 attempts)
 - base_repair -> layered_adaptive_llm: +12.5% (n=4 matched cases, case sets differ)
 
 Reliability & Input Quality

@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from scipy.stats import binomtest, norm
@@ -451,11 +452,13 @@ def analyze_paired_results(
     """
     if run_aggregation not in RUN_AGGREGATIONS:
         raise ValueError(f"unknown run_aggregation {run_aggregation!r}")
-    case_runs, case_categories = _case_run_pairs(
+    paired = _case_run_pairs(
         rows,
         condition_a=condition_a,
         condition_b=condition_b,
     )
+    case_runs = paired.runs
+    case_categories = paired.categories
     if not case_runs:
         return {"error": "No matched A/B pairs found."}
 
@@ -477,10 +480,19 @@ def analyze_paired_results(
     b_rate = sum(b for _, b in rates) / len(rates)
 
     overall_mcnemar = mcnemar_test(pairs)
+    own_rates = [_case_success_rates(paired.runs_own_budget[case_id]) for case_id in case_ids]
     result: dict[str, Any] = {
         "n_pairs": len(case_ids),
         "unit": "case",
         "run_aggregation": run_aggregation,
+        # STA-13 / D12: the comparison runs at the smaller attempt budget of the two
+        # conditions; the own-budget rates stay as descriptives.
+        "attempt_budget_basis": (
+            "common_k" if paired.common_attempt_k is not None else "own_budget"
+        ),
+        "common_attempt_k": paired.common_attempt_k,
+        "a_success_rate_own_budget": sum(a for a, _ in own_rates) / len(own_rates),
+        "b_success_rate_own_budget": sum(b for _, b in own_rates) / len(own_rates),
         "runs_per_case_max": runs_per_case_max,
         "n_decided_pairs": len(pairs),
         "tied_cases": len(case_ids) - len(pairs),
@@ -542,25 +554,82 @@ def _aggregate_case_runs(
     return decided
 
 
+@dataclass(frozen=True)
+class PairedCases:
+    """Matched A/B runs of each case, at the common attempt budget and at each own one."""
+
+    runs: dict[str, list[BinaryPair]]
+    """Outcomes used for the comparison: solved within ``common_attempt_k`` attempts."""
+
+    runs_own_budget: dict[str, list[BinaryPair]]
+    """The same runs scored at each condition's own attempt budget (descriptive)."""
+
+    categories: dict[str, str]
+
+    common_attempt_k: int | None
+    """The smallest attempt budget of the two conditions, or ``None`` when unknown."""
+
+
+def _common_attempt_budget(rows: list[dict[str, Any]]) -> int | None:
+    """Smallest attempt budget among *rows*, or ``None`` when the rows don't say (STA-13).
+
+    Every row needs an ``attempts_budget``, and every successful row an
+    ``attempts_to_success``; without them a common-budget outcome cannot be derived and
+    the comparison stays on each condition's own budget.
+    """
+    budgets: list[int] = []
+    for row in rows:
+        try:
+            budget = int(row.get("attempts_budget") or 0)
+        except (TypeError, ValueError):
+            return None
+        if budget <= 0:
+            return None
+        if bool(row.get("success")) and row.get("attempts_to_success") is None:
+            return None
+        budgets.append(budget)
+    return min(budgets) if budgets else None
+
+
+def _solved_within(row: dict[str, Any], k: int | None) -> bool:
+    """Whether the row's case was solved within the first *k* attempts (STA-13, D12)."""
+    if k is None:
+        return bool(row.get("success"))
+    value = row.get("attempts_to_success")
+    if value is None:
+        return False
+    try:
+        return int(value) <= int(k)
+    except (TypeError, ValueError):
+        return False
+
+
 def _case_run_pairs(
     rows: list[dict[str, Any]],
     *,
     condition_a: str,
     condition_b: str,
-) -> tuple[dict[str, list[BinaryPair]], dict[str, str]]:
-    """Matched (A, B) pairs per case, one per run in which both conditions ran.
+) -> PairedCases:
+    """Matched (A, B) runs per case, one pair per run in which both conditions ran.
 
-    Returns ``(pairs by case_id, category by case_id)``. Rows whose patch metadata says
-    ``baseline_supported=False`` are left out (BAS-01, D3).
+    Rows whose patch metadata says ``baseline_supported=False`` are left out (BAS-01, D3).
+    Conditions with different attempt budgets are compared at the smaller one
+    (``common_attempt_k``): a case counts as solved when it was solved within the first K
+    attempts (STA-13, D12). The own-budget outcomes are kept alongside, so the
+    descriptive per-condition rates don't change.
     """
+    eligible = [row for row in rows if comparison_eligible(row)]
+    compared = [
+        row for row in eligible if str(row.get("condition", "")) in {condition_a, condition_b}
+    ]
+    common_attempt_k = _common_attempt_budget(compared)
     by_key: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-    for row in rows:
-        if not comparison_eligible(row):
-            continue  # BAS-01 / D3: not a comparable outcome
+    for row in eligible:
         key = (str(row.get("case_id", "")), str(row.get("run_id", "")))
         by_key.setdefault(key, {})[str(row.get("condition", ""))] = row
 
     case_runs: dict[str, list[BinaryPair]] = {}
+    case_runs_own: dict[str, list[BinaryPair]] = {}
     categories: dict[str, str] = {}
     for case_id, run_id in sorted(by_key):
         entries = by_key[(case_id, run_id)]
@@ -569,10 +638,18 @@ def _case_run_pairs(
         if a_row is None or b_row is None:
             continue
         case_runs.setdefault(case_id, []).append(
+            (_solved_within(a_row, common_attempt_k), _solved_within(b_row, common_attempt_k))
+        )
+        case_runs_own.setdefault(case_id, []).append(
             (bool(a_row.get("success")), bool(b_row.get("success")))
         )
         categories.setdefault(case_id, str(a_row.get("category", "unknown")))
-    return case_runs, categories
+    return PairedCases(
+        runs=case_runs,
+        runs_own_budget=case_runs_own,
+        categories=categories,
+        common_attempt_k=common_attempt_k,
+    )
 
 
 # ---------------------------------------------------------------------------

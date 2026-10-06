@@ -44,6 +44,7 @@ from evals.analysis_usage import (
     _token_usage,
 )
 from evals.case_outcome import case_outcome
+from evals.stats import _solved_within
 
 
 def _derive_case_condition_rows(
@@ -714,19 +715,21 @@ def _success_within_attempts(rows: list[dict[str, Any]], k: int | None) -> float
     """Share of rows solved within the first *k* attempts (STA-13, D12)."""
     if k is None or not rows:
         return None
-    solved = sum(
-        1
-        for row in rows
-        if row.get("attempts_to_success") is not None and int(row["attempts_to_success"]) <= k
-    )
-    return solved / len(rows)
+    return sum(1 for row in rows if _solved_within(row, k)) / len(rows)
 
 
-def _case_success_rates(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Success rate per case_id over its runs (1.0/0.0 for a single run)."""
+def _case_success_rates(
+    rows: list[dict[str, Any]], *, within_attempts: int | None = None
+) -> dict[str, float]:
+    """Success rate per case_id over its runs (1.0/0.0 for a single run).
+
+    With *within_attempts*, a run counts as solved only when it was solved within that
+    many attempts, so conditions with different budgets are compared at the smaller one
+    (STA-13, D12).
+    """
     outcomes: dict[str, list[bool]] = defaultdict(list)
     for row in rows:
-        outcomes[str(row.get("case_id") or "")].append(bool(row.get("success")))
+        outcomes[str(row.get("case_id") or "")].append(_solved_within(row, within_attempts))
     return {case_id: sum(values) / len(values) for case_id, values in outcomes.items()}
 
 
@@ -749,8 +752,18 @@ def _matched_uplift(
     return sum(b_rates[case_id] - a_rates[case_id] for case_id in matched) / len(matched)
 
 
-def _pairwise_uplifts(case_rates: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
-    """Pairwise success-rate uplifts over each pair's matched cases (STA-03)."""
+def _pairwise_uplifts(
+    case_rates: dict[str, dict[str, float]],
+    *,
+    own_budget_rates: dict[str, dict[str, float]] | None = None,
+    common_attempt_k: int | None = None,
+) -> list[dict[str, Any]]:
+    """Pairwise success-rate uplifts over each pair's matched cases (STA-03).
+
+    *case_rates* carries the compared outcomes (at ``common_attempt_k`` when known);
+    *own_budget_rates* adds each condition's own-budget uplift as a descriptive (STA-13).
+    """
+    own_budget_rates = case_rates if own_budget_rates is None else own_budget_rates
     conditions = sorted(condition for condition, rates in case_rates.items() if rates)
     out: list[dict[str, Any]] = []
     for idx, condition_a in enumerate(conditions):
@@ -762,6 +775,13 @@ def _pairwise_uplifts(case_rates: dict[str, dict[str, float]]) -> list[dict[str,
                     "condition_a": condition_a,
                     "condition_b": condition_b,
                     "uplift_success_rate": _matched_uplift(case_rates, condition_a, condition_b),
+                    "uplift_success_rate_own_budget": _matched_uplift(
+                        own_budget_rates, condition_a, condition_b
+                    ),
+                    "attempt_budget_basis": (
+                        "common_k" if common_attempt_k is not None else "own_budget"
+                    ),
+                    "common_attempt_k": common_attempt_k,
                     "n_matched_cases": len(a_cases & b_cases),
                     "case_sets_match": a_cases == b_cases,
                 }
