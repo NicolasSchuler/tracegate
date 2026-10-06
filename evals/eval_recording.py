@@ -43,6 +43,7 @@ from .eval_types import (
     ADAPTIVE_REWARD_STAGNATION_SCALE_DEFAULT,
     ADAPTIVE_REWARD_SUCCESS_HINT_DEFAULT,
     ADAPTIVE_REWARD_TOKEN_SCALE_DEFAULT,
+    ATTEMPT_ACCOUNTING_VERSION,
     BASELINE_CONDITION_BY_NAME,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_ALPHA,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
@@ -67,6 +68,7 @@ from .eval_types import (
     PATCH_VERIFIER_SCOPE_ALL,
     PATCH_VERIFIER_SCOPE_DISABLED,
     POLICY_DEFAULTS_VERSION,
+    RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
     CaseSpec,
     Condition,
 )
@@ -288,6 +290,7 @@ def _build_run_metadata(
         "patcher_config_fingerprint": _xxh3_128_jsonlike(patcher_config),
         "run_settings_fingerprint": run_settings_fingerprint,
         "policy_defaults_version": POLICY_DEFAULTS_VERSION,
+        "attempt_accounting_version": ATTEMPT_ACCOUNTING_VERSION,
         "record_policy": {
             "prompt": str(args.record_prompt),
             "evidence": str(args.record_evidence),
@@ -312,6 +315,12 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         # version belongs in the config and in the settings fingerprint derived from it;
         # resuming across a bump is refused instead of mixing the two.
         "policy_defaults_version": POLICY_DEFAULTS_VERSION,
+        # ATT-05 / ATT-08 / POL-02: the attempt-counting and cost-accounting contract. Two
+        # runs with identical CLI knobs but different contracts are not comparable, and the
+        # retry gate's blocking policy is not a CLI knob, so both belong in the config and
+        # in the settings fingerprint derived from it.
+        "attempt_accounting_version": ATTEMPT_ACCOUNTING_VERSION,
+        "retry_gate_max_consecutive_blocks": RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
         "k": int(args.k),
         # CAP-20 / ATT-03: the snapshot format and the evidence-delivery contract are both
         # part of what the patcher sees, so two runs that differ in either are not comparable.

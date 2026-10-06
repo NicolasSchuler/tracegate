@@ -1832,3 +1832,78 @@ def test_resume_of_a_pre_remediation_run_is_rejected(tmp_path, monkeypatch, caps
     # The record-schema guard (codex 1d#4) rejects the v6 rows before the fingerprint check.
     assert exit_code != 0
     assert "predates this harness" in capsys.readouterr().out
+
+
+def test_resume_rejects_a_run_from_an_earlier_attempt_accounting_version(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """codex 1f#8: the attempt-counting/cost contract is part of the settings fingerprint.
+
+    A run recorded before the remediation counted attempts and costs differently (unscored
+    retry-gate blocks, discarded gate usage, TEP learning outside the attempt's totals), so
+    resuming it with today's contract would mix two accounting regimes under one run's
+    metadata (ATT-05, ATT-08, POL-02).
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "accounting_version_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    recorded_metadata: list[dict[str, object]] = []
+
+    def _run_once(*, case, condition, run_id, run_metadata, **_kwargs):
+        recorded_metadata.append(dict(run_metadata))
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+    argv = [
+        "--run-id",
+        "accounting-version-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "layered_adaptive_gated",
+        "--k",
+        "1",
+    ]
+
+    # The earlier contract, written by the same real fingerprint seam.
+    monkeypatch.setattr(
+        eval_recording,
+        "ATTEMPT_ACCOUNTING_VERSION",
+        eval_types.ATTEMPT_ACCOUNTING_VERSION - 1,
+    )
+    assert _run_eval_main(argv) == 0
+    capsys.readouterr()
+
+    monkeypatch.undo()
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+
+    assert _run_eval_main(argv) != 0
+    out = capsys.readouterr().out
+    assert "Resume aborted: run settings fingerprint mismatch" in out
+    assert len(recorded_metadata) == 1
+    patcher_config = recorded_metadata[0]["patcher_config"]
+    assert isinstance(patcher_config, dict)
+    assert patcher_config["attempt_accounting_version"] == eval_types.ATTEMPT_ACCOUNTING_VERSION - 1
+    assert patcher_config["retry_gate_max_consecutive_blocks"] == (
+        eval_types.RETRY_GATE_MAX_CONSECUTIVE_BLOCKS
+    )
+    assert (
+        recorded_metadata[0]["attempt_accounting_version"]
+        == eval_types.ATTEMPT_ACCOUNTING_VERSION - 1
+    )

@@ -180,6 +180,14 @@ Stage-A actions, the full snapshot reaches Stage-B only when the executed action
 and ``adaptive_snapshot_included`` / ``stage_b_snapshot_in_prompt`` /
 ``evidence_chars_by_type`` describe the delivered prompt (ATT-03, ATT-04, ATT-06). Earlier
 runs are revision 1."""
+ATTEMPT_ACCOUNTING_VERSION = 2
+"""Attempt-counting and cost-accounting contract, recorded in run metadata. Version 2
+(2026-10-04 review): a no-new-evidence retry-gate block is an unscored ``infra_event``
+that does not consume an attempt and whose paid work is carried into the next scored row
+(ATT-05); a unit that raises leaves a scored terminal row numbered after the last scored
+attempt (ATT-08); and every served LLM call -- TEP equilibrium re-plans, transport
+replays and full-TEP learning included -- is in the attempt's usage and latency
+(POL-02, ATT-09, ATT-13, ATT-15). Earlier runs are version 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}
