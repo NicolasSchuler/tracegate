@@ -363,6 +363,35 @@ class TestInstallHooks:
         assert len(forwarded) == 1  # the original hook still runs
         assert not list(tmp_path.glob("*.json"))
 
+    def test_unraisable_hook_delegates_for_an_exception_that_blocks_attributes(
+        self, tmp_path: Path
+    ):
+        """CAP-18: classifying with `isinstance` probed the instance and lost delegation."""
+
+        class _Blocked(ValueError):
+            def __getattribute__(self, name: str) -> object:
+                raise RuntimeError("no attribute access")
+
+        _, tb = _make_exc_with_tb()
+        forwarded: list[Any] = []
+        original = sys.unraisablehook
+        sys.unraisablehook = forwarded.append
+        try:
+            install_hooks(out_dir=str(tmp_path), pii_safe=False, hooks=("unraisable",))
+            unraisable = SimpleNamespace(
+                exc_type=_Blocked,
+                exc_value=_Blocked(),
+                exc_traceback=tb,
+                err_msg=None,
+                object=None,
+            )
+            sys.unraisablehook(cast(Any, unraisable))
+        finally:
+            uninstall_hooks()
+            sys.unraisablehook = original
+
+        assert len(forwarded) == 1  # the original hook still reports it
+
     def test_unraisable_hook_records_falsy_objects(self, tmp_path: Path):
         """CAP-18: an empty container is still the object, not "no object"."""
         self._call_unraisable_hook(tmp_path, ValueError("in __del__"), [])

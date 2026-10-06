@@ -93,6 +93,37 @@ def test_wide_ints_in_pandas_previews(tmp_path: Path) -> None:
     assert local_vars["series"]["head"] == [repr(2**70), 2]
 
 
+def test_wide_ints_nested_in_pandas_previews(tmp_path: Path) -> None:
+    """CAP-01: an object-dtype cell holding a wide int broke the JSON encoder."""
+    pd = pytest.importorskip("pandas")
+
+    def boom() -> None:
+        frame = pd.DataFrame({"a": [{"id": 2**70}, {"id": 1}]})  # noqa: F841 - captured local
+        listed = pd.DataFrame({"a": [[2**70, 1]]})  # noqa: F841 - captured local
+        series = pd.Series([{"id": 2**70}])  # noqa: F841 - captured local
+        raise ValueError("nested pandas wide ints")
+
+    snapshot = _capture(tmp_path, boom)
+
+    local_vars = _crash_locals(snapshot)
+    assert local_vars["frame"]["head"][0] == [{"id": repr(2**70)}]
+    assert local_vars["listed"]["head"][0] == [[repr(2**70), 1]]
+    assert local_vars["series"]["head"] == [{"id": repr(2**70)}]
+
+
+def test_wide_int_pandas_column_labels_are_normalized(tmp_path: Path) -> None:
+    """CAP-01: a wide-integer column label bypassed normalization."""
+    pd = pytest.importorskip("pandas")
+
+    def boom() -> None:
+        frame = pd.DataFrame({2**70: [1, 2]})  # noqa: F841 - captured local
+        raise ValueError("wide column label")
+
+    snapshot = _capture(tmp_path, boom)
+
+    assert _crash_locals(snapshot)["frame"]["columns"] == [repr(2**70)]
+
+
 # ---------------------------------------------------------------------------
 # CAP-02: exception text whose __str__ raises
 # ---------------------------------------------------------------------------

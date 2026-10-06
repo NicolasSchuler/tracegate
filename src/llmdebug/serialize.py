@@ -591,12 +591,32 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     return summary
 
 
-def _preview_cell(value: Any, cfg: SnapshotConfig) -> Any:
-    """A pandas preview cell, bounded like any other value (CAP-01, CAP-13)."""
+def _preview_cell(value: Any, cfg: SnapshotConfig, depth: int = 0) -> Any:
+    """A pandas preview cell or column label, bounded like any other value (CAP-01, CAP-13).
+
+    Object-dtype cells hold arbitrary Python values, so the normalization has to recurse:
+    a wide integer nested in a cell's dict or list reached the JSON encoder unchanged,
+    which raises and loses the whole snapshot rather than one value.
+    """
     if isinstance(value, str):
         return truncate_str(value, cfg.max_str)
+    if isinstance(value, bool):
+        return value
     if isinstance(value, int) and not JSON_INT_MIN <= value <= JSON_INT_MAX:
         return safe_repr(value, cfg)
+    if isinstance(value, dict):
+        if depth >= 2:
+            return safe_repr(value, cfg)
+        items = list(cast(dict[Any, Any], value).items())[: cfg.max_items]
+        return {
+            str(_preview_cell(key, cfg, depth + 1)): _preview_cell(item, cfg, depth + 1)
+            for key, item in items
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        if depth >= 2:
+            return safe_repr(value, cfg)
+        entries = list(cast("set[Any]", value))[: cfg.max_items]
+        return [_preview_cell(item, cfg, depth + 1) for item in entries]
     return value
 
 
@@ -610,7 +630,10 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
         summary["shape"] = f"<error: {type(e).__name__}>"
 
     try:
-        summary["columns"] = list(df.columns)[: cfg.max_items]
+        # Labels are arbitrary objects too: a wide-integer column label broke the encoder.
+        summary["columns"] = [
+            _preview_cell(column, cfg) for column in list(df.columns)[: cfg.max_items]
+        ]
         if len(df.columns) > cfg.max_items:
             summary["columns_truncated"] = True
     except Exception as e:
