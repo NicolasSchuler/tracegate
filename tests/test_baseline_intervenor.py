@@ -248,7 +248,9 @@ class TestIntervenorAdapter:
         ).to_dict()
         prompts: list[str] = []
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             prompts.append(prompt)
             if "Modification method:" in prompt:
                 return "Change the operator from + to *.", {
@@ -334,7 +336,9 @@ class TestIntervenorAdapter:
         ).to_dict()
         observed: list[tuple[str, int]] = []
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             observed.append((prompt, max_tokens))
             if "Modification method:" in prompt:
                 return "Change the operator from + to *.", {
@@ -377,7 +381,9 @@ class TestIntervenorAdapter:
             ),
         ).to_dict()
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             del client, model, max_tokens, config
             if "Modification method:" in prompt:
                 return (
@@ -729,7 +735,9 @@ class TestIntervenorAdapter:
         }
         prompts: list[str] = []
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             prompts.append(prompt)
             if "Modification method:" in prompt:
                 return "Change the operator from + to *.", {
@@ -845,7 +853,9 @@ class TestIntervenorAdapter:
         }
         prompts: list[str] = []
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             prompts.append(prompt)
             if "Modification method:" in prompt:
                 return "Change the operator from + to *.", {
@@ -978,7 +988,9 @@ class TestIntervenorAdapter:
         }
         prompts: list[str] = []
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             prompts.append(prompt)
             if "Modification method:" in prompt:
                 return "Change the operator from + to *.", {
@@ -1142,7 +1154,9 @@ class TestIntervenorAdapter:
             ]
         )
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             return next(responses)
 
         monkeypatch.setattr(adapter, "_build_client", lambda config: object())
@@ -1202,7 +1216,9 @@ class TestIntervenorAdapter:
             ]
         )
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             del client, model, max_tokens, config
             prompts.append(prompt)
             return next(responses)
@@ -1290,7 +1306,9 @@ class TestIntervenorAdapter:
             ]
         )
 
-        def _fake_generate_text(*, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs):
+        def _fake_generate_text(
+            *, client, model: str, prompt: str, max_tokens: int, config=None, **_deadline_kwargs
+        ):
             return next(responses)
 
         monkeypatch.setattr(adapter, "_build_client", lambda config: object())
