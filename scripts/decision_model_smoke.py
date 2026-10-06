@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -30,9 +29,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 from evals.decision_model.client import SystemOneClient, SystemOneResult  # noqa: E402
 from evals.decision_model.config import (  # noqa: E402
-    DECISION_MODEL_API_KEY_ENV,
     DEFAULT_DECISION_MODEL_NAME,
     DecisionModelClientConfig,
+    resolve_decision_model_api_key,
     resolve_decision_model_url,
 )
 from evals.decision_model.schema import (  # noqa: E402
@@ -305,7 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         url=url,
         model=str(args.model),
         timeout_sec=float(args.timeout_sec),
-        api_key=os.environ.get(DECISION_MODEL_API_KEY_ENV, "").strip(),
+        api_key=resolve_decision_model_api_key(),
     )
     requests = _build_requests(model=str(args.model), profile_name=str(args.profile))
     schedule = [request for request in requests for _ in range(repeats)]
