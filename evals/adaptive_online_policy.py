@@ -253,6 +253,8 @@ class AdaptiveOnlinePolicyController:
         self.decision_model = decision_model
         self._lock = threading.RLock()
         self._rng = random.Random(config.random_seed)
+        # POL-05: the key of the decision in flight, or None outside ``_decision_rng``.
+        self._decision_rng_key: str | None = None
         self._state = LinUCBState()
         self._save_counter = 0
         self._nan_counts: dict[str, int] = {}
@@ -414,11 +416,14 @@ class AdaptiveOnlinePolicyController:
             yield
             return
         shared = self._rng
+        shared_key = self._decision_rng_key
         self._rng = random.Random(derive_seed(self.config.random_seed, rng_key))
+        self._decision_rng_key = rng_key
         try:
             yield
         finally:
             self._rng = shared
+            self._decision_rng_key = shared_key
 
     def decide(
         self,
@@ -829,7 +834,21 @@ class AdaptiveOnlinePolicyController:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
         if self.config.algorithm != "thompson":
             return dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
-        return core.thompson_scores(self._state, x, seed=self.config.random_seed)
+        return core.thompson_scores(self._state, x, seed=self._thompson_seed())
+
+    def _thompson_seed(self) -> int | None:
+        """The NumPy seed for this decision's Thompson draw (POL-05).
+
+        Keyed like the Python RNG, so the same unit, model state and features sample the
+        same scores however the units interleave; the key names its own stream, which
+        keeps it independent of the exploration draws. Without a key the old
+        decision-counter stream is kept.
+        """
+        if self.config.random_seed is None:
+            return None
+        if self._decision_rng_key is None:
+            return int(self.config.random_seed) + int(self._state.decisions)
+        return derive_seed(self.config.random_seed, self._decision_rng_key, "thompson")
 
     def _apply_action_score_biases(self, scores: Mapping[str, float]) -> dict[str, float]:
         """Apply additive score priors without changing feasibility masks."""

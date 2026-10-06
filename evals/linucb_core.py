@@ -268,8 +268,13 @@ def linucb_scores(
 
 
 def thompson_scores(state: LinUCBState, x: np.ndarray, *, seed: int | None) -> dict[str, float]:
-    """Sample theta ~ N(A^-1 b, A^-1) per action and return theta . x."""
-    rng = np.random.default_rng(seed=(seed + state.decisions) if seed is not None else None)
+    """Sample theta ~ N(A^-1 b, A^-1) per action and return theta . x.
+
+    *seed* is used as given: the caller decides what makes one draw differ from the next.
+    This used to add ``state.decisions`` here, which tied every sample to how many
+    decisions other units had already made (POL-05).
+    """
+    rng = np.random.default_rng(seed=seed)
     scores: dict[str, float] = {}
     for action in state.action_names:
         A = state.A.get(action)

@@ -305,6 +305,57 @@ def test_pol05_keyed_decisions_do_not_depend_on_decision_order() -> None:
     assert len(draws) > 1  # different keys give different streams
 
 
+def test_pol05_thompson_scores_do_not_depend_on_decision_order() -> None:
+    """POL-05: the NumPy draw is keyed too, not just the Python RNG (codex 1d#2)."""
+    from evals.adaptive_budget_online_policy import (
+        AdaptiveBudgetPolicyController,
+        BudgetPolicyConfig,
+    )
+    from evals.adaptive_online_policy import AdaptiveOnlinePolicyController, OnlinePolicyConfig
+
+    features = {"bias": 1.0, "x": 0.3}
+
+    def _helper() -> AdaptiveOnlinePolicyController:
+        return AdaptiveOnlinePolicyController(
+            OnlinePolicyConfig.normalize(
+                mode="on",
+                algorithm="thompson",
+                warmup_decisions=0,
+                epsilon=0.0,
+                random_seed=11,
+            )
+        )
+
+    def _budget() -> AdaptiveBudgetPolicyController:
+        return AdaptiveBudgetPolicyController(
+            BudgetPolicyConfig.normalize(
+                mode="on",
+                algorithm="thompson",
+                warmup_decisions=0,
+                epsilon=0.0,
+                random_seed=11,
+            )
+        )
+
+    for build in (_helper, _budget):
+        first = build()
+        alone = first.decide(feature_values=features, rng_key="case-a|llm|1")
+
+        after_others = build()
+        for index in range(5):  # other units decide first under another interleaving
+            after_others.decide(feature_values=features, rng_key=f"case-b|llm|{index}")
+        interleaved = after_others.decide(feature_values=features, rng_key="case-a|llm|1")
+
+        assert alone.scores == interleaved.scores
+        assert alone.selected_action == interleaved.selected_action
+
+        keyed_scores = {
+            tuple(sorted(build().decide(feature_values=features, rng_key=f"k{i}").scores.items()))
+            for i in range(10)
+        }
+        assert len(keyed_scores) > 1  # different keys still sample different arms
+
+
 def test_derive_seed_is_stable_and_separates_streams() -> None:
     from evals.seed_derivation import derive_seed
 
