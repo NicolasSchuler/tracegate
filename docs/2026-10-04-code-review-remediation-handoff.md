@@ -302,7 +302,7 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - [x] Flag shadow-mode logs written before the POL-03 fix (Phase 3) as having biased propensities. *(M1 corrects them to 1.0 at read time; `shadow_corrected_samples` is counted and printed with the estimates.)*
 
 ### 2.4. Re-analysis audit, for the user
-- [ ] Write a tool, for example `python -m evals.reanalysis_audit <jsonl…>`. For a set of result files it should:
+- [x] Write a tool, for example `python -m evals.reanalysis_audit <jsonl…>`. For a set of result files it should:
   1. recompute the headline metrics with the corrected code and print the change from the previously reported values;
   2. run the data audits listed under "Impact on existing results" in the findings document:
      - successes whose patch touched tests or config
@@ -313,7 +313,7 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
      - SWE-Bench `snapshot_dir`
      - missing-usage rows
      - unmatched case sets
-- [ ] Hand the output to the user. Don't edit any published numbers.
+- [ ] Hand the output to the user. Don't edit any published numbers. *(No result files exist in this checkout; the command was handed to the user to run where the results live.)*
 
 **Acceptance:**
 - Unit tests check against scipy references: power within ±0.02 of a simulation, exact McNemar, and Holm.

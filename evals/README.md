@@ -1594,6 +1594,27 @@ uv run python -m evals.analyze_results evals/results/*.jsonl --stats --aggregati
 uv run python -m evals.analyze_results evals/results/*.jsonl --stats --aggregation any_success
 ```
 
+### Re-analysis audit of existing results
+
+Results written before the 2026-10-04 review fixes can be checked without re-running anything:
+
+```bash
+uv run python -m evals.reanalysis_audit evals/results/<run>*.jsonl \
+  --a base_repair --b layered_adaptive_llm \
+  [--swebench-run-dir evals/swebench_runs/<id>] [--json audit.json]
+```
+
+It prints the headline metrics computed with the corrected analysis next to the same metrics
+under the pre-review semantics (unmatched uplift, missing tokens as 0, run-level pairing,
+chi-square McNemar, the old power formula, uncorrected pairwise significance), and the data
+audits from "Impact on existing results" in `docs/2026-10-04-code-review-findings.md`:
+successes that touched tests or pytest config, whole-file fallbacks and seed bundles on
+restricted actions, full-reveal runs, policy decay below 1.0, OPE propensity problems,
+pre-fix deterministic runs, repeated runs, unmatched case sets, missing token usage, LDB case
+counts, retry-gate blocks scored as attempts, forced patches recorded as test failures, record
+schema versions, and per SWE-Bench run: `--snapshot-dir`, hints/test IDs in prompts and empty
+patches. It only reads the files.
+
 ### Paper-ready plain-text report
 
 Use `evals.report_run_metrics` for a narrative, paper-facing summary with

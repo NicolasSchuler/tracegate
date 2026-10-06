@@ -45,9 +45,7 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
         if not isinstance(payload, dict):
             raise ValueError(f"{path}:{line_no}: expected JSON object rows")
         raw_rows.append(payload)
-    return [
-        dict(row) for outcome in case_outcomes(raw_rows).values() for row in outcome.attempts
-    ]
+    return [dict(row) for outcome in case_outcomes(raw_rows).values() for row in outcome.attempts]
 
 
 def _is_success(row: dict[str, Any]) -> bool:

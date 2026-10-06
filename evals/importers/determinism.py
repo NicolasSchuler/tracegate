@@ -163,7 +163,9 @@ def scan_cases(cases_dir: Path) -> dict[str, list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     """Print flagged cases; exit 1 when any case is flagged."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Flag cases whose code may behave differently between runs (DAT-14)."
+    )
     parser.add_argument("cases_dir", nargs="?", type=Path, default=Path("evals/cases"))
     args = parser.parse_args(argv)
     flagged = scan_cases(args.cases_dir)
