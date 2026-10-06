@@ -114,3 +114,64 @@ def test_bas09_unreadable_file_warns_instead_of_crashing(tmp_path, capsys) -> No
 
     assert _load_results([str(tmp_path)]) == []  # a directory can't be opened as JSONL
     assert "1 unreadable file(s)" in capsys.readouterr().err
+
+
+def _row(run_id: str, case_id: str, condition: str, success: bool, **extra: object) -> dict:
+    return {
+        "run_id": run_id,
+        "case_id": case_id,
+        "condition": condition,
+        "success": success,
+        "category": "logic",
+        **extra,
+    }
+
+
+def test_separately_named_runs_still_pair_on_shared_cases() -> None:
+    """codex 2-2#2: a native run and a --baseline run have different run IDs."""
+    rows = [
+        _row("native-run", "case_a", "base_repair", True),
+        _row("native-run", "case_b", "base_repair", False),
+        _row("ldb-run", "case_a", "ldb", False),
+        _row("ldb-run", "case_b", "ldb", True),
+    ]
+
+    result = _compute_pairwise(rows, "base_repair", "ldb", n_bootstrap=32, seed=7)
+
+    assert "error" not in result
+    assert result["n_cases"] == 2
+    assert result["runs_per_case_max"] == 1
+    assert result["unpaired_runs"] == 0
+    assert (result["a_only_wins"], result["b_only_wins"]) == (1, 1)
+
+
+def test_replicates_of_separate_runs_pair_by_index() -> None:
+    """Repeated native and baseline invocations pair replicate i with replicate i."""
+    rows = [
+        _row("native-1", "case_a", "base_repair", True),
+        _row("native-2", "case_a", "base_repair", True),
+        _row("native-3", "case_a", "base_repair", False),
+        _row("ldb-1", "case_a", "ldb", False),
+        _row("ldb-2", "case_a", "ldb", False),
+        # A ran case_a three times, B twice: the third A run has no counterpart.
+    ]
+
+    result = _compute_pairwise(rows, "base_repair", "ldb", n_bootstrap=32, seed=7)
+
+    assert result["n_cases"] == 1
+    assert result["runs_per_case_max"] == 2
+    assert result["unpaired_runs"] == 1
+    assert (result["a_only_wins"], result["b_only_wins"]) == (1, 0)
+
+
+def test_bas01_unsupported_baseline_rows_are_not_losing_pairs() -> None:
+    """codex 1e#5: the comparison helper counted baseline_supported=False as a failure."""
+    rows = [
+        _row("native-run", "case_a", "base_repair", True),
+        _row("ldb-run", "case_a", "ldb", False, baseline_supported=False),
+    ]
+
+    result = _compute_pairwise(rows, "base_repair", "ldb", n_bootstrap=16, seed=3)
+
+    assert result["error"] == "no_common_cases"
+    assert result["n_cases"] == 0

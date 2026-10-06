@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from scipy.stats import binomtest, norm
@@ -31,6 +32,23 @@ BOOTSTRAP_METHOD = "percentile"
 
 BinaryPair = tuple[bool, bool]  # (condition_A_success, condition_B_success)
 NumericPair = tuple[float, float]  # (condition_A_value, condition_B_value)
+
+
+# ---------------------------------------------------------------------------
+# Comparison eligibility
+# ---------------------------------------------------------------------------
+
+
+def comparison_eligible(row: Mapping[str, Any]) -> bool:
+    """Whether a derived case-condition row is a comparable outcome (BAS-01, D3).
+
+    One predicate for every consumer — ``analyze_results``' bucket summary, the paired
+    tests, ``report_run_metrics``, the re-analysis audit and
+    ``python -m baselines.compare_results``. A case a baseline cannot represent is not a
+    baseline failure, so such rows are left out of rates, uplifts and paired tests (their
+    count is reported separately as ``baseline_unsupported_cases``).
+    """
+    return row.get("baseline_supported", True) is not False
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +555,7 @@ def _case_run_pairs(
     """
     by_key: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for row in rows:
-        if row.get("baseline_supported") is False:
+        if not comparison_eligible(row):
             continue  # BAS-01 / D3: not a comparable outcome
         key = (str(row.get("case_id", "")), str(row.get("run_id", "")))
         by_key.setdefault(key, {})[str(row.get("condition", ""))] = row

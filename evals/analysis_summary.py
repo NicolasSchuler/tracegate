@@ -23,7 +23,7 @@ from evals.analysis_usage import (
     _is_external_baseline_condition,
     _mean_prompt_chars_by_condition,
 )
-from evals.stats import DEFAULT_BOOTSTRAP_SEED
+from evals.stats import DEFAULT_BOOTSTRAP_SEED, comparison_eligible
 
 
 def _summarize_bucket(
@@ -54,9 +54,7 @@ def _summarize_bucket(
     ]
     common_attempt_k = min(attempt_budgets) if attempt_budgets else None
     case_rates = {
-        condition: _case_success_rates(
-            [row for row in condition_rows if row.get("baseline_supported", True)]
-        )
+        condition: _case_success_rates([row for row in condition_rows if comparison_eligible(row)])
         for condition, condition_rows in by_condition.items()
     }
 
@@ -64,7 +62,7 @@ def _summarize_bucket(
     for condition, all_condition_rows in sorted(by_condition.items()):
         # BAS-01 / D3: baselines are scored on the cases they can represent; the excluded
         # count is reported so the comparison's N stays explicit.
-        condition_rows = [row for row in all_condition_rows if row.get("baseline_supported", True)]
+        condition_rows = [row for row in all_condition_rows if comparison_eligible(row)]
         baseline_unsupported_cases = len(all_condition_rows) - len(condition_rows)
         successes = sum(1 for row in condition_rows if bool(row["success"]))
         cases = len(condition_rows)
