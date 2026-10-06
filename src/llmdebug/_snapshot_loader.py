@@ -15,7 +15,7 @@ from ._formatting import frame_file_label
 from ._warnings import emit_warning
 from .compact_keys import expand_keys, is_compact_snapshot
 from .output import get_latest_snapshot
-from .snapshot_index import index_matches_disk, is_confined_to, snapshot_files
+from .snapshot_index import index_covers_disk, is_confined_to, snapshot_files
 from .snapshot_types import SnapshotDict
 from .state_db import (
     list_snapshot_records,
@@ -316,7 +316,7 @@ def find_all_snapshots(
     if (
         indexed_entries
         and (effective_limit is None or len(indexed_entries) >= effective_limit)
-        and index_matches_disk(out_dir)
+        and index_covers_disk(out_dir)
     ):
         return indexed_entries[:effective_limit] if effective_limit is not None else indexed_entries
 

@@ -32,7 +32,7 @@ def test_find_all_snapshots_skips_invalid_index_mtime(
     bad_path.write_text("{}", encoding="utf-8")
 
     # The fake rows stand for a complete index (RCA-03 checks completeness separately).
-    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
+    monkeypatch.setattr(snapshot_loader, "index_covers_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -81,7 +81,7 @@ def test_find_all_snapshots_filters_search_matches_from_index(
     valueerror_path.write_text("{}", encoding="utf-8")
 
     # The fake rows stand for a complete index (RCA-03 checks completeness separately).
-    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
+    monkeypatch.setattr(snapshot_loader, "index_covers_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -819,3 +819,41 @@ def test_snapshot_symlink_out_of_out_dir_is_not_listed(tmp_path: Path) -> None:
 
     names = {str(entry["name"]) for entry in find_all_snapshots(str(out_dir))}
     assert names == {"real"}
+
+
+def test_find_all_snapshots_rescans_when_a_stale_row_balances_a_missing_one(
+    tmp_path: Path,
+) -> None:
+    """RCA-03: equal row and file counts do not mean the index covers the directory."""
+    import os
+
+    from llmdebug.state_db import count_snapshot_records, upsert_snapshot_record
+
+    old_path = tmp_path / "old.json"
+    old_path.write_text('{"name": "old", "exception": {"type": "ValueError"}}', encoding="utf-8")
+    new_path = tmp_path / "new.json"
+    new_path.write_text('{"name": "new", "exception": {"type": "KeyError"}}', encoding="utf-8")
+    os.utime(old_path, (10.0, 10.0))
+    os.utime(new_path, (20.0, 20.0))
+
+    # old.json is indexed and is the newest row, so a limited read stops before reaching
+    # the stale row for the deleted stale.json and never prunes it. new.json never made
+    # it into the index: two rows, two files on disk.
+    for name, mtime in (("old.json", 10.0), ("stale.json", 5.0)):
+        upsert_snapshot_record(
+            str(tmp_path),
+            {
+                "path": str((tmp_path / name).resolve()),
+                "mtime": mtime,
+                "name": name.removesuffix(".json"),
+                "exc_type": "ValueError",
+                "exc_message": "",
+                "file": "app.py",
+                "line": "1",
+            },
+        )
+    assert count_snapshot_records(str(tmp_path)) == 2
+
+    entries = find_all_snapshots(str(tmp_path), limit=1)
+
+    assert [str(entry["name"]) for entry in entries] == ["new"]
