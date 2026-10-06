@@ -26,9 +26,35 @@ def env_client_subprocess_env(api_key: str) -> dict[str, str]:
     return env
 
 
+def consume_env_client_api_key() -> str:
+    """Read the env-client API key and remove it from this process' environment.
+
+    Env clients run model code and (RLM) candidate code in subprocesses that inherit
+    ``os.environ``, so the key must not outlive the client's own use of it.
+    """
+    return str(os.environ.pop(ENV_CLIENT_API_KEY_ENV, "") or "")
+
+
+def candidate_subprocess_env() -> dict[str, str]:
+    """``os.environ`` for model-written candidate code, without the env-client key.
+
+    Belt and braces next to :func:`consume_env_client_api_key`: a candidate that prints
+    its environment must not be able to leak the key into model-visible output or into
+    persisted artifacts.
+    """
+    env = os.environ.copy()
+    env.pop(ENV_CLIENT_API_KEY_ENV, None)
+    return env
+
+
 def env_client_api_key(payload: Mapping[str, Any]) -> str:
-    """The API key inside an env client; a request file's ``api_key`` still wins."""
-    return str(payload.get("api_key") or os.environ.get(ENV_CLIENT_API_KEY_ENV) or "sk-placeholder")
+    """The API key inside an env client; a request file's ``api_key`` still wins.
+
+    Consumes :data:`ENV_CLIENT_API_KEY_ENV` either way, so the key is gone from the
+    environment before any model or candidate subprocess is started.
+    """
+    from_env = consume_env_client_api_key()
+    return str(payload.get("api_key") or from_env or "sk-placeholder")
 
 
 def scrub_secret(text: str, secret: str) -> str:
@@ -71,6 +97,77 @@ class BaselineOpenAICompatConfig:
     profile: str = "auto"
     allow_reasoning_fallback: bool = False
     enable_thinking: bool = False
+
+
+@dataclass(frozen=True)
+class EnvClientGenerationSettings:
+    """What an env client applies to the requests the upstream code makes (D4).
+
+    The lambda-RLM and RLM env clients wrap the upstream OpenAI client, so the shared
+    generation contract — sampling, the completion cap, the seed and the transport retry
+    count — has to be injected there rather than relying on upstream kwargs handling.
+    """
+
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    seed: int | None = None
+    transport_max_retries: int | None = None
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> EnvClientGenerationSettings:
+        """Read the settings an adapter put in the env-client request file."""
+
+        def _number(key: str) -> Any:
+            value = payload.get(key)
+            return value if value is not None else None
+
+        temperature = _number("temperature")
+        top_p = _number("top_p")
+        max_tokens = _number("max_tokens")
+        seed = _number("seed")
+        retries = _number("transport_max_retries")
+        return cls(
+            temperature=float(temperature) if temperature is not None else None,
+            top_p=float(top_p) if top_p is not None else None,
+            max_tokens=int(max_tokens) if max_tokens is not None else None,
+            seed=int(seed) if seed is not None else None,
+            transport_max_retries=int(retries) if retries is not None else None,
+        )
+
+    def request_kwargs(self) -> dict[str, Any]:
+        """The sampling keys to merge into an outbound chat-completion request."""
+        out: dict[str, Any] = {}
+        if self.temperature is not None:
+            out["temperature"] = float(self.temperature)
+        if self.top_p is not None:
+            out["top_p"] = float(self.top_p)
+        if self.max_tokens is not None:
+            out["max_tokens"] = int(self.max_tokens)
+        if self.seed is not None:
+            out["seed"] = int(self.seed)
+        return out
+
+    def apply_transport_retries(self, client: object) -> object:
+        """*client* with the contract's retry count, or unchanged when it can't be set.
+
+        The upstream RLM clients construct their ``openai.OpenAI`` without a retry
+        count, so the env-client wrapper re-options it after construction.
+        """
+        if self.transport_max_retries is None:
+            return client
+        retries = max(0, int(self.transport_max_retries))
+        with_options = getattr(client, "with_options", None)
+        if callable(with_options):
+            try:
+                return with_options(max_retries=retries)
+            except Exception:
+                pass
+        try:
+            client.max_retries = retries  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        return client
 
 
 @dataclass(frozen=True)
@@ -136,6 +233,20 @@ class OpenAICompatResponseError(RuntimeError):
 BASELINE_OPENAI_ENABLE_THINKING_DEFAULT = True
 BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT = True
 """Single source for the baseline OpenAI-compatible defaults, matching the CLI (BAS-19)."""
+
+
+def compat_payload_fields(compat_config: BaselineOpenAICompatConfig) -> dict[str, Any]:
+    """The env-client request-file keys that :func:`compat_config_from_extra` reads back.
+
+    Payload builders must serialize the *resolved* compatibility settings; spelling out
+    their own literal defaults made an env-client call behave differently from the
+    in-process path for the same ``BaselineConfig`` (BAS-19).
+    """
+    return {
+        "baseline_openai_compat_profile": str(compat_config.profile),
+        "baseline_openai_allow_reasoning_fallback": bool(compat_config.allow_reasoning_fallback),
+        "baseline_openai_enable_thinking": bool(compat_config.enable_thinking),
+    }
 
 
 def compat_config_from_extra(extra: Mapping[str, Any]) -> BaselineOpenAICompatConfig:

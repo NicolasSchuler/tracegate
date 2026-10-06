@@ -208,6 +208,8 @@ def test_analyze_grouping_and_uplift(tmp_path) -> None:
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
         "duplicate_attempt_rows_resolved": 0,
+        "duplicate_attempt_rows_conflicting": 0,
+        "record_schema_versions": [5],
     }
 
     rows = _derive_case_condition_rows(grouped)

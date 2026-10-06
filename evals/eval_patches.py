@@ -72,9 +72,16 @@ def _patch_leftovers(cwd: Path) -> set[Path]:
     }
 
 
-def _remove_new_patch_leftovers(cwd: Path, before: set[Path]) -> None:
-    """Delete ``.rej``/``.orig`` files that ``patch`` created (ATT-16)."""
+def _remove_new_patch_leftovers(cwd: Path, before: set[Path], *, diff: str) -> None:
+    """Delete ``.rej``/``.orig`` files that ``patch`` created (ATT-16).
+
+    A file the diff itself names is an intended target, not a tool artefact, even with
+    one of those suffixes, so cleanup leaves it alone.
+    """
+    intended = {(cwd / rel).resolve() for rel in _extract_diff_paths(diff)}
     for path in _patch_leftovers(cwd) - before:
+        if path.resolve() in intended:
+            continue
         path.unlink(missing_ok=True)
 
 
@@ -112,12 +119,18 @@ def apply_diff(cwd: Path, diff: str) -> tuple[bool, str]:
     crlf_targets = _crlf_diff_targets(cwd, diff)
     if not crlf_targets:
         return _apply_validated_diff(cwd, diff)
-    for target in crlf_targets:
-        target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+    normalized: list[Path] = []
     try:
-        return _apply_validated_diff(cwd, diff.replace("\r\n", "\n"))
-    finally:
         for target in crlf_targets:
+            # Preparing one target can fail (a read-only file) after earlier ones were
+            # already rewritten, so the rollback has to cover those too (LLM-09).
+            target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+            normalized.append(target)
+        return _apply_validated_diff(cwd, diff.replace("\r\n", "\n"))
+    except OSError as exc:
+        return False, f"could not prepare CRLF diff targets: {type(exc).__name__}: {exc}"
+    finally:
+        for target in normalized:
             if target.is_file() and not target.is_symlink():
                 target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
 
@@ -138,9 +151,9 @@ def _apply_validated_diff(cwd: Path, diff: str) -> tuple[bool, str]:
                 timeout=PATCH_APPLY_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
-            _remove_new_patch_leftovers(cwd, leftovers_before)
+            _remove_new_patch_leftovers(cwd, leftovers_before, diff=diff)
             return False, f"patch timed out after {PATCH_APPLY_TIMEOUT_SEC}s"
-        _remove_new_patch_leftovers(cwd, leftovers_before)
+        _remove_new_patch_leftovers(cwd, leftovers_before, diff=diff)
         if proc.returncode == 0:
             _remove_deleted_diff_targets(cwd=cwd, diff=diff)
             return True, ""

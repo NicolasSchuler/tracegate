@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import types
@@ -2219,3 +2220,179 @@ def test_bas13_failed_import_smoke_keeps_the_candidate(tmp_path: Path) -> None:
     assert "return 2" in (tmp_path / "buggy.py").read_text(encoding="utf-8")
     assert rejections == []
     assert len(smoke_failures) == 1
+
+
+def test_env_client_key_never_reaches_candidate_subprocesses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """codex 5-6#1: the env-client key is consumed, not inherited by candidate code.
+
+    Runs the real ``run_case_tests`` and import-smoke seams through ``env_client.main``
+    with the key only in the environment, and inspects what the child processes saw.
+    """
+    from baselines.openai_compat import ENV_CLIENT_API_KEY_ENV
+
+    secret = "sk-candidate-must-not-see-this"
+    repo = _make_env_client_repo(tmp_path)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    request_path = tmp_path / "request.json"
+    response_path = tmp_path / "response.json"
+    dump_code = (
+        "import json, os, pathlib\n"
+        "pathlib.Path('env_seen.json').write_text(json.dumps(dict(os.environ)))\n"
+    )
+    (workspace / "buggy.py").write_text("VALUE = 0\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _FakeLogger:
+        def get_trajectory(self) -> dict[str, object]:
+            return {"iterations": [{"final_answer": "done"}]}
+
+    class _FakeCompletion:
+        response = "VALUE = 1\n"
+        root_model = "test-model"
+        metadata = {"iterations": [{"final_answer": "done"}]}
+
+    class _FakeRLM:
+        def __init__(
+            self,
+            *,
+            custom_tools: dict[str, object],
+            backend_kwargs: dict[str, object],
+            **kwargs: object,
+        ) -> None:
+            del kwargs
+            self.custom_tools = custom_tools
+            captured["backend_kwargs"] = dict(backend_kwargs)
+
+        def completion(
+            self, prompt_context: str, root_prompt: str | None = None
+        ) -> _FakeCompletion:
+            del prompt_context, root_prompt
+            write_tool = self.custom_tools["write_buggy_py"]
+            test_tool = self.custom_tools["run_case_tests"]
+            assert isinstance(write_tool, dict)
+            assert isinstance(test_tool, dict)
+            # The import smoke test executes this candidate in a subprocess.
+            write_tool["tool"](dump_code)
+            captured["import_env"] = json.loads(
+                (workspace / "env_seen.json").read_text(encoding="utf-8")
+            )
+            (workspace / "env_seen.json").unlink()
+            test_tool["tool"]()
+            captured["test_env"] = json.loads(
+                (workspace / "env_seen.json").read_text(encoding="utf-8")
+            )
+            return _FakeCompletion()
+
+    monkeypatch.setattr(
+        env_client,
+        "_install_tracking",
+        lambda **kwargs: (_FakeRLM, _FakeLogger, []),
+    )
+    for module_name in list(sys.modules):
+        if module_name == "rlm" or module_name.startswith("rlm."):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+    monkeypatch.setenv(ENV_CLIENT_API_KEY_ENV, secret)
+    request_path.write_text(
+        json.dumps(
+            {
+                "repo_dir": str(repo),
+                "workspace_dir": str(workspace),
+                "model": "test-model",
+                "prompt_context": "ctx",
+                "root_prompt": "root",
+                "test_python": sys.executable,
+                "python_args": ["-c", dump_code],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = env_client.main(["env_client.py", str(request_path), str(response_path)])
+
+    assert exit_code == 0
+    backend_kwargs = captured["backend_kwargs"]
+    assert isinstance(backend_kwargs, dict)
+    # The model client still gets the key.
+    assert backend_kwargs["api_key"] == secret
+    for key in ("import_env", "test_env"):
+        child_env = captured[key]
+        assert isinstance(child_env, dict)
+        assert ENV_CLIENT_API_KEY_ENV not in child_env, key
+        assert secret not in child_env.values(), key
+    # The env client's own environment no longer carries it either.
+    assert ENV_CLIENT_API_KEY_ENV not in os.environ
+
+
+def test_env_client_applies_seed_and_transport_retries_to_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """codex 1e#6: the shared contract reaches the outbound request, not just the record."""
+    repo = _make_env_client_tracking_repo(tmp_path)
+    request_path = tmp_path / "request.json"
+    response_path = tmp_path / "response.json"
+    seen_requests: list[dict[str, object]] = []
+    created: list[object] = []
+
+    class _FakeChatCompletions:
+        def create(self, **kwargs: object) -> object:
+            seen_requests.append(dict(kwargs))
+            return types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="VALUE = 1\n"),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+
+    class _FakeChat:
+        def __init__(self) -> None:
+            self.completions = _FakeChatCompletions()
+
+    class _FakeOpenAIClient:
+        def __init__(self, **kwargs: object) -> None:
+            self.base_url = kwargs.get("base_url")
+            self.chat = _FakeChat()
+            created.append(self)
+
+    openai_module = types.ModuleType("openai")
+    openai_module.OpenAI = _FakeOpenAIClient
+    openai_module.AsyncOpenAI = _FakeOpenAIClient
+    monkeypatch.setitem(sys.modules, "openai", openai_module)
+    for module_name in list(sys.modules):
+        if module_name == "rlm" or module_name.startswith("rlm."):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+    request_path.write_text(
+        json.dumps(
+            {
+                "repo_dir": str(repo),
+                "workspace_dir": str(tmp_path),
+                "model": "test-model",
+                "api_key": "sk-test",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "prompt_context": "ctx",
+                "root_prompt": "root",
+                "temperature": 0.0,
+                "max_tokens": 321,
+                "seed": 4242,
+                "transport_max_retries": 6,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "buggy.py").write_text("VALUE = 0\n", encoding="utf-8")
+
+    exit_code = env_client.main(["env_client.py", str(request_path), str(response_path)])
+
+    assert exit_code == 0
+    assert seen_requests
+    assert seen_requests[0]["seed"] == 4242
+    assert seen_requests[0]["max_tokens"] == 321
+    assert seen_requests[0]["temperature"] == 0.0
+    assert created
+    assert all(getattr(client, "max_retries", None) == 6 for client in created)

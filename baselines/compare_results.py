@@ -27,8 +27,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from evals.analysis_api import derive_case_condition_rows, load_and_group_records
-from evals.stats import analyze_paired_results, format_p_value, holm_bonferroni
+from evals.analysis_api import (
+    derive_case_condition_rows,
+    load_and_group_records,
+    schema_version_warning,
+)
+from evals.stats import (
+    analyze_paired_results,
+    comparison_eligible,
+    format_p_value,
+    holm_bonferroni,
+)
 
 # ------------------------------------------------------------------
 # Data loading
@@ -59,13 +68,85 @@ def _load_results(
     if unreadable:
         # BAS-09: the counter is an int; len() on it raised TypeError instead of warning.
         print(f"Warning: {unreadable} unreadable file(s)", file=sys.stderr)
-    rows = derive_case_condition_rows(grouped)
-    return rows
+    # codex 2-2#5: every other way input is dropped was silent here, so a cohort could
+    # shrink without any warning.
+    dropped = {
+        key: int(errors.get(key) or 0)
+        for key in ("json_lines_invalid", "records_skipped", "records_schema_invalid")
+    }
+    if any(dropped.values()):
+        detail = ", ".join(f"{key}={value}" for key, value in dropped.items())
+        print(f"Warning: dropped input records ({detail})", file=sys.stderr)
+    conflicting = int(errors.get("duplicate_attempt_rows_conflicting") or 0)
+    if conflicting:
+        print(
+            f"Warning: {conflicting} duplicate attempt row(s) disagree about success",
+            file=sys.stderr,
+        )
+    schema_warning = schema_version_warning(errors)
+    if schema_warning:
+        print(f"Warning: {schema_warning}", file=sys.stderr)
+    return derive_case_condition_rows(grouped)
 
 
 # ------------------------------------------------------------------
 # Comparison logic
 # ------------------------------------------------------------------
+
+
+def _align_replicates_across_runs(
+    rows: list[dict[str, Any]], condition_a: str, condition_b: str
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Relabel each condition's runs of a case so separate invocations can be paired.
+
+    codex 2-2#2: this tool exists to compare separately launched runs — a native run and
+    a ``--baseline`` run normally get different run IDs. The shared case-unit analyzer
+    pairs a case within one ``(run_id, case_id)``, so those rows produced
+    ``no_common_cases`` even when the case IDs matched.
+
+    Each condition's runs of a case are enumerated in sorted run-ID order and relabelled
+    ``replicate-<i>``, an explicit replicate-pairing map: replicate *i* of A is compared
+    with replicate *i* of B, and the case still contributes exactly one paired
+    observation (STA-02). Runs without a counterpart (A ran the case three times, B once)
+    have no replicate to pair with and are counted in ``unpaired_runs``. Rows that are
+    not comparable outcomes (``baseline_supported=False``) are left out here as well, so
+    they cannot create a replicate slot (BAS-01, D3).
+    """
+    by_case_condition: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        condition = str(row.get("condition") or "")
+        if condition not in {condition_a, condition_b} or not comparison_eligible(row):
+            continue
+        run_id = str(row.get("run_id") or "")
+        runs = by_case_condition.setdefault((str(row.get("case_id") or ""), condition), [])
+        if run_id not in runs:
+            runs.append(run_id)
+    replicate_of: dict[tuple[str, str, str], int] = {}
+    for (case_id, condition), runs in by_case_condition.items():
+        for index, run_id in enumerate(sorted(runs)):
+            replicate_of[(case_id, condition, run_id)] = index
+    paired_replicates = {
+        case_id: min(
+            len(by_case_condition.get((case_id, condition_a), ())),
+            len(by_case_condition.get((case_id, condition_b), ())),
+        )
+        for case_id, _condition in by_case_condition
+    }
+    aligned: list[dict[str, Any]] = []
+    unpaired = 0
+    for row in rows:
+        condition = str(row.get("condition") or "")
+        case_id = str(row.get("case_id") or "")
+        key = (case_id, condition, str(row.get("run_id") or ""))
+        replicate = replicate_of.get(key)
+        if replicate is None:
+            aligned.append(row)
+            continue
+        if replicate >= paired_replicates.get(case_id, 0):
+            unpaired += 1
+            continue
+        aligned.append({**row, "run_id": f"replicate-{replicate}"})
+    return aligned, {"unpaired_runs": unpaired}
 
 
 def _compute_pairwise(
@@ -81,10 +162,13 @@ def _compute_pairwise(
     BAS-06: success used to be keyed by case only, so with repeated runs the last run
     in file-glob order overwrote the others and the paired and per-category N
     disagreed. This uses the shared ``analyze_paired_results``: one pair per case,
-    repeated runs aggregated by majority vote, the run count reported.
+    repeated runs aggregated by majority vote, the run count reported. The two
+    conditions' runs are first aligned by replicate index, because they normally come
+    from separate invocations with their own run IDs (codex 2-2#2).
     """
+    aligned, alignment = _align_replicates_across_runs(rows, condition_a, condition_b)
     result = analyze_paired_results(
-        rows,
+        aligned,
         n_bootstrap=n_bootstrap,
         seed=seed,
         condition_a=condition_a,
@@ -96,6 +180,7 @@ def _compute_pairwise(
             "condition_b": condition_b,
             "n_cases": 0,
             "error": "no_common_cases",
+            **alignment,
         }
     mcnemar = result["overall_mcnemar"]
     a_rate = float(result["a_success_rate"])
@@ -105,6 +190,7 @@ def _compute_pairwise(
         "condition_b": condition_b,
         "n_cases": result["n_pairs"],
         "runs_per_case_max": result["runs_per_case_max"],
+        **alignment,
         "tied_cases": result["tied_cases"],
         "a_rate": round(a_rate, 4),
         "b_rate": round(b_rate, 4),

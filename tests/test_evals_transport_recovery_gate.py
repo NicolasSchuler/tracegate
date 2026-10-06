@@ -39,11 +39,26 @@ def test_followers_get_the_outcome_of_their_own_outage() -> None:
         gate._outage_generation = 1
     result: dict[str, Any] = {}
 
+    # Thread.start() does not guarantee that the follower reached its wait loop. Without
+    # this barrier the main thread can advance to generation 2 first, the follower then
+    # joins the still-active outage 2 and never wakes, and the assertions below fail on a
+    # never-populated result instead of on the behaviour under test.
+    waiting = threading.Event()
+    real_wait = gate._condition.wait
+
+    def _wait(timeout: float | None = None) -> bool:
+        # Reached only after recover() captured the generation under the same lock.
+        waiting.set()
+        return real_wait(timeout)
+
+    gate._condition.wait = _wait  # type: ignore[method-assign]
+
     def _follow() -> None:
         result.update(gate.recover(patcher=object(), operation_name="op"))
 
     follower = threading.Thread(target=_follow, daemon=True)
     follower.start()
+    assert waiting.wait(timeout=5.0), "follower never reached the outage wait loop"
     with gate._condition:
         # Outage 1 ends and outage 2 starts before the follower wakes up.
         gate._outcomes[1] = {"recovered": True, "generation": 1}

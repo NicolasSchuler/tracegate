@@ -1105,3 +1105,74 @@ def test_run_eval_docker_reports_missing_config_file(tmp_path: Path) -> None:
 
     assert proc.returncode == 2
     assert "Config file not found" in proc.stderr
+
+
+def test_run_eval_docker_default_sidecar_url_matches_the_harness() -> None:
+    from evals.decision_model.config import DEFAULT_DECISION_MODEL_URL
+
+    script = RUN_SCRIPT.read_text(encoding="utf-8")
+    assert f'DEFAULT_DECISION_MODEL_URL="{DEFAULT_DECISION_MODEL_URL}"' in script
+
+
+def test_run_eval_docker_materializes_the_implicit_sidecar_url_on_linux(tmp_path: Path) -> None:
+    """An enabled role without a URL still means a host sidecar, so host networking is needed."""
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Linux",
+        args=[
+            "--patcher",
+            "openai",
+            "--openai-base-url",
+            "http://remote:9999/v1",
+            "--openai-model",
+            "cfg-model",
+            "--conditions",
+            "layered_adaptive_llm",
+            "--adaptive-online-policy-mode",
+            "on",
+            "--adaptive-decision-model-role",
+            "policy",
+            "--k",
+            "1",
+        ],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert _arg_value(eval_args, "--adaptive-decision-model-url") == "http://127.0.0.1:8090"
+    assert _arg_value(docker_args, "--network") == "host"
+
+
+def test_run_eval_docker_translates_the_implicit_sidecar_url_on_darwin(tmp_path: Path) -> None:
+    config_path = tmp_path / "decision-model-role.toml"
+    config_path.write_text(
+        """
+[run_eval]
+patcher = "openai"
+conditions = "layered_adaptive_llm"
+k = 1
+
+[run_eval.openai]
+base_url = "http://remote:9999/v1"
+model = "cfg-model"
+
+[run_eval.adaptive]
+online_policy_mode = "on"
+decision_model_role = "shadow"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    proc, calls = _run_wrapper(
+        tmp_path=tmp_path,
+        uname_value="Darwin",
+        args=["--config", str(config_path)],
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    docker_args, eval_args = _split_docker_and_eval_args(_main_run_call(calls))
+    assert (
+        _arg_value(eval_args, "--adaptive-decision-model-url") == "http://host.docker.internal:8090"
+    )
+    assert not _arg_values(docker_args, "--network")

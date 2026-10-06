@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from evals import eval_attempt_flow, progress_output, run_eval
+from evals import eval_attempt_flow, eval_recording, eval_types, progress_output, run_eval
 from evals.patchers.base import ContextRequestResult, PatchResult
 from llmdebug import _json as json
 
@@ -1519,3 +1519,391 @@ def test_ctrl_c_in_a_parallel_run_reports_and_waits_for_in_flight_units(
     # The in-flight unit finished; the third unit was never scheduled.
     assert finished == ["case_b"]
     assert "waiting for 1 in-flight unit(s)" in capsys.readouterr().out
+
+
+def test_resume_rejects_a_run_from_an_earlier_policy_defaults_version(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """POL-01: the policy behaviour generation is part of the settings fingerprint.
+
+    A run recorded under `policy_defaults_version: 1` used different features, decay and
+    tie-breaking, so resuming it with today's defaults would stamp new records with the
+    old run metadata (codex 3-1#1).
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "policy_version_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    recorded_metadata: list[dict[str, object]] = []
+
+    def _run_once(*, case, condition, run_id, run_metadata, **_kwargs):
+        recorded_metadata.append(dict(run_metadata))
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+    argv = [
+        "--run-id",
+        "policy-version-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "layered_adaptive_gated",
+        "--k",
+        "1",
+    ]
+
+    # The earlier generation, written by the same real fingerprint seam.
+    monkeypatch.setattr(
+        eval_recording,
+        "POLICY_DEFAULTS_VERSION",
+        eval_types.POLICY_DEFAULTS_VERSION - 1,
+    )
+    assert _run_eval_main(argv) == 0
+    capsys.readouterr()
+
+    monkeypatch.undo()
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+
+    assert _run_eval_main(argv) != 0
+    out = capsys.readouterr().out
+    assert "Resume aborted: run settings fingerprint mismatch" in out
+    assert len(recorded_metadata) == 1
+    patcher_config = recorded_metadata[0]["patcher_config"]
+    assert isinstance(patcher_config, dict)
+    assert patcher_config["policy_defaults_version"] == eval_types.POLICY_DEFAULTS_VERSION - 1
+
+
+def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """A v6-or-older run carries no settings fingerprint, so it cannot be resumed into a
+    v7 run — not even with `--allow-settings-drift` (codex 3-1#4, 1d#4)."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "legacy_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    results_dir = repo_root / "evals" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    legacy_record = {
+        "schema_version": 6,
+        "run_id": "legacy-run",
+        "case_id": case.case_id,
+        "condition": "base_repair",
+        "attempt": 1,
+        "success": False,
+        "run_metadata": {"run_id": "legacy-run"},
+    }
+    (results_dir / "legacy-run.jsonl").write_text(
+        f"{json.dumps(legacy_record)}\n", encoding="utf-8"
+    )
+
+    def _unexpected_run(**_kwargs):
+        raise AssertionError("the legacy run must not be resumed")
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _unexpected_run)
+    argv = [
+        "--run-id",
+        "legacy-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "base_repair",
+        "--k",
+        "1",
+    ]
+
+    # The record-schema guard (codex 1d#4) rejects the v6 file before the fingerprint check.
+    assert _run_eval_main(argv) != 0
+    assert "predates this harness" in capsys.readouterr().out
+    assert _run_eval_main(["--allow-settings-drift", *argv]) != 0
+    assert "predates this harness" in capsys.readouterr().out
+
+
+def test_run_eval_resume_continues_after_permitted_settings_drift(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """ORC-04 (codex 1d#1): a linked drift history stays resumable on later invocations."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "drift_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    executed: list[tuple[str, str]] = []
+
+    def _run_once(*, case, condition, run_id, run_metadata, **_kwargs):
+        executed.append((case.case_id, condition.value))
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+
+    base_argv = ["--run-id", "drift-run", "--patcher", "null", "--k", "1"]
+    assert _run_eval_main([*base_argv, "--conditions", "base_repair"]) == 0
+    capsys.readouterr()
+
+    drifted = [*base_argv, "--conditions", "base_repair,layered_adaptive_gated"]
+    assert _run_eval_main(["--allow-settings-drift", *drifted]) == 0
+    out = capsys.readouterr().out
+    assert "Resume warning: run settings fingerprint mismatch for existing run_id" in out
+    assert executed == [("drift_case", "base_repair"), ("drift_case", "layered_adaptive_gated")]
+
+    # Third invocation: same settings as the drifted one. The results file now holds both
+    # fingerprints, which used to abort resume with "inconsistent run_settings_fingerprint".
+    assert _run_eval_main(drifted) == 0
+    out = capsys.readouterr().out
+    assert "Resume aborted" not in out
+    assert "inconsistent run_settings_fingerprint" not in out
+    assert "Resume warning: run settings fingerprint mismatch" not in out
+    assert "all planned case/condition units are already complete" in out
+    assert len(executed) == 2
+
+    # Fourth invocation: the chain extends from the drifted generation, so unfinished units
+    # still resume and run.
+    assert (
+        _run_eval_main(
+            [
+                "--allow-settings-drift",
+                *base_argv,
+                "--conditions",
+                "base_repair,layered_adaptive_gated,cot_repair",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "Resume aborted" not in out
+    assert executed[-1] == ("drift_case", "cot_repair")
+    assert "SKIP (resumed) drift_case/base_repair" in out
+
+    records = [
+        json.loads(line)
+        for line in (repo_root / "evals" / "results" / "drift-run.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    fingerprints = {str(record["run_metadata"]["run_settings_fingerprint"]) for record in records}
+    assert len(fingerprints) == 3
+    drift_links = {
+        str(record["run_metadata"].get("settings_drift_from_fingerprint") or "")
+        for record in records
+    } - {""}
+    assert len(drift_links) == 2
+    assert drift_links < fingerprints
+
+
+def test_run_eval_resume_rejects_an_unlinked_settings_change(tmp_path, monkeypatch) -> None:
+    """ORC-04: only an explicitly linked drift chain is resumable."""
+    from evals.run_state import _load_existing_run_state
+
+    results = tmp_path / "unlinked.jsonl"
+    rows = [
+        {
+            "run_id": "r",
+            "case_id": "c1",
+            "condition": "base_repair",
+            "attempt": 1,
+            "success": False,
+            "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-one"},
+        },
+        {
+            "run_id": "r",
+            "case_id": "c1",
+            "condition": "cot_repair",
+            "attempt": 1,
+            "success": False,
+            "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-two"},
+        },
+    ]
+    results.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="inconsistent run_settings_fingerprint"):
+        _load_existing_run_state(results_path=results, run_id="r", max_attempts_per_unit=1)
+
+
+def test_run_eval_resume_rejects_an_older_record_schema(tmp_path) -> None:
+    """Resuming a pre-remediation results file would mix record generations in one run."""
+    from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION
+    from evals.run_state import _load_existing_run_state
+
+    results = tmp_path / "legacy.jsonl"
+    row = {
+        "schema_version": EVAL_RECORD_SCHEMA_VERSION - 1,
+        "run_id": "r",
+        "case_id": "c1",
+        "condition": "base_repair",
+        "attempt": 1,
+        "success": False,
+        "run_metadata": {"run_id": "r", "run_settings_fingerprint": "fp-old"},
+    }
+    results.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="predates this harness"):
+        _load_existing_run_state(results_path=results, run_id="r", max_attempts_per_unit=1)
+
+    row["schema_version"] = EVAL_RECORD_SCHEMA_VERSION
+    results.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    completed, _metadata, fingerprint, count, _issue = _load_existing_run_state(
+        results_path=results, run_id="r", max_attempts_per_unit=1
+    )
+    assert completed == {("c1", "base_repair")}
+    assert fingerprint == "fp-old"
+    assert count == 1
+
+
+def test_resume_of_a_pre_remediation_run_is_rejected(tmp_path, monkeypatch, capsys) -> None:
+    """A v6-era run cannot be continued as a v7 run (LLM-02/LLM-22 bookkeeping).
+
+    Pre-remediation records carry a fingerprint computed without the keys this revision
+    added, so identical CLI arguments still abort the resume instead of mixing old and
+    new repair semantics under one run_id.
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    case = _make_case(repo_root, "case_only")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    def _run(*, case, condition, run_id, run_metadata, **_kwargs):
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run)
+    argv = [
+        "--run-id",
+        "legacy-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "base_repair",
+        "--k",
+        "1",
+    ]
+    assert _run_eval_main(argv) == 0
+    capsys.readouterr()
+
+    # Rewrite the results as a pre-remediation (v6) run with its own fingerprint.
+    results_path = repo_root / "evals" / "results" / "legacy-run.jsonl"
+    rows = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
+    for row in rows:
+        row["schema_version"] = 6
+        row["run_metadata"]["run_settings_fingerprint"] = "pre_remediation_fingerprint"
+    results_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=True) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    exit_code = _run_eval_main(argv)
+
+    # The record-schema guard (codex 1d#4) rejects the v6 rows before the fingerprint check.
+    assert exit_code != 0
+    assert "predates this harness" in capsys.readouterr().out
+
+
+def test_resume_rejects_a_run_from_an_earlier_attempt_accounting_version(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """codex 1f#8: the attempt-counting/cost contract is part of the settings fingerprint.
+
+    A run recorded before the remediation counted attempts and costs differently (unscored
+    retry-gate blocks, discarded gate usage, TEP learning outside the attempt's totals), so
+    resuming it with today's contract would mix two accounting regimes under one run's
+    metadata (ATT-05, ATT-08, POL-02).
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "accounting_version_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    recorded_metadata: list[dict[str, object]] = []
+
+    def _run_once(*, case, condition, run_id, run_metadata, **_kwargs):
+        recorded_metadata.append(dict(run_metadata))
+        return [
+            _result_record(
+                run_id=run_id,
+                case=case,
+                condition=condition,
+                run_metadata=run_metadata,
+                success=False,
+            )
+        ]
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+    argv = [
+        "--run-id",
+        "accounting-version-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "layered_adaptive_gated",
+        "--k",
+        "1",
+    ]
+
+    # The earlier contract, written by the same real fingerprint seam.
+    monkeypatch.setattr(
+        eval_recording,
+        "ATTEMPT_ACCOUNTING_VERSION",
+        eval_types.ATTEMPT_ACCOUNTING_VERSION - 1,
+    )
+    assert _run_eval_main(argv) == 0
+    capsys.readouterr()
+
+    monkeypatch.undo()
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+    monkeypatch.setattr(run_eval, "run_one_condition", _run_once)
+
+    assert _run_eval_main(argv) != 0
+    out = capsys.readouterr().out
+    assert "Resume aborted: run settings fingerprint mismatch" in out
+    assert len(recorded_metadata) == 1
+    patcher_config = recorded_metadata[0]["patcher_config"]
+    assert isinstance(patcher_config, dict)
+    assert patcher_config["attempt_accounting_version"] == eval_types.ATTEMPT_ACCOUNTING_VERSION - 1
+    assert patcher_config["retry_gate_max_consecutive_blocks"] == (
+        eval_types.RETRY_GATE_MAX_CONSECUTIVE_BLOCKS
+    )
+    assert (
+        recorded_metadata[0]["attempt_accounting_version"]
+        == eval_types.ATTEMPT_ACCOUNTING_VERSION - 1
+    )

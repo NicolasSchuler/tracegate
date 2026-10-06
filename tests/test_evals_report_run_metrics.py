@@ -202,6 +202,95 @@ def test_compute_dual_objective_summary_reports_missing_token_coverage() -> None
     assert summary["fixed_budget_success"] == []
 
 
+def _cost_row(run_id: str, case_id: str, condition: str, success: bool, tokens: float | None):
+    return {
+        "run_id": run_id,
+        "case_id": case_id,
+        "condition": condition,
+        "success": success,
+        "token_usage_total": tokens,
+    }
+
+
+def test_fixed_budget_success_applies_the_threshold_to_each_run(tmp_path) -> None:
+    """codex 2-2#1: the budget was applied to the mean cost of a case's runs."""
+    rows = [
+        # One expensive success and one cheap failure: no run met a 6,000-token budget.
+        _cost_row("r1", "c1", "base_repair", True, 10_000.0),
+        _cost_row("r2", "c1", "base_repair", False, 1_000.0),
+        _cost_row("r1", "c1", "cot_repair", False, 5_000.0),
+        _cost_row("r2", "c1", "cot_repair", False, 5_000.0),
+    ]
+    summary = _compute_dual_objective_summary(
+        rows=rows,
+        condition_a="base_repair",
+        condition_b="cot_repair",
+        n_bootstrap=50,
+        seed=1,
+        fixed_budget_thresholds=[6_000, 10_000],
+    )
+
+    assert summary["matched_pairs"] == 1
+    assert summary["matched_runs"] == 2
+    assert summary["token_covered_runs"] == 2
+    tight, loose = summary["fixed_budget_success"]
+    assert tight["token_threshold"] == 6_000
+    assert tight["a_rate"] == pytest.approx(0.0)  # was 0.5 on the 5,500-token mean
+    assert loose["a_rate"] == pytest.approx(0.5)  # the 10,000-token run qualifies
+
+
+def test_token_cost_statistics_need_both_sides_in_the_same_run() -> None:
+    """codex 2-2#3: independent null-skipping means manufactured a covered pair."""
+    rows = [
+        _cost_row("r1", "c1", "base_repair", True, 4_000.0),
+        _cost_row("r1", "c1", "cot_repair", True, None),
+        _cost_row("r2", "c1", "base_repair", False, None),
+        _cost_row("r2", "c1", "cot_repair", False, 8_000.0),
+    ]
+    summary = _compute_dual_objective_summary(
+        rows=rows,
+        condition_a="base_repair",
+        condition_b="cot_repair",
+        n_bootstrap=50,
+        seed=1,
+        fixed_budget_thresholds=[10_000],
+    )
+
+    assert summary["matched_pairs"] == 1
+    assert summary["matched_runs"] == 2
+    assert summary["token_covered_pairs"] == 0
+    assert summary["token_covered_runs"] == 0
+    assert summary["token_coverage_rate"] == pytest.approx(0.0)
+    assert summary["cost_per_success"]["available"] is False
+    assert summary["paired_cost_delta"]["available"] is False
+    assert summary["fixed_budget_success"] == []
+
+
+def test_cost_per_success_counts_only_token_covered_runs() -> None:
+    """codex 2-2#3: success fractions included runs the token means excluded."""
+    rows = [
+        _cost_row("r1", "c1", "base_repair", False, 2_000.0),
+        _cost_row("r1", "c1", "cot_repair", False, 2_000.0),
+        # The successful run reported no tokens for A, so it is not a cost observation.
+        _cost_row("r2", "c1", "base_repair", True, None),
+        _cost_row("r2", "c1", "cot_repair", True, 2_000.0),
+    ]
+    summary = _compute_dual_objective_summary(
+        rows=rows,
+        condition_a="base_repair",
+        condition_b="cot_repair",
+        n_bootstrap=50,
+        seed=1,
+        fixed_budget_thresholds=[10_000],
+    )
+
+    cost = summary["cost_per_success"]
+    assert summary["token_covered_runs"] == 1
+    assert cost["a_successes"] == pytest.approx(0.0)
+    assert cost["a_value"] is None  # no success among the token-covered runs
+    assert summary["fixed_budget_success"][0]["a_rate"] == pytest.approx(0.0)
+
+
 def test_compute_token_estimate_diagnostics_handles_partial_coverage() -> None:
     left = _record(
         run_id="run-est",
@@ -1026,3 +1115,65 @@ def test_sta21_report_uses_and_prints_the_requested_ope_settings(
         capsys.readouterr().out
     )
     assert main(["--jsonl", str(jsonl), "--adaptive-ope-propensity-floor", "0"]) == 2
+
+
+def _schema_record(case_id: str, condition: str, success: bool, **overrides):
+    from tests.test_evals_analyze_grouping import _record
+
+    record = _record(
+        run_id="r1",
+        case_id=case_id,
+        condition=condition,
+        attempt=1,
+        success=success,
+        category="logic_error",
+        difficulty="easy",
+        snapshot_dependency="helpful",
+    )
+    record.update(overrides)
+    return record
+
+
+def _v7_record(case_id: str, condition: str, success: bool):
+    """A current-schema record: v7 carries the xxh3 prompt/evidence hashes."""
+    record = _schema_record(case_id, condition, success, schema_version=7)
+    record["attempt_metadata"]["prompt_xxh3_128"] = "p"
+    record["attempt_metadata"]["evidence_xxh3_128"] = "e"
+    return record
+
+
+def test_main_warns_about_schema_invalid_rows_and_mixed_versions(tmp_path, capsys) -> None:
+    """codex 2-2#5 / 1e#13: dropped rows and mixed schema versions were silent here."""
+    from evals import _json as json
+    from evals import report_run_metrics as rrm
+
+    records = [
+        _schema_record("c1", "base_repair", True),
+        _v7_record("c1", "cot_repair", False),
+        _schema_record("c2", "base_repair", False),
+        _schema_record("c2", "cot_repair", True),
+        # Valid JSON, invalid against the record schema: dropped from the cohort.
+        _schema_record("c3", "base_repair", True, attempt="not-an-int"),
+    ]
+    jsonl = tmp_path / "mixed.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    assert rrm.main(["--jsonl", str(jsonl), "--bootstrap", "16", "--seed", "3"]) == 0
+    out = capsys.readouterr().out
+
+    assert "records_schema_invalid=1" in out
+    assert "several schema versions (5, 7)" in out
+
+
+def test_main_rejects_schema_invalid_rows_with_strict_input(tmp_path, capsys) -> None:
+    from evals import _json as json
+    from evals import report_run_metrics as rrm
+
+    jsonl = tmp_path / "invalid.jsonl"
+    jsonl.write_text(
+        json.dumps(_schema_record("c1", "base_repair", True, attempt="nope")) + "\n",
+        encoding="utf-8",
+    )
+
+    assert rrm.main(["--jsonl", str(jsonl), "--strict-input"]) == 2
+    assert "Input error" in capsys.readouterr().out

@@ -180,8 +180,10 @@ def _base_pytest_env(
         "LLMDEBUG_OUTPUT_FORMAT": output_format,
     }
     run_settings = settings if settings is not None else _ActiveRunSettings()
-    if run_settings.deterministic and run_settings.seed is not None:
-        env["PYTHONHASHSEED"] = str(run_settings.seed)
+    # ORC-01: PYTHONHASHSEED must be 0..4294967295 or the interpreter refuses to start.
+    hash_seed = run_settings.hash_seed
+    if hash_seed is not None:
+        env["PYTHONHASHSEED"] = str(hash_seed)
         env.setdefault("TZ", "UTC")
     if snapshot_condition:
         env.setdefault("LLMDEBUG_DEBUG", "0")

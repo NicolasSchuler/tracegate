@@ -19,6 +19,7 @@ from evals.analysis_ope_support import (
 )
 from evals.analysis_output import _ope_target_order as ope_target_order
 from evals.analysis_output import _print_input_errors as print_input_errors
+from evals.analysis_output import schema_version_warning
 from evals.analysis_paired_stats import _run_statistical_analysis as run_statistical_analysis
 from evals.analysis_records import _load_and_group_records as load_and_group_records
 from evals.analysis_rows import _case_success_rates as case_success_rates
@@ -48,5 +49,6 @@ __all__ = [
     "ratio",
     "records_by_case_condition",
     "run_statistical_analysis",
+    "schema_version_warning",
     "summarize_bucket",
 ]

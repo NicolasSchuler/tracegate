@@ -21,7 +21,7 @@ from ._debug_session import (
     build_debug_session,
     split_extra_context,
 )
-from ._warnings import emit_debug
+from ._warnings import emit_capture_diagnostics, emit_debug
 from .config import SnapshotConfig, resolve_snapshot_config
 from .output import write_bundle
 from .serialize import (
@@ -608,8 +608,7 @@ def capture_exception(
     if warnings:
         snapshot_payload["_capture_warnings"] = list(warnings)
         if cfg.debug:
-            for w in warnings:
-                sys.stderr.write(f"llmdebug: {w}\n")
+            emit_capture_diagnostics(warnings)
 
     payload = build_debug_session(
         name=name,

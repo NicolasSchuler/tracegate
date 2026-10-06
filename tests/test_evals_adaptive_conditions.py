@@ -1339,6 +1339,7 @@ class _AdaptiveDelayedCreditPatcher:
     patch_outcomes: tuple[str, ...] = ("no_diff", "fix")
     request_calls: int = 0
     patch_calls: int = 0
+    prompts: list[str] = field(default_factory=list)
 
     def request_context(self, *, prompt: str, context_dir, cwd) -> ContextRequestResult:
         del prompt, context_dir, cwd
@@ -1361,7 +1362,8 @@ class _AdaptiveDelayedCreditPatcher:
         )
 
     def propose_patch(self, *, prompt: str, context_dir, cwd) -> PatchResult:
-        del prompt, context_dir, cwd
+        del context_dir, cwd
+        self.prompts.append(prompt)
         self.patch_calls += 1
         outcome = self.patch_outcomes[min(self.patch_calls - 1, len(self.patch_outcomes) - 1)]
         if outcome == "no_diff":
@@ -1600,6 +1602,7 @@ def _run_adaptive_action_case(
     extra_run_kwargs: dict[str, object] | None = None,
     decision_model: DecisionModelBinding | None = None,
     fallback_action: str | None = None,
+    include_files_context: bool = False,
 ) -> tuple[list[dict[str, object]], Path]:
     case = _make_case(tmp_path)
     workdir = tmp_path / f"{run_id}_workdir"
@@ -1646,7 +1649,7 @@ def _run_adaptive_action_case(
         k=k,
         output_format="json_compact",
         run_id=run_id,
-        include_files_context=False,
+        include_files_context=include_files_context,
         force_patch_attempt=False,
         adaptive_online_policy_controller=controller,
         adaptive_online_policy_mode="on",
@@ -5689,6 +5692,84 @@ def test_adaptive_online_policy_logging_failure_does_not_abort_attempt(
     assert attempt_meta["adaptive_online_update_reason"] == "event_logging_error:OSError"
 
 
+@dataclass
+class _FullTepNoDiffPatcher:
+    """An openai-shaped patcher with the TEP generation hooks, proposing no diff."""
+
+    name: str = "openai"
+    max_propose_sec: float = 10.0
+    max_tokens: int = 400
+    response_mode: str = "edits"
+
+    def propose_patch(self, *, prompt: str, context_dir, cwd, **_kwargs) -> PatchResult:
+        del prompt, context_dir, cwd
+        return PatchResult(diff=None, meta={"reason": "no_diff"})
+
+    def generate_text(self, **_kwargs):
+        raise AssertionError("the no-diff attempt must not reach the TEP text calls")
+
+    def generate_json(self, **_kwargs):
+        raise AssertionError("the no-diff attempt must not reach the TEP critic")
+
+
+def test_full_tep_save_failure_reaches_the_streamed_record(tmp_path, monkeypatch) -> None:
+    """ATT-17: a no-diff attempt skips the learning pass, so its own save must report.
+
+    The failure used to be attached to the returned record after the row had already
+    gone to `record_sink`, leaving the JSONL silent (codex 3-1#3).
+    """
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "workdir_full_tep_save"
+    context_dir = tmp_path / "context_full_tep_save"
+    shutil.copytree(case.path, workdir)
+
+    # The state path's parent is a file, so every save raises.
+    blocker = tmp_path / "tep_blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    state_path = blocker / "state" / "tep.json"
+
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "run_pytest",
+        lambda *args, **kwargs: run_eval.RunResult(
+            returncode=1,
+            duration_sec=0.01,
+            stdout="tests/test_buggy.py::test_f\nE   AssertionError: expected 2 got 1\n",
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
+    )
+
+    streamed: list[str] = []
+    records = run_eval.run_one_condition(
+        case=case,
+        condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
+        workdir=workdir,
+        context_dir_base=context_dir,
+        patcher=_FullTepNoDiffPatcher(),
+        k=1,
+        output_format="json_compact",
+        run_id="run-full-tep-save-failure",
+        include_files_context=False,
+        force_patch_attempt=False,
+        adaptive_tep_mode="full",
+        adaptive_tep_state_path=str(state_path),
+        record_sink=lambda record: streamed.append(json.dumps(record)),
+    )
+
+    assert len(records) == 1
+    assert records[0]["note"] == "no_patch_proposed"
+    assert len(streamed) == 1
+    streamed_record = json.loads(streamed[0])
+    save_error = streamed_record["attempt_metadata"]["adaptive_tep_save_error"]
+    assert save_error
+    assert streamed_record["patch_meta"]["adaptive_tep_save_error"] == save_error
+
+
 def test_adaptive_budget_policy_shadow_keeps_baseline_budget(tmp_path, monkeypatch) -> None:
     case = _make_case(tmp_path)
     workdir = tmp_path / "workdir_adaptive_budget_shadow"
@@ -6624,6 +6705,44 @@ def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent
     assert len(event_lines) == 1
 
 
+def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_is_budgeted_out(
+    tmp_path, monkeypatch
+) -> None:
+    """POL-11: the helper's evidence is selected for the successful prompt but the prompt
+    budget trims the block out, so the rescue bonus is not earned (codex 3-1#2)."""
+    records, patcher, events_path = _run_adaptive_delayed_credit_case(
+        tmp_path,
+        monkeypatch,
+        patch_outcomes=("no_diff", "fix"),
+        adaptive_max_helper_calls=2,
+        k=2,
+        run_id="run-adaptive-delayed-credit-trimmed",
+        # Room for a few characters of the first block, so no `[id]` header survives.
+        extra_run_kwargs={"prompt_budget_evidence_chars": 12},
+    )
+
+    assert [bool(record["success"]) for record in records] == [False, True]
+    assert patcher.request_calls == 2
+    # The helper's evidence was still selected for the successful attempt's prompt.
+    assert set(records[0]["patch_meta"]["evidence_ids_new"]) & set(
+        records[1]["patch_meta"]["evidence_ids_reused"]
+    )
+    final_prompt = patcher.prompts[-1]
+    assert not any(
+        f"[{evidence_id}]" in final_prompt
+        for evidence_id in records[0]["patch_meta"]["evidence_ids_new"]
+    )
+    first_meta = records[0]["attempt_metadata"]
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
+
+    event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(event_lines) == 2
+
+
 def test_adaptive_llm_discretion_delayed_credit_sink_emits_resolved_case_end_metadata(
     tmp_path, monkeypatch
 ) -> None:
@@ -6951,6 +7070,128 @@ def test_no_restricted_action_delivers_more_evidence_than_invoke_helper(
     assert all(totals[action] <= totals["invoke_helper"] for action in totals), totals
 
 
+@pytest.mark.parametrize(
+    ("action", "denied_request"),
+    [
+        (ACTION_SEARCH_ONLY, {"type": "file", "path": "buggy.py"}),
+        (ACTION_FILE_ONLY, {"type": "search", "path": "helper.py", "pattern": "return"}),
+        (ACTION_FRAME_ONLY, {"type": "file", "path": "helper.py"}),
+    ],
+)
+def test_att03_fully_filtered_restricted_action_gets_no_monolithic_file_context(
+    tmp_path, monkeypatch, action: str, denied_request: dict[str, object]
+) -> None:
+    """ATT-03: an emptied restricted request must not restore whole-project file context.
+
+    With ``include_files_context=True`` the Stage-B prompt used to fall back to the
+    monolithic ``Project files:`` block once layer-3 filtering removed every request,
+    handing back exactly the evidence the policy denied.
+    """
+    patcher = _AdaptiveActionCapturePatcher(
+        request_payload={
+            "need_more_context": True,
+            "requests": [dict(denied_request)],
+            "sufficiency_rationale": "need the denied evidence type",
+        }
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=action,
+        run_id=f"run-att03-{action}",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+
+    patch_meta = records[0]["patch_meta"]
+    assert isinstance(patch_meta, dict)
+    assert patch_meta["stage_a_requests_count"] == 0
+    assert patch_meta["stage_a_reason"] == "restricted_action_no_valid_requests"
+    assert patch_meta["context_protocol"] == "staged"
+
+    prompt = patcher.patch_prompts[0]
+    assert "Project files:" not in prompt
+    assert "def value() -> int:" not in prompt
+
+
+def test_att03_unrestricted_action_keeps_monolithic_file_context(tmp_path, monkeypatch) -> None:
+    """The monolithic fallback stays for actions that never restricted the evidence types."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-att03-skip",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    patch_meta = records[0]["patch_meta"]
+    assert isinstance(patch_meta, dict)
+    assert patch_meta["context_protocol"] == "monolithic"
+    assert "Project files:" in patcher.patch_prompts[0]
+
+
+def test_att06_delta_retry_does_not_claim_a_snapshot_it_never_delivered(
+    tmp_path, monkeypatch
+) -> None:
+    """ATT-06: the snapshot fields describe the delivered prompt, not the Stage-A grant.
+
+    Delta retry prompts omit the snapshot section entirely, so a granted snapshot on
+    attempt 2 must not be recorded as included.
+    """
+    patcher = _AdaptiveActionCapturePatcher(request_payload=dict(_ASK_FOR_EVERYTHING))
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_INVOKE_HELPER,
+        run_id="run-att06-delta",
+        k=2,
+        adaptive_helper_max_calls_per_case=4,
+        extra_run_kwargs={"adaptive_reveal_mode": "full", "retry_prompt_mode": "delta"},
+    )
+
+    first, second = records[0], records[1]
+    assert first["patch_meta"]["retry_delta_prompt"] is False
+    assert first["attempt_metadata"]["stage_b_snapshot_in_prompt"] is True
+    assert first["attempt_metadata"]["adaptive_snapshot_included"] is True
+    assert "Snapshot" in patcher.patch_prompts[0]
+
+    assert second["patch_meta"]["retry_delta_prompt"] is True
+    assert second["attempt_metadata"]["adaptive_snapshot_requested"] is True
+    assert second["attempt_metadata"]["stage_b_snapshot_in_prompt"] is False
+    assert second["attempt_metadata"]["adaptive_snapshot_included"] is False
+    assert second["attempt_metadata"]["evidence_chars_by_type"]["snapshot"] == 0
+
+
+def test_att06_compaction_replacing_the_snapshot_clears_the_inclusion_fields(
+    tmp_path, monkeypatch
+) -> None:
+    """ATT-06: successful compaction replaces the snapshot section, so it is not included."""
+    patcher = _AdaptiveActionCapturePatcher(
+        compacted_text="crash in buggy.py line 4; helper.value() returns 1 but test expects 2",
+        compact_meta={"llm_call_count": 1},
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_COMPACT_THEN_PATCH,
+        run_id="run-att06-compaction",
+        extra_run_kwargs={"adaptive_reveal_mode": "full"},
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+    assert attempt_meta["context_compaction_invoked"] is True
+    assert records[0]["patch_meta"]["context_compaction_success"] is True
+    assert "snapshot" in records[0]["patch_meta"]["context_compaction_replaced_sections"]
+    assert attempt_meta["stage_b_snapshot_in_prompt"] is False
+    assert attempt_meta["adaptive_snapshot_included"] is False
+    assert attempt_meta["evidence_chars_by_type"]["snapshot"] == 0
+
+
 def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
     tmp_path, monkeypatch
 ) -> None:
@@ -6986,3 +7227,157 @@ def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
     assert meta["adaptive_online_policy_mode"] == "off"
     assert meta["adaptive_online_feature_vector"] == {}
     assert meta["adaptive_online_feature_vector_raw"]
+
+
+def test_bas07_native_attempt_records_a_case_information_manifest(tmp_path, monkeypatch) -> None:
+    """BAS-07 (codex 1a#3): native arms record which case files reached their prompt."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-bas07-files",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert isinstance(manifest, dict)
+    assert manifest["case_info_policy"] == "neutral_v1"
+    assert manifest["test_source_exposure"] == "full"
+    assert manifest["prompt_files"] == ["buggy.py", "helper.py", "test_buggy.py"]
+    assert "Reference tests" not in patcher.patch_prompts[0]
+    assert "def test_f() -> None:" in patcher.patch_prompts[0]
+
+
+def test_bas07_native_attempt_without_file_context_records_no_test_source(
+    tmp_path, monkeypatch
+) -> None:
+    """The omitted-test-source half: no project files and no staged file evidence."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-bas07-nofiles",
+        include_snapshot=False,
+        include_files_context=False,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert manifest["test_source_exposure"] == "none"
+    assert manifest["prompt_files"] == []
+    assert "def test_f() -> None:" not in patcher.patch_prompts[0]
+
+
+def test_bas07_native_manifest_lists_only_staged_file_evidence(tmp_path, monkeypatch) -> None:
+    """A restricted file-only action reports just the file it was granted."""
+    patcher = _AdaptiveActionCapturePatcher(
+        request_payload={
+            "need_more_context": True,
+            "requests": [{"type": "file", "path": "test_buggy.py"}],
+            "sufficiency_rationale": "need the failing test",
+        }
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_FILE_ONLY,
+        run_id="run-bas07-staged",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    manifest = records[0]["patch_meta"]["case_information"]
+    assert manifest["prompt_files"] == ["test_buggy.py"]
+    assert manifest["test_source_exposure"] == "full"
+
+
+@dataclass
+class _RetryGateUsagePatcher:
+    """Reports usage on every served call so totals can be compared against it."""
+
+    name: str = "openai"
+    max_propose_sec: float = 10.0
+    max_tokens: int = 400
+    response_mode: str = "edits"
+    served: list[dict[str, int]] = field(default_factory=list)
+
+    def _usage_meta(self, prompt_tokens: int, completion_tokens: int) -> dict[str, Any]:
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        self.served.append(dict(usage))
+        return {"llm_call_count": 1, "usage": dict(usage)}
+
+    def request_context(self, *, prompt: str, context_dir, cwd) -> ContextRequestResult:
+        del prompt, context_dir, cwd
+        return ContextRequestResult(
+            request_json={
+                "need_more_context": True,
+                "requests": [{"type": "file", "path": "buggy.py"}],
+                "sufficiency_rationale": "need buggy file",
+            },
+            raw_response='{"need_more_context":true,"requests":[{"type":"file","path":"buggy.py"}]}',
+            meta=self._usage_meta(30, 6),
+        )
+
+    def propose_patch(self, *, prompt: str, context_dir, cwd) -> PatchResult:
+        del prompt, context_dir, cwd
+        return PatchResult(diff=None, meta={"reason": "no_diff", **self._usage_meta(70, 14)})
+
+
+def test_att05_retry_gate_block_usage_is_kept_in_the_scored_rows(tmp_path, monkeypatch) -> None:
+    """codex 1f#2: a gate block is unscored but paid for, so its usage must survive."""
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "workdir_retry_gate_usage"
+    context_dir = tmp_path / "context_retry_gate_usage"
+    shutil.copytree(case.path, workdir)
+    patcher = _RetryGateUsagePatcher()
+
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "run_pytest",
+        lambda *args, **kwargs: run_eval.RunResult(
+            returncode=1,
+            duration_sec=0.01,
+            stdout="tests/test_buggy.py::test_f\nE   AssertionError: expected 2 got 1\n",
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        eval_attempt_flow,
+        "read_latest_snapshot",
+        lambda *_args, **_kwargs: (_snapshot_payload(), None),
+    )
+
+    records = run_eval.run_one_condition(
+        case=case,
+        condition=run_eval.Condition.LAYERED_ADAPTIVE_GATED,
+        workdir=workdir,
+        context_dir_base=context_dir,
+        patcher=patcher,
+        k=2,
+        output_format="json_compact",
+        run_id="run-retry-gate-usage",
+        include_files_context=False,
+        force_patch_attempt=False,
+        adaptive_gate_policy="aggressive",
+        adaptive_max_helper_calls=3,
+    )
+
+    blocks = [r for r in records if r["note"] == "retry_gate_no_new_evidence"]
+    scored = [r for r in records if r.get("record_type", "attempt") != "infra_event"]
+    assert len(blocks) == 1
+    block_tokens = blocks[0]["attempt_metadata"]["tokens_total"]
+    assert block_tokens > 0
+
+    served_total = sum(usage["total_tokens"] for usage in patcher.served)
+    scored_total = sum(r["attempt_metadata"]["tokens_total"] for r in scored)
+    # Every token the stub served is accounted for by the rows analysis actually reads.
+    assert scored_total == served_total
+    assert blocks[0]["patch_meta"]["retry_gate_usage_carried_forward"] is True
+    carried = [r["attempt_metadata"]["retry_gate_carried_tokens_total"] for r in scored]
+    assert sum(carried) == block_tokens

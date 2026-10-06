@@ -72,7 +72,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **Redaction Profile** — A privacy preset (`dev`, `ci`, `prod`) that configures default redaction behavior; profiles are additive and explicit `redact`/`redact_*` options always take precedence. See: [Configuration Reference § Redaction Profiles](configuration.md#redaction-profiles).
 
-**Schema Version** — The semantic version string (currently `"2.1"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. The major part changes on breaking envelope changes; readers accept any `2.x`. `2.1` emits string dict keys in locals as plain strings instead of their `repr`. See: [README § Output](../README.md#output).
+**Schema Version** — The semantic version string (currently `"2.1"`) embedded in every `DebugSession` envelope, defining the on-disk contract for snapshot consumers. The major part changes on breaking envelope changes; readers accept any `2.x`. `2.1` emits string dict keys in locals as plain strings instead of their `repr`, and counts array `anomalies` on the original array instead of the up-cast float32 copy (so large `float64` values no longer report false `inf`, and CuPy arrays are covered). See: [README § Output](../README.md#output).
 
 **Session ID** — A stable string identifier (`<resolved_out_dir>::<scope>`) derived from the output directory and pytest node ID (or snapshot name). Used to correlate RCA attempts across retries for the same test or code region. See: [`rca_identity.py`](../src/llmdebug/rca_identity.py).
 
@@ -84,7 +84,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **SourceMode** — Controls which stack frames receive inline source-context lines: `all` (every frame), `crash_only` (only the crash frame), or `none` (no source context). Reduces snapshot size in production captures. See: [Configuration Reference](configuration.md#parameter-reference).
 
-**Stall Detection** — A safety rule that marks the RCA state as `stalled` when a failure signature repeats at or above the stall threshold without hypothesis or plan advancement. Forces the debugger to gather new evidence or revise the hypothesis before retrying. See: [`rca_transitions.py`](../src/llmdebug/rca_transitions.py).
+**Stall Detection** — A safety rule that marks the RCA state as `stalled` when the repair streak for one failure signature reaches the stall threshold. The streak counts consecutive `bind_evidence`/`change`/`verify` attempts that bring no new evidence, no advanced hypothesis or plan, and no passing verification, so ordinary workflow steps never trip it. Forces the debugger to gather new evidence or revise the hypothesis before retrying. See: [`rca_transitions.py`](../src/llmdebug/rca_transitions.py).
 
 **Token Budget** — Deterministic per-section caps (retry packet, pytest output, snapshot summary, evidence blocks) governing how much of each content type is included in a prompt. Sections are truncated or dropped in a fixed order when the total cap is exceeded. See: [Evidence-First Protocol § Prompt Budgeting](evidence_first_protocol.md#prompt-budgeting).
 

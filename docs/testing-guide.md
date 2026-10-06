@@ -344,9 +344,18 @@ Golden runs prove that a harness refactor changes no behaviour. Each scenario in
 each unit: wrong patches, syntax errors, sanitizer rejections, stale diffs, non-answers
 and transport faults. The output keeps the result records, policy event logs and
 states, the artifact tree, every model request and the `analyze_results`,
-`report_run_metrics` and `eval_summary` output, with timings, ports, random IDs and
-the run root replaced by placeholders. Together the scenarios cover about 80% of
+`report_run_metrics` and `eval_summary` output, with ports, random IDs and the run root
+replaced by placeholders. Together the scenarios cover about 80% of
 `eval_attempt_flow.py`; baselines aren't covered because they need provisioned repos.
+
+Only *measurements* are replaced by `<T>`, and only the ones listed in
+`_MEASURED_TIME_KEYS` — an allowlist, because the key pattern also matches configured
+budgets and deadlines, reward coefficients and attempt counts, and replacing those made
+a miscomputed effective deadline produce identical output. A time-like key in neither
+`_MEASURED_TIME_KEYS` nor `_CONFIGURED_TIME_KEYS` is compared, and
+`tests/test_evals_golden_eval_harness.py` names it. TOON token estimates keep their
+missingness (`None` stays `None`); only their magnitude becomes `<SIZE>`, because the
+encoded snapshot holds pytest's own object reprs.
 
 ```bash
 just golden-evals          # compare with tests/golden/eval_runs/ (about 15 s)
@@ -358,7 +367,18 @@ output to `.golden-diff/`. Prompts contain the checkout and interpreter paths, a
 pytest's output depends on `uv.lock`, so golden files only compare in the environment
 recorded in `tests/golden/eval_runs/environment.json`; elsewhere `just golden-evals`
 exits 2 and the integration test skips. To use them on another machine, run
-`just golden-evals-update` on a commit whose behaviour you trust first.
+`just golden-evals-update` on a commit whose behaviour you trust first and commit the
+regenerated `environment.json` with the fixtures.
+
+Each scenario subprocess gets a pinned environment (`scenario_env()`): proxies off, so
+the loopback stub cannot be routed to a real host, and `LLMDEBUG_*`, `PYTEST_ADDOPTS`,
+`TZ` and the locale set by the harness rather than inherited, because they reach the
+records without changing the environment fingerprint. `TIKTOKEN_CACHE_DIR` points at
+`~/.cache/tracegate-golden-eval-tokenizer`, and `ensure_offline_tokenizer()` resolves
+the tokenizer once up front, so the recorded token estimates come from local data
+instead of a per-run download. Each scenario holds an exclusive lock on its run root
+under `~/.cache/tracegate-golden-eval` for the whole run, so a second invocation of the
+same scenario fails instead of deleting the first one's live work tree.
 
 ## Coverage Requirements
 

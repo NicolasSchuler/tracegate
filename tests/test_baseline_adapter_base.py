@@ -312,3 +312,85 @@ def test_generation_settings_env_carries_only_set_values() -> None:
         "TRACEGATE_BASELINE_SEED": "7",
         "TRACEGATE_BASELINE_MAX_TOKENS": "512",
     }
+
+
+def test_untracked_tree_digest_marks_missing_oversized_and_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#10: content for normal files, stable markers for the awkward ones."""
+    from baselines import adapter_base
+    from baselines.adapter_base import _untracked_tree_digest
+
+    (tmp_path / "small.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "big.bin").write_bytes(b"0" * 64)
+    listing = b"small.py\n\nmissing.py\nbig.bin\n"
+
+    monkeypatch.setattr(adapter_base, "_UNTRACKED_CONTENT_HASH_MAX_BYTES", 8)
+    digest = _untracked_tree_digest(tmp_path, listing).decode("utf-8")
+
+    assert "missing.py\0absent" in digest
+    assert "big.bin\0size:64" in digest
+    assert "small.py\0" in digest
+    assert "\0absent" in digest
+
+    def _boom(self: Path) -> bool:
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(Path, "is_file", _boom)
+    assert "small.py\0unreadable" in _untracked_tree_digest(tmp_path, b"small.py\n").decode("utf-8")
+
+
+def test_repair_deadline_clamps_to_the_remaining_budget() -> None:
+    """codex 1e#3: one deadline per run_repair bounds every blocking step."""
+    import time
+
+    from baselines.adapter_base import RepairDeadline
+
+    unbounded = RepairDeadline.from_config(BaselineConfig(process_timeout_sec=0, timeout_sec=0))
+    assert unbounded.bounded is False
+    assert unbounded.expired is False
+    assert unbounded.remaining_sec() == float("inf")
+    assert unbounded.clamp_sec(12.0) == 12.0
+    assert unbounded.clamp_int_sec(12) == 12
+
+    bounded = RepairDeadline.from_config(BaselineConfig(process_timeout_sec=30))
+    assert bounded.bounded is True
+    assert bounded.expired is False
+    assert bounded.clamp_sec(5.0) == 5.0
+    assert bounded.clamp_int_sec(5) == 5
+    # No explicit request: take whatever is left.
+    assert 0.0 < bounded.clamp_sec(None) <= 30.0
+
+    spent = RepairDeadline(started_at=time.perf_counter() - 60.0, budget_sec=30.0)
+    assert spent.expired is True
+    assert spent.remaining_sec() == 0.0
+    assert spent.clamp_sec(10.0) == 0.1
+    assert spent.clamp_int_sec(10) == 1
+
+
+def test_effective_generation_reports_adapter_overrides() -> None:
+    """codex 1e#7: the record follows the knob that actually won."""
+    from baselines.adapter_base import BaselineGenerationSettings
+
+    class _OverridingAdapter(_DummyAdapter):
+        honours_generation_contract = True
+        generation_override_keys = {
+            "stub_temperature": "temperature",
+            "stub_max_tokens": "max_completion_tokens",
+        }
+
+    adapter = _OverridingAdapter()
+    shared = BaselineGenerationSettings(temperature=0.0, max_completion_tokens=2048)
+    plain = adapter.effective_generation(BaselineConfig(generation=shared))
+    assert plain["max_completion_tokens"] == 2048
+    assert "overrides" not in plain
+
+    overridden = adapter.effective_generation(
+        BaselineConfig(generation=shared, extra={"stub_temperature": 0.7, "stub_max_tokens": 8192})
+    )
+    assert overridden["temperature"] == pytest.approx(0.7)
+    assert overridden["max_completion_tokens"] == 8192
+    assert overridden["overrides"] == {
+        "temperature": "stub_temperature",
+        "max_completion_tokens": "stub_max_tokens",
+    }

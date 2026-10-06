@@ -16,6 +16,13 @@ import pytest
 
 import evals.swebench_pro.score_docker as score_docker_mod
 from evals.swebench.types import PredictionRecord
+from evals.swebench_pro.io import (
+    ensure_run_layout,
+    instance_ids_path,
+    prediction_path,
+    write_instance_ids,
+    write_predictions,
+)
 from evals.swebench_pro.score_docker import (
     _EvalContext,
     _parse_selected_test_files,
@@ -58,6 +65,42 @@ def _make_ctx(
         fail_to_pass={"test_a"} if fail_to_pass is _SENTINEL else fail_to_pass,  # type: ignore[arg-type]
         pass_to_pass={"test_b"} if pass_to_pass is _SENTINEL else pass_to_pass,  # type: ignore[arg-type]
     )
+
+
+def _write_run_scripts(scripts_dir: Path, instance_id: str) -> None:
+    instance_dir = scripts_dir / instance_id
+    instance_dir.mkdir(parents=True, exist_ok=True)
+    (instance_dir / "run_script.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (instance_dir / "parser.py").write_text("import sys\n", encoding="utf-8")
+
+
+def _docker_stub(
+    *,
+    output_dir: Path,
+    instance_id: str,
+    status_code: int,
+    workspace_files: dict[str, str] | None = None,
+) -> MagicMock:
+    """A docker SDK stub whose container writes receipts like the real entry script."""
+    container = MagicMock()
+    container.wait.return_value = {"StatusCode": status_code}
+    client = MagicMock()
+    client.images.pull.return_value = None
+
+    def _run(_image: str, **_kwargs: Any) -> MagicMock:
+        workspace_dir = output_dir / instance_id / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        for name, text in (workspace_files or {}).items():
+            (workspace_dir / name).write_text(text, encoding="utf-8")
+        return container
+
+    client.containers.run.side_effect = _run
+    docker_module = MagicMock()
+    docker_module.from_env.return_value = client
+    return docker_module
+
+
+_PASSING_REPORT = json.dumps({"tests": [{"name": "test_a", "status": "PASSED"}]})
 
 
 # ---------------------------------------------------------------------------
@@ -781,24 +824,17 @@ class TestEvaluateInstanceDockerErrors:
         (instance_dir / "parser.py").write_text("import sys\n", encoding="utf-8")
 
         output_dir = tmp_path / "output"
-        workspace_dir = output_dir / ctx.instance_id / "workspace"
-        workspace_dir.mkdir(parents=True)
-
-        import json
-
-        (workspace_dir / "output.json").write_text(
-            json.dumps({"tests": [{"name": "test_a", "status": "PASSED"}]}), encoding="utf-8"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=0,
+            workspace_files={
+                "apply_status": "applied\n",
+                "run_status": "0\n",
+                "output.json": _PASSING_REPORT,
+            },
         )
-
-        mock_container = MagicMock()
-        mock_container.wait.return_value = {"StatusCode": 0}
-
-        mock_client = MagicMock()
-        mock_client.images.pull.return_value = None
-        mock_client.containers.run.return_value = mock_container
-
-        mock_docker = MagicMock()
-        mock_docker.from_env.return_value = mock_client
+        mock_client = mock_docker.from_env.return_value
 
         with patch.dict("sys.modules", {"docker": mock_docker}):
             result = evaluate_instance_docker(
@@ -1009,6 +1045,32 @@ class TestRunDockerScoring:
         assert item.accuracy == 1.0
         assert (run_dir / "docker_eval" / "baseline" / "eval_results.json").exists()
 
+    def test_rejects_a_population_reduced_in_both_arms(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """DAT-05: equal-but-incomplete prediction files are not a complete comparison."""
+        run_dir = tmp_path / "pro-run"
+        ensure_run_layout(run_dir, conditions=["baseline", "llmdebug"])
+        write_instance_ids(instance_ids_path(run_dir), ["inst-1", "inst-2"])
+        for condition in ("baseline", "llmdebug"):
+            write_predictions(
+                prediction_path(run_dir, condition),
+                [PredictionRecord("inst-1", "diff --git a/a.py b/a.py\n", "model")],
+            )
+        monkeypatch.setattr(
+            score_docker_mod, "_load_dataset_rows", lambda **_kwargs: pytest.fail("unreachable")
+        )
+
+        with pytest.raises(ValueError, match=r"differs from instance_ids\.txt"):
+            run_docker_scoring(
+                run_dir=run_dir,
+                conditions="baseline,llmdebug",
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+            )
+
 
 class TestReviewScoringIntegrity:
     """2026-10-04 review: DAT-04, DAT-09, DAT-11."""
@@ -1030,28 +1092,218 @@ class TestReviewScoringIntegrity:
 
     def test_patch_that_does_not_apply_is_a_model_failure(self, tmp_path: Path) -> None:
         ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
-        instance_dir = tmp_path / "scripts" / ctx.instance_id
-        instance_dir.mkdir(parents=True)
-        (instance_dir / "run_script.sh").write_text("#!/bin/bash\n", encoding="utf-8")
-        (instance_dir / "parser.py").write_text("import sys\n", encoding="utf-8")
-        mock_container = MagicMock()
-        mock_container.wait.return_value = {"StatusCode": score_docker_mod.APPLY_FAILED_EXIT_CODE}
-        mock_client = MagicMock()
-        mock_client.containers.run.return_value = mock_container
-        mock_docker = MagicMock()
-        mock_docker.from_env.return_value = mock_client
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=score_docker_mod.APPLY_FAILED_EXIT_CODE,
+            workspace_files={"apply_status": "failed\n"},
+        )
         with patch.dict("sys.modules", {"docker": mock_docker}):
             result = evaluate_instance_docker(
                 ctx,
                 dockerhub_username="testuser",
                 scripts_dir=tmp_path / "scripts",
                 dockerfiles_dir=None,
-                output_dir=tmp_path / "output",
+                output_dir=output_dir,
                 prefix="baseline",
             )
         assert result.passed is False
         assert result.infrastructure_error is False
         assert result.error == "patch_apply_failed"
+
+    def test_exit_three_without_a_failed_apply_receipt_is_infrastructure(
+        self, tmp_path: Path
+    ) -> None:
+        """DAT-09: exit 3 is not exclusive to patch application (e.g. a setup command)."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=score_docker_mod.APPLY_FAILED_EXIT_CODE,
+            workspace_files={"apply_status": "applied\n"},
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is True
+        assert result.error is not None and "exited with code 3" in result.error
+
+    def test_stale_failed_apply_receipt_does_not_mask_a_new_failure(self, tmp_path: Path) -> None:
+        """DAT-09: the previous attempt's receipts must not classify this execution."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        workspace_dir = output_dir / ctx.instance_id / "workspace"
+        workspace_dir.mkdir(parents=True)
+        (workspace_dir / "apply_status").write_text("failed\n", encoding="utf-8")
+        (workspace_dir / "output.json").write_text(_PASSING_REPORT, encoding="utf-8")
+
+        # The new container dies during initialization and writes nothing.
+        mock_docker = _docker_stub(
+            output_dir=output_dir, instance_id=ctx.instance_id, status_code=1
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.error is not None and "exited with code 1" in result.error
+        assert result.infrastructure_error is True
+
+    def test_stale_report_is_not_scored_for_a_new_patch(self, tmp_path: Path) -> None:
+        """DAT-09/DAT-13: a leftover report must not be accepted under a new digest."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        workspace_dir = output_dir / ctx.instance_id / "workspace"
+        workspace_dir.mkdir(parents=True)
+        (workspace_dir / "output.json").write_text(_PASSING_REPORT, encoding="utf-8")
+        (workspace_dir / "run_status").write_text("0\n", encoding="utf-8")
+
+        # This container exits 0 but its parser writes no report.
+        mock_docker = _docker_stub(
+            output_dir=output_dir, instance_id=ctx.instance_id, status_code=0
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is True
+        assert result.error is not None and "output.json not found" in result.error
+        assert not (output_dir / ctx.instance_id / "baseline_output.patch_sha256").exists()
+
+    def test_runner_that_never_ran_is_infrastructure_not_a_wrong_patch(
+        self, tmp_path: Path
+    ) -> None:
+        """DAT-09: run_script.sh exit 127 followed by parser exit 0 (empty test list)."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=0,
+            workspace_files={
+                "apply_status": "applied\n",
+                "run_status": "127\n",
+                "output.json": json.dumps({"tests": []}),
+            },
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is True
+        assert result.error is not None and "infrastructure code 127" in result.error
+
+    def test_failing_tests_keep_their_runner_exit_code(self, tmp_path: Path) -> None:
+        """A non-zero test-runner exit is an outcome: pytest exit 1 is still scored."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=0,
+            workspace_files={
+                "apply_status": "applied\n",
+                "run_status": "1\n",
+                "output.json": json.dumps({"tests": [{"name": "test_a", "status": "FAILED"}]}),
+            },
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is False
+        assert result.error is None
+
+    def test_malformed_report_is_an_infrastructure_failure(self, tmp_path: Path) -> None:
+        """DAT-09: a container that exits 0 with unparseable output.json is not a model failure."""
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=0,
+            workspace_files={
+                "apply_status": "applied\n",
+                "run_status": "0\n",
+                "output.json": '{"tests": [{"name": "test_a"',
+            },
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.passed is False
+        assert result.infrastructure_error is True
+        assert result.error is not None and "unreadable output.json" in result.error
+
+    def test_report_without_a_test_list_is_an_infrastructure_failure(self, tmp_path: Path) -> None:
+        ctx = _make_ctx(fail_to_pass={"test_a"}, pass_to_pass=set())
+        _write_run_scripts(tmp_path / "scripts", ctx.instance_id)
+        output_dir = tmp_path / "output"
+        mock_docker = _docker_stub(
+            output_dir=output_dir,
+            instance_id=ctx.instance_id,
+            status_code=0,
+            workspace_files={
+                "apply_status": "applied\n",
+                "run_status": "0\n",
+                "output.json": json.dumps({"summary": "no tests key"}),
+            },
+        )
+        with patch.dict("sys.modules", {"docker": mock_docker}):
+            result = evaluate_instance_docker(
+                ctx,
+                dockerhub_username="testuser",
+                scripts_dir=tmp_path / "scripts",
+                dockerfiles_dir=None,
+                output_dir=output_dir,
+                prefix="baseline",
+            )
+        assert result.infrastructure_error is True
+        assert result.error is not None and "no 'tests' list" in result.error
 
     def test_dataset_values_are_shell_quoted(self) -> None:
         script = build_entry_script(

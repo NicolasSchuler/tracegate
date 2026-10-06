@@ -447,6 +447,8 @@ class AdaptiveBudgetPolicyController:
         self.config = config
         self._lock = threading.RLock()
         self._rng = random.Random(config.random_seed)
+        # POL-05: the key of the decision in flight, or None outside ``_decision_rng``.
+        self._decision_rng_key: str | None = None
         self._state = LinUCBState(action_names=BUDGET_POLICY_ACTIONS)
         self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
         self._save_counter = 0
@@ -724,11 +726,14 @@ class AdaptiveBudgetPolicyController:
             yield
             return
         shared = self._rng
+        shared_key = self._decision_rng_key
         self._rng = random.Random(derive_seed(self.config.random_seed, rng_key))
+        self._decision_rng_key = rng_key
         try:
             yield
         finally:
             self._rng = shared
+            self._decision_rng_key = shared_key
 
     def decide(
         self,
@@ -1193,7 +1198,26 @@ class AdaptiveBudgetPolicyController:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
         if self.config.algorithm != "thompson":
             return dict.fromkeys(state.action_names, 0.0)
-        return core.thompson_scores(state, x, seed=self.config.random_seed)
+        return core.thompson_scores(state, x, seed=self._thompson_seed(state=state))
+
+    def _thompson_seed(self, *, state: LinUCBState) -> int | None:
+        """The NumPy seed for this decision's Thompson draw (POL-05).
+
+        Keyed like the Python RNG, so the draw does not depend on how many decisions
+        other units made first. The arm space names the stream, so the gate and the
+        family head of one decision keep drawing independently; without a key the old
+        decision-counter stream is kept.
+        """
+        if self.config.random_seed is None:
+            return None
+        if self._decision_rng_key is None:
+            return int(self.config.random_seed) + int(state.decisions)
+        return derive_seed(
+            self.config.random_seed,
+            self._decision_rng_key,
+            "thompson",
+            *state.action_names,
+        )
 
     def _update_model(
         self,

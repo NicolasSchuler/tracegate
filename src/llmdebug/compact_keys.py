@@ -109,13 +109,42 @@ KEY_MAP: dict[str, str] = {
     "missing_count": "_mc",
 }
 
-# Reverse mapping for decoding
-REVERSE_KEY_MAP: dict[str, str] = {v: k for k, v in KEY_MAP.items()}
+# Short keys earlier releases wrote that current captures never produce. Decoding has to
+# keep understanding them: compaction skips locals and args, but not user-supplied extra
+# context, so a snapshot captured with extra={"stats": {"min": 1}, "device": "cuda"} holds
+# `_st`, `_mn` and `_dev` (CAP-17).
+LEGACY_REVERSE_KEY_MAP: dict[str, str] = {
+    "_arr": "__array__",
+    "_df": "__dataframe__",
+    "_ser": "__series__",
+    "_typ": "__type__",
+    "_sh": "shape",
+    "_dt": "dtype",
+    "_hd": "head",
+    "_ht": "head_truncated",
+    "_dev": "device",
+    "_rg": "requires_grad",
+    "_anom": "anomalies",
+    "_st": "stats",
+    "_mu": "mean",
+    "_sd": "std",
+    "_mn": "min",
+    "_mx": "max",
+}
 
-if len(REVERSE_KEY_MAP) != len(KEY_MAP):
+# Reverse mapping for decoding: current keys plus the retired ones old files still carry.
+REVERSE_KEY_MAP: dict[str, str] = {
+    **LEGACY_REVERSE_KEY_MAP,
+    **{v: k for k, v in KEY_MAP.items()},
+}
+
+# One guard for both failure modes: a short key used twice in KEY_MAP, and a KEY_MAP entry
+# that reuses a retired one (which would decode old snapshots to the wrong key).
+if len(REVERSE_KEY_MAP) != len(KEY_MAP) + len(LEGACY_REVERSE_KEY_MAP):
     raise ValueError(
-        f"KEY_MAP has duplicate short-key values: "
-        f"{len(KEY_MAP)} keys but only {len(REVERSE_KEY_MAP)} unique values"
+        f"KEY_MAP has duplicate short-key values, or reuses a retired one: "
+        f"{len(KEY_MAP)} current and {len(LEGACY_REVERSE_KEY_MAP)} retired keys map to "
+        f"only {len(REVERSE_KEY_MAP)} unique values"
     )
 
 # Keys that contain user data (locals, args) - don't transform their contents

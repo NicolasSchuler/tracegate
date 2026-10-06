@@ -10,7 +10,6 @@ import pytest
 import llmdebug._snapshot_loader as snapshot_loader
 from llmdebug._snapshot_loader import (
     _has_snapshot_files,
-    _is_within_out_dir,
     _latest_pointer_path,
     _normalize_line_value,
     _normalize_mtime_value,
@@ -20,6 +19,7 @@ from llmdebug._snapshot_loader import (
     load_snapshot_raw,
     resolve_snapshot_ref_path,
 )
+from llmdebug.snapshot_index import is_confined_to
 
 
 def test_find_all_snapshots_skips_invalid_index_mtime(
@@ -32,7 +32,7 @@ def test_find_all_snapshots_skips_invalid_index_mtime(
     bad_path.write_text("{}", encoding="utf-8")
 
     # The fake rows stand for a complete index (RCA-03 checks completeness separately).
-    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
+    monkeypatch.setattr(snapshot_loader, "index_covers_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -81,7 +81,7 @@ def test_find_all_snapshots_filters_search_matches_from_index(
     valueerror_path.write_text("{}", encoding="utf-8")
 
     # The fake rows stand for a complete index (RCA-03 checks completeness separately).
-    monkeypatch.setattr(snapshot_loader, "index_matches_disk", lambda _out_dir: True)
+    monkeypatch.setattr(snapshot_loader, "index_covers_disk", lambda _out_dir: True)
     monkeypatch.setattr(
         snapshot_loader,
         "list_snapshot_records",
@@ -329,15 +329,15 @@ def test_normalize_mtime_value_valid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _is_within_out_dir: OSError path
+# is_confined_to: OSError path
 # ---------------------------------------------------------------------------
 
 
 def test_is_within_out_dir_oserror_returns_false(tmp_path: Path) -> None:
-    """_is_within_out_dir returns False on OSError from resolve()."""
+    """is_confined_to returns False on OSError from resolve()."""
     fake_path = MagicMock(spec=Path)
     fake_path.resolve.side_effect = OSError("cannot resolve")
-    result = _is_within_out_dir(fake_path, str(tmp_path))
+    result = is_confined_to(fake_path, str(tmp_path))
     assert result is False
 
 
@@ -345,14 +345,14 @@ def test_is_within_out_dir_outside_returns_false(tmp_path: Path) -> None:
     other = tmp_path.parent
     subdir = tmp_path / "sub"
     subdir.mkdir()
-    result = _is_within_out_dir(other, str(subdir))
+    result = is_confined_to(other, str(subdir))
     assert result is False
 
 
 def test_is_within_out_dir_inside_returns_true(tmp_path: Path) -> None:
     child = tmp_path / "snap.json"
     child.write_text("{}", encoding="utf-8")
-    result = _is_within_out_dir(child, str(tmp_path))
+    result = is_confined_to(child, str(tmp_path))
     assert result is True
 
 
@@ -779,3 +779,104 @@ def test_partially_populated_index_does_not_hide_snapshots(tmp_path: Path) -> No
     assert [entry["name"] for entry in newest] == ["newest"]
     assert len(everything) == 3
     assert count_snapshot_records(str(tmp_path)) == 3  # the rescan repaired the index
+
+
+# ---------------------------------------------------------------------------
+# RCA-02: confining the directory must also confine what is read from inside it
+# ---------------------------------------------------------------------------
+
+
+def _external_snapshot(tmp_path: Path) -> Path:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "secret.json"
+    target.write_text('{"name": "secret", "exception": {"type": "Secret"}}', encoding="utf-8")
+    return target
+
+
+def test_latest_pointer_symlink_out_of_out_dir_is_not_loaded(tmp_path: Path) -> None:
+    target = _external_snapshot(tmp_path)
+    out_dir = tmp_path / "snaps"
+    out_dir.mkdir()
+    (out_dir / "latest.json").symlink_to(target)
+
+    assert _latest_pointer_path(str(out_dir)) is None
+    with pytest.raises(FileNotFoundError):
+        load_snapshot(None, str(out_dir))
+    with pytest.raises(FileNotFoundError):
+        load_snapshot_raw(None, str(out_dir))
+    with pytest.raises(FileNotFoundError):
+        resolve_snapshot_ref_path("latest", str(out_dir))
+
+
+def test_snapshot_symlink_out_of_out_dir_is_not_listed(tmp_path: Path) -> None:
+    target = _external_snapshot(tmp_path)
+    out_dir = tmp_path / "snaps"
+    out_dir.mkdir()
+    (out_dir / "escape.json").symlink_to(target)
+    inside = out_dir / "real.json"
+    inside.write_text('{"name": "real", "exception": {"type": "ValueError"}}', encoding="utf-8")
+
+    names = {str(entry["name"]) for entry in find_all_snapshots(str(out_dir))}
+    assert names == {"real"}
+
+
+def test_find_all_snapshots_rescans_when_a_stale_row_balances_a_missing_one(
+    tmp_path: Path,
+) -> None:
+    """RCA-03: equal row and file counts do not mean the index covers the directory."""
+    import os
+
+    from llmdebug.state_db import count_snapshot_records, upsert_snapshot_record
+
+    old_path = tmp_path / "old.json"
+    old_path.write_text('{"name": "old", "exception": {"type": "ValueError"}}', encoding="utf-8")
+    new_path = tmp_path / "new.json"
+    new_path.write_text('{"name": "new", "exception": {"type": "KeyError"}}', encoding="utf-8")
+    os.utime(old_path, (10.0, 10.0))
+    os.utime(new_path, (20.0, 20.0))
+
+    # old.json is indexed and is the newest row, so a limited read stops before reaching
+    # the stale row for the deleted stale.json and never prunes it. new.json never made
+    # it into the index: two rows, two files on disk.
+    for name, mtime in (("old.json", 10.0), ("stale.json", 5.0)):
+        upsert_snapshot_record(
+            str(tmp_path),
+            {
+                "path": str((tmp_path / name).resolve()),
+                "mtime": mtime,
+                "name": name.removesuffix(".json"),
+                "exc_type": "ValueError",
+                "exc_message": "",
+                "file": "app.py",
+                "line": "1",
+            },
+        )
+    assert count_snapshot_records(str(tmp_path)) == 2
+
+    entries = find_all_snapshots(str(tmp_path), limit=1)
+
+    assert [str(entry["name"]) for entry in entries] == ["new"]
+
+
+def test_index_covers_disk_without_snapshot_files(tmp_path: Path) -> None:
+    """RCA-03: an empty directory has nothing the index could be missing."""
+    from llmdebug.snapshot_index import index_covers_disk
+
+    assert index_covers_disk(str(tmp_path)) is True
+
+
+def test_index_covers_disk_treats_an_unreadable_index_as_not_covering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """RCA-03: an index that cannot be read cannot be trusted either."""
+    import llmdebug.snapshot_index as snapshot_index
+
+    (tmp_path / "snap.json").write_text("{}", encoding="utf-8")
+
+    def _boom(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr(snapshot_index, "list_snapshot_records", _boom)
+
+    assert snapshot_index.index_covers_disk(str(tmp_path)) is False

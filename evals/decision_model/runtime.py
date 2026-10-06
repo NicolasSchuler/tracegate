@@ -9,8 +9,9 @@ status that the controller handles per role.
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from .policy import (
     ADVICE_STATUS_MISSING,
     ADVICE_STATUS_OK,
     DecisionModelAdvice,
+    DecisionModelAdvisor,
     DecisionModelBinding,
     atomic_action_from_answers,
 )
@@ -36,9 +38,22 @@ DECISION_MODEL_STATES_FILENAME = "decision_model_states.jsonl"
 # The preflight may hit a cold llama-swap entry, which holds the request until the model has
 # loaded instead of answering 503 like the PyTorch sidecar; give it time to finish.
 DECISION_MODEL_PREFLIGHT_TIMEOUT_SEC = 300.0
+# Cooldown between ``/health`` lookups of the served revision after a failed one.
+DECISION_MODEL_REVISION_RETRY_SEC = 30.0
+# What the sidecar reports about the release it serves; recorded in the run configuration so a
+# different revision, quantization, dtype or context limit is visible and detected on resume.
+DECISION_MODEL_SERVING_IDENTITY_FIELDS = (
+    "model",
+    "revision",
+    "device",
+    "dtype",
+    "quantization",
+    "max_length",
+)
 STATUS_INVALID_REQUEST = "invalid_request"
 STATUS_INVALID_RESPONSE = "invalid_response"
 _ERROR_CHARS = 200
+_IDENTITY_FIELD_CHARS = 200
 
 
 @dataclass(frozen=True)
@@ -79,11 +94,14 @@ class SystemOneAdvisor:
         settings: DecisionModelSettings,
         *,
         client: SystemOneClient | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._profile = get_profile(settings.policy.profile)
         self._client = client or SystemOneClient(settings.client)
         self._revision: str | None = None
+        self._clock = clock
+        self._revision_retry_at = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -103,14 +121,22 @@ class SystemOneAdvisor:
         """Model revision from ``/health``; cached only once the sidecar reports healthy.
 
         The sidecar answers 503 while the model loads, so a failed lookup is retried later
-        instead of pinning an empty revision for the whole run.
+        instead of pinning an empty revision for the whole run.  Retries are rate-limited and
+        skipped entirely while the query circuit breaker is open: an unresponsive sidecar used
+        to get one blocking ``/health`` per decision (each up to the full timeout, under this
+        shared lock) although the decision itself returned ``circuit_open`` immediately.
         """
         with self._lock:
-            if self._revision is None:
-                result = self._client.health()
-                if not result.ok or not result.body:
-                    return ""
-                self._revision = str(result.body.get("revision") or "")
+            if self._revision is not None:
+                return self._revision
+            now = self._clock()
+            if now < self._revision_retry_at or self._client.circuit_open:
+                return ""
+            result = self._client.health()
+            if not result.ok or not result.body:
+                self._revision_retry_at = now + DECISION_MODEL_REVISION_RETRY_SEC
+                return ""
+            self._revision = str(result.body.get("revision") or "")
             return self._revision
 
     def advise(self, request: AdviceRequest) -> DecisionModelAdvice:
@@ -215,6 +241,22 @@ def binding_of(controller: Any) -> DecisionModelBinding | None:
     return binding
 
 
+def advise_safely(advisor: DecisionModelAdvisor, request: AdviceRequest) -> DecisionModelAdvice:
+    """Query *advisor*; any exception becomes an ``error:<Type>`` status.
+
+    The client maps transport failures to statuses itself, but not every httpx error is a
+    ``TransportError`` (a corrupt compressed response raises ``DecodingError``), so every
+    caller that must survive one bad query goes through here.
+    """
+    try:
+        return advisor.advise(request)
+    except Exception as exc:  # the decision model must never break its caller
+        return DecisionModelAdvice(
+            status=f"error:{type(exc).__name__}",
+            error=str(exc)[:_ERROR_CHARS],
+        )
+
+
 def advise_for_attempt(
     binding: DecisionModelBinding,
     request: AdviceRequest,
@@ -222,13 +264,7 @@ def advise_for_attempt(
     """Query the advisor; any exception becomes an ``error:<Type>`` status."""
     if binding.advisor is None:
         return DecisionModelAdvice(status=ADVICE_STATUS_MISSING)
-    try:
-        return binding.advisor.advise(request)
-    except Exception as exc:  # the decision model must never break an attempt
-        return DecisionModelAdvice(
-            status=f"error:{type(exc).__name__}",
-            error=str(exc)[:_ERROR_CHARS],
-        )
+    return advise_safely(binding.advisor, request)
 
 
 def record_advice_state(
@@ -256,14 +292,50 @@ def record_advice_state(
         return
 
 
-def check_decision_model_health(
+def _serving_identity(body: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Sanitized serving identity from a ``/health`` body (empty when it reports none).
+
+    Only the documented fields are kept, strings are clipped, and empty values are dropped so
+    an endpoint that reports nothing (for example a plain gateway) adds nothing to the run
+    configuration.
+    """
+    if not isinstance(body, Mapping):
+        return {}
+    identity: dict[str, Any] = {}
+    for field_name in DECISION_MODEL_SERVING_IDENTITY_FIELDS:
+        raw = body.get(field_name)
+        if isinstance(raw, bool) or raw is None:
+            continue
+        if isinstance(raw, (int, float)):
+            identity[field_name] = int(raw) if float(raw).is_integer() else float(raw)
+            continue
+        text = str(raw).strip()
+        if text:
+            identity[field_name] = text[:_IDENTITY_FIELD_CHARS]
+    return identity
+
+
+@dataclass(frozen=True)
+class DecisionModelPreflight:
+    """Outcome of the pre-run health check: an error message and the served identity."""
+
+    error: str = ""
+    identity: dict[str, Any] = field(default_factory=dict)
+
+
+def decision_model_preflight(
     settings: DecisionModelSettings,
     *,
     client: SystemOneClient | None = None,
-) -> str:
-    """Return an error message when an enabled sidecar is unreachable (empty when healthy)."""
+) -> DecisionModelPreflight:
+    """Health-check an enabled sidecar and resolve what it actually serves.
+
+    The identity (model id, revision, device, dtype, quantization, context limit) is what makes
+    two runs with the same flags comparable: the request alias (``clef-flash``) stays the same
+    when the sidecar is restarted on another revision or quantization.
+    """
     if not settings.enabled:
-        return ""
+        return DecisionModelPreflight()
     preflight_timeout = max(settings.client.timeout_sec, DECISION_MODEL_PREFLIGHT_TIMEOUT_SEC)
     active = client or SystemOneClient(replace(settings.client, timeout_sec=preflight_timeout))
     try:
@@ -272,15 +344,26 @@ def check_decision_model_health(
         if client is None:
             active.close()
     if result.ok:
-        return ""
+        return DecisionModelPreflight(identity=_serving_identity(result.body))
     detail = f": {result.error}" if result.error else ""
     loading = (
         " The sidecar answers 503 while the model is still loading."
         if (result.status == "http_503")
         else ""
     )
-    return (
-        f"decision model sidecar at {settings.client.url} is not healthy ({result.status}{detail})."
-        f"{loading} Start it (just decision-model-up), wait for just decision-model-health, or use "
-        "--adaptive-decision-model-role off."
+    return DecisionModelPreflight(
+        error=(
+            f"decision model sidecar at {settings.client.url} is not healthy "
+            f"({result.status}{detail}).{loading} Start it (just decision-model-up), wait for "
+            "just decision-model-health, or use --adaptive-decision-model-role off."
+        )
     )
+
+
+def check_decision_model_health(
+    settings: DecisionModelSettings,
+    *,
+    client: SystemOneClient | None = None,
+) -> str:
+    """Return an error message when an enabled sidecar is unreachable (empty when healthy)."""
+    return decision_model_preflight(settings, client=client).error

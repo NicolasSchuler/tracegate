@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections.abc import Iterator
 from pathlib import Path
 
 _CLOCK_CALLS = frozenset(
@@ -41,7 +42,10 @@ _ENTROPY_CALLS = frozenset(
 _ENTROPY_MODULES = ("secrets.",)
 _NETWORK_MODULES = ("requests.", "urllib.", "http.", "socket.", "httpx.", "aiohttp.")
 _RANDOM_MODULES = ("random.", "numpy.random.")
-_SEED_CALLS = frozenset({"random.seed", "numpy.random.seed"})
+# Longest prefix first: "numpy.random." also matches nothing in "random.".
+_RANDOM_FAMILY_BY_PREFIX = (("numpy.random.", "numpy"), ("random.", "random"))
+_SEED_CALLS = {"random.seed": "random", "numpy.random.seed": "numpy"}
+_SEED_KEYWORDS = frozenset({"a", "seed"})
 _SEEDABLE_CONSTRUCTORS = frozenset(
     {"random.Random", "numpy.random.default_rng", "numpy.random.RandomState"}
 )
@@ -78,14 +82,77 @@ def _qualified_name(func: ast.expr, aliases: dict[str, str]) -> str:
     return ".".join(reversed(parts))
 
 
-def _iterates_a_set(iterable: ast.expr) -> bool:
-    if isinstance(iterable, (ast.Set, ast.SetComp)):
+def _is_a_set_expression(value: ast.expr) -> bool:
+    if isinstance(value, (ast.Set, ast.SetComp)):
         return True
     return (
-        isinstance(iterable, ast.Call)
-        and isinstance(iterable.func, ast.Name)
-        and iterable.func.id in _SET_BUILDERS
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id in _SET_BUILDERS
     )
+
+
+def _set_valued_names(tree: ast.AST) -> set[str]:
+    """Names bound to a literal set, set comprehension or ``set()``/``frozenset()`` call.
+
+    Iterating such a binding has the same hash-seed-dependent order as iterating the
+    literal, so the checker must see through the indirection (DAT-14).
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _is_a_set_expression(node.value):
+            targets = node.targets
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and _is_a_set_expression(node.value)
+        ):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+    return names
+
+
+def _iterates_a_set(iterable: ast.expr, set_valued_names: set[str]) -> bool:
+    if _is_a_set_expression(iterable):
+        return True
+    return isinstance(iterable, ast.Name) and iterable.id in set_valued_names
+
+
+def _random_family(name: str) -> str:
+    for prefix, family in _RANDOM_FAMILY_BY_PREFIX:
+        if name.startswith(prefix):
+            return family
+    return ""
+
+
+def _constant_seed_argument(node: ast.Call) -> bool:
+    """Whether the call passes a seed that is a constant other than ``None``.
+
+    ``random.seed(None)`` and ``default_rng(seed=None)`` reseed from entropy, so an
+    argument alone does not make the RNG reproducible.
+    """
+    values = [*node.args, *(kw.value for kw in node.keywords if kw.arg in _SEED_KEYWORDS)]
+    if not values:
+        return False
+    return all(isinstance(value, ast.Constant) and value.value is not None for value in values)
+
+
+def _walk_with_scope(
+    node: ast.AST, scope: ast.AST | None = None
+) -> Iterator[tuple[ast.AST, ast.AST | None]]:
+    """Yield every descendant with the function scope that encloses it (``None`` = module)."""
+    for child in ast.iter_child_nodes(node):
+        child_scope = (
+            child
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+            else scope
+        )
+        yield child, child_scope
+        yield from _walk_with_scope(child, child_scope)
 
 
 def nondeterminism_reasons(code: str) -> list[str]:
@@ -103,14 +170,16 @@ def nondeterminism_reasons(code: str) -> list[str]:
         return ["unparsable_risky_call"] if any(m in lower for m in _FALLBACK_MARKERS) else []
 
     aliases = _import_aliases(tree)
+    set_valued_names = _set_valued_names(tree)
     reasons: set[str] = set()
     if any(f"{name}.".startswith(_NETWORK_MODULES) for name in aliases.values()):
         reasons.add("network")  # importing a network client is enough to flag the case
-    seeded = False
-    random_calls = 0
-    for node in ast.walk(tree):
+    # (family, scope, lineno) of constant seeds, and of the random calls they may exempt.
+    seeds: list[tuple[str, ast.AST | None, int]] = []
+    random_uses: list[tuple[str, ast.AST | None, int]] = []
+    for node, scope in _walk_with_scope(tree):
         if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)) and _iterates_a_set(
-            node.iter
+            node.iter, set_valued_names
         ):
             reasons.add("set_iteration")
         if not isinstance(node, ast.Call):
@@ -125,14 +194,25 @@ def nondeterminism_reasons(code: str) -> list[str]:
         elif name.startswith(_NETWORK_MODULES):
             reasons.add("network")
         elif name in _SEED_CALLS:
-            seeded = seeded or bool(node.args or node.keywords)
+            if _constant_seed_argument(node):
+                seeds.append((_SEED_CALLS[name], scope, node.lineno))
         elif name in _SEEDABLE_CONSTRUCTORS:
-            if not (node.args or node.keywords):
+            if not _constant_seed_argument(node):
                 reasons.add("unseeded_random")
         elif name.startswith(_RANDOM_MODULES):
-            random_calls += 1
-    if random_calls and not seeded:
-        reasons.add("unseeded_random")
+            random_uses.append((_random_family(name), scope, node.lineno))
+    # DAT-14: a seed only exempts a random call when it is for the same RNG and is known to
+    # run first -- earlier in the same function, or earlier at module level.
+    for family, scope, lineno in random_uses:
+        covered = any(
+            seed_family == family
+            and seed_lineno < lineno
+            and (seed_scope is scope or seed_scope is None)
+            for seed_family, seed_scope, seed_lineno in seeds
+        )
+        if not covered:
+            reasons.add("unseeded_random")
+            break
     return sorted(reasons)
 
 

@@ -3,6 +3,7 @@
 import re
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -1411,6 +1412,65 @@ def test_large_mixed_sets_fall_back_to_a_bounded_sample(cfg):
 
     assert len(result) == cfg.max_items + 1
     assert result[-1] == "...[TRUNC]"
+
+
+def test_large_set_of_decimal_nan_keeps_its_preview():
+    """CAP-10: `Decimal('NaN')` raises InvalidOperation, which is not a TypeError."""
+    from decimal import Decimal
+
+    cfg = SnapshotConfig(max_items=5)
+    values: set[object] = {Decimal(i) for i in range(1500)}
+    values.add(Decimal("NaN"))
+
+    result = to_jsonlike(values, cfg)
+
+    assert isinstance(result, list)
+    assert len(result) == cfg.max_items + 1
+    assert result[-1] == "...[TRUNC]"
+    assert not any(isinstance(item, str) and "serialization failed" in item for item in result)
+
+
+def test_sampled_set_preview_is_marked_truncated_above_the_sampling_cap():
+    """CAP-10: truncation came from the preview length, which an internal cap bounded."""
+    cfg = SnapshotConfig(max_items=1500)
+    mixed: set[object] = set(range(1500)) | {f"s{i}" for i in range(1500)}
+
+    result = to_jsonlike(mixed, cfg)
+
+    assert isinstance(result, list)
+    assert result[-1] == "...[TRUNC]"
+
+
+def test_incomparable_set_preview_does_not_depend_on_the_hash_seed(tmp_path: Path):
+    """CAP-10: the sample was taken in set-iteration order, so contents moved with the seed."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    script = tmp_path / "preview.py"
+    script.write_text(
+        "import json\n"
+        "from llmdebug.config import SnapshotConfig\n"
+        "from llmdebug.serialize import to_jsonlike\n"
+        "values = {f'string-{i:05d}' for i in range(3000)}\n"
+        "values.add(None)\n"
+        "print(json.dumps(to_jsonlike(values, SnapshotConfig(max_items=8))))\n",
+        encoding="utf-8",
+    )
+
+    def _run(seed: str) -> list[object]:
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        ).stdout
+        return json.loads(out)
+
+    assert _run("1") == _run("2")
 
 
 def test_dataframe_preview_respects_max_items_and_max_str():

@@ -774,10 +774,20 @@ def clean(keep: int, delete_all: bool, yes: bool, out_dir: str, purge_state: boo
     deleted, failed = _perform_deletions(to_delete)
     if not purge_state:
         # Drop index rows of the deleted snapshots so listings don't trust stale rows.
+        # Best-effort, like retention's own index cleanup: the files are already gone, so
+        # an unreadable database must not swallow the deletion summary (RCA-03).
         removed_snapshots = set(snapshot_files) & set(to_delete)
-        remove_snapshot_records(
-            str(out_path), [str(path.resolve()) for path in removed_snapshots if not path.exists()]
-        )
+        try:
+            remove_snapshot_records(
+                str(out_path),
+                [str(path.resolve()) for path in removed_snapshots if not path.exists()],
+            )
+        except Exception as index_error:
+            click.echo(
+                f"  Warning: snapshot index cleanup failed: "
+                f"{type(index_error).__name__}: {index_error}",
+                err=True,
+            )
     msg = f"Deleted {deleted} file(s)."
     if failed:
         msg += f" Failed to delete {failed} file(s)."

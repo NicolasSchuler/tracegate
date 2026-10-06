@@ -102,6 +102,9 @@ def _resolve_edits(edits: list[Any], *, cwd: Path) -> _ResolvedEdits:
             return _fail("bad_path", entry=_safe_trunc(entry))
         if not isinstance(find, str) or not isinstance(replace, str):
             return _fail("bad_find_replace", entry=_safe_trunc(entry))
+        # Chaining and matching run on LF text: a CRLF replacement payload would reach
+        # _with_line_endings unnormalized and come back with doubled "\r" (LLM-09).
+        replace = _normalize_newlines(replace)
         if not find:
             return _fail("empty_find", path=path)
         if path not in current:
@@ -233,6 +236,16 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
 _FUZZY_BLOCK_TIME_BUDGET_SEC = 2.0
 """Wall-time cap on one fuzzy block search (LLM-12)."""
 
+_FUZZY_BLOCK_MAX_CHARS = 4000
+"""Largest find block or candidate window compared character by character (LLM-12).
+
+``SequenceMatcher.ratio`` is quadratic and cannot be interrupted, so the wall-time cap
+only bounds the search *between* candidates: one 16,000-character line with
+adjacent-character transpositions passes both cheap bounds and then spends seconds
+inside a single call. Bounding the compared sizes keeps every comparison far below the
+budget; a targeted single replacement is never this large.
+"""
+
 
 def _apply_fuzzy_block_replacement(
     *,
@@ -245,6 +258,8 @@ def _apply_fuzzy_block_replacement(
         return None
     # Keep fuzzy replacement conservative to avoid accidental rewrites.
     if len(find_block) < 16:
+        return None
+    if len(find_block) > _FUZZY_BLOCK_MAX_CHARS:
         return None
 
     line_chunks = before_nl.splitlines(keepends=True)
@@ -275,8 +290,9 @@ def _apply_fuzzy_block_replacement(
     # LLM-12: a window whose ratio can't reach min_ratio - margin can be neither the
     # accepted match nor within the ambiguity margin of one, so the cheap upper bounds
     # (real_quick_ratio, quick_ratio) skip it without changing the outcome. The matcher
-    # caches the find block as its second sequence, and a wall-time cap makes a
-    # pathological file fail closed instead of burning CPU outside any deadline.
+    # caches the find block as its second sequence, and a wall-time cap plus the
+    # per-comparison size bound make a pathological file fail closed instead of burning
+    # CPU outside any deadline.
     ambiguity_margin = 0.03
     prune_below = min_ratio - ambiguity_margin
     matcher = difflib.SequenceMatcher(None, "", find_block)
@@ -288,7 +304,7 @@ def _apply_fuzzy_block_replacement(
             if time.monotonic() > deadline:
                 return None
             raw_window = "".join(line_chunks[start : start + window_len]).strip()
-            if not raw_window:
+            if not raw_window or len(raw_window) > _FUZZY_BLOCK_MAX_CHARS:
                 continue
             matcher.set_seq1(raw_window)
             if matcher.real_quick_ratio() < prune_below or matcher.quick_ratio() < prune_below:
@@ -314,15 +330,26 @@ def _apply_fuzzy_block_replacement(
 
 def _normalize_full_file_response(raw: dict[str, Any]) -> tuple[str | None, PatcherMeta]:
     content = _get_first_choice_content(raw)
+    finish_reason = _get_first_choice_finish_reason(raw)
     if content is None:
-        return None, {"error": "empty_full_file_response", "raw_response": _safe_trunc(raw)}
+        # Truncation is terminal and decided before the content check (LLM-02).
+        empty_meta: PatcherMeta = {
+            "error": (
+                "truncated_full_file_response"
+                if finish_reason == "length"
+                else "empty_full_file_response"
+            ),
+            "raw_response": _safe_trunc(raw),
+        }
+        if finish_reason:
+            empty_meta["finish_reason"] = finish_reason
+        return None, empty_meta
 
     repaired, code_fence_stripped = _extract_first_fenced_code_block(content)
     meta: PatcherMeta = {
         "full_file_code_fence_stripped": code_fence_stripped,
         "full_file_output_chars": len(repaired),
     }
-    finish_reason = _get_first_choice_finish_reason(raw)
     if finish_reason:
         meta["finish_reason"] = finish_reason
     if finish_reason == "length":

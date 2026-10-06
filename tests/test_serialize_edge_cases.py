@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+from collections import namedtuple
 from typing import Any
 
 import numpy as np
@@ -900,3 +901,218 @@ def test_cupy_arrays_get_anomaly_counts() -> None:
     arr = _FakeCupy([1.0, float("nan"), float("inf")])
     assert count_anomalies(arr) == {"nan": 1, "inf": 1}
     assert _compute_array_stats_and_anomalies(arr)[1] == {"nan": 1, "inf": 1}
+
+
+def _past_depth_limit(value: Any, cfg: SnapshotConfig) -> Any:
+    """Serialize *value* where ``to_jsonlike`` has to fall back to a repr (CAP-03)."""
+    rendered = to_jsonlike({"a": {"b": value}}, cfg)
+    assert isinstance(rendered, dict)
+    return rendered["a"]["b"]
+
+
+def test_depth_limit_repr_keeps_the_plain_repr_without_redaction() -> None:
+    cfg = SnapshotConfig(redaction_profile="dev")
+    assert _past_depth_limit({"password": "hunter2"}, cfg) == "{'password': 'hunter2'}"
+
+
+def test_depth_limit_repr_elides_oversized_containers() -> None:
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=2, max_str=200)
+    wide = {"k0": 0, "k1": 1, "k2": 2, "k3": 3}
+
+    assert _past_depth_limit(wide, cfg) == "{'k0': 0, 'k1': 1, '...[TRUNC]': '+2 more keys'}"
+    assert _past_depth_limit([0, 1, 2, 3], cfg) == "[0, 1, '...[TRUNC]']"
+
+
+def test_depth_limit_repr_preserves_tuples_and_redacts_pairs() -> None:
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=5, max_str=200)
+
+    assert _past_depth_limit((1, {"api_key": "abc"}), cfg) == "(1, {'api_key': '[REDACTED]'})"
+    assert _past_depth_limit(["api_key", "abc"], cfg) == "['api_key', '[REDACTED]']"
+
+
+def test_depth_limit_repr_stops_at_its_own_depth_bound() -> None:
+    """Below the bound the repr is handed to the text patterns unchanged."""
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=500)
+    deep: Any = {"password": "hunter2"}
+    for _ in range(7):
+        deep = {"wrap": deep}
+
+    assert "'password': 'hunter2'" in _past_depth_limit(deep, cfg)
+
+
+def test_depth_limit_repr_fails_closed_on_an_unwalkable_container() -> None:
+    class _HostileKey:
+        """Hashable exactly once, so the rebuild of the dict fails, not its construction."""
+
+        def __init__(self) -> None:
+            self.hashed = 0
+
+        def __hash__(self) -> int:
+            self.hashed += 1
+            if self.hashed > 1:
+                raise RuntimeError("no hash")
+            return 7
+
+    cfg = SnapshotConfig(redaction_profile="prod")
+
+    assert _past_depth_limit({_HostileKey(): "hunter2"}, cfg) == (
+        "<serialization failed: RuntimeError>"
+    )
+
+
+def test_depth_limit_repr_rebuilds_container_subclasses() -> None:
+    """A subclass keeps its own repr, which the text patterns need not understand."""
+
+    class _Config(dict):  # type: ignore[type-arg]
+        def __repr__(self) -> str:
+            return f"_Config({dict.__repr__(self)})"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Config(password="hunter2"), cfg) == (
+        "_Config({'password': '[REDACTED]'})"
+    )
+
+
+def test_depth_limit_repr_rebuilds_a_subclass_with_a_hostile_constructor() -> None:
+    """``copy`` and the constructor can both fail; the type name is then rendered instead."""
+
+    class _Frozen(tuple):  # type: ignore[type-arg]
+        def __new__(cls, *_args: Any) -> Any:
+            raise TypeError("no construction")
+
+        def __copy__(self) -> Any:
+            raise TypeError("no copy")
+
+    frozen = tuple.__new__(_Frozen, ({"password": "hunter2"},))
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(frozen, cfg) == ("\"_Frozen([{'password': '[REDACTED]'}])\"")
+
+
+def test_depth_limit_repr_redacts_a_namedtuple_name_value_pair() -> None:
+    """The same pair rule as for a plain tuple: ("password", value) is a field."""
+    field = namedtuple("field", ["name", "value"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    rendered = _past_depth_limit(field("Authorization", "Basic dXNlcjpwYXNz"), cfg)
+
+    assert rendered == "field(name='Authorization', value='[REDACTED]')"
+
+
+def test_depth_limit_repr_elides_namedtuple_fields_beyond_max_items() -> None:
+    """``max_items`` cannot drop fields, so the extra values are elided in place."""
+    wide = namedtuple("wide", ["a", "b", "c"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=2, max_str=200)
+
+    assert _past_depth_limit(wide(1, 2, 3), cfg) == "wide(a=1, b=2, c='...[TRUNC]')"
+
+
+def test_depth_limit_repr_redacts_namedtuple_fields_by_name() -> None:
+    creds = namedtuple("creds", ["user", "password", "extra"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    rendered = _past_depth_limit(creds("bob", "hunter2", {"api_key": "abc"}), cfg)
+
+    assert rendered == "creds(user='bob', password='[REDACTED]', extra={'api_key': '[REDACTED]'})"
+
+
+def test_depth_limit_repr_fails_closed_on_a_broken_namedtuple() -> None:
+    """A type that looks like a namedtuple but cannot be rebuilt is never repr'd as-is."""
+
+    class _Broken(tuple):  # type: ignore[type-arg]
+        _fields = ("password",)
+
+        def _replace(self, **_kwargs: Any) -> Any:
+            raise TypeError("no _replace")
+
+        def __repr__(self) -> str:
+            return "_Broken(password='hunter2')"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Broken(("hunter2",)), cfg) == "<serialization failed: TypeError>"
+
+
+def test_depth_limit_repr_rebuilds_list_and_tuple_subclasses() -> None:
+    class _Row(list[Any]):
+        def __repr__(self) -> str:
+            return f"_Row({list.__repr__(self)})"
+
+    class _Pair(tuple[Any, ...]):
+        def __repr__(self) -> str:
+            return f"_Pair({tuple.__repr__(self)})"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Row([{"password": "hunter2"}]), cfg) == (
+        "_Row([{'password': '[REDACTED]'}])"
+    )
+    assert _past_depth_limit(_Pair(("api_key", "abc")), cfg) == ("_Pair(('api_key', '[REDACTED]'))")
+
+
+def test_depth_limit_repr_falls_back_to_redacted_when_nothing_can_be_rendered() -> None:
+    """Neither a copy, a rebuild nor a type-name rendering works: nothing is shown."""
+
+    class _Unreprable:
+        def __repr__(self) -> str:
+            raise RuntimeError("no repr")
+
+    class _Weird(dict[str, Any]):
+        def __init__(self, marker: str, data: dict[str, Any]) -> None:
+            super().__init__(data)
+            self.marker = marker
+
+        def __copy__(self) -> Any:
+            raise TypeError("no copy")
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Weird("m", {"v": _Unreprable()}), cfg) == "'[REDACTED]'"
+
+
+def test_series_preview_cells_are_normalized_without_pandas() -> None:
+    """CAP-01: object cells hold arbitrary values, so normalization has to recurse.
+
+    A stub stands in for pandas so the normalization is covered wherever the suite runs;
+    `tests/test_capture_hostile.py` drives the same code through real frames.
+    """
+
+    class Series:
+        __module__ = "pandas.core.series"
+
+        def __init__(self, values: list[object]) -> None:
+            self._values = values
+            self.shape = (len(values),)
+            self.name = "cells"
+            self.dtype = "object"
+
+        def head(self, _rows: int) -> Series:
+            return self
+
+        def tolist(self) -> list[object]:
+            return list(self._values)
+
+        def __len__(self) -> int:
+            return len(self._values)
+
+    cells: list[object] = [
+        {"id": 2**70},
+        [2**70, "ok"],
+        {"ok": True},
+        {"a": {"b": {"c": 1}}},
+        [[[1]]],
+        ("t", 2**70),
+    ]
+    summary = to_jsonlike(Series(cells), SnapshotConfig())
+
+    assert isinstance(summary, dict)
+    assert summary["head"] == [
+        {"id": repr(2**70)},
+        [repr(2**70), "ok"],
+        {"ok": True},
+        # Two levels in, a container becomes its repr instead of recursing without bound.
+        {"a": {"b": "{'c': 1}"}},
+        [["[1]"]],
+        ["t", repr(2**70)],
+    ]

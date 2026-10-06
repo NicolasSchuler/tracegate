@@ -75,3 +75,32 @@ def test_whitespace_pattern_ignores_trailing_blanks_without_backtracking() -> No
     started = time.perf_counter()
     assert nasty.search("a" + " " * 4000 + "c") is None
     assert time.perf_counter() - started < 0.5
+
+
+def _transposed(text: str, *, every: int) -> str:
+    """*text* with adjacent characters swapped, which keeps quick_ratio at 1.0."""
+    chars = list(text)
+    for index in range(0, len(chars) - 1, every):
+        chars[index], chars[index + 1] = chars[index + 1], chars[index]
+    return "".join(chars)
+
+
+def test_one_huge_line_cannot_outlast_the_budget_inside_a_single_comparison() -> None:
+    # Many distinct characters defeat difflib's autojunk, so ratio() does the full
+    # quadratic work; the cheap bounds both return 1.0 for this pair.
+    rng = random.Random(7)
+    alphabet = [chr(0x4E00 + offset) for offset in range(400)]
+    line = "".join(rng.choice(alphabet) for _ in range(16_000))
+    find = _transposed(line, every=97)
+    matcher = difflib.SequenceMatcher(None, line, find)
+    assert matcher.real_quick_ratio() == 1.0
+    assert matcher.quick_ratio() == 1.0
+
+    started = time.perf_counter()
+    result = _apply_fuzzy_block_replacement(
+        before_nl=f"{line}\n", find_nl=find, replace_nl="x = 1\n"
+    )
+    elapsed = time.perf_counter() - started
+
+    assert result is None
+    assert elapsed < 2.0  # one ratio() call on this pair alone took seconds

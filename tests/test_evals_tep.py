@@ -988,16 +988,17 @@ class TestAdaptiveTepControllerRecordFreePhase:
 
     def test_record_free_phase_populates_trace(self, tmp_path) -> None:
         controller = AdaptiveTepController(state_path=str(tmp_path / "tep.json"))
-        critic = TepCriticResult(overall_score_10=7.5, improvement_kind="substantive")
+        critiques = [
+            TepCriticResult(overall_score_10=score, improvement_kind="substantive")
+            for score in (6.0, 7.0, 7.5)
+        ]
 
         trace = controller.record_free_phase(
             node_id=TEP_NODE_PATCH_PROPOSER,
             case_id="case-1",
             input_summary="input",
             output_summary="output",
-            critic_result=critic,
-            scores=[6.0, 7.0, 7.5],
-            improvement_kinds=["substantive", "substantive", "substantive"],
+            critiques=critiques,
             feedback_rounds=[["feedback 1"], ["feedback 2"]],
         )
 
@@ -1009,6 +1010,50 @@ class TestAdaptiveTepControllerRecordFreePhase:
         node = controller.node(TEP_NODE_PATCH_PROPOSER)
         assert len(node.validation_buffer) == 1
         assert node.validation_buffer[0].case_id == "case-1"
+
+    def test_unparsed_window_does_not_converge_or_score(self, tmp_path) -> None:
+        """POL-17: three malformed critic replies are not an equilibrium (codex 3-1#5)."""
+        controller = AdaptiveTepController(state_path=str(tmp_path / "tep.json"))
+        critiques = [TepCriticResult.from_payload({"summary": "nonsense"}) for _ in range(3)]
+        assert [critique.critic_parsed for critique in critiques] == [False, False, False]
+
+        trace = controller.record_free_phase(
+            node_id=TEP_NODE_PATCH_PROPOSER,
+            case_id="case-1",
+            input_summary="input",
+            output_summary="output",
+            critiques=critiques,
+            feedback_rounds=[[], []],
+        )
+
+        assert trace.converged is False
+        assert trace.convergence_reason == "critic_unparsed"
+        assert trace.scores == []
+        assert controller.node(TEP_NODE_PATCH_PROPOSER).validation_buffer == []
+
+    def test_unparsed_critiques_are_dropped_from_a_mixed_window(self, tmp_path) -> None:
+        """Only parsed critiques feed convergence and the validation buffer (POL-17)."""
+        controller = AdaptiveTepController(state_path=str(tmp_path / "tep.json"))
+        critiques = [
+            TepCriticResult(overall_score_10=7.0, improvement_kind="substantive"),
+            TepCriticResult.from_payload(None),
+            TepCriticResult(overall_score_10=7.1, improvement_kind="substantive"),
+        ]
+
+        trace = controller.record_free_phase(
+            node_id=TEP_NODE_PATCH_PROPOSER,
+            case_id="case-1",
+            input_summary="input",
+            output_summary="output",
+            critiques=critiques,
+            feedback_rounds=[["feedback 1"], ["feedback 2"]],
+        )
+
+        assert trace.iterations == 3
+        assert trace.scores == pytest.approx([7.0, 7.1])
+        assert trace.improvement_kinds == ["substantive", "substantive"]
+        node = controller.node(TEP_NODE_PATCH_PROPOSER)
+        assert [entry.score for entry in node.validation_buffer] == pytest.approx([7.1])
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from evals.analysis_api import (
     ope_target_order,
     print_input_errors,
     records_by_case_condition,
+    schema_version_warning,
     summarize_bucket,
 )
 from evals.eval_types import CONDITION_FAMILY_ADAPTIVE, condition_family
@@ -108,7 +109,13 @@ def _print_core_summary(
     for stats in condition_matrix:
         _print_condition_row(stats)
 
-    print("\nPairwise Uplift Matrix")
+    basis = str(overall.get("uplift_attempt_budget_basis") or "own_budget")
+    scope = (
+        f"within common k={overall.get('common_attempt_k')} attempts"
+        if basis == "common_k"
+        else "own attempt budgets"
+    )
+    print(f"\nPairwise Uplift Matrix ({scope})")
     pairwise = _pairwise_uplifts(overall)
     if not pairwise:
         print("- none")
@@ -141,11 +148,17 @@ def _print_core_summary(
         f"files_unreadable={int(input_errors.get('files_unreadable', 0))}, "
         f"json_lines_invalid={int(input_errors.get('json_lines_invalid', 0))}, "
         f"records_skipped={int(input_errors.get('records_skipped', 0))}, "
+        f"records_schema_invalid={int(input_errors.get('records_schema_invalid', 0))}, "
         f"infra_event_rows_seen={int(input_errors.get('infra_event_rows_seen', 0))}, "
         f"infra_event_rows_skipped={int(input_errors.get('infra_event_rows_skipped', 0))}, "
         f"duplicate_attempt_rows_seen={int(input_errors.get('duplicate_attempt_rows_seen', 0))}, "
-        f"duplicate_attempt_rows_resolved={int(input_errors.get('duplicate_attempt_rows_resolved', 0))}"
+        f"duplicate_attempt_rows_resolved={int(input_errors.get('duplicate_attempt_rows_resolved', 0))}, "
+        f"duplicate_attempt_rows_conflicting="
+        f"{int(input_errors.get('duplicate_attempt_rows_conflicting', 0))}"
     )
+    schema_warning = schema_version_warning(input_errors)
+    if schema_warning:
+        print(f"- warning: {schema_warning}")
 
     if _has_adaptive_condition(conditions) and adaptive_stats is not None:
         print(f"\nAdaptive Signals ({adaptive_condition})")

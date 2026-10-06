@@ -47,6 +47,7 @@ from .config import (
     DecisionModelClientConfig,
     DecisionModelPolicyConfig,
     DecisionModelSettings,
+    resolve_decision_model_api_key,
     resolve_decision_model_url,
 )
 from .policy import (
@@ -55,7 +56,7 @@ from .policy import (
     DecisionModelAdvisor,
     distribution_summary,
 )
-from .runtime import AdviceRequest, SystemOneAdvisor
+from .runtime import AdviceRequest, SystemOneAdvisor, advise_safely
 from .schema import (
     COMPACT_THEN_PATCH,
     DEFAULT_PROFILE_NAME,
@@ -562,12 +563,15 @@ def probe_case(
     record = _base_record(case, observation)
     if options.dry_run or advisor is None:
         return _dry_run_record(record, observation, options=options)
-    advice = advisor.advise(
+    # Same exception-safe wrapper as the live attempt path: one unexpected httpx error
+    # (for example a corrupt compressed response) must not abort run_probe().
+    advice = advise_safely(
+        advisor,
         AdviceRequest(
             state_inputs=observation.state_inputs,
             available_actions=observation.available_actions,
             lite_snapshot_mode=options.lite_snapshot_mode,
-        )
+        ),
     )
     record["advice"] = _advice_fields(advice)
     return record
@@ -925,6 +929,9 @@ def build_advisor(args: argparse.Namespace) -> SystemOneAdvisor:
             url=resolve_decision_model_url(str(args.url)),
             model=str(args.model),
             timeout_sec=float(args.timeout_sec),
+            # Same gateway token as the harness and the smoke command: without it an
+            # llama-swap endpoint answers 401 for every probed case.
+            api_key=resolve_decision_model_api_key(),
         ),
     )
     transport = OptionKeyPermutingTransport() if bool(args.rename_option_keys) else None

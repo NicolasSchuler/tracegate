@@ -19,6 +19,7 @@ import argparse
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,16 +34,33 @@ from .analysis_api import (
     load_and_group_records,
     matched_uplift,
     run_statistical_analysis,
+    schema_version_warning,
 )
 from .eval_types import (
+    CONDITION_FAMILY_ADAPTIVE,
     EVAL_RECORD_SCHEMA_VERSION,
     HELPER_RESTRICTED_STAGE_A_ACTIONS,
+    condition_family,
     normalize_condition_name,
 )
-from .stats import analyze_paired_results, exact_binomial_p_value, mcnemar_test, power_report
+from .stats import (
+    analyze_paired_results,
+    comparison_eligible,
+    exact_binomial_p_value,
+    mcnemar_test,
+    power_report,
+)
 
 _CONFIG_AND_TEST_NAMES = ("conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini")
 _EXAMPLE_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class RawInput:
+    """Raw JSONL rows of the audited files and the counts of what could not be read."""
+
+    records: list[dict[str, Any]]
+    errors: dict[str, int]
 
 
 # ---------------------------------------------------------------------------
@@ -50,24 +68,39 @@ _EXAMPLE_LIMIT = 10
 # ---------------------------------------------------------------------------
 
 
-def load_records(paths: Iterable[str]) -> list[dict[str, Any]]:
-    """Every JSON object line of *paths*, including telemetry rows."""
+def load_records(paths: Iterable[str], *, strict: bool = False) -> RawInput:
+    """Every JSON object line of *paths*, including telemetry rows, plus what was dropped.
+
+    codex 2-4#4: unreadable files and malformed lines used to be skipped in silence, so a
+    partial audit looked complete.
+    """
     records: list[dict[str, Any]] = []
+    errors = {"files_unreadable": 0, "json_lines_invalid": 0, "records_skipped": 0}
     for src in expand_paths(list(paths)):
         try:
             text = Path(src).read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            errors["files_unreadable"] += 1
+            if strict:
+                raise ValueError(f"{src}: unreadable file ({type(exc).__name__}: {exc})") from exc
             continue
-        for line in text.splitlines():
+        for line_no, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 payload = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                errors["json_lines_invalid"] += 1
+                if strict:
+                    raise ValueError(f"{src}:{line_no}: invalid JSON ({exc})") from exc
                 continue
             if isinstance(payload, dict):
                 records.append(payload)
-    return records
+            else:
+                errors["records_skipped"] += 1
+                if strict:
+                    raise ValueError(f"{src}:{line_no}: record is not a JSON object")
+    return RawInput(records=records, errors=errors)
 
 
 def _patch_meta(record: dict[str, Any]) -> dict[str, Any]:
@@ -140,28 +173,41 @@ def headline_comparison(
     expected_cases = {str(row["case_id"]) for row in rows}
 
     conditions: dict[str, Any] = {}
-    for condition, condition_rows in sorted(by_condition.items()):
+    for condition, legacy_rows in sorted(by_condition.items()):
+        # codex 2-4#1 / BAS-01, D3: the corrected metrics are over the cases the condition
+        # can represent; the legacy ones keep counting an unsupported case as a failure.
+        condition_rows = [row for row in legacy_rows if comparison_eligible(row)]
         tokens = [row.get("token_usage") for row in condition_rows]
+        legacy_tokens = [row.get("token_usage") for row in legacy_rows]
         measured = [float(value) for value in tokens if value is not None]
         conditions[condition] = {
             "cases": len(condition_rows),
-            "success_rate": sum(bool(row["success"]) for row in condition_rows)
-            / len(condition_rows),
+            "cases_legacy": len(legacy_rows),
+            "baseline_unsupported_cases": len(legacy_rows) - len(condition_rows),
+            "success_rate": (
+                (sum(bool(row["success"]) for row in condition_rows) / len(condition_rows))
+                if condition_rows
+                else None
+            ),
+            "success_rate_legacy": sum(bool(row["success"]) for row in legacy_rows)
+            / len(legacy_rows),
             "cases_missing": len(expected_cases - {str(r["case_id"]) for r in condition_rows}),
             "mean_tokens_corrected": (sum(measured) / len(measured)) if measured else None,
-            "mean_tokens_legacy": sum(float(value or 0.0) for value in tokens)
-            / len(condition_rows),
+            "mean_tokens_legacy": sum(float(value or 0.0) for value in legacy_tokens)
+            / len(legacy_rows),
             "token_covered_cases": len(measured),
         }
 
     case_rates = {
-        condition: case_success_rates(condition_rows)
+        condition: case_success_rates([row for row in condition_rows if comparison_eligible(row)])
         for condition, condition_rows in by_condition.items()
     }
     a_stats = conditions.get(condition_a)
     b_stats = conditions.get(condition_b)
     uplift_legacy = (
-        b_stats["success_rate"] - a_stats["success_rate"] if a_stats and b_stats else None
+        b_stats["success_rate_legacy"] - a_stats["success_rate_legacy"]
+        if a_stats and b_stats
+        else None
     )
     result: dict[str, Any] = {
         "condition_a": condition_a,
@@ -207,12 +253,49 @@ def headline_comparison(
         rows, aggregation="majority_vote", pair_a=condition_a, pair_b=condition_b
     )
     pairwise = [entry for entry in stats.get("pairwise", []) if "error" not in entry]
-    result["pairwise_significant_uncorrected"] = sum(
+    # codex 2-4#2: the "uncorrected" count used to come from the corrected case-level exact
+    # tests, so it could not show what the pre-review run-level chi-square reported.
+    legacy_significant, legacy_tests = _legacy_pairwise_significance(rows)
+    result["pairwise_significant_uncorrected"] = legacy_significant
+    result["pairwise_tests_legacy"] = legacy_tests
+    result["pairwise_significant_corrected"] = sum(
         1 for entry in pairwise if entry.get("mcnemar_significant")
     )
     result["pairwise_significant_holm"] = sum(1 for entry in pairwise if entry.get("holm_rejected"))
     result["pairwise_tests"] = len(pairwise)
     return result
+
+
+def _legacy_pairwise_significance(
+    rows: list[dict[str, Any]], *, alpha: float = 0.05
+) -> tuple[int, int]:
+    """Significant pairs under the pre-review semantics: run-level pairs, legacy McNemar.
+
+    Each run of a case was an independent pair and the p-value came from the chi-square
+    approximation above 24 discordant pairs (STA-02, STA-23). Unsupported baseline rows
+    counted as failures back then, so they stay in here (BAS-01).
+    """
+    by_run_case: dict[tuple[str, str], dict[str, bool]] = defaultdict(dict)
+    for row in rows:
+        by_run_case[(str(row.get("run_id") or ""), str(row.get("case_id") or ""))][
+            str(row.get("condition") or "")
+        ] = bool(row.get("success"))
+    conditions = sorted({str(row.get("condition") or "") for row in rows if row.get("condition")})
+    significant = 0
+    tests = 0
+    for index, condition_a in enumerate(conditions):
+        for condition_b in conditions[index + 1 :]:
+            pairs = [
+                (entry[condition_a], entry[condition_b])
+                for entry in by_run_case.values()
+                if condition_a in entry and condition_b in entry
+            ]
+            if not pairs:
+                continue
+            tests += 1
+            if _legacy_mcnemar_p(pairs) <= alpha:
+                significant += 1
+    return significant, tests
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +316,20 @@ def _touches_tests_or_config(patch_meta: dict[str, Any]) -> bool:
     return False
 
 
+def _is_adaptive_attempt(record: dict[str, Any]) -> bool:
+    """An adaptive-family condition, or another condition run with an adaptive mode (STA-16)."""
+    if condition_family(record.get("condition")) == CONDITION_FAMILY_ADAPTIVE:
+        return True
+    mode = _attempt_meta(record).get("adaptive_mode") or _patch_meta(record).get("adaptive_mode")
+    return str(mode or "none") != "none"
+
+
 def data_audits(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The checks listed under "Impact on existing results"."""
+    """The checks listed under "Impact on existing results".
+
+    *records* are the validated, deduplicated attempts of the canonical loader, the same
+    ones the headline metrics are computed from (codex 2-4#5).
+    """
     attempts = [r for r in records if str(r.get("record_type") or "attempt") != "infra_event"]
     audits: dict[str, Any] = {}
 
@@ -280,18 +375,23 @@ def data_audits(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> di
         config = _run_meta(record).get("patcher_config")
         if isinstance(config, dict):
             configs.setdefault(str(record.get("run_id") or ""), config)
+    # codex 2-4#6: adaptive snapshot disclosure only applies to attempts that ran an
+    # adaptive policy; a base_repair-only run records the default reveal mode but never
+    # used it.
+    adaptive_pre_v7_runs = {
+        str(r.get("run_id") or "")
+        for r in attempts
+        if _schema(r) < EVAL_RECORD_SCHEMA_VERSION and _is_adaptive_attempt(r)
+    }
     full_reveal = sorted(
         run_id
         for run_id, config in configs.items()
         if str(config.get("adaptive_reveal_mode") or "full") == "full"
-        and any(
-            _schema(r) < EVAL_RECORD_SCHEMA_VERSION
-            for r in attempts
-            if str(r.get("run_id") or "") == run_id
-        )
+        and run_id in adaptive_pre_v7_runs
     )
     audits["full_reveal_runs"] = _audit(
-        "ATT-06: pre-v7 runs in full reveal mode, where the snapshot was always in the prompt",
+        "ATT-06: pre-v7 runs with adaptive attempts in full reveal mode, where the snapshot "
+        "was always in the prompt",
         len(full_reveal),
         full_reveal,
     )
@@ -443,11 +543,24 @@ def swebench_audit(run_dir: Path) -> dict[str, Any]:
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not str(json.loads(line).get("model_patch") or "").strip()
         )
+    # codex 2-4#3: pre-fix generators did not record snapshot_dir even when snapshots
+    # reached the prompts, so "not recorded" is unknown, not "no snapshot directory".
+    if "llmdebug" not in conditions:
+        snapshot_dir_status = "not_applicable"
+    elif policy is None:
+        snapshot_dir_status = "unknown_legacy_run"
+    elif policy.get("snapshot_dir"):
+        snapshot_dir_status = "recorded"
+    else:
+        snapshot_dir_status = "recorded_missing"
     return {
         "run_dir": str(run_dir),
         "conditions": conditions,
-        "llmdebug_without_snapshot_dir": "llmdebug" in conditions
-        and not (policy or {}).get("snapshot_dir"),
+        "llmdebug_snapshot_dir_status": snapshot_dir_status,
+        "llmdebug_without_snapshot_dir": snapshot_dir_status == "recorded_missing",
+        "llmdebug_snapshot_dir_needs_external_evidence": (
+            snapshot_dir_status == "unknown_legacy_run"
+        ),
         "prompt_policy_recorded": policy is not None,
         "hints_or_test_ids_in_prompt": policy is None
         or bool(policy.get("include_hints") or policy.get("include_test_ids")),
@@ -471,20 +584,54 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _input_diagnostic_lines(input_errors: Any) -> list[str]:
+    """Report dropped input, so a partial audit is never presented as complete (2-4#4)."""
+    if not isinstance(input_errors, dict):
+        return []
+    dropped = {
+        key: int(input_errors.get(key) or 0)
+        for key in (
+            "files_unreadable",
+            "json_lines_invalid",
+            "records_skipped",
+            "records_schema_invalid",
+            "duplicate_attempt_rows_seen",
+            "duplicate_attempt_rows_conflicting",
+        )
+    }
+    lines: list[str] = []
+    schema_warning = schema_version_warning(input_errors)
+    if schema_warning:
+        lines.append(f"- WARNING: {schema_warning}")
+    if any(dropped.values()):
+        detail = ", ".join(f"{key}={value}" for key, value in dropped.items() if value)
+        lines.append(
+            f"- WARNING: partial input, this audit covers the readable subset only ({detail}); "
+            "rerun with --strict-input to reject it"
+        )
+    return lines
+
+
 def render_text(report: dict[str, Any]) -> str:
     """Human-readable audit report."""
     headline = report["headline"]
     lines = [
         "Re-analysis audit (2026-10-04 review)",
-        f"- input records: {report['records']}, case-condition rows: {report['rows']}",
+        f"- input records: {report['records']}, audited attempts: "
+        f"{report.get('records_audited', report['records'])}, "
+        f"case-condition rows: {report['rows']}",
+        *_input_diagnostic_lines(report.get("input_errors")),
         "",
         f"Headline metrics: corrected vs pre-review semantics "
         f"({headline['condition_a']} -> {headline['condition_b']})",
     ]
     for condition, stats in headline["conditions"].items():
+        unsupported = int(stats.get("baseline_unsupported_cases") or 0)
+        excluded = f", {unsupported} unsupported case(s) excluded" if unsupported else ""
         lines.append(
             f"- {condition}: success={_fmt(stats['success_rate'])} over {stats['cases']} cases "
-            f"(missing {stats['cases_missing']}); mean tokens corrected="
+            f"(legacy {_fmt(stats['success_rate_legacy'])} over {stats['cases_legacy']}{excluded}; "
+            f"missing {stats['cases_missing']}); mean tokens corrected="
             f"{_fmt(stats['mean_tokens_corrected'])} vs legacy={_fmt(stats['mean_tokens_legacy'])}"
             f" (measured {stats['token_covered_cases']}/{stats['cases']})"
         )
@@ -504,9 +651,11 @@ def render_text(report: dict[str, Any]) -> str:
             f"corrected={_fmt(headline['power_corrected'])}  [STA-04]"
         )
     lines.append(
-        f"- pairwise tests significant: {headline['pairwise_significant_uncorrected']} "
-        f"uncorrected vs {headline['pairwise_significant_holm']} after Holm, of "
-        f"{headline['pairwise_tests']}  [STA-06]"
+        f"- pairwise tests significant: {headline['pairwise_significant_uncorrected']} legacy "
+        f"run-level (of {headline['pairwise_tests_legacy']}) vs "
+        f"{headline['pairwise_significant_corrected']} corrected case-level and "
+        f"{headline['pairwise_significant_holm']} after Holm, of "
+        f"{headline['pairwise_tests']}  [STA-02, STA-06, STA-23]"
     )
     lines.extend(["", "Data audits"])
     for name, audit in report["audits"].items():
@@ -527,16 +676,28 @@ def render_text(report: dict[str, Any]) -> str:
 
 
 def build_report(
-    paths: list[str], *, condition_a: str, condition_b: str, swebench_dirs: list[Path]
+    paths: list[str],
+    *,
+    condition_a: str,
+    condition_b: str,
+    swebench_dirs: list[Path],
+    strict_input: bool = False,
 ) -> dict[str, Any]:
-    records = load_records(paths)
-    grouped, _input_errors = load_and_group_records(paths)
+    """Audit report over *paths*; with *strict_input* any unreadable input is rejected."""
+    raw = load_records(paths, strict=strict_input)
+    grouped, input_errors = load_and_group_records(paths, strict_input=strict_input)
     rows = derive_case_condition_rows(grouped)
+    # codex 2-4#5: audit the attempts the headline is computed from — validated and
+    # deduplicated by the canonical loader — and report the raw row count separately.
+    attempts = [record for key in sorted(grouped) for record in grouped[key]]
+    diagnostics = {**raw.errors, **input_errors}
     return {
-        "records": len(records),
+        "records": len(raw.records),
+        "records_audited": len(attempts),
         "rows": len(rows),
+        "input_errors": diagnostics,
         "headline": headline_comparison(rows, condition_a=condition_a, condition_b=condition_b),
-        "audits": data_audits(records, rows),
+        "audits": data_audits(attempts, rows),
         "swebench": [swebench_audit(path) for path in swebench_dirs],
     }
 
@@ -556,13 +717,26 @@ def main(argv: list[str] | None = None) -> int:
         help="SWE-Bench run directory to check (repeatable).",
     )
     parser.add_argument("--json", default="", help="Also write the report as JSON here.")
-    args = parser.parse_args(argv)
-    report = build_report(
-        list(args.paths),
-        condition_a=str(args.a),
-        condition_b=str(args.b),
-        swebench_dirs=list(args.swebench_run_dir),
+    parser.add_argument(
+        "--strict-input",
+        action="store_true",
+        help=(
+            "Reject unreadable files, malformed JSONL lines and schema-invalid records "
+            "instead of auditing the readable subset."
+        ),
     )
+    args = parser.parse_args(argv)
+    try:
+        report = build_report(
+            list(args.paths),
+            condition_a=str(args.a),
+            condition_b=str(args.b),
+            swebench_dirs=list(args.swebench_run_dir),
+            strict_input=bool(args.strict_input),
+        )
+    except ValueError as exc:
+        print(f"Input error: {exc}")
+        return 2
     if not report["rows"]:
         print("No case-condition rows found.")
         return 1

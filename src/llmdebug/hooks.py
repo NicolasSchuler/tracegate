@@ -209,6 +209,16 @@ def _build_production_config(
 # ---------------------------------------------------------------------------
 
 
+def _is_intentional_exit(exc: BaseException) -> bool:
+    """Whether an exception is an intentional exit, without probing the instance.
+
+    ``isinstance`` reads ``exc.__class__``, so an object whose ``__getattribute__``
+    raises took the whole hook down before it could delegate to the original handler
+    and report the failure. ``type()`` cannot be intercepted.
+    """
+    return issubclass(type(exc), (KeyboardInterrupt, SystemExit))
+
+
 def _make_excepthook(
     original: Callable[..., Any],
     cfg: SnapshotConfig,
@@ -222,7 +232,7 @@ def _make_excepthook(
         exc_tb: Any,
     ) -> None:
         # Don't capture intentional exits
-        if not isinstance(exc_value, (KeyboardInterrupt, SystemExit)):
+        if not _is_intentional_exit(exc_value):
             _capture_safely(
                 "unhandled",
                 exc_value,
@@ -246,11 +256,7 @@ def _make_threading_hook(
     def hook(args: Any) -> None:
         exc_value = args.exc_value
         exc_tb = args.exc_traceback
-        if (
-            exc_value is not None
-            and exc_tb is not None
-            and not isinstance(exc_value, (KeyboardInterrupt, SystemExit))
-        ):
+        if exc_value is not None and exc_tb is not None and not _is_intentional_exit(exc_value):
             thread_name = args.thread.name if args.thread else "?"
             _capture_safely(
                 "thread_crash",
@@ -276,11 +282,7 @@ def _make_unraisable_hook(
     def hook(unraisable: Any) -> None:
         exc = unraisable.exc_value
         tb = unraisable.exc_traceback
-        if (
-            exc is not None
-            and tb is not None
-            and not isinstance(exc, (KeyboardInterrupt, SystemExit))
-        ):
+        if exc is not None and tb is not None and not _is_intentional_exit(exc):
             try:
                 obj = unraisable.object
                 obj_repr = repr(obj) if obj is not None else None
@@ -310,7 +312,7 @@ def _make_asyncio_handler(
         exc = context.get("exception")
         if exc is not None:
             tb = exc.__traceback__
-            if tb is not None and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            if tb is not None and not _is_intentional_exit(exc):
                 _capture_safely(
                     "asyncio",
                     exc,

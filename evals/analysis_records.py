@@ -8,7 +8,7 @@ from typing import Any
 
 from evals import _json as json
 from evals.analysis_numeric import _as_int, _expand_paths
-from evals.case_outcome import is_resume_eligible
+from evals.case_outcome import resolve_duplicate_attempt
 from evals.eval_types import EVAL_RECORD_SCHEMA_VERSION, normalize_condition_name
 
 # v7 marks the 2026-10-04 review semantics (see evals/README.md, "Record schema versions").
@@ -114,17 +114,21 @@ def _load_and_group_records(
     paths: list[str],
     *,
     strict_input: bool = False,
-) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], dict[str, int]]:
+) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], dict[str, Any]]:
     """Load JSONL files and group records by (run_id, case_id, condition).
 
     Validates each record, deduplicates by attempt number, and tracks
     input errors (unreadable files, invalid JSON, missing fields).
 
+    ``record_schema_versions`` lists every schema version read, so a consumer can warn
+    when one analysis mixes pre-remediation records with current ones (1e#13).
+
     Returns:
-        Tuple of (grouped records dict, input error counters dict).
+        Tuple of (grouped records dict, input diagnostics dict).
     """
     grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    input_errors = {
+    schema_versions: set[int] = set()
+    input_errors: dict[str, Any] = {
         "files_unreadable": 0,
         "json_lines_invalid": 0,
         "records_skipped": 0,
@@ -133,6 +137,7 @@ def _load_and_group_records(
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
         "duplicate_attempt_rows_resolved": 0,
+        "duplicate_attempt_rows_conflicting": 0,
     }
     deduped_records: dict[tuple[str, str, str, int], dict[str, Any]] = {}
     for src in _expand_paths(paths):
@@ -176,6 +181,7 @@ def _load_and_group_records(
                     if strict_input:
                         raise
                     continue
+                schema_versions.add(_as_int(record.get("schema_version")))
                 record_type = str(record.get("record_type") or "attempt").strip() or "attempt"
                 if record_type == "infra_event":
                     input_errors["infra_event_rows_seen"] += 1
@@ -186,13 +192,24 @@ def _load_and_group_records(
                 previous = deduped_records.get(dedup_key)
                 if previous is not None:
                     input_errors["duplicate_attempt_rows_seen"] += 1
-                    # A resumed attempt's real outcome beats its runtime-error row.
-                    if is_resume_eligible(record) and not is_resume_eligible(previous):
+                    # DAT-24: one resolver for this reader and case_outcome.scored_attempts.
+                    resolution = resolve_duplicate_attempt(previous, record)
+                    if resolution.conflicting:
+                        input_errors["duplicate_attempt_rows_conflicting"] += 1
+                        if strict_input:
+                            raise ValueError(
+                                f"{src}:{line_no}: conflicting duplicate of "
+                                f"{case_id}/{condition} attempt {attempt}: "
+                                f"success={bool(previous.get('success'))} and "
+                                f"success={bool(record.get('success'))} with equal priority"
+                            )
+                    if resolution.keep is previous:
                         continue
                 if record.get("condition") != condition:
                     record = {**record, "condition": condition}
                 deduped_records[dedup_key] = record
     input_errors["duplicate_attempt_rows_resolved"] = input_errors["duplicate_attempt_rows_seen"]
+    input_errors["record_schema_versions"] = sorted(schema_versions)
     for run_id, case_id, condition, _attempt in sorted(deduped_records):
         grouped[(run_id, case_id, condition)].append(
             deduped_records[(run_id, case_id, condition, _attempt)]

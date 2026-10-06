@@ -31,12 +31,15 @@ from __future__ import annotations
 import difflib
 import hashlib
 import logging
+import math
 import subprocess
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from baselines.case_information import CASE_INFO_POLICY
@@ -171,23 +174,110 @@ def _git_output(repo: Path, *args: str) -> bytes | None:
     return result.stdout
 
 
+#: Above this size an untracked file contributes its length instead of its content hash.
+_UNTRACKED_CONTENT_HASH_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _untracked_tree_digest(repo: Path, untracked: bytes) -> bytes:
+    """Deterministic path + content digest for the untracked files in *repo* (BAS-14).
+
+    The upstream patches add untracked modules (TraceCoder's ``src/exact_test_context.py``,
+    for example). Editing one changes executable behaviour without changing either
+    ``git diff HEAD`` or the file list, so the content has to be part of the identity.
+    """
+    lines: list[bytes] = []
+    for raw in sorted(untracked.decode("utf-8", "replace").splitlines()):
+        name = raw.strip()
+        if not name:
+            continue
+        path = repo / name
+        try:
+            if not path.is_file():
+                marker = "absent"
+            elif path.stat().st_size > _UNTRACKED_CONTENT_HASH_MAX_BYTES:
+                marker = f"size:{path.stat().st_size}"
+            else:
+                marker = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            marker = "unreadable"
+        lines.append(f"{name}\0{marker}".encode())
+    return b"\n".join(lines)
+
+
 def observed_repo_state(repo: Path) -> dict[str, Any]:
     """Record what is actually checked out (BAS-05, BAS-14).
 
-    ``tree_patch_sha256`` hashes the tracked diff against ``HEAD`` plus the untracked
-    file list, i.e. the applied upstream patches and normalizations, so two runs can be
-    compared even though the pinned commit alone doesn't identify the patched tree.
+    ``tree_patch_sha256`` hashes the tracked diff against ``HEAD`` plus a path/content
+    digest of the untracked files, i.e. the applied upstream patches and normalizations,
+    so two runs can be compared even though the pinned commit alone doesn't identify the
+    patched tree.
     """
     commit = (_git_output(repo, "rev-parse", "HEAD") or b"").decode("utf-8", "replace").strip()
     if not commit:
         return {"observed_commit": "", "dirty": None, "tree_patch_sha256": None}
     diff = _git_output(repo, "diff", "--binary", "HEAD") or b""
     untracked = _git_output(repo, "ls-files", "--others", "--exclude-standard") or b""
+    untracked_digest = _untracked_tree_digest(repo, untracked)
     return {
         "observed_commit": commit,
         "dirty": bool(diff.strip() or untracked.strip()),
-        "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked).hexdigest(),
+        "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked_digest).hexdigest(),
     }
+
+
+@dataclass(frozen=True)
+class RepairDeadline:
+    """One wall-clock deadline for a whole ``run_repair`` call (BAS-08, decision D4).
+
+    ``BaselineConfig.process_timeout_sec`` is the budget for everything an adapter does for
+    one case, so every blocking operation — an LLM request, an env-client subprocess, a
+    pytest run — is clamped to what is left of it instead of starting with its own full
+    timeout. A budget of ``0`` means "no deadline" (ORC-18).
+    """
+
+    started_at: float
+    budget_sec: float
+
+    @classmethod
+    def from_config(
+        cls, config: BaselineConfig, *, started_at: float | None = None
+    ) -> RepairDeadline:
+        """The deadline for one ``run_repair`` call, measured from *started_at*."""
+        return cls(
+            started_at=time.perf_counter() if started_at is None else float(started_at),
+            budget_sec=max(0.0, float(config.process_timeout_sec or 0.0)),
+        )
+
+    @property
+    def bounded(self) -> bool:
+        """Whether a deadline applies at all."""
+        return self.budget_sec > 0.0
+
+    def remaining_sec(self) -> float:
+        """Seconds left in the budget; ``inf`` when unbounded."""
+        if not self.bounded:
+            return math.inf
+        return max(0.0, self.budget_sec - (time.perf_counter() - self.started_at))
+
+    @property
+    def expired(self) -> bool:
+        """Whether the budget is used up, so no further operation may start."""
+        return self.bounded and self.remaining_sec() <= 0.0
+
+    def clamp_sec(self, requested: float | None) -> float:
+        """*requested* seconds, never more than the remaining budget (never below 0.1)."""
+        candidate = float(requested or 0.0)
+        if candidate <= 0.0:
+            candidate = self.remaining_sec()
+        return max(0.1, min(candidate, self.remaining_sec()))
+
+    def clamp_int_sec(self, requested: int | float | None) -> int:
+        """Like :meth:`clamp_sec` for subprocess timeouts, in whole seconds (minimum 1).
+
+        Rounded up, so a call that starts with the full budget still gets the timeout it
+        asked for rather than one second less.
+        """
+        return max(1, math.ceil(self.clamp_sec(requested)))
 
 
 def require_pinned_commit(*, name: str, observed_commit: str, pinned_commit: str) -> None:
@@ -290,6 +380,13 @@ class BaselineAdapter(ABC):
     honours_generation_contract: bool = False
     """Whether ``run_repair`` applies ``BaselineConfig.generation`` itself (decision D4)."""
 
+    generation_override_keys: Mapping[str, str] = MappingProxyType({})
+    """``config.extra`` keys that beat the shared contract, mapped to the recorded field.
+
+    Adapters whose baseline-specific knob wins over ``BaselineConfig.generation`` declare it
+    here so the record reports the value the request actually used.
+    """
+
     retry_context_prompt_field: str | None = None
     """Free-text ``case_input`` field the harness may extend with retry context (BAS-02)."""
 
@@ -298,6 +395,25 @@ class BaselineAdapter(ABC):
 
     #: Fallback model used when the harness does not configure one.
     default_model: str = ""
+
+    def effective_generation(self, config: BaselineConfig) -> dict[str, Any]:
+        """The generation values this adapter really requests, for the record (D4).
+
+        Resolves ``generation_override_keys`` on top of the shared contract so a
+        baseline-specific knob is reported instead of the shared value it replaced.
+        """
+        record = config.generation.record(enforced=bool(self.honours_generation_contract))
+        applied: dict[str, Any] = {}
+        for extra_key, field_name in self.generation_override_keys.items():
+            value = config.extra.get(extra_key)
+            if value is None:
+                continue
+            resolved = int(value) if field_name.endswith("tokens") else float(value)
+            record[field_name] = resolved
+            applied[field_name] = extra_key
+        if applied:
+            record["overrides"] = applied
+        return record
 
     def contract(self) -> BaselineContract:
         """Return machine-readable metadata for this adapter contract."""

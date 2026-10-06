@@ -11,6 +11,7 @@ from evals import _json as json
 from evals.eval_evidence import _xxh3_128_jsonlike
 from evals.eval_recording import _build_patcher_config, _resolve_llmdebug_snapshot_schema_version
 from evals.eval_types import (
+    EVAL_RECORD_SCHEMA_VERSION,
     EVAL_RECORD_TYPE_INFRA_EVENT,
     CaseSpec,
     Condition,
@@ -41,8 +42,9 @@ def _build_run_settings_fingerprint(
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "prompt_budget_retry_history_chars": int(args.prompt_budget_retry_history_chars),
-        # CAP-20: the snapshot format (e.g. dict-key rendering) is part of the prompt evidence.
-        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
+        # CAP-20: the snapshot format (e.g. dict-key rendering) is part of the prompt evidence,
+        # and the executor decides which llmdebug install writes it (4-2#8).
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
     }
     return _xxh3_128_jsonlike(payload)
 
@@ -61,21 +63,27 @@ def _load_existing_run_state(
 ]:
     """Scan an existing results JSONL to determine completed units.
 
+    ORC-04: a results file written across an ``--allow-settings-drift`` resume holds more
+    than one ``run_settings_fingerprint``. Each new generation declares the one it replaces
+    in ``settings_drift_from_fingerprint``, so such a chain is accepted and the *latest*
+    generation's fingerprint and metadata are returned; an unlinked change is still an error.
+
     Returns:
-        Tuple of (completed_unit_keys, first_run_metadata,
+        Tuple of (completed_unit_keys, latest_run_metadata,
         settings_fingerprint, records_count, trailing_tail_issue).
     """
     if not results_path.exists():
         return set(), None, None, 0, None
 
     per_unit_stats: dict[tuple[str, str], dict[str, Any]] = {}
-    first_run_metadata: dict[str, Any] | None = None
+    latest_run_metadata: dict[str, Any] | None = None
     settings_fingerprint: str | None = None
+    seen_fingerprints: set[str] = set()
     records_count = 0
     trailing_tail_issue: _TrailingResultsTailIssue | None = None
 
     def _consume_record(*, record: dict[str, Any], line_no: int) -> None:
-        nonlocal first_run_metadata, settings_fingerprint, records_count
+        nonlocal latest_run_metadata, settings_fingerprint, records_count
 
         record_run_id = record.get("run_id")
         if not isinstance(record_run_id, str) or not record_run_id:
@@ -91,6 +99,18 @@ def _load_existing_run_state(
         condition = record.get("condition")
         if not isinstance(condition, str) or not condition:
             raise ValueError(f"{results_path}:{line_no}: condition must be a non-empty string")
+        record_schema_version = record.get("schema_version")
+        if (
+            record_schema_version is not None
+            and record_schema_version != EVAL_RECORD_SCHEMA_VERSION
+        ):
+            # Appending to a pre-remediation results file would mix record generations in
+            # one run, which analysis reads as a single run. Start a new --run-id instead.
+            raise ValueError(
+                f"{results_path}:{line_no}: schema_version={record_schema_version!r} predates "
+                f"this harness (schema_version={EVAL_RECORD_SCHEMA_VERSION}); resuming would "
+                "mix record generations. Use a new --run-id."
+            )
         record_type = _record_type(record)
         attempt = record.get("attempt")
         if not isinstance(attempt, int) or attempt < 0:
@@ -115,13 +135,24 @@ def _load_existing_run_state(
         if isinstance(current_fingerprint, str):
             if settings_fingerprint is None:
                 settings_fingerprint = current_fingerprint
+                seen_fingerprints.add(current_fingerprint)
+                latest_run_metadata = dict(run_metadata)
             elif settings_fingerprint != current_fingerprint:
-                raise ValueError(
-                    f"{results_path}:{line_no}: inconsistent run_settings_fingerprint values"
+                drift_from = run_metadata.get("settings_drift_from_fingerprint")
+                linked = (
+                    isinstance(drift_from, str)
+                    and drift_from in seen_fingerprints
+                    and current_fingerprint not in seen_fingerprints
                 )
-
-        if first_run_metadata is None:
-            first_run_metadata = dict(run_metadata)
+                if not linked:
+                    raise ValueError(
+                        f"{results_path}:{line_no}: inconsistent run_settings_fingerprint values"
+                    )
+                settings_fingerprint = current_fingerprint
+                seen_fingerprints.add(current_fingerprint)
+                latest_run_metadata = dict(run_metadata)
+        elif latest_run_metadata is None:
+            latest_run_metadata = dict(run_metadata)
 
         unit_key = (case_id, condition)
         if record_type == EVAL_RECORD_TYPE_INFRA_EVENT:
@@ -204,7 +235,7 @@ def _load_existing_run_state(
     }
     return (
         completed_units,
-        first_run_metadata,
+        latest_run_metadata,
         settings_fingerprint,
         records_count,
         trailing_tail_issue,

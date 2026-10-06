@@ -11,6 +11,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from baselines._runtime import (
@@ -30,6 +31,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    RepairDeadline,
     observed_repo_state,
 )
 from baselines.case_schemas import LambdaRLMCaseInput
@@ -38,7 +40,12 @@ from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
-from baselines.openai_compat import env_client_subprocess_env, scrub_secret
+from baselines.openai_compat import (
+    compat_config_from_extra,
+    compat_payload_fields,
+    env_client_subprocess_env,
+    scrub_secret,
+)
 from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
 from llmdebug import _json as json
 
@@ -86,6 +93,15 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
     retry_context_prompt_field = "prompt_context"
 
     honours_generation_contract = True
+
+    #: D4: these knobs beat the shared contract, so the record reports them.
+    generation_override_keys = MappingProxyType(
+        {
+            "baseline_rlm_temperature": "temperature",
+            "baseline_rlm_top_p": "top_p",
+            "baseline_rlm_max_tokens": "max_completion_tokens",
+        }
+    )
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None
@@ -251,6 +267,8 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
         last_terminal_outcome: str | None = None
         no_write_attempt_streak = 0
         started_at = time.perf_counter()
+        # BAS-08: one deadline for the whole call; each inner call gets what is left of it.
+        deadline = RepairDeadline.from_config(config, started_at=started_at)
 
         with tempfile.TemporaryDirectory(prefix="rlm_precheck_") as tmpdir:
             precheck_dir = Path(tmpdir)
@@ -265,7 +283,7 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
             precheck = self._run_case_tests(
                 work_dir=precheck_dir,
                 python_args=python_args,
-                timeout_sec=test_timeout_sec,
+                timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
             )
             eval_duration_sec += precheck.duration_sec
             if precheck.returncode == 0:
@@ -309,6 +327,10 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
 
         retry_feedback = self._format_failure_feedback(precheck)
         for attempt_idx in range(1, config.max_attempts + 1):
+            if deadline.expired:
+                last_error = "deadline_exceeded"
+                last_terminal_outcome = "deadline_exceeded"
+                break
             with tempfile.TemporaryDirectory(prefix=f"rlm_attempt_{attempt_idx:02d}_") as tmpdir:
                 work_dir = Path(tmpdir)
                 self._materialize_workspace(work_dir=work_dir, file_rows=file_rows)
@@ -333,9 +355,9 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
                         root_prompt=root_prompt,
                         work_dir=work_dir,
                         python_args=python_args,
-                        test_timeout_sec=test_timeout_sec,
+                        test_timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
                         config=config,
-                        timeout_sec=generation_timeout_sec,
+                        timeout_sec=deadline.clamp_int_sec(generation_timeout_sec),
                     )
                 except (subprocess.TimeoutExpired, RuntimeError) as exc:
                     # BAS-10: keep earlier attempts' candidate, usage and metrics.
@@ -632,7 +654,7 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
                 test_outcome = self._run_case_tests(
                     work_dir=work_dir,
                     python_args=python_args,
-                    timeout_sec=test_timeout_sec,
+                    timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
                 )
                 eval_duration_sec += test_outcome.duration_sec
                 attempt_summary["test_returncode"] = test_outcome.returncode
@@ -835,15 +857,9 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
             "model": str(config.model or ""),
             "base_url": str(config.api_base_url or ""),
             "api_timeout_sec": float(config.api_timeout_sec or 0.0),
-            "baseline_openai_compat_profile": str(
-                config.extra.get("baseline_openai_compat_profile") or "auto"
-            ),
-            "baseline_openai_allow_reasoning_fallback": bool(
-                config.extra.get("baseline_openai_allow_reasoning_fallback", False)
-            ),
-            "baseline_openai_enable_thinking": bool(
-                config.extra.get("baseline_openai_enable_thinking", False)
-            ),
+            # BAS-19: the resolved shared defaults, so the env client behaves like
+            # the in-process path for the same config.
+            **compat_payload_fields(compat_config_from_extra(config.extra)),
             "prompt_context": prompt_context,
             "root_prompt": root_prompt,
             "workspace_dir": str(work_dir),
@@ -867,6 +883,9 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
             payload["temperature"] = float(config.generation.temperature)
         if config.generation.max_completion_tokens is not None:
             payload["max_tokens"] = int(config.generation.max_completion_tokens)
+        if config.generation.seed is not None:
+            payload["seed"] = int(config.generation.seed)
+        payload["transport_max_retries"] = int(config.generation.transport_max_retries)
         for source_key, target_key in (
             ("baseline_rlm_temperature", "temperature"),
             ("baseline_rlm_top_p", "top_p"),

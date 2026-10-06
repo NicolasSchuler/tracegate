@@ -11,6 +11,7 @@ import pytest
 import llmdebug.compact_keys as compact_keys_module
 from llmdebug.compact_keys import (
     KEY_MAP,
+    LEGACY_REVERSE_KEY_MAP,
     REVERSE_KEY_MAP,
     USER_DATA_KEYS,
     compact_keys,
@@ -27,7 +28,12 @@ class TestKeyMapIntegrity:
     """Structural guarantees on the abbreviation tables."""
 
     def test_key_map_is_bijective(self) -> None:
-        assert len(KEY_MAP) == len(REVERSE_KEY_MAP)
+        assert len(KEY_MAP) == len(set(KEY_MAP.values()))
+        assert len(REVERSE_KEY_MAP) == len(KEY_MAP) + len(LEGACY_REVERSE_KEY_MAP)
+
+    def test_retired_short_keys_are_not_reused_by_current_entries(self) -> None:
+        """CAP-17: reusing one would silently decode old snapshots to the wrong key."""
+        assert not set(LEGACY_REVERSE_KEY_MAP) & set(KEY_MAP.values())
 
     def test_reverse_map_inverts_key_map(self) -> None:
         for full_key, short_key in KEY_MAP.items():
@@ -72,6 +78,24 @@ class TestDuplicateShortKeyGuard:
 
         module = importlib.util.module_from_spec(spec)
         with pytest.raises(ValueError, match="duplicate short-key values"):
+            spec.loader.exec_module(module)
+
+    def test_reused_retired_short_key_raises_on_import(self, tmp_path: Path) -> None:
+        """CAP-17: a retired short key reused by a new entry would decode old files wrongly."""
+        assert compact_keys_module.__file__ is not None
+        source = Path(compact_keys_module.__file__).read_text(encoding="utf-8")
+        bad_source = source.replace('"timestamp_utc": "_ts",', '"timestamp_utc": "_st",', 1)
+        assert bad_source != source
+
+        temp_module = tmp_path / "reused_compact_keys.py"
+        temp_module.write_text(bad_source, encoding="utf-8")
+
+        spec = importlib.util.spec_from_file_location("reused_compact_keys", temp_module)
+        assert spec is not None
+        assert spec.loader is not None
+
+        module = importlib.util.module_from_spec(spec)
+        with pytest.raises(ValueError, match="reuses a retired one"):
             spec.loader.exec_module(module)
 
     def test_actual_key_map_passes_guard(self) -> None:
@@ -303,3 +327,29 @@ def test_every_key_map_entry_can_apply() -> None:
     summary_only = {"__array__", "__dataframe__", "__series__", "shape", "dtype", "stats", "head"}
 
     assert not summary_only & set(KEY_MAP)
+
+
+def test_legacy_compact_extra_context_still_expands(tmp_path: Path) -> None:
+    """CAP-17: compaction skipped locals and args, not user-supplied extra context."""
+    from llmdebug import _json as json
+    from llmdebug._snapshot_loader import load_snapshot_from_file
+    from llmdebug.output import get_latest_snapshot
+
+    # As an earlier release wrote it for extra={"stats": {"min": 1}, "device": "cuda"}.
+    legacy = {
+        "__llmdebug_compact__": True,
+        "_v": "2.1",
+        "_n": "legacy",
+        "_exc": {"_t": "ValueError", "_msg": "boom"},
+        "_fr": [],
+        "_ctx": {"_st": {"_mn": 1, "_mx": 9}, "_dev": "cuda"},
+    }
+    expected_context = {"stats": {"min": 1, "max": 9}, "device": "cuda"}
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    (tmp_path / "latest.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    assert load_snapshot_from_file(path)["context"] == expected_context
+    latest = get_latest_snapshot(str(tmp_path))
+    assert latest is not None
+    assert latest["context"] == expected_context

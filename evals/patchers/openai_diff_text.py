@@ -11,27 +11,22 @@ from evals.eval_patches import _diff_lines
 def _extract_unified_diff(text: str) -> str | None:
     """Extract every file diff from a model response as one git-style patch.
 
-    Review findings LLM-01/03/04/07/10: all fenced blocks and all file sections are
-    collected (a later diff for the same file replaces an earlier draft), hunks are read
-    with their declared counts so trailing prose isn't absorbed, blank context lines are
-    normalized to ``" "``, and ``/dev/null`` headers create or delete files.
+    Review findings LLM-01/03/04/07/10/23: fenced and unfenced sections are scanned in
+    response order and every file section is collected (a later diff for the same file
+    replaces an earlier draft), hunks are read with their declared counts so trailing
+    prose isn't absorbed, blank context lines are normalized to ``" "``, and
+    ``/dev/null`` headers create or delete files.
     """
     s = _strip_think(text).strip("\n")
     if not s.strip():
         return None
-    fences = [
-        match.group(1)
-        for match in re.finditer(
-            r"```(?:diff|patch)?[^\n]*\n(.*?)```", s, re.DOTALL | re.IGNORECASE
-        )
-    ]
-    sources = fences or [s]
+    sections, fenced = _response_sections(s)
     by_path: dict[str, str] = {}
-    for source in sources:
+    for source in sections:
         for path, block in _iter_file_diffs(source.split("\n")):
             by_path.pop(path, None)  # keep the last version, in the order it appeared
             by_path[path] = block
-    if not by_path and fences:
+    if not by_path and fenced:
         for path, block in _iter_file_diffs(s.split("\n")):
             by_path.pop(path, None)
             by_path[path] = block
@@ -42,6 +37,33 @@ def _extract_unified_diff(text: str) -> str | None:
 
 def _strip_think(text: str) -> str:
     return strip_think(text)
+
+
+_FENCE_RE = re.compile(r"```(?:diff|patch)?[^\n]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _response_sections(text: str) -> tuple[list[str], bool]:
+    """Split a response into fenced blocks and the text around them, in response order.
+
+    Collecting only the fenced blocks dropped an unfenced diff that followed a fenced
+    one and kept a fenced draft that a later unfenced revision replaced (LLM-01/LLM-04).
+    The second element reports whether any fence was found, for the whole-response
+    fallback scan of diffs that straddle a fence.
+    """
+    sections: list[str] = []
+    cursor = 0
+    fenced = False
+    for match in _FENCE_RE.finditer(text):
+        fenced = True
+        outside = text[cursor : match.start()]
+        if outside.strip():
+            sections.append(outside)
+        sections.append(match.group(1))
+        cursor = match.end()
+    tail = text[cursor:]
+    if tail.strip():
+        sections.append(tail)
+    return (sections or [text]), fenced
 
 
 _DIFF_META_PREFIXES = (
@@ -59,6 +81,23 @@ _DIFF_META_PREFIXES = (
 
 
 _MARKDOWN_BULLET_RE = re.compile(r"^[-*+] +(?:[A-Z`*_\[(]|\d+\.)")
+
+# A lowercase bullet ("- fixes the return value") ends a complete hunk too (LLM-07).
+# Only plain words count, so a deleted or added source line stays diff content: code
+# punctuation (``=``, brackets, quotes, ``_``, ``:``) and the deeper indentation of real
+# source lines both fail this pattern.
+_PROSE_BULLET_RE = re.compile(r"^[-*+] [A-Za-z]+(?: +[A-Za-z0-9'`,.!?-]+)+ *$")
+
+
+def _ends_complete_hunk(body: str) -> bool:
+    """Whether *body* is trailing Markdown prose rather than another diff line."""
+    if _MARKDOWN_BULLET_RE.match(body):
+        return True
+    if not _PROSE_BULLET_RE.match(body):
+        return False
+    # Two bare words ("- return x") can still be a one-space-indented source line;
+    # a sentence or three or more words cannot.
+    return len(body[2:].split()) >= 3 or body.rstrip().endswith((".", "!", "?"))
 
 
 def _is_file_header_pair(lines: list[str], index: int) -> bool:
@@ -91,6 +130,7 @@ def _iter_file_diffs(lines: list[str]) -> list[tuple[str, str]]:
         old_path, new_path = _strip_git_prefixes(
             _clean_path_token(lines[j][4:].strip()),
             _clean_path_token(lines[j + 1][4:].strip()),
+            declared=_git_header_path(line) if git_header else None,
         )
         if old_path is None or new_path is None:
             i = j + 2
@@ -116,6 +156,20 @@ def _git_file_block(
         path = old_path
         header = [f"diff --git a/{path} b/{path}", *meta, f"--- a/{path}", f"+++ b/{path}"]
     return path, "\n".join([*header, *hunks]) + "\n"
+
+
+def _blank_run_continues_hunk(lines: list[str], index: int) -> bool:
+    """Whether the run of blank lines at *index* is followed by more hunk body.
+
+    Several blank context lines in a row (LLM-03) must not end extraction: looking only
+    at the next line made the first blank of a pair terminate the hunk and silently drop
+    every change after it. The whole run is skipped and the first non-blank line decides.
+    """
+    probe = index
+    while probe < len(lines) and lines[probe] == "":
+        probe += 1
+    following = lines[probe] if probe < len(lines) else ""
+    return following.startswith((" ", "+", "-", "\\"))
 
 
 def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
@@ -147,11 +201,10 @@ def _read_hunks(lines: list[str], start: int) -> tuple[list[str], int]:
                 break
             if body == "":
                 # A blank line inside a hunk is a context line whose space was lost (LLM-03).
-                following = lines[i + 1] if i + 1 < n else ""
-                if counts_met or not following.startswith((" ", "+", "-", "\\")):
+                if counts_met or not _blank_run_continues_hunk(lines, i):
                     break
                 body = " "
-            elif body.startswith(("+", "-")) and counts_met and _MARKDOWN_BULLET_RE.match(body):
+            elif body.startswith(("+", "-")) and counts_met and _ends_complete_hunk(body):
                 break  # trailing markdown bullets after a complete hunk (LLM-07)
             elif not body.startswith((" ", "+", "-", "\\")):
                 break
@@ -189,14 +242,36 @@ def _clean_path_token(raw: str) -> str | None:
     return token
 
 
-def _strip_git_prefixes(old: str | None, new: str | None) -> tuple[str | None, str | None]:
+def _git_header_path(line: str) -> str | None:
+    """The path a ``diff --git a/P b/P`` line declares, or ``None`` if it is ambiguous.
+
+    The two tokens name the same file on both sides, so the pair rule below decides
+    whether ``a/``/``b/`` are git's prefixes or a real top-level directory. A quoted or
+    space-containing header is left to the ``---``/``+++`` lines.
+    """
+    tokens = line.split()
+    if len(tokens) != 4 or '"' in line:
+        return None
+    old, new = tokens[2], tokens[3]
+    if old.startswith("a/") and new.startswith("b/"):
+        old, new = old.removeprefix("a/"), new.removeprefix("b/")
+    return old if old and old == new else None
+
+
+def _strip_git_prefixes(
+    old: str | None, new: str | None, *, declared: str | None = None
+) -> tuple[str | None, str | None]:
     """Drop git's ``a/`` and ``b/`` prefixes only when the headers use them as a pair.
 
     Stripping each side unconditionally mangled a real top-level directory named ``a``
     or ``b`` in prefix-less headers such as ``--- a/mod.py`` / ``+++ a/mod.py`` (LLM-23).
+    A ``/dev/null`` side carries no prefix evidence, so for creations and deletions the
+    path declared by an accompanying ``diff --git`` header wins when there is one.
     """
     if old is None or new is None:
         return old, new
+    if declared is not None and "/dev/null" in {old, new}:
+        return ("/dev/null", declared) if old == "/dev/null" else (declared, "/dev/null")
     old_git = old == "/dev/null" or old.startswith("a/")
     new_git = new == "/dev/null" or new.startswith("b/")
     if not (old_git and new_git):

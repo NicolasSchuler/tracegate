@@ -93,6 +93,46 @@ def test_wide_ints_in_pandas_previews(tmp_path: Path) -> None:
     assert local_vars["series"]["head"] == [repr(2**70), 2]
 
 
+def test_wide_ints_nested_in_pandas_previews(tmp_path: Path) -> None:
+    """CAP-01: an object-dtype cell holding a wide int broke the JSON encoder."""
+    pd = pytest.importorskip("pandas")
+
+    def boom() -> None:
+        frame = pd.DataFrame({"a": [{"id": 2**70}, {"id": 1}]})  # noqa: F841 - captured local
+        listed = pd.DataFrame({"a": [[2**70, 1]]})  # noqa: F841 - captured local
+        flagged = pd.DataFrame({"a": [{"ok": True}]})  # noqa: F841 - captured local
+        deep = pd.DataFrame(  # noqa: F841 - captured local
+            {"a": [{"b": {"c": {"d": 1}}}], "b": [[[[1]]]]}
+        )
+        series = pd.Series([{"id": 2**70}])  # noqa: F841 - captured local
+        raise ValueError("nested pandas wide ints")
+
+    snapshot = _capture(tmp_path, boom)
+
+    local_vars = _crash_locals(snapshot)
+    assert local_vars["frame"]["head"][0] == [{"id": repr(2**70)}]
+    assert local_vars["listed"]["head"][0] == [[repr(2**70), 1]]
+    assert local_vars["flagged"]["head"][0] == [{"ok": True}]
+    assert local_vars["series"]["head"] == [{"id": repr(2**70)}]
+    # Two levels in, a container becomes its repr instead of recursing without bound.
+    deep_dict, deep_list = local_vars["deep"]["head"][0]
+    assert deep_dict == {"b": {"c": "{'d': 1}"}}
+    assert deep_list == [["[1]"]]
+
+
+def test_wide_int_pandas_column_labels_are_normalized(tmp_path: Path) -> None:
+    """CAP-01: a wide-integer column label bypassed normalization."""
+    pd = pytest.importorskip("pandas")
+
+    def boom() -> None:
+        frame = pd.DataFrame({2**70: [1, 2]})  # noqa: F841 - captured local
+        raise ValueError("wide column label")
+
+    snapshot = _capture(tmp_path, boom)
+
+    assert _crash_locals(snapshot)["frame"]["columns"] == [repr(2**70)]
+
+
 # ---------------------------------------------------------------------------
 # CAP-02: exception text whose __str__ raises
 # ---------------------------------------------------------------------------
@@ -226,6 +266,16 @@ class _Lazy:
         return 3
 
 
+class _LazyList(list[Any]):
+    """A container subclass whose ``__len__`` does work, like a lazy result list."""
+
+    len_calls = 0
+
+    def __len__(self) -> int:
+        type(self).len_calls += 1
+        return super().__len__()
+
+
 _HOSTILE_FACTORIES: dict[str, Callable[[], Any]] = {
     "no_repr": _NoRepr,
     "no_len": lambda: _NoLen([1, 2]),
@@ -330,3 +380,21 @@ def test_capture_does_not_call_len_on_arbitrary_objects(tmp_path: Path, locals_m
     assert lazy.len_calls == 0
     assert "len" not in meta["query"]
     assert meta["rows"]["len"] == 3
+
+
+@pytest.mark.parametrize("locals_mode", ["safe", "meta"])
+def test_capture_does_not_call_an_overridden_container_len(
+    tmp_path: Path, locals_mode: str
+) -> None:
+    """CAP-21: a list subclass passed the isinstance whitelist and still ran user code."""
+    _LazyList.len_calls = 0
+    rows = _LazyList([1, 2, 3])
+
+    def boom() -> None:
+        query = rows  # noqa: F841 - captured local
+        raise ValueError("lazy list")
+
+    snapshot = _capture(tmp_path, boom, locals_mode=locals_mode)
+
+    assert _LazyList.len_calls == 0
+    assert "len" not in snapshot["frames"][0]["locals_meta"]["query"]

@@ -35,11 +35,12 @@ def _rows(run_ids: tuple[str, ...]) -> list[dict[str, Any]]:
 def test_tripled_runs_give_the_same_paired_results_as_one_run() -> None:
     single, tripled = _rows(("r1",)), _rows(("r1", "r2", "r3"))
 
-    for rows in (single, tripled):
-        assert (
-            report._paired_success_cost_frame(rows=rows, condition_a=_A, condition_b=_B).height
-            == 20
-        )
+    for rows, n_runs in ((single, 1), (tripled, 3)):
+        # Run level for the per-run budget and coverage rules (codex 2-2#1/#3), then
+        # one row per case.
+        runs = report._paired_success_cost_frame(rows=rows, condition_a=_A, condition_b=_B)
+        assert runs.height == 20 * n_runs
+        assert report._case_success_cost_frame(runs, thresholds=[]).height == 20
         deltas, _a, _b = report._paired_metric_deltas(
             rows=rows, condition_a=_A, condition_b=_B, metric="runtime_sec"
         )
@@ -63,7 +64,8 @@ def test_cost_frame_uses_success_fraction_over_runs() -> None:
     rows = _rows(("r1",))[:2] + [
         {**row, "run_id": "r2", "success": not row["success"]} for row in _rows(("r1",))[:2]
     ]
-    frame = report._paired_success_cost_frame(rows=rows, condition_a=_A, condition_b=_B)
+    runs = report._paired_success_cost_frame(rows=rows, condition_a=_A, condition_b=_B)
+    frame = report._case_success_cost_frame(runs, thresholds=[])
     assert frame["a_success"].to_list() == [0.5]
     assert frame["b_success"].to_list() == [0.5]
 

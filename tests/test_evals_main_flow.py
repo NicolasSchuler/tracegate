@@ -86,6 +86,7 @@ class _FakeResume:
     resumed_completed_units: set[tuple[str, str]] = field(default_factory=set)
     skipped_units: int = 0
     remaining_units: int = 0
+    decision_model_serving: dict[str, Any] = field(default_factory=dict)
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -2497,3 +2498,119 @@ def test_run_main_flow_starts_no_pool_without_opt_in(monkeypatch) -> None:
     from evals.eval_main_flow import run_main_flow
 
     run_main_flow(parser=_make_parser(), args=_make_args(), argv_tokens=[])
+
+
+def test_attempt_flow_forwards_the_run_context_to_both_pytest_runs(tmp_path, monkeypatch) -> None:
+    """ORC-01/ORC-02, X-02: the real attempt flow hands its RunContext to run_pytest.
+
+    The test above stubs ``_execute_eval_unit``, so it only proves that the main flow
+    builds the context and passes it into the unit. This one drives the real attempt
+    loop and the real ``run_pytest``, stubbing nothing but the container executor, so
+    dropping ``run_context=`` at either pytest call site (initial verification or
+    post-patch verification) fails here.
+    """
+    import shutil
+
+    from evals import run_eval
+    from evals.eval_types import ExecutionConfig, RunResult, _ActiveRunSettings
+    from evals.patchers.base import PatchResult
+    from evals.run_context import RunContext
+
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def f() -> int:\n    return 1\n", encoding="utf-8")
+    (case_dir / "test_buggy.py").write_text(
+        "from buggy import f\n\n\ndef test_f() -> None:\n    assert f() == 2\n",
+        encoding="utf-8",
+    )
+    case = run_eval.CaseSpec(
+        case_id="ctx_handoff",
+        path=case_dir,
+        category="data_shape_runtime",
+        difficulty="easy",
+        snapshot_dependency="none",
+        expected_exception="AssertionError",
+        tags=[],
+        python_args=["-m", "pytest", "-q"],
+        timeout_sec=10,
+    )
+
+    # What the unit executor materializes before the attempt loop starts.
+    workdir = tmp_path / "workdir"
+    shutil.copytree(case_dir, workdir)
+
+    # run_pytest's no-context fallback, so a dropped run_context runs locally instead of
+    # failing on the missing testcontainers import: the assertions below then report the
+    # lost seeding and pooling rather than an unrelated dependency error.
+    monkeypatch.setattr(
+        "evals.pytest_runner.get_active_execution_config",
+        lambda: ExecutionConfig(executor="local"),
+    )
+
+    envs: list[dict[str, str]] = []
+
+    class _FakeContainer:
+        def exec_pytest(self, *, host_cwd, command, env, timeout_sec) -> RunResult:
+            envs.append(dict(env))
+            failing = len(envs) == 1
+            return RunResult(
+                returncode=1 if failing else 0,
+                duration_sec=0.0,
+                stdout="1 failed" if failing else "1 passed",
+                stderr="E   AssertionError: expected 2 got 1" if failing else "",
+            )
+
+    class _FakePool:
+        def __init__(self) -> None:
+            self.acquired = 0
+            self.released = 0
+
+        def acquire(self) -> _FakeContainer:
+            self.acquired += 1
+            return _FakeContainer()
+
+        def release(self, container: _FakeContainer) -> None:
+            self.released += 1
+
+    pool = _FakePool()
+
+    class _FixedDiffPatcher:
+        name = "fixed_diff"
+
+        def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path) -> PatchResult:
+            return PatchResult(
+                diff=(
+                    "--- a/buggy.py\n"
+                    "+++ b/buggy.py\n"
+                    "@@ -1,2 +1,2 @@\n"
+                    " def f() -> int:\n"
+                    "-    return 1\n"
+                    "+    return 2\n"
+                ),
+                meta={},
+            )
+
+    run_eval.run_one_condition(
+        case=case,
+        condition=run_eval.Condition.BASE_REPAIR,
+        workdir=workdir,
+        context_dir_base=tmp_path / "context",
+        patcher=_FixedDiffPatcher(),
+        k=1,
+        output_format="json_compact",
+        run_id="ctx-handoff",
+        include_files_context=False,
+        force_patch_attempt=False,
+        run_context=RunContext(
+            execution=ExecutionConfig(executor="testcontainers", container_pool=True),
+            settings=_ActiveRunSettings(deterministic=True, seed=1234),
+            container_pool=pool,
+        ),
+    )
+
+    assert len(envs) == 2, "initial and post-patch verification must both run pytest"
+    # ORC-01: both runs are seeded from the run's settings.
+    assert [env.get("PYTHONHASHSEED") for env in envs] == ["1234", "1234"]
+    assert [env.get("TZ") for env in envs] == ["UTC", "UTC"]
+    # ORC-02: both runs come from the run's pool, not from one-shot containers.
+    assert (pool.acquired, pool.released) == (2, 2)

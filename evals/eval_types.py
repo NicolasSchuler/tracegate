@@ -171,6 +171,23 @@ POLICY_DEFAULTS_VERSION = 2
 (2026-10-04 review): decay 1.0, decayed per arm (POL-01); random greedy tie-breaking
 (POL-24); no feature equal to a combination of ``bias`` and others (POL-06). Earlier runs
 are version 1."""
+EVIDENCE_POLICY_REVISION = 2
+"""Adaptive evidence-delivery contract, recorded in ``patcher_config`` so the settings and
+patcher fingerprints distinguish two runs that share ``EVAL_RECORD_SCHEMA_VERSION``.
+Revision 2 (2026-10-04 review, Phase 1C): restricted actions get no fallback bundle and no
+monolithic project-file context, the whole-file seed bundle is limited to the unrestricted
+Stage-A actions, the full snapshot reaches Stage-B only when the executed action grants it,
+and ``adaptive_snapshot_included`` / ``stage_b_snapshot_in_prompt`` /
+``evidence_chars_by_type`` describe the delivered prompt (ATT-03, ATT-04, ATT-06). Earlier
+runs are revision 1."""
+ATTEMPT_ACCOUNTING_VERSION = 2
+"""Attempt-counting and cost-accounting contract, recorded in run metadata. Version 2
+(2026-10-04 review): a no-new-evidence retry-gate block is an unscored ``infra_event``
+that does not consume an attempt and whose paid work is carried into the next scored row
+(ATT-05); a unit that raises leaves a scored terminal row numbered after the last scored
+attempt (ATT-08); and every served LLM call -- TEP equilibrium re-plans, transport
+replays and full-TEP learning included -- is in the attempt's usage and latency
+(POL-02, ATT-09, ATT-13, ATT-15). Earlier runs are version 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}
@@ -547,12 +564,30 @@ class ContextCompactionBundle:
     replace_project_files: bool
 
 
+PYTHON_HASH_SEED_MODULUS = 4_294_967_296
+"""``PYTHONHASHSEED`` accepts 0..4294967295; anything else aborts interpreter startup."""
+
+
 @dataclass
 class _ActiveRunSettings:
     """Global mutable state for deterministic-seed propagation."""
 
     deterministic: bool = False
     seed: int | None = None
+
+    @property
+    def hash_seed(self) -> int | None:
+        """``PYTHONHASHSEED`` for the pytest subprocess, or ``None`` when not deterministic.
+
+        ORC-01: CPython rejects a ``PYTHONHASHSEED`` outside 0..4294967295 with a fatal
+        initialization error, so a negative or 32-bit-overflowing ``--seed`` used to stop
+        every pytest subprocess from starting. The raw seed still drives bandit exploration
+        and is what run metadata and the settings fingerprint record; only the hash seed is
+        reduced into range.
+        """
+        if not self.deterministic or self.seed is None:
+            return None
+        return int(self.seed) % PYTHON_HASH_SEED_MODULUS
 
 
 @dataclass(frozen=True)
@@ -1506,3 +1541,7 @@ class PromptBudgetResult:
     overflow_chars: int
     dropped_sections: list[str]
     section_status: dict[str, str] = field(default_factory=dict)
+    section_chars: dict[str, int] = field(default_factory=dict)
+    """Characters each section retained in the final prompt, by section key (ATT-03)."""
+    section_original_chars: dict[str, int] = field(default_factory=dict)
+    """Characters each section had before per-section and total budgets applied (ATT-03)."""

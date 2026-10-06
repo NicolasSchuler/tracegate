@@ -30,11 +30,13 @@ from baselines.openai_compat import (
     response_error_meta,
 )
 from evals import _json as json
+from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR
 from evals.patchers.openai_response import (
     _coerce_content_to_text,
     _extract_response_seed,
     _get_first_choice_reasoning,
     _get_first_choice_reasoning_content,
+    _is_truncated_response,
     _nonnegative_int,
     _reasoning_tokens_from_payload,
     _usage_counts_from_payload,
@@ -750,6 +752,8 @@ def _chat_completion(
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
                 error_meta
             )
+            backoff_sec = 0.0
+            retry_delay_exceeds_deadline = False
             if should_retry:
                 backoff_sec = _jittered_retry_delay_sec(
                     _chat_completion_retry_backoff_sec(
@@ -758,11 +762,16 @@ def _chat_completion(
                         max_sec=retry_backoff_max_sec,
                     ),
                     retry_after_sec=error_meta.get("retry_after_sec"),
-                    max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
-                if remaining_retry_budget_sec is not None:
-                    backoff_sec = min(backoff_sec, max(0.0, remaining_retry_budget_sec - 1e-3))
+                # Waiting less than the server asked for only buys another rejection:
+                # if the required delay doesn't fit the deadline, stop here (LLM-22).
+                retry_delay_exceeds_deadline = (
+                    remaining_retry_budget_sec is not None
+                    and backoff_sec >= remaining_retry_budget_sec
+                )
+                should_retry = not retry_delay_exceeds_deadline
+            if should_retry:
                 retry_meta: dict[str, Any] = {
                     "attempt": call_count,
                     "error": str(error_meta.get("error", "")),
@@ -805,6 +814,14 @@ def _chat_completion(
             final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
+            if retry_delay_exceeds_deadline:
+                # The deadline, not the server, ends the request here, so it keeps the
+                # budget classification the trimmed-sleep-then-retry path produced
+                # before, with the refused call's own error alongside it (LLM-22).
+                final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
+                final_error_meta["transport_retry_delay_sec"] = backoff_sec
+                final_error_meta["transport_error"] = str(error_meta.get("error") or "")
+                final_error_meta["error"] = "request_budget_exceeded"
             return None, final_error_meta
 
         meta: PatcherMeta = {
@@ -837,10 +854,17 @@ def _chat_completion(
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
+            # A length-limited answer without usable final content is a truncation, not
+            # a compatibility problem: it must not be retried or relabelled (LLM-02).
+            rejection = (
+                TRUNCATED_RESPONSE_ERROR
+                if _is_truncated_response(data if isinstance(data, dict) else {})
+                else _OPENAI_COMPAT_REASONING_ONLY_ERROR
+            )
             compat_error_meta = copy_patcher_meta(
                 {
                     **meta,
-                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                    **response_error_meta(exc, error=rejection),
                 }
             )
             if retry_attempts:
@@ -1099,6 +1123,8 @@ async def _chat_completion_async(
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
                 error_meta
             )
+            backoff_sec = 0.0
+            retry_delay_exceeds_deadline = False
             if should_retry:
                 backoff_sec = _jittered_retry_delay_sec(
                     _chat_completion_retry_backoff_sec(
@@ -1107,11 +1133,16 @@ async def _chat_completion_async(
                         max_sec=retry_backoff_max_sec,
                     ),
                     retry_after_sec=error_meta.get("retry_after_sec"),
-                    max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
-                if remaining_retry_budget_sec is not None:
-                    backoff_sec = min(backoff_sec, max(0.0, remaining_retry_budget_sec - 1e-3))
+                # Waiting less than the server asked for only buys another rejection:
+                # if the required delay doesn't fit the deadline, stop here (LLM-22).
+                retry_delay_exceeds_deadline = (
+                    remaining_retry_budget_sec is not None
+                    and backoff_sec >= remaining_retry_budget_sec
+                )
+                should_retry = not retry_delay_exceeds_deadline
+            if should_retry:
                 retry_meta: dict[str, Any] = {
                     "attempt": call_count,
                     "error": str(error_meta.get("error", "")),
@@ -1154,6 +1185,14 @@ async def _chat_completion_async(
             final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
+            if retry_delay_exceeds_deadline:
+                # The deadline, not the server, ends the request here, so it keeps the
+                # budget classification the trimmed-sleep-then-retry path produced
+                # before, with the refused call's own error alongside it (LLM-22).
+                final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
+                final_error_meta["transport_retry_delay_sec"] = backoff_sec
+                final_error_meta["transport_error"] = str(error_meta.get("error") or "")
+                final_error_meta["error"] = "request_budget_exceeded"
             return None, final_error_meta
 
         meta: PatcherMeta = {
@@ -1186,10 +1225,17 @@ async def _chat_completion_async(
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
+            # A length-limited answer without usable final content is a truncation, not
+            # a compatibility problem: it must not be retried or relabelled (LLM-02).
+            rejection = (
+                TRUNCATED_RESPONSE_ERROR
+                if _is_truncated_response(data if isinstance(data, dict) else {})
+                else _OPENAI_COMPAT_REASONING_ONLY_ERROR
+            )
             compat_error_meta = copy_patcher_meta(
                 {
                     **meta,
-                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                    **response_error_meta(exc, error=rejection),
                 }
             )
             if retry_attempts:
@@ -1254,23 +1300,29 @@ def _retry_after_meta(raw: str) -> PatcherMeta:
     return {"retry_after_sec": max(0.0, seconds)}
 
 
+_RETRY_AFTER_MAX_SEC = 120.0
+"""Sanity ceiling on an honoured ``Retry-After``, for runs without a deadline (LLM-22)."""
+
+
 def _jittered_retry_delay_sec(
     backoff_sec: float,
     *,
     retry_after_sec: object,
-    max_sec: float,
     rng: random.Random | None = None,
 ) -> float:
     """The delay before a retry: jittered backoff, but at least the server's Retry-After.
 
     Equal jitter (half the backoff plus a random share of the other half) keeps parallel
-    workers from retrying in lockstep after a shared outage. A ``Retry-After`` is
-    honoured up to the backoff cap, *max_sec* (LLM-22).
+    workers from retrying in lockstep after a shared outage. The exponential backoff is
+    capped by its own ``max_sec``; the server's retry floor is not, since clipping a
+    ``Retry-After: 60`` to an eight-second cap only buys another rejection (LLM-22).
+    The caller compares the result with the remaining deadline and stops instead of
+    retrying early; ``_RETRY_AFTER_MAX_SEC`` bounds a deadline-less run.
     """
     base = max(0.0, float(backoff_sec))
     delay = base / 2 + (rng or random).uniform(0.0, base / 2)
     if isinstance(retry_after_sec, (int, float)) and retry_after_sec > 0:
-        delay = max(delay, min(float(retry_after_sec), max(float(max_sec), base)))
+        delay = max(delay, min(float(retry_after_sec), _RETRY_AFTER_MAX_SEC))
     return delay
 
 

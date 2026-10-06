@@ -370,10 +370,26 @@ def _choice_probabilities(
 
 
 def _noul_probability(answers: Mapping[str, Any], question_id: str) -> float:
+    """Required scalar probability of a ``noul`` answer; malformed values raise ``ValueError``.
+
+    Unlike the per-option probabilities of a choice answer (where one unusable entry is dropped
+    and the remaining options still carry mass), this is the entire answer: ``null``, a
+    non-numeric string, a boolean or a non-finite number must surface as an invalid response
+    instead of a silent 0.0 that reads as "the traceback is not sufficient".
+    """
     answer = _answer(answers, question_id)
     if "noul" not in answer:
         raise ValueError(f"answer {question_id!r} has no noul probability")
-    return _finite_probability(answer.get("noul"))
+    raw = answer.get("noul")
+    if raw is None or isinstance(raw, bool):
+        raise ValueError(f"answer {question_id!r} has a non-numeric noul probability")
+    try:
+        number = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"answer {question_id!r} has a non-numeric noul probability") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"answer {question_id!r} has a non-finite noul probability")
+    return min(1.0, max(0.0, number))
 
 
 def _score_fraction(answers: Mapping[str, Any], question_id: str, *, levels: int) -> float:

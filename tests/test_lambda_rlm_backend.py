@@ -614,11 +614,23 @@ def test_env_client_failure_text_does_not_echo_the_api_key(
 
 
 def test_env_clients_read_the_key_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    from baselines.openai_compat import env_client_api_key, env_client_subprocess_env
+    import os
+
+    from baselines.openai_compat import (
+        candidate_subprocess_env,
+        env_client_api_key,
+        env_client_subprocess_env,
+    )
 
     monkeypatch.delenv(ENV_CLIENT_API_KEY_ENV, raising=False)
     assert env_client_api_key({}) == "sk-placeholder"
     monkeypatch.setenv(ENV_CLIENT_API_KEY_ENV, "sk-from-env")
     assert env_client_api_key({}) == "sk-from-env"
+    # codex 5-6#1: reading the key consumes it, so candidate subprocesses can't inherit it.
+    assert ENV_CLIENT_API_KEY_ENV not in os.environ
+    monkeypatch.setenv(ENV_CLIENT_API_KEY_ENV, "sk-from-env")
     assert env_client_api_key({"api_key": "sk-request"}) == "sk-request"
+    assert ENV_CLIENT_API_KEY_ENV not in os.environ
+    monkeypatch.setenv(ENV_CLIENT_API_KEY_ENV, "sk-from-env")
+    assert ENV_CLIENT_API_KEY_ENV not in candidate_subprocess_env()
     assert env_client_subprocess_env("sk-x")[ENV_CLIENT_API_KEY_ENV] == "sk-x"

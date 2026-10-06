@@ -14,6 +14,7 @@ import pytest
 
 from evals import analyze_results as ar
 from evals import eval_summary as es
+from evals.analysis_ope_support import OpeSummarySettings
 
 _ONLINE_ACTION_SPACE = set(ar.ADAPTIVE_ONLINE_ACTIONS)
 _TWO_ACTIONS = {"skip_helper", "invoke_helper"}
@@ -128,11 +129,8 @@ def test_stochastic_one_hot_target_matches_deterministic_target() -> None:
     deterministic = ar._deterministic_target_ope(
         samples=samples,
         target_action="skip_helper",
-        action_space=set(_TWO_ACTIONS),
         action_counts=ar._action_counts_for_samples(samples=samples, action_space=_TWO_ACTIONS),
-        min_action_support=2,
-        ridge_alpha=ar.ADAPTIVE_OPE_RIDGE_ALPHA,
-        propensity_floor=1e-3,
+        settings=_settings(),
     )
 
     for key in ("ips", "snips", "effective_sample_size", "matched_samples", "total_samples"):
@@ -419,8 +417,10 @@ def test_summary_omits_decision_model_targets_without_advice() -> None:
         samples=samples,
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["target_order"] == list(ar.ADAPTIVE_ONLINE_TARGET_POLICY_ORDER)
@@ -456,8 +456,10 @@ def test_summary_adds_decision_model_targets_with_advice() -> None:
         samples=samples,
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["decision_model_sample_count"] == 2
@@ -526,8 +528,10 @@ def test_adaptive_ope_samples_correct_shadow_mode_propensity() -> None:
         samples=samples,
         action_space=set(_ONLINE_ACTION_SPACE),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
     assert summary["shadow_corrected_samples"] == 1
     # Without the fix the stale shadow row would carry weight 4 instead of 1.
@@ -647,8 +651,10 @@ def test_summary_from_records_derives_decision_model_targets() -> None:
         prefix="adaptive_online",
         action_space=set(_ONLINE_ACTION_SPACE),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     assert summary["sample_count"] == 2
@@ -704,8 +710,10 @@ def test_renderers_include_decision_model_targets() -> None:
         ],
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     analyzer_line = ar._format_ope_targets(
@@ -731,8 +739,10 @@ def test_renderers_unchanged_without_decision_model_targets() -> None:
         ],
         action_space=set(_TWO_ACTIONS),
         target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
-        min_action_support=1,
-        propensity_floor=0.005,
+        settings=OpeSummarySettings(
+            min_action_support=1,
+            propensity_floor=0.005,
+        ),
     )
 
     line = ar._format_ope_targets(summary, ordered_targets=ar.ADAPTIVE_ONLINE_TARGET_POLICY_ORDER)
@@ -741,3 +751,90 @@ def test_renderers_unchanged_without_decision_model_targets() -> None:
     assert [part.split(":")[0] for part in line.split("; ")] == list(
         ar.ADAPTIVE_ONLINE_TARGET_POLICY_ORDER
     )
+
+
+def test_shadow_records_flag_target_mass_without_behavior_support() -> None:
+    """Deterministic behavior gives no support for the rest of a stochastic target's mass.
+
+    Shadow mode always applies the deterministic baseline action, so a target that puts 10%
+    on it and 90% on another action produces IPS = SNIPS = 0 with support_rate = 1. Those are
+    not estimates of the full target policy, and the summary now says so (codex m1#1).
+    """
+    records = [
+        _record(
+            case_id=f"case-shadow-{index}",
+            attempt=1,
+            attempt_metadata_extra={
+                "adaptive_online_decision_id": f"d{index}",
+                "adaptive_online_policy_mode": "shadow",
+                "adaptive_online_reward": 0.0,
+                "adaptive_online_behavior_action": "invoke_helper",
+                "adaptive_online_behavior_propensity": 1.0,
+                "adaptive_online_available_actions": ["invoke_helper", "frame_only"],
+                "adaptive_online_dm_status": "ok",
+                "adaptive_online_dm_action_probs": {"invoke_helper": 0.1, "frame_only": 0.9},
+                "adaptive_online_feature_vector": {"bias": 1.0},
+                "adaptive_online_feature_scaling_profile": "v1",
+            },
+        )
+        for index in range(6)
+    ]
+
+    summary = ar._adaptive_ope_summary_from_records(
+        records=records,
+        prefix="adaptive_online",
+        action_space=set(_ONLINE_ACTION_SPACE),
+        target_policies=dict(ar.ADAPTIVE_ONLINE_TARGET_POLICIES),
+        settings=OpeSummarySettings(
+            min_action_support=2,
+            propensity_floor=0.005,
+        ),
+    )
+    target = summary["targets"][ar.DECISION_MODEL_TARGET_STOCHASTIC]
+
+    # The estimator output is unchanged ...
+    assert target["ips"] == pytest.approx(0.0)
+    assert target["snips"] == pytest.approx(0.0)
+    assert target["support_rate"] == pytest.approx(1.0)
+    # ... but the behavior-support information is preserved and the target is flagged.
+    assert target["behavior_supported_target_mass"] == pytest.approx(0.1)
+    assert target["unsupported_target_mass"] == pytest.approx(0.9)
+    assert target["unsupported_mass_samples"] == 6
+    assert target["deterministic_behavior_samples"] == 6
+    assert target["estimates_identifiable"] is False
+    assert target["support_warning"] == "unsupported_target_mass"
+    # The greedy target puts all of its mass on the never-taken action.
+    greedy = summary["targets"][ar.DECISION_MODEL_TARGET_GREEDY]
+    assert greedy["unsupported_target_mass"] == pytest.approx(1.0)
+    assert greedy["support_warning"] == "no_behavior_support"
+
+
+def test_randomized_behavior_supports_the_full_target_distribution() -> None:
+    samples = [
+        _sample(
+            action=action,
+            propensity=0.5,
+            reward=reward,
+            dm_status="ok",
+            dm_action_probs={"skip_helper": 0.1, "invoke_helper": 0.9},
+            available_actions=["skip_helper", "invoke_helper"],
+        )
+        for action, reward in (
+            ("skip_helper", 1.0),
+            ("invoke_helper", 0.0),
+            ("skip_helper", 0.0),
+            ("invoke_helper", 1.0),
+        )
+    ]
+    target = ar._stochastic_target_ope(
+        samples=samples,
+        target_distributions=[{"skip_helper": 0.1, "invoke_helper": 0.9} for _ in samples],
+        settings=_settings(),
+    )
+
+    assert target["behavior_supported_target_mass"] == pytest.approx(1.0)
+    assert target["unsupported_target_mass"] == pytest.approx(0.0)
+    assert target["unsupported_mass_samples"] == 0
+    assert target["deterministic_behavior_samples"] == 0
+    assert target["estimates_identifiable"] is True
+    assert target["support_warning"] == ""

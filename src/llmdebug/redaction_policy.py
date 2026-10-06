@@ -16,35 +16,115 @@ SENSITIVE_NAMES = (
     r"|authorization|cookie"
 )
 
+# Secret-name suffix after one of SENSITIVE_NAMES, e.g. the "-key" of "secret-key". Hyphens
+# are included so text matching accepts the same names as `is_sensitive_name`. Bounded
+# because the suffix class overlaps the names themselves.
+_NAME_SUFFIX = r"[\w-]{0,128}"
+
 # A Python/JSON string literal with escapes and an optional b/r/u prefix; the closing quote is
 # optional so a value cut by truncation is still covered to its end.
 _QUOTED_VALUE = r"""[bru]{0,2}(?:'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)"""
 
+# One item of a bracketed container value: a complete string literal, or any character that
+# is neither a quote nor a bracket. The three alternatives are distinguished by their first
+# character, so there is exactly one way to match any input and the repeat stays linear. A
+# quoted item is matched as a unit so that a bracket inside a string does not end the
+# container, and nesting is excluded so that a nested container fails this branch instead of
+# matching half of it.
+_CONTAINER_ITEM = r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^][{}()'"\r\n]"""
+
+# A composite value consumed whole instead of up to its first comma: the repr of
+# {'password': ['alpha', 'beta']} must not keep "beta".
+_CONTAINER_VALUE = (
+    r"\[(?:" + _CONTAINER_ITEM + r"){0,1024}\]"
+    r"|\{(?:" + _CONTAINER_ITEM + r"){0,1024}\}"
+    r"|\((?:" + _CONTAINER_ITEM + r"){0,1024}\)"
+)
+
+# A value that opens a container but is nested, unterminated or longer than the bound above:
+# matching part of it would leak the rest, so it is redacted to the end of its line. The
+# repeat is unbounded on purpose - a cap would leak the tail of a long value - and a single
+# greedy class stays linear.
+_OPEN_CONTAINER_VALUE = r"[\[{(][^\r\n]*"
+
+# A quoted literal together with anything glued to it, so a value that merely *starts* with a
+# string literal (`password="abc"def`) does not keep its tail.
+_QUOTED_STRUCTURED_VALUE = _QUOTED_VALUE + r"[^\s,;}\])]*"
+_QUOTED_TEXT_VALUE = _QUOTED_VALUE + r"\S*"
+
+# A bare value up to the delimiter that ends it in a repr or JSON rendering. Only used where
+# the name was quoted, i.e. the text really is a structured rendering whose shape should
+# survive; elsewhere an unquoted value runs to the next whitespace. Both are unbounded for
+# the same fail-closed reason as above.
+_BARE_STRUCTURED_VALUE = r"[^\s,;}\])]+"
+_BARE_TEXT_VALUE = r"\S+"
+
+_STRUCTURED_SECRET_VALUE = (
+    f"(?:{_QUOTED_STRUCTURED_VALUE}|{_CONTAINER_VALUE}"
+    f"|{_OPEN_CONTAINER_VALUE}|{_BARE_STRUCTURED_VALUE})"
+)
+_TEXT_SECRET_VALUE = (
+    f"(?:{_QUOTED_TEXT_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_TEXT_VALUE})"
+)
+
+# Header fields whose value is whitespace- or ";"-separated, so one token is not the whole
+# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". An optional leading string
+# literal is consumed first - so a quoted value keeps commas and brackets of its own - and
+# then everything up to the structural delimiters of a surrounding repr/JSON object, which
+# stay readable. The literal is only a prefix, not an alternative, because in
+# `Authorization: "Bearer" abc123` the quoted word is just the scheme; and because a quoted
+# alternative with a lookahead behind it can backtrack into a partial literal, which would
+# leak the rest.
+_AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
+_AUTH_FIELD_VALUE = r"(?:" + _QUOTED_VALUE + r")?[^\r\n,}\])]*"
+
 # Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
 # that can follow a match start is bounded, so redacting long text (captured stdout, big
-# tracebacks) stays linear.
+# tracebacks) stays linear. The order matters: `redact_text` applies them in sequence, and a
+# pattern that consumes a longer value must run before one that would stop inside it.
 PII_PATTERNS: tuple[str, ...] = (
-    r"(?i)password\s*[:=]\s*\S+",
-    r"(?i)(?:api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[:=]\s*\S+",
+    # Authorization/Cookie fields first: the generic assignment patterns below would stop at
+    # the space in "Basic dXNlcjpwYXNz" and leave the credential behind.
+    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*" + _AUTH_FIELD_VALUE,
+    # A quoted secret name assigned a value, i.e. the repr of a dict or a JSON object:
+    # {'secret-key': 'hunter2'}, {"api_key": ["a", "b"]}. The name's quotes are matched with a
+    # lookbehind so the rendering keeps its shape around the replacement.
+    r"(?i)(?<=['\"])(?:"
+    + SENSITIVE_NAMES
+    + r")"
+    + _NAME_SUFFIX
+    + r"['\"]\s*[:=]\s*"
+    + _STRUCTURED_SECRET_VALUE,
+    # An unquoted secret name assigned a value: a log line, an exception message, an object
+    # repr. An unquoted value here runs to the next whitespace, as the former
+    # `password\s*[:=]\s*\S+` pattern did, so "password=ab,cd" is redacted whole. That pair of
+    # patterns is replaced by this one, which no longer pre-empts the quoted-value matcher
+    # below it and so no longer cuts "password=\"alpha beta gamma\"" off after its first word.
+    r"(?i)(?:" + SENSITIVE_NAMES + r")" + _NAME_SUFFIX + r"['\"]?\s*[:=]\s*" + _TEXT_SECRET_VALUE,
+    # A quoted secret name followed by a value: the repr of a header or form pair,
+    # ['Authorization', 'Basic dXNlcjpwYXNz'], which has no ":"/"=" separator.
+    r"(?i)['\"](?:"
+    + SENSITIVE_NAMES
+    + r")"
+    + _NAME_SUFFIX
+    + r"['\"]\s*,\s*"
+    + _STRUCTURED_SECRET_VALUE,
     r"(?i)bearer\s+\S+",
     # URL userinfo, up to the last "@" before the host (passwords may contain "@"), with or
     # without a password: postgres://u:p@ss@db -> //[REDACTED]@db, https://TOKEN@host ->
-    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") before its "@" is
-    # redacted too, since it may be userinfo, and so is an authority longer than any real
-    # host (fail closed). Runs before the email pattern, which would otherwise take
-    # "TOKEN@github.com" together with the host.
-    # The long-authority branch comes first: otherwise the userinfo branch would redact only
-    # the part before an early "@" of an over-long authority.
-    r"(?<=://)[^\s/]{513,}|(?<=://)[^\s/]{1,512}(?=@)"
-    r"|(?<=://)[^\s/@]{1,512}(?=\.\.\.\[TRUNC\]$)",
+    # //[REDACTED]@host. An authority cut by truncation ("...[TRUNC]") is redacted whole,
+    # since it may be userinfo, and so is an authority longer than any real host (fail
+    # closed). Runs before the email pattern, which would otherwise take "TOKEN@github.com"
+    # together with the host.
+    # Branch order is the fail-closed order: a truncated or over-long authority must win over
+    # ordinary userinfo matching, which would otherwise stop at an "@" inside the password
+    # ("postgres://admin:p@ss...[TRUNC]") or before the real host of an over-long authority.
+    r"(?<=://)[^\s/]{513,}"
+    r"|(?<=://)[^\s/]{1,512}(?=\.\.\.\[TRUNC\])"
+    r"|(?<=://)[^\s/]{1,512}(?=@)",
     # RFC 5321 caps the local part at 64 characters; the bound also keeps this linear.
     r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}\b",
     r"(?i)(?:sk|pk|token|key)[_-][a-zA-Z0-9_-]{20,}",
-    # A secret-named key inside text, e.g. the repr of a nested dict: {'password': 'x y'}.
-    # The name suffix is bounded because it overlaps later names; whitespace can't, so the
-    # separator padding is unbounded without becoming quadratic.
-    r"(?i)(?:" + SENSITIVE_NAMES + r")\w{0,128}['\"]?\s*[:=]\s*"
-    r"(?:" + _QUOTED_VALUE + r"|[^\s,;}\])]+)",
 )
 
 _VALID_PROFILES = {"dev", "ci", "prod"}

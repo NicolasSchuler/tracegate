@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import fcntl
 import gzip
 import hashlib
 import io
@@ -33,6 +34,7 @@ import sys
 import tempfile
 import zlib
 from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -243,16 +245,135 @@ def _systemone_answers(body: dict[str, Any]) -> dict[str, Any]:
 
 # --- normalization ----------------------------------------------------------------------
 
+# Every record key that reads like a time. Each one must be classified below: the
+# regex alone also matches configured budgets, reward coefficients and attempt counts,
+# and normalizing those away made a refactor that miscomputes an effective deadline
+# produce identical golden output.
 _TIME_KEY = re.compile(
     r"(^|_)(sec|secs|seconds|ms|ns|ts|time|timestamp|duration|elapsed|latency|at|eta)"
     r"(_[a-z0-9]+)?$"
 )
-_TIME_KEY_EXCEPTIONS = frozenset(
+# Measurements: wall-clock durations, latencies and timestamps, replaced by a
+# placeholder because they differ on every run.
+_MEASURED_TIME_KEYS = frozenset(
     {
-        # Configuration values, not measurements.
-        "timeout_sec",
+        "adaptive_budget_local_wall_sec",
+        "adaptive_budget_mean_local_wall_sec",
+        "adaptive_budget_reward_latency_penalty",
+        "adaptive_controller_prepare_sec",
+        "adaptive_controller_sidecar_build_sec",
+        "adaptive_controller_sidecar_write_sec",
+        "adaptive_controller_summarizer_sec",
+        "adaptive_online_dm_latency_ms",
+        "adaptive_online_local_wall_sec",
+        "adaptive_online_mean_local_wall_sec",
+        "adaptive_online_reward_latency_penalty",
+        "after_duration_sec",
+        "apply_duration_sec",
+        "attempt_shared_propose_budget_remaining_sec",
+        "attempt_shared_propose_call_budget_sec",
+        "attempt_wall_clock_sec",
+        "baseline_case_conversion_sec",
+        "baseline_eval_sec",
+        "baseline_internal_total_sec",
+        "baseline_orchestration_sec",
+        "baseline_sidecar_load_sec",
+        "before_duration_sec",
+        "compact_context_duration_sec",
+        "context_compaction_llm_sec",
+        "context_compaction_total_sec",
+        "created_at_utc",
+        "cumulative_runtime_sec",
+        "duration_sec",
+        "generated_at_utc",
+        "json_generation_duration_sec",
+        "latency_ms",
+        "llm_total_sec",
+        "llmdebug_total_sec",
+        "local_wall_sec",
+        "max_propose_sec",
+        "mean_runtime_sec",
+        "no_diff_recovery_duration_sec",
+        "overhead_sec",
+        "patch_apply_sec",
+        "patch_verifier_recovery_duration_sec",
+        "plan_patch_duration_sec",
+        "prompt_assembly_sec",
+        "propose_duration_sec",
+        "recovery_llm_sec",
+        "recovery_total_sec",
+        "remaining_budget_sec",
+        "request_context_duration_sec",
+        "retry_gate_carried_wall_sec",
+        "retry_plan_then_patch_duration_sec",
+        "reward_latency_penalty",
+        "runner_forced_patch_build_sec",
+        "saved_at_utc",
+        "server_ready_probe_duration_sec",
+        "snapshot_read_sec",
+        "stage_a_context_fulfillment_sec",
+        "stage_a_llm_sec",
+        "stage_a_total_sec",
+        "stage_b_llm_sec",
+        "started_at_utc",
+        "syntax_preflight_sec",
+        "tep_learning_llm_sec",
+        "test_after_sec",
+        "test_before_sec",
+        "time",
+        "timestamp_utc",
+        "transport_recovery_wait_sec",
     }
 )
+# Configured budgets and deadlines, reward coefficients, attempt counts and the rates
+# derived from them: deterministic, behaviour-defining, and therefore compared.
+_CONFIGURED_TIME_KEYS = frozenset(
+    {
+        "adaptive_budget_applied_time_attempts",
+        "adaptive_budget_applied_time_rate",
+        "adaptive_budget_reward_eta_progress",
+        "adaptive_budget_reward_latency_scale",
+        "adaptive_budget_reward_mu_latency",
+        "adaptive_budget_selected_time_attempts",
+        "adaptive_budget_selected_time_rate",
+        "adaptive_controller_lambda_rlm_timeout_sec",
+        "adaptive_decision_model_timeout_sec",
+        "adaptive_online_reward_eta_progress",
+        "adaptive_online_reward_latency_scale",
+        "adaptive_online_reward_mu_latency",
+        "adaptive_reward_eta_progress",
+        "adaptive_reward_latency_scale",
+        "adaptive_reward_mu_latency",
+        "attempt_shared_propose_budget_base_sec",
+        "attempt_shared_propose_budget_sec",
+        "base_propose_budget_sec",
+        "budget_can_raise_time",
+        "effective_timeout_sec",
+        "openai_max_propose_sec",
+        "openai_timeout_sec",
+        "openai_transport_recovery_max_wait_sec",
+        "openai_transport_recovery_poll_sec",
+        "openai_transport_retry_backoff_base_sec",
+        "openai_transport_retry_backoff_max_sec",
+        "propose_budget_sec",
+        "timeout_sec",
+        "transport_retry_backoff_base_sec",
+        "transport_retry_backoff_max_sec",
+    }
+)
+
+
+def is_measured_time(key: str) -> bool:
+    """Whether *key*'s value is a measurement that must be normalized away.
+
+    An allowlist, not a pattern: an unclassified time-like key stays in the comparison,
+    so a new budget or coefficient cannot silently escape the lock. A new measurement
+    makes two runs differ instead, and ``test_every_time_like_key_is_classified`` names
+    it before that happens.
+    """
+    return bool(key) and key.lower() in _MEASURED_TIME_KEYS
+
+
 _PYTEST_TIMING = re.compile(r"\b(passed|failed|error|errors|skipped)( in) \d+(\.\d+)?s\b")
 _ADDRESS = re.compile(r"\b0x[0-9a-fA-F]{6,}\b")
 _VERDICT_FILE = re.compile(r"(tracegate_pytest_verdict_)[0-9a-f]{32}")
@@ -264,6 +385,7 @@ _RANDOM_ID_KEY = re.compile(r"decision_ids?$")
 # vary by a few characters per process, and these size estimates follow.
 _OBJECT_ID_KEY = re.compile(r"^\d{9,}$")
 _SIZE_ESTIMATE_KEY = re.compile(r"^adaptive_toon_(encoded_tokens|json_tokens|savings_tokens)")
+_SIZE_ESTIMATE_PLACEHOLDER = "<SIZE>"
 
 
 class Normalizer:
@@ -299,10 +421,15 @@ class Normalizer:
             return self.alias(value)
         if key == "python_version" and isinstance(value, str):
             return ".".join(value.split(".")[:2])
-        if key and key not in _TIME_KEY_EXCEPTIONS and _TIME_KEY.search(key.lower()):
-            return "<T>" if isinstance(value, (int, float, str)) and value is not True else value
+        if is_measured_time(key):
+            if isinstance(value, bool) or value is None:
+                return value
+            return "<T>" if isinstance(value, (int, float, str)) else value
         if _SIZE_ESTIMATE_KEY.search(key):
-            return "<SIZE>"
+            # Missingness is a recording regression, so None is kept; the magnitude is
+            # not comparable because the encoded snapshot holds pytest's own object
+            # reprs, whose length varies by a few characters per process.
+            return value if value is None else _SIZE_ESTIMATE_PLACEHOLDER
         if isinstance(value, dict):
             return {
                 (f"<OBJID{index}>" if _OBJECT_ID_KEY.match(str(k)) else str(k)): self.value(
@@ -319,7 +446,7 @@ class Normalizer:
 
 def _fixed_times(value: Any, key: str = "") -> Any:
     """Replace measured times by constants so the analysis tools see stable inputs."""
-    if key and key not in _TIME_KEY_EXCEPTIONS and _TIME_KEY.search(key.lower()):
+    if is_measured_time(key):
         if isinstance(value, bool) or value is None:
             return value
         if isinstance(value, (int, float)):
@@ -416,23 +543,79 @@ def _collect(root: Path, normalizer: Normalizer, requests: list[dict[str, Any]])
     return output
 
 
-def _fresh_run_root(name: str) -> Path:
-    """Create an empty run root, refusing paths another user could have planted."""
+def _check_owned(directory: Path) -> os.stat_result:
+    """Return *directory*'s lstat, refusing a symlink or another user's directory."""
+    info = directory.lstat()
+    if stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError(f"refusing to use {directory}: a symlink or not owned by this user")
+    return info
+
+
+def prepare_run_root() -> Path:
+    """Create the run root with private permissions, refusing an exposed parent.
+
+    Ownership alone is not enough: in a group- or world-writable parent another account
+    can replace a scenario directory or plant fixture content between the check and the
+    run, and ``mkdir(exist_ok=True)`` does not tighten an existing permissive directory.
+    """
     RUN_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for directory in (RUN_ROOT.parent, RUN_ROOT):
-        info = directory.lstat()
-        if stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
-            raise RuntimeError(f"refusing to use {directory}: a symlink or not owned by this user")
+    parent_info = _check_owned(RUN_ROOT.parent)
+    exposed = parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    if exposed and not parent_info.st_mode & stat.S_ISVTX:
+        raise RuntimeError(
+            f"refusing to use {RUN_ROOT.parent}: it is group- or world-writable; "
+            "tighten it or point RUN_ROOT elsewhere"
+        )
+    # Owned, so tighten rather than refuse.
+    if _check_owned(RUN_ROOT).st_mode & 0o077:
+        RUN_ROOT.chmod(0o700)
+    return RUN_ROOT
+
+
+@contextlib.contextmanager
+def scenario_lock(name: str) -> Iterator[None]:
+    """Hold an exclusive cross-process lock on one scenario's run root and port.
+
+    Two invocations of the same scenario share the directory and the stub port, so
+    without the lock the second deletes the first's live work tree before failing on the
+    occupied port, and its cleanup deletes it again.
+    """
+    prepare_run_root()
+    lock_path = RUN_ROOT / f"{name}.lock"
+    handle = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RuntimeError(
+                f"scenario {name!r} is already running in {RUN_ROOT}; "
+                "wait for it to finish instead of resetting its run root"
+            ) from exc
+        yield
+    finally:
+        os.close(handle)
+
+
+def _fresh_run_root(name: str) -> Path:
+    """Create an empty scenario root; call under :func:`scenario_lock`."""
+    prepare_run_root()
     root = RUN_ROOT / name
     if root.is_symlink():
         raise RuntimeError(f"refusing to use {root}: it is a symlink")
     if root.exists():
         shutil.rmtree(root)
-    root.mkdir()
+    root.mkdir(mode=0o700)
     return root
 
 
 def run_scenario(name: str, keep_root: Path | None = None) -> dict[str, Any]:
+    """Run one scenario under its cross-process lock and return its normalized output."""
+    ensure_offline_tokenizer()
+    with scenario_lock(name):
+        return _run_scenario_locked(name, keep_root=keep_root)
+
+
+def _run_scenario_locked(name: str, *, keep_root: Path | None = None) -> dict[str, Any]:
     from evals import run_eval
     from tests._openai_stub_server import OpenAIStubServer, StubbedResponse
 
@@ -544,6 +727,67 @@ def interpreter() -> str:
     return str(venv_python) if venv_python.is_file() else sys.executable
 
 
+# Only these are inherited by a scenario subprocess; everything else the caller exports
+# (proxies, LLMDEBUG_*, PYTEST_ADDOPTS, ...) would change the recorded output without
+# changing the recorded environment fingerprint.
+_INHERITED_ENV_KEYS = ("HOME", "PATH", "TMPDIR", "USER", "LOGNAME")
+# tiktoken caches its vocabulary in $TMPDIR by default, which is wiped; with a cold cache
+# the token estimates in the records come from a download instead of local data.
+TOKENIZER_CACHE = Path.home() / ".cache" / "tracegate-golden-eval-tokenizer"
+
+
+def scenario_env() -> dict[str, str]:
+    """The pinned environment of a scenario subprocess.
+
+    Proxies are off so the loopback stub cannot be routed to a real host, and the capture
+    and pytest settings that reach the prompts are pinned instead of inherited.
+    """
+    env = {key: os.environ[key] for key in _INHERITED_ENV_KEYS if key in os.environ}
+    env.update(
+        {
+            "no_proxy": "*",
+            "NO_PROXY": "*",
+            "PYTEST_ADDOPTS": "",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "COLUMNS": "80",
+            "TIKTOKEN_CACHE_DIR": str(TOKENIZER_CACHE),
+        }
+    )
+    return env
+
+
+def ensure_offline_tokenizer() -> None:
+    """Point tiktoken at a persistent cache and fail loudly if it is not usable.
+
+    ``estimate_text_token_count`` records a token count per request, and its tokenizer
+    downloads its vocabulary when the cache is cold. Resolving it once here keeps the
+    scenario runs offline and turns a missing tokenizer into one explicit error instead
+    of silently different telemetry in every record.
+    """
+    from evals.token_counting import estimate_text_token_count
+
+    TOKENIZER_CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(TOKENIZER_CACHE))
+    default_cache = Path(tempfile.gettempdir()) / "data-gym-cache"
+    if default_cache.is_dir():
+        # Reuse vocabulary already on this machine rather than fetching it again.
+        for blob in default_cache.iterdir():
+            target = TOKENIZER_CACHE / blob.name
+            if blob.is_file() and not target.exists():
+                shutil.copy2(blob, target)
+    probe = estimate_text_token_count("golden", model="golden-model")
+    if not probe.get("available"):
+        raise RuntimeError(
+            "golden runs need a local tokenizer: "
+            f"{probe.get('error') or 'unavailable'}. Warm {TOKENIZER_CACHE} once with "
+            "network access (python -c \"import tiktoken; tiktoken.get_encoding('o200k_base')\")"
+        )
+
+
 def environment() -> dict[str, str]:
     """What the golden files depend on besides the code under test.
 
@@ -597,14 +841,18 @@ def run_in_subprocess(name: str, out: Path) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        env=scenario_env(),
     )
 
 
 def run_scenarios(names: list[str], out_dir: Path) -> dict[str, str]:
     """Run scenarios in parallel subprocesses; return the error output of failed runs."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(names) or 1) as pool:
+    # Two subprocesses for one scenario would fight over its run root and stub port.
+    unique = sorted(set(names))
+    ensure_offline_tokenizer()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(unique) or 1) as pool:
         futures = {
-            name: pool.submit(run_in_subprocess, name, out_dir / f"{name}.json") for name in names
+            name: pool.submit(run_in_subprocess, name, out_dir / f"{name}.json") for name in unique
         }
         results = {name: future.result() for name, future in futures.items()}
     return {
@@ -649,12 +897,14 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(_dump(output), encoding="utf-8")
         return 0
 
-    names = sorted(args.scenario or SCENARIOS)
+    names = sorted(set(args.scenario or SCENARIOS))
     if not args.update:
         mismatch = golden_environment_mismatch()
         if mismatch is not None:
-            print(f"cannot compare: {mismatch}. Regenerate the golden files on the base commit")
-            print("first: uv run python -m tests.golden_eval.runner --update")
+            print(f"cannot compare: {mismatch}.")
+            print("The golden files lock behaviour in the environment that recorded them;")
+            print("compare there, or regenerate on a commit whose behaviour you trust with")
+            print("`just golden-evals-update` and commit the new environment.json with them.")
             return 2
     with tempfile.TemporaryDirectory(prefix="golden-out-") as tmp:
         errors = run_scenarios(names, Path(tmp))

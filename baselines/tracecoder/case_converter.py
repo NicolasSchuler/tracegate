@@ -9,6 +9,7 @@ from typing import cast
 
 from baselines.adapter_base import BaselineCaseContext, BaselineCaseIncompatibleError
 from baselines.case_information import (
+    REFERENCE_TESTS_HEADER,
     TEST_SOURCE_FULL,
     case_information_record,
     render_reference_tests,
@@ -129,9 +130,25 @@ def _build_prompt(*, buggy_code: str, test_code: str, entry_point: str) -> str:
 
 
 def compact_problem_prompt(prompt: str, *, max_chars: int) -> str:
-    """Clamp the already-structured task description to a reproducible size."""
+    """Clamp the generated task description, keeping everything from the test section on.
+
+    The budget used to apply to the whole prompt, which for longer cases cut off the end of
+    ``test_buggy.py`` — while the record still claimed ``test_source_exposure="full"``
+    (BAS-07) — and dropped the retry context the harness appends on attempt 2+ (BAS-02).
+    Only the leading summary is compactable; the full reference tests and anything appended
+    after them are preserved.
+    """
     text = str(prompt or "").strip()
     limit = max(1, int(max_chars))
+    index = text.find(REFERENCE_TESTS_HEADER)
+    if index < 0:
+        return _clamp_text(text, limit=limit)
+    head = _clamp_text(text[:index].rstrip(), limit=limit)
+    preserved = text[index:]
+    return f"{head}\n{preserved}" if head else preserved
+
+
+def _clamp_text(text: str, *, limit: int) -> str:
     if len(text) <= limit:
         return text
     if limit <= 3:

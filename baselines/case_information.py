@@ -27,6 +27,10 @@ TEST_SOURCE_ASSERTS = "asserts"
 """Only the test assertions are in the prompt; used by LDB, whose converter accepts only
 plain-assert test bodies, so the assertions carry the whole test content."""
 
+TEST_SOURCE_NONE = "none"
+"""No test source reached the prompt. A native arm whose evidence staging or prompt budget
+left the test file out records this, so BAS-07 comparisons have both halves."""
+
 
 def build_baseline_case_context_payload(
     *,
@@ -57,6 +61,10 @@ def case_information_record(
     }
 
 
+REFERENCE_TESTS_HEADER = "Reference tests (test_buggy.py):"
+"""Header of the full-test-source prompt section; prompt compaction must not cut it off."""
+
+
 def render_reference_tests(test_code: str) -> str:
     """Render the full test source as a prompt section (``TEST_SOURCE_FULL``)."""
-    return "Reference tests (test_buggy.py):\n" + str(test_code).rstrip() + "\n"
+    return REFERENCE_TESTS_HEADER + "\n" + str(test_code).rstrip() + "\n"

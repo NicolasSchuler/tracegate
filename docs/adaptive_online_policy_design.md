@@ -66,7 +66,7 @@ here had drifted (8 actions, hint scales 0.25/0.5/0.25/0.5, event schema 3).
 | Helper materialization scale | 0.5 |
 | Budget `rho_budget_exceeded` | 0.5 |
 
-Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`, and so do `patcher_config` and the run settings fingerprint derived from it, so resuming a run recorded under an earlier generation is refused.
 <!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## Budget-policy extension (adaptive tooling only)
@@ -271,8 +271,15 @@ historical runs can be reproduced, and all are recorded in the run configuration
   payload, those actions get an empty Stage-A context (reason
   `restricted_action_no_valid_requests`) instead of the whole-file fallback bundle, and the
   whole-file seed bundle is only added for `invoke_helper` and `retry_helper_strict_json`.
+  A restricted action also keeps the `staged` context protocol when its request list ends up
+  empty, so the Stage-B prompt never falls back to the monolithic project-file context (ATT-03).
   `attempt_metadata.seed_bundle_chars` and `evidence_chars_by_type` (snapshot, snapshot_lite,
   seed, file, search, frame, local_var) record what reached the Stage-B prompt.
+  `evidence_chars_by_type` counts evidence as delivered: deduplicated across the seed bundle
+  and the Stage-A requests, filtered to the new items on a delta retry, and scaled by how much
+  of each prompt section survived compaction and the prompt budget. `stage_b_snapshot_in_prompt`
+  and `adaptive_snapshot_included` are derived from the final prompt sections too, so a delta
+  retry or a snapshot-replacing compaction records them as false (ATT-06).
 - **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
   logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
   rows at read time.
@@ -372,6 +379,20 @@ before the first unit runs; an unhealthy sidecar stops the run with a clear erro
   `shadow_corrected_samples` counts old shadow rows whose propensity was corrected to 1.0.
   Meaningful estimates need a stochastic behavior policy, i.e. LinUCB `on` with the decision
   model in `shadow` role.
+- Each stochastic target therefore also reports how much of its probability mass the behavior
+  policy can identify: `behavior_supported_target_mass`, `unsupported_target_mass`,
+  `unsupported_mass_samples`, `deterministic_behavior_samples` and `estimates_identifiable`.
+  Mass counts as supported when the sample took that action, or when the sample's behavior was
+  stochastic (propensity < 1) and the action occurs somewhere in the data. When unsupported
+  mass remains, `support_warning` is `unsupported_target_mass`: `matched_samples` /
+  `support_rate` alone read as full support as soon as the executed action keeps any target
+  probability, so a deterministic shadow run with 10% of the target mass on the baseline action
+  used to report IPS = SNIPS = 0 with `support_rate` 1 and no warning at all. The point
+  estimates are kept (they estimate the supported part of the target), but they must not be
+  read as estimates of the full target policy.
+- Bootstrap intervals follow the point estimates: with no importance-weighted sample,
+  `ope_ci.ips` / `ope_ci.snips` are `null` instead of a seemingly certain `[0, 0]`, and
+  `ope_ci.available` is true only when at least one interval exists.
 
 ## Safety notes
 - `shadow` mode is the recommended first rollout for calibration.

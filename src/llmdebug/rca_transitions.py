@@ -29,6 +29,9 @@ _STATE_TRANSITIONS: dict[str, RCAState] = {
     "verify": "verified",
     "resolve": "resolved",
 }
+# Actions that re-tread the same failure instead of describing new reasoning. Only these
+# feed the repair streak that drives stall detection (RCA-06).
+_REPAIR_LOOP_ACTIONS: frozenset[str] = frozenset({"bind_evidence", "change", "verify"})
 
 
 def normalize_action(action: str) -> RCAAction:
@@ -197,6 +200,13 @@ def carry_forward_verification(
     return None
 
 
+def verification_passed(verification_result: Any) -> bool:
+    """Whether a verification result dict reports ``status == "pass"``."""
+    if not isinstance(verification_result, dict):
+        return False
+    return str(cast(dict[str, Any], verification_result).get("status") or "") == "pass"
+
+
 class AttemptProgress(NamedTuple):
     """Repeat and progression signals of the current attempt versus the previous one."""
 
@@ -214,6 +224,8 @@ class TransitionInputs:
     action: RCAAction
     progress: AttemptProgress
     stall_threshold: int
+    repair_streak: int = 0
+    gate_allowed: bool = True
 
 
 @dataclass(frozen=True)
@@ -253,6 +265,40 @@ def derive_attempt_progress(
     )
 
 
+def derive_repair_streak(
+    *,
+    previous_streak: int,
+    action: RCAAction,
+    progress: AttemptProgress,
+    evidence_advanced: bool,
+    verification_is_passing: bool,
+) -> int:
+    """Count consecutive unsuccessful repair attempts against one failure signature.
+
+    Stall detection needs "how often did we re-try the same failure without bringing
+    anything new", not "how many attempts share this signature": the plain
+    ``repeat_count`` also counts the bookkeeping steps of the normal
+    ``capture -> bind_evidence -> hypothesize -> plan -> change`` walk, so a first-time
+    workflow used to be marked ``stalled`` at ``change`` (RCA-06).
+
+    The streak resets to 0 whenever the attempt brings progress -- a different failure
+    signature, an advanced hypothesis or plan, newly bound evidence, or a passing
+    verification. ``bind_evidence``/``change``/``verify`` that bring none of those
+    increment it by one; any other action carries it forward unchanged, so describing
+    the same plan twice neither trips nor clears loop protection.
+    """
+    carried = max(previous_streak, 0)
+    if not progress.same_signature:
+        return 0
+    if progress.hypothesis_advanced or progress.plan_advanced or evidence_advanced:
+        return 0
+    if verification_is_passing:
+        return 0
+    if action not in _REPAIR_LOOP_ACTIONS:
+        return carried
+    return carried + 1
+
+
 def resolve_target_state(
     previous_state: str,
     normalized_action: RCAAction,
@@ -273,14 +319,18 @@ def apply_stall_rule(
     target_state: RCAState,
     gate_warnings: list[str],
 ) -> tuple[RCAState, list[str]]:
-    """Apply stall detection for repeated signatures without progression."""
+    """Apply stall detection for repeated repair attempts without progression.
+
+    A denied action did not happen, so it never marks the session stalled: evaluating
+    the rule unconditionally let a rejected request change the persisted state and the
+    allowed actions (RCA-06).
+    """
     progress = inputs.progress
     if (
-        progress.same_signature
-        and progress.repeat_count >= max(inputs.stall_threshold, 2)
-        and not progress.hypothesis_advanced
-        and not progress.plan_advanced
-        and inputs.action in {"bind_evidence", "change", "verify"}
+        inputs.gate_allowed
+        and progress.same_signature
+        and inputs.repair_streak >= max(inputs.stall_threshold, 2)
+        and inputs.action in _REPAIR_LOOP_ACTIONS
     ):
         gate_warnings.append(
             "Repeated failure signature without hypothesis/plan advancement; state marked stalled."

@@ -478,6 +478,14 @@ class OpenAICompatPatcher(Patcher):
             totals = _accumulate_llm_totals(totals=totals, meta=attempt_meta, default_calls=0)
             meta = cast(PatcherMeta, dict(attempt_meta or {}))
             request_json, raw_response = _normalize_context_request_payload(raw)
+            # A cut-off helper answer is terminal (LLM-02): without the reason the
+            # caller below would record invalid_request_context_payload instead, after
+            # a pointless strict-JSON retry under the same token budget.
+            response_truncated = (
+                request_json is None and raw is not None and _is_truncated_response(raw)
+            )
+            if response_truncated:
+                meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
             failure_kind = _request_context_failure_kind(
                 meta=meta,
                 request_json=request_json,
@@ -507,6 +515,8 @@ class OpenAICompatPatcher(Patcher):
                 }
             )
             if request_json is not None:
+                break
+            if response_truncated:
                 break
             if _is_openai_compat_reasoning_only(meta):
                 break
@@ -840,16 +850,17 @@ class OpenAICompatPatcher(Patcher):
         if raw is None:
             return JsonGenerationResult(payload=None, raw_response=None, meta=result_meta)
         content = _get_first_choice_content(raw)
+        # Truncation is terminal and decided before the content check (LLM-02).
+        if _is_truncated_response(raw):
+            return JsonGenerationResult(
+                payload=None,
+                raw_response=content[:2000] if content is not None else _safe_trunc(raw),
+                meta=_error_meta(result_meta, TRUNCATED_RESPONSE_ERROR),
+            )
         if content is None:
             result_meta.setdefault("error", "no_choice_content")
             return JsonGenerationResult(
                 payload=None, raw_response=_safe_trunc(raw), meta=result_meta
-            )
-        if _is_truncated_response(raw):
-            return JsonGenerationResult(
-                payload=None,
-                raw_response=content[:2000],
-                meta=_error_meta(result_meta, TRUNCATED_RESPONSE_ERROR),
             )
         payload = _extract_json_object(content)
         if payload is None:
@@ -934,6 +945,14 @@ class OpenAICompatPatcher(Patcher):
             totals = _accumulate_llm_totals(totals=totals, meta=attempt_meta, default_calls=0)
             meta = cast(PatcherMeta, dict(attempt_meta or {}))
             request_json, raw_response = _normalize_context_request_payload(raw)
+            # A cut-off helper answer is terminal (LLM-02): without the reason the
+            # caller below would record invalid_request_context_payload instead, after
+            # a pointless strict-JSON retry under the same token budget.
+            response_truncated = (
+                request_json is None and raw is not None and _is_truncated_response(raw)
+            )
+            if response_truncated:
+                meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
             failure_kind = _request_context_failure_kind(
                 meta=meta,
                 request_json=request_json,
@@ -963,6 +982,8 @@ class OpenAICompatPatcher(Patcher):
                 }
             )
             if request_json is not None:
+                break
+            if response_truncated:
                 break
             if _is_openai_compat_reasoning_only(meta):
                 break
@@ -2013,6 +2034,9 @@ def _compact_context_via_json(
 
     meta = _meta_with_llm_totals(meta=cast(PatcherMeta, dict(meta)), totals=totals)
     compacted_context, raw_response = _normalize_context_compaction_payload(raw)
+    if compacted_context is None and raw is not None and _is_truncated_response(raw):
+        # Terminal truncation, not an invalid compaction payload (LLM-02).
+        meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
     return compacted_context, raw_response, meta
 
 
@@ -2109,6 +2133,9 @@ async def _compact_context_via_json_async(
 
     meta = _meta_with_llm_totals(meta=cast(PatcherMeta, dict(meta)), totals=totals)
     compacted_context, raw_response = _normalize_context_compaction_payload(raw)
+    if compacted_context is None and raw is not None and _is_truncated_response(raw):
+        # Terminal truncation, not an invalid compaction payload (LLM-02).
+        meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
     return compacted_context, raw_response, meta
 
 
@@ -2119,10 +2146,11 @@ def _normalize_context_compaction_payload(
         return None, None
 
     content = _get_first_choice_content(response)
+    # Truncation is terminal and decided before the content check (LLM-02).
+    if _is_truncated_response(response):
+        return None, content if content is not None else _safe_trunc(response)
     if content is None:
         return None, _safe_trunc(response)
-    if _is_truncated_response(response):
-        return None, content
     payload = _extract_json_object(content)
     if payload is None:
         return None, content
@@ -2146,10 +2174,11 @@ def _normalize_context_request_payload(
         return None, None
 
     content = _get_first_choice_content(response)
+    # Truncation is terminal and decided before the content check (LLM-02).
+    if _is_truncated_response(response):
+        return None, content if content is not None else _safe_trunc(response)
     if content is None:
         return None, _safe_trunc(response)
-    if _is_truncated_response(response):
-        return None, content
     raw_payload = _extract_json_object(content)
     if raw_payload is None:
         return None, content
@@ -2239,15 +2268,19 @@ def _propose_patch_via_diff(
             continue
 
         content = _get_first_choice_content(raw)
+        # Truncation is terminal and decided before the content check: a length-limited
+        # answer can also drop its content, which would look retryable here (LLM-02).
+        if _is_truncated_response(raw):
+            last_meta = _error_meta(
+                last_meta,
+                TRUNCATED_RESPONSE_ERROR,
+                raw_response=content[:2000] if content is not None else _safe_trunc(raw),
+            )
+            break
         if content is None:
             last_meta["error"] = "no_choice_content"
             last_meta["response"] = _safe_trunc(raw)
             continue
-        if _is_truncated_response(raw):
-            last_meta = _error_meta(
-                last_meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000]
-            )
-            break
 
         diff = _extract_unified_diff(content)
         if diff is None:
@@ -2427,12 +2460,8 @@ def _propose_patch_via_edits(
             meta["reasoning_chars"] = len(raw_reasoning_text)
 
         content = _get_first_choice_content(raw)
-        if content is None:
-            attempt["parse_error"] = "no_choice_content"
-            stage_attempts.append(attempt)
-            fallback_reason = "no_json_payload"
-            fallback_raw_response = _safe_trunc(raw)
-            continue
+        # Truncation is terminal and decided before the content check: a length-limited
+        # answer can also drop its content, which would look retryable here (LLM-02).
         if _is_truncated_response(raw):
             attempt["parse_error"] = TRUNCATED_RESPONSE_ERROR
             attempt["terminal"] = True
@@ -2441,9 +2470,19 @@ def _propose_patch_via_edits(
             return PatchResult(
                 diff=None,
                 meta=_with_totals(
-                    _error_meta(meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000])
+                    _error_meta(
+                        meta,
+                        TRUNCATED_RESPONSE_ERROR,
+                        raw_response=content[:2000] if content is not None else _safe_trunc(raw),
+                    )
                 ),
             )
+        if content is None:
+            attempt["parse_error"] = "no_choice_content"
+            stage_attempts.append(attempt)
+            fallback_reason = "no_json_payload"
+            fallback_raw_response = _safe_trunc(raw)
+            continue
 
         payload_candidate = _extract_json_object(content)
         if payload_candidate is None:
@@ -2812,15 +2851,19 @@ async def _propose_patch_via_diff_async(
             continue
 
         content = _get_first_choice_content(raw)
+        # Truncation is terminal and decided before the content check: a length-limited
+        # answer can also drop its content, which would look retryable here (LLM-02).
+        if _is_truncated_response(raw):
+            last_meta = _error_meta(
+                last_meta,
+                TRUNCATED_RESPONSE_ERROR,
+                raw_response=content[:2000] if content is not None else _safe_trunc(raw),
+            )
+            break
         if content is None:
             last_meta["error"] = "no_choice_content"
             last_meta["response"] = _safe_trunc(raw)
             continue
-        if _is_truncated_response(raw):
-            last_meta = _error_meta(
-                last_meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000]
-            )
-            break
 
         diff = _extract_unified_diff(content)
         if diff is None:
@@ -2999,12 +3042,8 @@ async def _propose_patch_via_edits_async(
             meta["reasoning_chars"] = len(raw_reasoning_text)
 
         content = _get_first_choice_content(raw)
-        if content is None:
-            attempt["parse_error"] = "no_choice_content"
-            stage_attempts.append(attempt)
-            fallback_reason = "no_json_payload"
-            fallback_raw_response = _safe_trunc(raw)
-            continue
+        # Truncation is terminal and decided before the content check: a length-limited
+        # answer can also drop its content, which would look retryable here (LLM-02).
         if _is_truncated_response(raw):
             attempt["parse_error"] = TRUNCATED_RESPONSE_ERROR
             attempt["terminal"] = True
@@ -3013,9 +3052,19 @@ async def _propose_patch_via_edits_async(
             return PatchResult(
                 diff=None,
                 meta=_with_totals(
-                    _error_meta(meta, TRUNCATED_RESPONSE_ERROR, raw_response=content[:2000])
+                    _error_meta(
+                        meta,
+                        TRUNCATED_RESPONSE_ERROR,
+                        raw_response=content[:2000] if content is not None else _safe_trunc(raw),
+                    )
                 ),
             )
+        if content is None:
+            attempt["parse_error"] = "no_choice_content"
+            stage_attempts.append(attempt)
+            fallback_reason = "no_json_payload"
+            fallback_raw_response = _safe_trunc(raw)
+            continue
 
         payload_candidate = _extract_json_object(content)
         if payload_candidate is None:

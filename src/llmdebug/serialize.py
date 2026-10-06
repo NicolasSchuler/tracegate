@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import collections
+import copy
 import functools
 import heapq
 import inspect
-import itertools
 import re
 from dataclasses import dataclass
 from re import Pattern
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from .config import SnapshotConfig
 from .redaction_policy import SENSITIVE_NAMES
@@ -591,13 +591,48 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     return summary
 
 
-def _preview_cell(value: Any, cfg: SnapshotConfig) -> Any:
-    """A pandas preview cell, bounded like any other value (CAP-01, CAP-13)."""
+def _preview_cell(value: Any, cfg: SnapshotConfig, depth: int = 0) -> Any:
+    """A pandas preview cell or column label, bounded like any other value (CAP-01, CAP-13).
+
+    Object-dtype cells hold arbitrary Python values, so the normalization has to recurse:
+    a wide integer nested in a cell's dict or list reached the JSON encoder unchanged,
+    which raises and loses the whole snapshot rather than one value.
+    """
     if isinstance(value, str):
         return truncate_str(value, cfg.max_str)
+    if isinstance(value, bool):
+        return value
     if isinstance(value, int) and not JSON_INT_MIN <= value <= JSON_INT_MAX:
         return safe_repr(value, cfg)
+    if isinstance(value, dict):
+        if depth >= 2:
+            return safe_repr(value, cfg)
+        items = list(cast(dict[Any, Any], value).items())[: cfg.max_items]
+        return {
+            str(_preview_cell(key, cfg, depth + 1)): _preview_cell(item, cfg, depth + 1)
+            for key, item in items
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        if depth >= 2:
+            return safe_repr(value, cfg)
+        entries = list(cast("set[Any]", value))[: cfg.max_items]
+        return [_preview_cell(item, cfg, depth + 1) for item in entries]
     return value
+
+
+def _add_dataframe_columns(summary: dict[str, Any], df: Any, cfg: SnapshotConfig) -> None:
+    """Record the listed column labels and whether they were cut (CAP-01, CAP-13).
+
+    Labels are arbitrary objects too, so they get the same normalization as preview
+    cells: a wide-integer column label used to break the JSON encoder.
+    """
+    try:
+        columns = list(cast(list[Any], df.columns))
+        summary["columns"] = [_preview_cell(column, cfg) for column in columns[: cfg.max_items]]
+        if len(columns) > cfg.max_items:
+            summary["columns_truncated"] = True
+    except Exception as e:
+        summary["columns"] = f"<error: {type(e).__name__}>"
 
 
 def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
@@ -609,12 +644,7 @@ def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     except Exception as e:
         summary["shape"] = f"<error: {type(e).__name__}>"
 
-    try:
-        summary["columns"] = list(df.columns)[: cfg.max_items]
-        if len(df.columns) > cfg.max_items:
-            summary["columns_truncated"] = True
-    except Exception as e:
-        summary["columns"] = f"<error: {type(e).__name__}>"
+    _add_dataframe_columns(summary, df, cfg)
 
     try:
         dtypes_raw = getattr(df, "dtypes", None)
@@ -697,30 +727,48 @@ def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 _SET_FULL_SORT_LIMIT = 1000
 
 
-def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> list[Any]:
-    """The first ``max_items + 1`` elements of a set, in a process-independent order."""
-    count = cfg.max_items + 1
+class _SetPreview(NamedTuple):
+    """Up to ``max_items`` preview elements, plus whether the set held more."""
+
+    items: list[Any]
+    truncated: bool
+
+
+def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> _SetPreview:
+    """The lowest ``max_items`` elements of a set, in a process-independent order.
+
+    Truncation comes from the set's own size: inferring it from the preview length
+    reported a 3,000-element set as complete whenever the preview hit an internal
+    sampling cap first.
+    """
+    limit = cfg.max_items
+    total = len(x)
 
     def by_repr(item: Any) -> tuple[str, str, str]:
         return (type(item).__module__, type(item).__name__, safe_repr(item, cfg))
 
-    if len(x) <= _SET_FULL_SORT_LIMIT:
-        return sorted(x, key=by_repr)[:count]
+    if total <= _SET_FULL_SORT_LIMIT:
+        return _SetPreview(sorted(x, key=by_repr)[:limit], total > limit)
     try:
-        return heapq.nsmallest(count, x)  # natural order, no repr per element
-    except TypeError:  # element types that don't compare: sort a bounded sample
-        return sorted(itertools.islice(x, _SET_FULL_SORT_LIMIT), key=by_repr)[:count]
+        return _SetPreview(heapq.nsmallest(limit, x), total > limit)
+    except Exception:
+        # Ordering the elements failed -- incomparable types, but also e.g. a
+        # `Decimal("NaN")` raising `InvalidOperation`, which used to escape and turn the
+        # whole local into a `<serialization failed>` marker. Falling back to canonical
+        # repr order over the whole set costs one repr per element, but a sample taken in
+        # set-iteration order changed contents (not just order) with the hash seed.
+        return _SetPreview(heapq.nsmallest(limit, x, key=by_repr), total > limit)
 
 
 def _jsonlike_collection(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     """Serialize list/tuple/set/frozenset to JSON-like form."""
     if isinstance(x, (list, tuple)):
         items: list[Any] = list(cast(list[Any], x)[: cfg.max_items + 1])
+        truncated = len(items) > cfg.max_items
+        if truncated:
+            items = items[: cfg.max_items]
     else:
-        items = _set_preview(cast(set[Any] | frozenset[Any], x), cfg)
-    truncated = len(items) > cfg.max_items
-    if truncated:
-        items = items[: cfg.max_items]
+        items, truncated = _set_preview(cast(set[Any] | frozenset[Any], x), cfg)
     result: list[Any] = [to_jsonlike(i, cfg, depth + 1) for i in items]
     if truncated:
         result.append("...[TRUNC]")
@@ -736,8 +784,18 @@ def _jsonlike_dict(x: dict[Any, Any], cfg: SnapshotConfig, depth: int) -> JsonLi
             break
         # str keys stay plain (str.__str__ also unwraps str subclasses); others use repr.
         # A collision such as {1: ..., "1": ...} keeps both entries as "1" and "1#2".
-        key = truncate_str(str.__str__(k), cfg.max_str) if isinstance(k, str) else safe_repr(k, cfg)
-        _insert_redacted_key(out, key, to_jsonlike(v, cfg, depth + 1))
+        if isinstance(k, str):
+            name = str.__str__(k)
+            key = truncate_str(name, cfg.max_str)
+        else:
+            name = key = safe_repr(k, cfg)
+        # Sensitivity is decided on the untruncated name: a key longer than ``max_str``
+        # loses its secret suffix, and the name-aware redaction that runs afterwards only
+        # ever sees the truncated key (CAP-03).
+        value: JsonLike = (
+            REDACTED if cfg.redact and is_sensitive_name(name) else to_jsonlike(v, cfg, depth + 1)
+        )
+        _insert_redacted_key(out, key, value)
     return out
 
 
@@ -758,6 +816,136 @@ def _jsonlike_object(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
 
 def _serialization_failed(error: Exception) -> str:
     return f"<serialization failed: {type(error).__name__}>"
+
+
+# Past the depth limit a container becomes a single repr string, which only the text patterns
+# can inspect afterwards. Composite values survived them: the repr of
+# {'password': ['alpha', 'beta']} kept "beta", and a nested ['Authorization', '<creds>'] pair
+# has no "name: value" shape at all (CAP-03). Replacing those values structurally first keeps
+# the surrounding shape of the repr readable without the secrets.
+_REPR_REDACTION_MAX_DEPTH = 6
+
+
+def _is_exact_type(x: Any, expected: type[Any]) -> bool:
+    """``type(x) is expected``; a subclass takes the rebuild path in `_redact_for_repr`."""
+    return type(x) is expected
+
+
+def _redacted_dict_for_repr(
+    mapping: dict[Any, Any], cfg: SnapshotConfig, depth: int
+) -> dict[Any, Any]:
+    out: dict[Any, Any] = {}
+    for i, (key, item) in enumerate(mapping.items()):
+        if i >= cfg.max_items:
+            out["...[TRUNC]"] = f"+{len(mapping) - cfg.max_items} more keys"
+            break
+        if isinstance(key, str) and is_sensitive_name(key):
+            out[key] = REDACTED
+        else:
+            out[key] = _redact_for_repr(item, cfg, depth + 1)
+    return out
+
+
+def _redacted_items_for_repr(
+    sequence: list[Any] | tuple[Any, ...], cfg: SnapshotConfig, depth: int
+) -> list[Any]:
+    items: list[Any] = [
+        _redact_for_repr(item, cfg, depth + 1) for item in sequence[: cfg.max_items]
+    ]
+    if len(sequence) == 2 and _is_sensitive_pair_name(sequence[0]):
+        items[1] = REDACTED
+    elif len(sequence) > cfg.max_items:
+        items.append("...[TRUNC]")
+    return items
+
+
+def _redact_namedtuple_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
+    """A namedtuple with the fields under sensitive names replaced, keeping its type.
+
+    Rebuilding it as a plain tuple would drop the field names from the repr, and the text
+    patterns would then no longer see the ``password=`` that protects the value. Raising is
+    the fail-closed outcome: the caller turns it into a marker rather than repr the original.
+    """
+    fields = cast(tuple[str, ...], x._fields)
+    values = list(cast(tuple[Any, ...], x))
+    replacement: dict[str, Any] = {}
+    # strict=True: a _fields/values mismatch is not a namedtuple, and failing is closed.
+    for i, (field, item) in enumerate(zip(fields, values, strict=True)):
+        if is_sensitive_name(field):
+            replacement[field] = REDACTED
+        elif i >= cfg.max_items:
+            replacement[field] = "...[TRUNC]"
+        else:
+            replacement[field] = _redact_for_repr(item, cfg, depth + 1)
+    # The same pair rule as for a plain tuple: ("password", value) is a header or form field.
+    if len(fields) == 2 and _is_sensitive_pair_name(values[0]):
+        replacement[fields[1]] = REDACTED
+    return x._replace(**replacement)
+
+
+def _redact_container_subclass_for_repr(x: Any, redacted: Any) -> Any:
+    """A dict/list/tuple subclass holding *redacted*, or a rendering of its type name.
+
+    Never returns *x*: a subclass may define its own ``__repr__``, and a custom ``redact``
+    tuple need not contain the text patterns at all, so leaving its contents in place would
+    fail open.
+    """
+    try:
+        clone = copy.copy(x)
+        if isinstance(clone, dict):
+            mapping = cast(dict[Any, Any], clone)
+            mapping.clear()
+            mapping.update(cast(dict[Any, Any], redacted))
+            return cast(Any, clone)
+        if isinstance(clone, list):
+            sequence = cast(list[Any], clone)
+            sequence[:] = cast(list[Any], redacted)
+            return cast(Any, clone)
+        return type(x)(redacted)
+    except Exception:  # nosec B110 — the fallback below never keeps the original contents
+        pass
+    try:
+        return f"{type(x).__name__}({redacted!r})"
+    except Exception:
+        return REDACTED
+
+
+def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
+    """A copy of *x* with the values under sensitive names replaced, for repr rendering.
+
+    Exact ``dict``/``list``/``tuple`` instances are rebuilt as themselves and a namedtuple
+    keeps its type and field names. Any other container subclass is rebuilt through
+    :func:`_redact_container_subclass_for_repr`, which never hands back the original.
+    """
+    if depth >= _REPR_REDACTION_MAX_DEPTH:
+        return x
+    if isinstance(x, dict):
+        redacted_mapping = _redacted_dict_for_repr(cast(dict[Any, Any], x), cfg, depth)
+        if _is_exact_type(x, dict):
+            return redacted_mapping
+        return _redact_container_subclass_for_repr(x, redacted_mapping)
+    if hasattr(x, "_fields") and hasattr(x, "_replace") and isinstance(x, tuple):
+        return _redact_namedtuple_for_repr(cast(Any, x), cfg, depth)
+    if isinstance(x, (list, tuple)):
+        items = _redacted_items_for_repr(cast("list[Any] | tuple[Any, ...]", x), cfg, depth)
+        if _is_exact_type(x, list):
+            return items
+        if _is_exact_type(x, tuple):
+            return tuple(items)
+        return _redact_container_subclass_for_repr(x, items)
+    return x
+
+
+def _depth_limit_repr(x: Any, cfg: SnapshotConfig) -> str:
+    """``safe_repr`` for a value past the depth limit, with secrets removed first."""
+    if not cfg.redact:
+        return safe_repr(x, cfg)
+    try:
+        reduced = _redact_for_repr(x, cfg, 0)
+    except Exception as e:
+        # Fail closed: a container that cannot be walked is not repr'd either.
+        return _serialization_failed(e)
+    return safe_repr(reduced, cfg)
 
 
 def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
@@ -781,7 +969,7 @@ def _to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     if isinstance(x, str):
         return truncate_str(x, cfg.max_str)
     if depth >= 2:
-        return safe_repr(x, cfg)
+        return _depth_limit_repr(x, cfg)
     if is_array_like(x):
         return summarize_array(x, cfg)
     if is_dataframe(x):
@@ -811,7 +999,7 @@ def _local_type_name(value: Any) -> str:
 
 # Types whose len() is known to be cheap and side-effect free. Calling len() on arbitrary
 # objects ran user code: a lazy ORM query set executes its query (CAP-21).
-_SAFE_LEN_TYPES = (
+_SAFE_LEN_TYPES: tuple[type, ...] = (
     str,
     bytes,
     bytearray,
@@ -825,16 +1013,36 @@ _SAFE_LEN_TYPES = (
 )
 
 
+def _has_builtin_len(value: Any) -> bool:
+    """Whether ``value`` is a safe container that has not overridden ``__len__``.
+
+    An ``isinstance`` check alone still ran user code: a ``list`` subclass that
+    overrides ``__len__`` passed it, which is exactly the arbitrary call CAP-21 removed
+    from metadata-only mode.
+    """
+    value_type = cast("type[Any]", type(value))
+    if value_type in _SAFE_LEN_TYPES:
+        return True
+    if not isinstance(value, _SAFE_LEN_TYPES):
+        return False
+    own_len = cast(object, getattr(value_type, "__len__", None))
+    return any(
+        own_len is cast(object, getattr(base, "__len__", None))
+        for base in _SAFE_LEN_TYPES
+        if isinstance(value, base)
+    )
+
+
 def _safe_len(value: Any) -> int | None:
     """``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
     try:
         if (
-            isinstance(value, _SAFE_LEN_TYPES)
+            _has_builtin_len(value)
             or is_array_like(value)
             or is_dataframe(value)
             or is_series(value)
         ):
-            return len(cast(Any, value))
+            return len(value)
     except Exception:  # nosec B110 — safe serialization fallback
         pass
     return None

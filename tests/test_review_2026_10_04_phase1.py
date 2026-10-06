@@ -7,12 +7,14 @@ High/Medium Phase 1 findings that need a run through ``run_one_condition``.
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from evals import _json as json
 from evals import eval_attempt_flow, run_eval
 from evals.eval_types import Condition
 from evals.patchers.base import PatchResult
@@ -305,6 +307,57 @@ def test_pol05_keyed_decisions_do_not_depend_on_decision_order() -> None:
     assert len(draws) > 1  # different keys give different streams
 
 
+def test_pol05_thompson_scores_do_not_depend_on_decision_order() -> None:
+    """POL-05: the NumPy draw is keyed too, not just the Python RNG (codex 1d#2)."""
+    from evals.adaptive_budget_online_policy import (
+        AdaptiveBudgetPolicyController,
+        BudgetPolicyConfig,
+    )
+    from evals.adaptive_online_policy import AdaptiveOnlinePolicyController, OnlinePolicyConfig
+
+    features = {"bias": 1.0, "x": 0.3}
+
+    def _helper() -> AdaptiveOnlinePolicyController:
+        return AdaptiveOnlinePolicyController(
+            OnlinePolicyConfig.normalize(
+                mode="on",
+                algorithm="thompson",
+                warmup_decisions=0,
+                epsilon=0.0,
+                random_seed=11,
+            )
+        )
+
+    def _budget() -> AdaptiveBudgetPolicyController:
+        return AdaptiveBudgetPolicyController(
+            BudgetPolicyConfig.normalize(
+                mode="on",
+                algorithm="thompson",
+                warmup_decisions=0,
+                epsilon=0.0,
+                random_seed=11,
+            )
+        )
+
+    for build in (_helper, _budget):
+        first = build()
+        alone = first.decide(feature_values=features, rng_key="case-a|llm|1")
+
+        after_others = build()
+        for index in range(5):  # other units decide first under another interleaving
+            after_others.decide(feature_values=features, rng_key=f"case-b|llm|{index}")
+        interleaved = after_others.decide(feature_values=features, rng_key="case-a|llm|1")
+
+        assert alone.scores == interleaved.scores
+        assert alone.selected_action == interleaved.selected_action
+
+        keyed_scores = {
+            tuple(sorted(build().decide(feature_values=features, rng_key=f"k{i}").scores.items()))
+            for i in range(10)
+        }
+        assert len(keyed_scores) > 1  # different keys still sample different arms
+
+
 def test_derive_seed_is_stable_and_separates_streams() -> None:
     from evals.seed_derivation import derive_seed
 
@@ -504,6 +557,87 @@ def test_att08_unit_runtime_error_record_is_schema_valid_and_scored(tmp_path: Pa
     assert record["attempt"] == 1 and record["record_type"] == "attempt"
 
 
+def test_att08_terminal_failure_after_an_infra_event_stays_in_the_denominator(
+    tmp_path: Path,
+) -> None:
+    """codex 1f#1: infra events consume no attempt, so the terminal row must stay scored.
+
+    The real seam: a transport failure writes an ``infra_event``, the recovered replay
+    raises, and ``execute_eval_unit_impl`` has to number the terminal row from the scored
+    records only -- otherwise both rows are discarded and the unit vanishes from the
+    denominator again.
+    """
+    import argparse
+    from types import SimpleNamespace
+
+    from evals.eval_types import EvalUnitInputs, RunConditionInputs
+    from evals.patchers.base import PatchResult
+
+    calls = {"n": 0}
+
+    def _propose(**_kwargs: Any) -> PatchResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return PatchResult(
+                diff=None,
+                meta={"error": "request_failed", "exc": "ConnectionError: connection refused"},
+            )
+        raise RuntimeError("boom during the replayed call")
+
+    patcher = SimpleNamespace(
+        name="openai",
+        model="stub-model",
+        response_mode="text",
+        propose_patch=_propose,
+        probe_server_ready=lambda **_kw: True,
+    )
+    gate = SimpleNamespace(
+        wait_if_open=lambda: None,
+        recover=lambda **_kw: {
+            "attempted": True,
+            "recovered": True,
+            "timed_out": False,
+            "wait_sec": 0.0,
+            "probe_attempts": [1],
+        },
+    )
+    streamed: list[dict[str, Any]] = []
+    previous = run_eval.set_active_execution_config(run_eval.ExecutionConfig(executor="local"))
+    try:
+        outcome = eval_attempt_flow.execute_eval_unit_impl(
+            case=_case(tmp_path),
+            condition=Condition.BASE_REPAIR,
+            artifacts_root=tmp_path / "artifacts",
+            inputs=EvalUnitInputs(
+                patcher_args=argparse.Namespace(),
+                patcher_override=patcher,
+                progress_verbosity="basic",
+                progress_heartbeat_sec=0.0,
+                run_condition=RunConditionInputs(
+                    k=1,
+                    output_format="json_compact",
+                    run_id="phase1",
+                    include_files_context=False,
+                    force_patch_attempt=False,
+                    run_metadata={"run_id": "phase1"},
+                    record_sink=streamed.append,
+                    openai_transport_recovery=True,
+                    transport_recovery_gate=gate,
+                ),
+            ),
+        )
+    finally:
+        run_eval.set_active_execution_config(previous)
+
+    assert outcome.runtime_error is not None and "boom" in outcome.runtime_error
+    assert [(r["attempt"], r.get("record_type")) for r in streamed] == [
+        (1, "infra_event"),
+        (1, "attempt"),
+    ]
+    assert streamed[-1]["note"] == "unit_runtime_error"
+    assert streamed[-1]["success"] is False
+
+
 def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
     from evals.eval_attempt_flow import _fold_tep_learning_usage
 
@@ -512,8 +646,23 @@ def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
     }
     learning: dict[str, Any] = {"enabled": True, "llm_call_metas": [call_meta] * 3}
-    attempt_metadata: dict[str, Any] = {"llm_call_count": 2, "tokens_total": 500}
-    patch_meta: dict[str, Any] = {}
+    # The propose path syncs the same usage onto both dicts before the fold runs.
+    propose_usage = {"prompt_tokens": 400, "completion_tokens": 100, "total_tokens": 500}
+    attempt_metadata: dict[str, Any] = {
+        "llm_call_count": 2,
+        "token_usage_available": True,
+        "tokens_prompt": 400,
+        "tokens_completion": 100,
+        "tokens_total": 500,
+    }
+    patch_meta: dict[str, Any] = {
+        "llm_call_count": 2,
+        "token_usage_available": True,
+        "tokens_prompt": 400,
+        "tokens_completion": 100,
+        "tokens_total": 500,
+        "usage": dict(propose_usage),
+    }
     _fold_tep_learning_usage(
         learning=learning, attempt_metadata=attempt_metadata, patch_meta=patch_meta
     )
@@ -521,6 +670,111 @@ def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
     assert attempt_metadata["tokens_total"] == 860
     assert patch_meta["tep_learning_llm_call_count"] == 3
     assert "llm_call_metas" not in learning
+    # codex 1f#3: the canonical fields describe the same calls as tokens_total.
+    assert patch_meta["tokens_total"] == 860
+    assert patch_meta["usage"]["total_tokens"] == 860
+    assert attempt_metadata["tokens_input"] == 700
+    assert attempt_metadata["tokens_output"] == 160
+    assert attempt_metadata["token_usage_partial"] is False
+
+
+class _FullTepPatcher:
+    """An ``openai``-shaped patcher whose patch call reports no usage but whose TEP
+    critic/update calls do, with a clock that advances one second per learning call."""
+
+    name = "openai"
+    response_mode = "diff"
+
+    def __init__(self, *, clock_offset: dict[str, float]) -> None:
+        self._clock_offset = clock_offset
+        self.served_usage: list[dict[str, int]] = []
+
+    def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path, **_kw: Any) -> Any:
+        del prompt, context_dir, cwd
+        # A valid patch response that carries no usage payload at all.
+        return PatchResult(diff=_FIX, meta={"llm_call_count": 1})
+
+    def generate_text(self, **_kwargs: Any) -> Any:
+        raise AssertionError("full TEP learning only uses generate_json")
+
+    def generate_json(self, **kwargs: Any) -> Any:
+        from types import SimpleNamespace
+
+        self._clock_offset["value"] += 1.0
+        usage = {"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}
+        self.served_usage.append(dict(usage))
+        operation = str(kwargs.get("operation_name") or "")
+        payload: dict[str, Any] = (
+            {"overall_score_10": 6.0, "improvement_kind": "stable", "summary": "ok"}
+            if "critic" in operation
+            else {"rationale": "no change", "system_prompts": {}, "blocks": {}}
+        )
+        return SimpleNamespace(
+            payload=payload,
+            meta={"llm_call_count": 1, "usage": dict(usage)},
+        )
+
+
+def test_pol02_full_tep_learning_lands_in_usage_latency_and_policy_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1f#3 / 1f#4: the TEP critic/update calls are paid for in every account.
+
+    Drives the real full-TEP seam: the patch response omits usage, the learning calls
+    report it, and each learning call costs one (fake) second.
+    """
+    clock_offset = {"value": 0.0}
+    real_perf_counter = time.perf_counter
+
+    class _OffsetClock:
+        def __getattr__(self, item: str) -> Any:
+            return getattr(time, item)
+
+        def perf_counter(self) -> float:
+            return real_perf_counter() + clock_offset["value"]
+
+    from evals import attempt_proposal
+
+    offset_clock = _OffsetClock()
+    monkeypatch.setattr(eval_attempt_flow, "time", offset_clock)
+    # The wall-clock measurement reads its own module's clock.
+    monkeypatch.setattr(attempt_proposal, "time", offset_clock)
+    patcher = _FullTepPatcher(clock_offset=clock_offset)
+    records = _run(
+        tmp_path,
+        patcher,  # type: ignore[arg-type]
+        patch_verifier_scope="disabled",
+        adaptive_tep_mode="full",
+        adaptive_tep_state_path=str(tmp_path / "tep_state.json"),
+    )
+    record = _attempts(records)[0]
+    meta = record["attempt_metadata"]
+    patch_meta = record["patch_meta"]
+
+    served_total = sum(usage["total_tokens"] for usage in patcher.served_usage)
+    assert served_total > 0
+    learning = meta["adaptive_tep_full_learning"]
+    assert learning["llm_call_count"] == len(patcher.served_usage)
+
+    # 1f#3: the known learning tokens are not discarded for lack of patch usage, and
+    # every canonical field describes the same calls.
+    assert meta["token_usage_available"] is True
+    assert meta["tokens_total"] == served_total
+    assert meta["tokens_input"] == sum(u["prompt_tokens"] for u in patcher.served_usage)
+    assert meta["tokens_output"] == sum(u["completion_tokens"] for u in patcher.served_usage)
+    assert patch_meta["usage"]["total_tokens"] == served_total
+    assert patch_meta["tokens_total"] == served_total
+    # The propose call served without usage, so coverage is partial, not complete.
+    assert meta["token_usage_partial"] is True
+    assert meta["token_usage_missing_segments"] == ["patch"]
+
+    # 1f#4: learning is inside the attempt's wall clock and the policy-local cost.
+    learning_sec = float(len(patcher.served_usage))
+    assert meta["timing_breakdown"]["tep_learning_llm_sec"] >= learning_sec
+    assert record["attempt_wall_clock_sec"] >= learning_sec
+    assert record["cumulative_runtime_sec"] >= learning_sec
+    assert meta["adaptive_budget_local_tokens_total"] >= served_total
+    assert meta["adaptive_budget_local_wall_sec"] >= learning_sec
 
 
 def test_att09_equilibrium_replans_accumulate_usage() -> None:
@@ -542,6 +796,29 @@ def test_att11_final_prompt_is_the_one_the_patcher_saw(tmp_path: Path) -> None:
     assert meta["final_prompt_xxh3_128"] == _xxh3_128_text(patcher.prompts[-1])
     assert meta["propose_prompt_xxh3_128s"] == [_xxh3_128_text(p) for p in patcher.prompts]
     assert Path(meta["final_prompt_path"]).read_text(encoding="utf-8") == patcher.prompts[-1]
+
+
+@pytest.mark.parametrize("record_prompt", ["none", "hash", "full"])
+def test_att11_propose_prompt_hashes_honor_the_recording_mode(
+    tmp_path: Path, record_prompt: str
+) -> None:
+    """codex 1f#7: ``--record-prompt none`` suppresses the new hashes too."""
+    patcher = _DiffPatcher([_FIX])
+    records = _run(
+        tmp_path,
+        patcher,
+        patch_verifier_scope="disabled",
+        record_prompt=record_prompt,
+    )
+    meta = _attempts(records)[0]["attempt_metadata"]
+    hashed = record_prompt != "none"
+    # The pre-existing prompt hash sets the policy; the ATT-11 fields must follow it.
+    assert (meta.get("prompt_xxh3_128") is not None) is hashed
+    assert (meta.get("final_prompt_xxh3_128") is not None) is hashed
+    assert (meta.get("propose_prompt_xxh3_128s") is not None) is hashed
+    assert (meta.get("final_prompt_path") is not None) is (record_prompt == "full")
+    # Sizes are not prompt content: they stay recorded in every mode.
+    assert meta["final_prompt_chars"] == len(patcher.prompts[-1])
 
 
 def test_att12_replay_cleanup_keeps_harness_artifacts(tmp_path: Path) -> None:
@@ -589,3 +866,375 @@ def test_llm02_truncated_answer_has_its_own_attempt_note(
 
     assert [r["note"] for r in records] == [note]
     assert records[0]["success"] is False
+
+
+def test_d4_both_rlm_payloads_carry_the_seed_and_retry_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#6: lambda-RLM and RLM forward the seed and retry count, not just sampling."""
+    import subprocess
+
+    from baselines.adapter_base import BaselineConfig, BaselineGenerationSettings
+    from baselines.lambda_rlm.adapter import LambdaRLMAdapter
+    from baselines.rlm.adapter import RLMAdapter
+
+    config = BaselineConfig(
+        repo_dir=tmp_path,
+        python_executable=tmp_path / "python",
+        model="test-model",
+        api_base_url="http://127.0.0.1:1234",
+        api_key="sk-test",
+        process_timeout_sec=30,
+        generation=BaselineGenerationSettings(
+            temperature=0.0, seed=4242, max_completion_tokens=321, transport_max_retries=6
+        ),
+    )
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("baselines.rlm.adapter.subprocess.run", _fake_run)
+    monkeypatch.setattr("baselines.lambda_rlm.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    LambdaRLMAdapter()._invoke_lambda(prompt="ask", config=config, timeout_sec=30)
+
+    assert len(payloads) == 2
+    for payload in payloads:
+        assert payload["seed"] == 4242
+        assert payload["max_tokens"] == 321
+        assert payload["temperature"] == 0.0
+        assert payload["transport_max_retries"] == 6
+
+
+def test_bas19_env_client_payloads_use_the_shared_compat_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#11: the env-client path can't disagree with the in-process defaults."""
+    import subprocess
+
+    from baselines.adapter_base import BaselineConfig
+    from baselines.intervenor.adapter import IntervenorAdapter
+    from baselines.lambda_rlm.adapter import LambdaRLMAdapter
+    from baselines.openai_compat import compat_config_from_extra, compat_payload_fields
+    from baselines.rlm.adapter import RLMAdapter
+
+    config = BaselineConfig(repo_dir=tmp_path, model="test-model", process_timeout_sec=30)
+    expected = compat_payload_fields(compat_config_from_extra(config.extra))
+    assert expected["baseline_openai_enable_thinking"] is True
+    assert expected["baseline_openai_allow_reasoning_fallback"] is True
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    for module in ("rlm", "lambda_rlm", "intervenor"):
+        monkeypatch.setattr(f"baselines.{module}.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    LambdaRLMAdapter()._invoke_lambda(prompt="ask", config=config, timeout_sec=30)
+    IntervenorAdapter()._generate_text_via_env_python(
+        python_executable=tmp_path / "python",
+        model="test-model",
+        prompt="ask",
+        max_tokens=512,
+        config=config,
+    )
+
+    assert len(payloads) == 3
+    for payload in payloads:
+        for key, value in expected.items():
+            assert payload[key] == value, key
+
+
+def _baseline_run_args(*extra: str) -> Any:
+    from evals.eval_cli_args import build_parser
+
+    return build_parser().parse_args(
+        [
+            "--patcher",
+            "baseline",
+            "--baseline-name",
+            "tracecoder",
+            "--baseline-repo-dir",
+            "/repo",
+            *extra,
+        ]
+    )
+
+
+def test_bas03_baseline_generation_settings_change_the_resume_fingerprint() -> None:
+    """codex 1e#1: a changed baseline cap, temperature, retry count or deadline drifts."""
+    from evals.run_state import _build_run_settings_fingerprint
+
+    def _fingerprint(*extra: str) -> str:
+        return _build_run_settings_fingerprint(
+            args=_baseline_run_args(*extra), cases=[], conditions=[]
+        )
+
+    baseline = _fingerprint()
+    assert _fingerprint("--openai-temperature", "0.7") != baseline
+    assert _fingerprint("--openai-max-tokens", "4096") != baseline
+    assert _fingerprint("--openai-transport-max-retries", "2") != baseline
+    assert _fingerprint("--baseline-process-timeout-sec", "123") != baseline
+    assert _fingerprint("--baseline-max-iterations", "5") != baseline
+    # A baseline-specific generation override counts too (codex 1e#7).
+    assert _fingerprint("--baseline-tracecoder-analysis-max-tokens", "999") != baseline
+    assert _fingerprint() == baseline
+
+
+def test_bas03_baseline_seed_follows_the_deterministic_switch() -> None:
+    """codex 1e#12: a seed without --deterministic must not change baseline sampling."""
+    from evals.eval_cli_args import build_parser
+    from evals.eval_recording import _baseline_generation_settings_from_args
+    from evals.patcher_factory import make_patcher
+
+    assert (
+        _baseline_generation_settings_from_args(args=_baseline_run_args("--seed", "7"))["seed"]
+        is None
+    )
+    assert (
+        _baseline_generation_settings_from_args(
+            args=_baseline_run_args("--seed", "7", "--deterministic")
+        )["seed"]
+        == 7
+    )
+    # The native arm gates its request seed the same way.
+    native = make_patcher(
+        build_parser().parse_args(["--patcher", "openai", "--openai-model", "m", "--seed", "7"])
+    )
+    assert getattr(native, "seed", "missing") is None
+
+
+def test_bas03_record_reports_the_baseline_specific_generation_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#7: the record shows the override the request used, not the shared value."""
+    import subprocess
+
+    from baselines.adapter_base import (
+        BaselineConfig,
+        BaselineGenerationSettings,
+        BaselineResult,
+    )
+    from baselines.rlm.adapter import RLMAdapter
+    from evals.patchers.baseline_patcher import BaselinePatcher
+
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def compute(value):\n    return value\n", encoding="utf-8")
+    (case_dir / "test_buggy.py").write_text(
+        "from buggy import compute\n\n\ndef test_compute():\n    assert compute(3) == 6\n",
+        encoding="utf-8",
+    )
+    config = BaselineConfig(
+        repo_dir=tmp_path,
+        python_executable=tmp_path / "python",
+        model="test-model",
+        process_timeout_sec=30,
+        generation=BaselineGenerationSettings(
+            temperature=0.0, max_completion_tokens=2048, transport_max_retries=6
+        ),
+        extra={"baseline_rlm_max_tokens": 8192, "baseline_rlm_temperature": 0.9},
+    )
+    adapter = RLMAdapter()
+    monkeypatch.setattr(
+        adapter,
+        "run_repair",
+        lambda case_input, cfg: BaselineResult(
+            repaired_code="def compute(value):\n    return value * 2\n", success=True
+        ),
+    )
+    patcher = BaselinePatcher(adapter=adapter, config=config)
+
+    result = patcher.propose_patch(prompt="ignored", context_dir=case_dir, cwd=case_dir)
+
+    assert result.meta is not None
+    generation = result.meta["baseline_generation"]
+    assert generation["max_completion_tokens"] == 8192
+    assert generation["temperature"] == pytest.approx(0.9)
+    assert generation["enforced"] is True
+    assert generation["overrides"] == {
+        "temperature": "baseline_rlm_temperature",
+        "max_completion_tokens": "baseline_rlm_max_tokens",
+    }
+
+    # ... and the request really uses those values, so record and payload agree.
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("baselines.rlm.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    assert payloads[0]["max_tokens"] == 8192
+    assert payloads[0]["temperature"] == pytest.approx(0.9)
+
+
+def test_bas14_tree_hash_covers_untracked_file_contents(tmp_path: Path) -> None:
+    """codex 1e#10: editing an untracked upstream module changes the patched-tree hash."""
+    import subprocess
+
+    from baselines.adapter_base import observed_repo_state
+
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.email=t@e", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "main.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "main.py"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    added = repo / "exact_test_context.py"
+    added.write_text("def context():\n    return 'a'\n", encoding="utf-8")
+
+    first = observed_repo_state(repo)
+    # Same filename, different executable behaviour.
+    added.write_text("def context():\n    return 'b'\n", encoding="utf-8")
+    second = observed_repo_state(repo)
+
+    assert first["dirty"] is True
+    assert first["tree_patch_sha256"] != second["tree_patch_sha256"]
+    assert observed_repo_state(repo)["tree_patch_sha256"] == second["tree_patch_sha256"]
+
+
+def test_bas08_intervenor_stops_at_the_deadline_between_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#3: a deadline that expires during the teacher call stops the attempt."""
+    from baselines.adapter_base import BaselineCaseContext, BaselineConfig
+    from baselines.intervenor.adapter import IntervenorAdapter, _CommandOutcome
+
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def multiply(a, b):\n    return a + b\n", encoding="utf-8")
+    (case_dir / "test_buggy.py").write_text(
+        "from buggy import multiply\n\n\ndef test_multiply():\n    assert multiply(2, 3) == 6\n",
+        encoding="utf-8",
+    )
+    repo = tmp_path / "fake_intervenor"
+    (repo / "prompt").mkdir(parents=True)
+    (repo / "prompt" / "code_teacher.txt").write_text(
+        "Teacher prompt\n%%%buggy_code%%%\n%%%error_message%%%\nModification method:\n",
+        encoding="utf-8",
+    )
+    (repo / "prompt" / "code_learner.txt").write_text(
+        "Learner prompt\n%%%buggy_code%%%\n%%%error_message%%%\n%%%repair_method%%%\n",
+        encoding="utf-8",
+    )
+    adapter = IntervenorAdapter()
+    config = BaselineConfig(
+        repo_dir=repo,
+        model="test-model",
+        max_attempts=3,
+        process_timeout_sec=1,
+    )
+    adapter.setup(config)
+    case_input = adapter.convert_case(
+        case_dir,
+        case_context=BaselineCaseContext(
+            case_id="case", python_args=("-m", "pytest", "-q"), timeout_sec=30
+        ),
+    ).to_dict()
+    calls: list[str] = []
+    test_timeouts: list[int] = []
+
+    def _fake_tests(*, work_dir: Path, python_args: list[str], timeout_sec: int) -> _CommandOutcome:
+        del work_dir, python_args
+        test_timeouts.append(timeout_sec)
+        return _CommandOutcome(returncode=1, stdout="", stderr="boom", duration_sec=0.0)
+
+    def _slow_teacher(*, prompt: str, **_kwargs: Any) -> tuple[str, dict[str, int], float]:
+        del prompt
+        calls.append(f"call_{len(calls) + 1}")
+        time.sleep(1.1)  # burn the whole deadline inside the first (teacher) call
+        return "do the thing", {"prompt_tokens": 1, "completion_tokens": 1}, 1.1
+
+    monkeypatch.setattr(adapter, "_build_client", lambda config: object())
+    monkeypatch.setattr(adapter, "_run_case_tests", _fake_tests)
+    monkeypatch.setattr(adapter, "_generate_text", _slow_teacher)
+
+    result = adapter.run_repair(case_input, config)
+
+    assert result.success is False
+    assert result.meta["error"] == "deadline_exceeded"
+    # One teacher call, then the deadline stops the learner and the postcheck.
+    assert calls == ["call_1"]
+    # The precheck was clamped to the remaining budget, not given its own 30s.
+    assert test_timeouts == [1]
+
+
+def test_att16_cleanup_keeps_a_diff_target_that_ends_in_orig(tmp_path: Path) -> None:
+    from evals.eval_patches import apply_diff
+
+    (tmp_path / "buggy.py").write_text("def f() -> int:\n    return 1\n", encoding="utf-8")
+    creates_fixture = "--- /dev/null\n+++ b/fixture.orig\n@@ -0,0 +1,1 @@\n+expected = 1\n"
+
+    ok, msg = apply_diff(tmp_path, creates_fixture)
+
+    assert ok, msg
+    assert (tmp_path / "fixture.orig").read_text(encoding="utf-8") == "expected = 1\n"
+
+
+@dataclass
+class _CountingOpenAIPatcher:
+    """A patcher the runner treats as the OpenAI one, counting its proposals."""
+
+    meta: dict[str, Any]
+    name: str = "openai"
+    calls: int = 0
+
+    def propose_patch(self, *, prompt: str, context_dir: Path, cwd: Path) -> PatchResult:
+        del prompt, context_dir, cwd
+        self.calls += 1
+        return PatchResult(diff=None, meta=dict(self.meta))
+
+
+def test_llm02_truncated_answer_skips_no_diff_recovery(tmp_path: Path) -> None:
+    patcher = _CountingOpenAIPatcher({"error": "truncated_response", "finish_reason": "length"})
+
+    records = _attempts(_run(tmp_path, patcher))  # type: ignore[arg-type]
+
+    assert patcher.calls == 1  # terminal: no second proposal under the same budget
+    assert records[0]["patch_meta"].get("no_diff_recovery_invoked") is not True
+    assert [r["note"] for r in records] == ["truncated_response"]
+
+
+def test_llm02_other_no_diff_errors_still_reach_no_diff_recovery(tmp_path: Path) -> None:
+    patcher = _CountingOpenAIPatcher({"error": "no_diff_found"})
+
+    records = _attempts(_run(tmp_path, patcher))  # type: ignore[arg-type]
+
+    assert patcher.calls == 2
+    assert records[0]["patch_meta"]["no_diff_recovery_invoked"] is True

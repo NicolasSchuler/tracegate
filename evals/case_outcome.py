@@ -7,9 +7,10 @@ in the summary and appear in ``<run>.failed.txt``. Every reader now uses
 :func:`case_outcomes` or :func:`case_outcome`:
 
 - ``infra_event`` rows are telemetry, not attempts.
-- One row per attempt number. When a resumed unit wrote the same attempt twice, a real
-  outcome beats a resume-eligible ``unit_runtime_error`` row, and otherwise the later
-  row wins. Readers load files in sorted path order, so the choice is deterministic.
+- One row per attempt number, resolved by :func:`resolve_duplicate_attempt`, which both
+  readers share: a real outcome beats a resume-eligible ``unit_runtime_error`` row, and
+  otherwise the later row wins. Readers load files in sorted path order, so the choice
+  is deterministic.
 - A case succeeded when any scored attempt succeeded. A ``unit_runtime_error`` row is a
   failed attempt and stays in the denominator (ATT-08).
 """
@@ -45,6 +46,45 @@ def is_resume_eligible(record: Mapping[str, Any]) -> bool:
     return isinstance(patch_meta, Mapping) and bool(patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE))
 
 
+@dataclass(frozen=True)
+class DuplicateAttempt:
+    """Which of two rows written for the same attempt number to keep (DAT-24)."""
+
+    keep: Mapping[str, Any]
+    """The surviving row."""
+
+    conflicting: bool
+    """The two rows had equal priority and disagreed about ``success``."""
+
+
+def resolve_duplicate_attempt(
+    previous: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> DuplicateAttempt:
+    """Resolve two rows of the same ``(run_id, case_id, condition, attempt)`` (DAT-24).
+
+    One rule for every reader, so the summary, the failed-case list and the audit can
+    never disagree about which row counts:
+
+    - A resumed unit's real outcome beats its resume-eligible ``unit_runtime_error`` row,
+      whichever came first in the file.
+    - Otherwise the later row wins: rows are appended chronologically and files are read
+      in sorted path order.
+
+    Equal-priority rows that disagree about ``success`` are marked *conflicting*: no
+    recorded field says which superseded the other, so the choice depends on input
+    order. Callers count them and ``--strict-input`` rejects them instead of reporting a
+    silently order-dependent outcome.
+    """
+    if is_resume_eligible(candidate) and not is_resume_eligible(previous):
+        return DuplicateAttempt(keep=previous, conflicting=False)
+    if is_resume_eligible(previous) and not is_resume_eligible(candidate):
+        return DuplicateAttempt(keep=candidate, conflicting=False)
+    return DuplicateAttempt(
+        keep=candidate,
+        conflicting=bool(previous.get("success")) != bool(candidate.get("success")),
+    )
+
+
 def scored_attempts(records: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """The scored attempt rows of one case, one per attempt number, in attempt order."""
     by_attempt: dict[int, Mapping[str, Any]] = {}
@@ -53,9 +93,9 @@ def scored_attempts(records: Iterable[Mapping[str, Any]]) -> list[Mapping[str, A
             continue
         attempt = coerce_attempt(record.get("attempt"))
         current = by_attempt.get(attempt)
-        if current is not None and is_resume_eligible(record) and not is_resume_eligible(current):
-            continue
-        by_attempt[attempt] = record
+        by_attempt[attempt] = (
+            record if current is None else resolve_duplicate_attempt(current, record).keep
+        )
     return [by_attempt[attempt] for attempt in sorted(by_attempt)]
 
 

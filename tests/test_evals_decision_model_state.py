@@ -228,3 +228,34 @@ def test_hints_keep_one_hypothesis_per_pattern(monkeypatch) -> None:
     _build(_inputs())
 
     assert seen == {"max_per_pattern": 1}
+
+
+def test_oversized_parameterized_node_id_stays_within_the_budget() -> None:
+    """Parameterized node ids are data from the run and must not defeat the size bound."""
+    node_id = "test_service.py::test_lookup[" + ("p" * 12_000) + "]"
+    snapshot = _snapshot()
+    snapshot["pytest"] = {"nodeid": node_id}
+    profile = schema.get_profile("evidence_v1")
+    built = _build(_inputs(snapshot=snapshot))
+
+    failing_test = built.payload["1_failure"]["failing_test"]
+    assert len(failing_test) < 300
+    assert failing_test.startswith("test_service.py::test_lookup[p")
+    assert "more characters]" in failing_test
+    assert built.chars <= profile.max_state_chars
+
+
+def test_a_tight_budget_clips_the_mandatory_failure_section_last() -> None:
+    """Once every optional section is gone, the copied failure text is cut too."""
+    snapshot = _snapshot()
+    snapshot["exception"] = {"type": "KeyError", "message": "u" * 4_000}
+    snapshot["pytest"] = {"nodeid": "test_service.py::test_lookup[" + "p" * 4_000 + "]"}
+    profile = replace(schema.get_profile("evidence_v1"), max_state_chars=800)
+    built = state.build_decision_state(
+        _inputs(snapshot=snapshot, stdout="x" * 5_000 + "\nE   KeyError: 'user_id'\n"),
+        profile=profile,
+    )
+
+    assert built.chars <= 800
+    assert "1_failure" in built.truncated_sections
+    assert "1_failure" in built.payload

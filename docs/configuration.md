@@ -228,12 +228,35 @@ optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
 `locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
 treated as secrets, because they are too common in ordinary code. A two-item list or tuple
 whose first item is such a name (a header or form field like `("password", value)`) has its
-second item replaced. `llmdebug.PII_PATTERNS` also covers URL userinfo
-(`postgres://user:pw@host` and `https://TOKEN@host` become `…://[REDACTED]@host`) and
-secret-named keys inside text such as the `repr` of a nested dict, including escaped,
-`b''`-prefixed and truncated values. The patterns are bounded so redacting megabytes of
-captured output stays linear. Source snippets and the frame `code` line are source code and
-are not redacted.
+second item replaced. Name matching uses the original key, before any `max_str`
+truncation, so a long key such as `database_connection_password` cannot lose its secret
+suffix first. Containers past the nesting limit become one `repr` string; the values under
+secret names inside them are replaced before that `repr` is taken, so a composite value
+(`{'password': ['alpha', 'beta']}`) or a nested header pair does not survive it. That
+`repr` also elides beyond `max_items` per container. A namedtuple keeps its type and field
+names (its values are replaced by field name, and the `max_items` limit elides the extra
+values in place rather than dropping fields); any other `dict`/`list`/`tuple` subclass is
+rebuilt with the redacted contents so that its own `__repr__` cannot print them, and a
+subclass that cannot be rebuilt is rendered as its type name around the redacted contents.
+This structural pass never relies on the text patterns below, because a custom `redact`
+tuple need not contain them.
+
+`llmdebug.PII_PATTERNS` additionally covers, inside text such as a log line, an exception
+message or a `repr`: URL userinfo (`postgres://user:pw@host` and `https://TOKEN@host`
+become `…://[REDACTED]@host`; an over-long or truncation-cut authority is redacted whole,
+even when the password contains `@`), secret-named assignments including quoted multi-word
+values, hyphenated names (`secret-key`), escaped, `b''`-prefixed and truncated values,
+quoted name/value pairs (`['Authorization', 'Basic …']`), and the complete value of an
+`authorization`/`cookie` field (`Cookie: a=1; b=2`, `Authorization: "Bearer" abc123`). An
+unquoted value runs to the next whitespace; where the name was quoted — so the text is a
+structured rendering whose shape should survive — it runs to the next structural delimiter
+instead; and a value that merely starts with a string literal keeps nothing glued to it.
+No value is length-capped, so a long token cannot keep a tail. A container value is
+consumed whole, with quoted items taken as units so a bracket inside a string does not end
+it; a nested, unterminated or very long container is redacted to the end of its line rather
+than matched in part. Every repeat is either bounded or a single greedy character class, so
+redacting megabytes of captured output stays linear. Source snippets and the frame `code`
+line are source code and are not redacted.
 `dev`, no profile, or `redact=()` turn all of this off.
 
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a
@@ -318,13 +341,18 @@ Locals are serialized to JSON-safe values. A local and its direct elements are e
 are emitted as-is (`{"k": "v"}`); other key types use their `repr` (`{1: "a"}` becomes
 `{"1": "a"}`), and a key that collides with an earlier one gets a stable `#2`, `#3` suffix.
 Sets of up to 1,000 elements are previewed in `repr` order; larger sets show their
-smallest elements in natural order (or a bounded sample if the elements don't compare),
-so a huge set isn't rendered in full just to be truncated. `locals_meta` records `len`
-only for built-in containers, arrays and pandas objects: calling `len()` on arbitrary
-objects runs user code (a lazy ORM query set executes its query).
+smallest elements in natural order (or in canonical `repr` order if the elements don't
+compare), so a huge set isn't rendered in full just to be truncated. The `...[TRUNC]`
+marker follows the set's own size, so a preview is never silently incomplete.
+`locals_meta` records `len` only for built-in containers (whose `__len__` is the
+built-in one), arrays and pandas objects: calling `len()` on arbitrary objects runs
+user code (a lazy ORM query set executes its query).
 Snapshots before schema `2.1` wrote every key as its `repr` (`{"'k'": "v"}`). Integers
-outside the 64-bit range are stored as their `repr` string, and a value that can't be
-introspected becomes `"<serialization failed: <ErrorType>>"` without affecting the rest.
+outside the 64-bit range are stored as their `repr` string (including inside pandas
+preview cells and column labels), and a value that can't be introspected becomes
+`"<serialization failed: <ErrorType>>"` without affecting the rest. Schema `2.1` also
+counts array `anomalies` (NaN/Inf) on the original array rather than the up-cast copy, so
+large `float64` values no longer report false `inf`, and CuPy arrays get counts at all.
 
 ### Coverage Notes
 

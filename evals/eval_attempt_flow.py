@@ -11,13 +11,18 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from baselines.case_information import build_baseline_case_context_payload
+from baselines.case_information import (
+    TEST_SOURCE_FULL,
+    TEST_SOURCE_NONE,
+    build_baseline_case_context_payload,
+    case_information_record,
+)
 from baselines.controller_packet import HYBRID_GUIDANCE_MODE_FIXED_V1
 from evals import _json as json
 from evals.adaptive_action_selection import (
@@ -109,6 +114,7 @@ from evals.attempt_usage import (
     _summarize_recovery_usage_meta,
     _sync_attempt_prompt_char_metadata,
     _sync_attempt_usage_metadata,
+    _token_usage_available_from_meta,
     _usage_token_counts_from_patch_meta,
 )
 from evals.attempt_verification import (
@@ -128,9 +134,11 @@ from evals.eval_config import (
     _parse_adaptive_online_action_score_biases,
 )
 from evals.eval_evidence import (
+    DeliveredEvidence,
     _collect_file_index_lines,
     _compute_evidence_fingerprint,
     _evidence_ids_from_items,
+    _evidence_ids_rendered_in_prompt,
     _merge_evidence_items,
     _render_evidence_index,
     _render_evidence_items,
@@ -138,6 +146,7 @@ from evals.eval_evidence import (
     _xxh3_128_text,
     build_fallback_context_bundle,
     collect_text_context,
+    context_block_paths,
     evidence_chars_by_type,
 )
 from evals.eval_patch_constants import patcher_meta_truncated
@@ -184,8 +193,6 @@ from evals.eval_prompts import (
     _build_retry_history_section,
     _build_snapshot_prompt_text,
     _format_snapshot_index_section,
-    _format_snapshot_payload_section,
-    _format_snapshot_section,
     _is_generic_snapshot_justification,
     _render_retry_packet,
     prune_snapshot_for_prompt,
@@ -223,6 +230,7 @@ from evals.eval_types import (
     EVAL_RECORD_TYPE_ATTEMPT,
     EVAL_RECORD_TYPE_INFRA_EVENT,
     HELPER_FULL_SNAPSHOT_ACTIONS,
+    HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
@@ -449,6 +457,39 @@ def _reset_patch_usage_sync_metadata(patch_meta: dict[str, Any]) -> None:
     """Clear attempt-synced usage fields before merging fresh patch metadata."""
     for key in _PATCH_USAGE_SYNC_META_KEYS:
         patch_meta.pop(key, None)
+
+
+def _is_test_source_path(rel_path: str) -> bool:
+    name = PurePosixPath(str(rel_path).replace("\\", "/")).name
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def _native_case_information(
+    *,
+    project_files_context: str,
+    evidence_items: Sequence[Mapping[str, Any]],
+    stage_a_context_delivered: bool,
+) -> dict[str, Any]:
+    """Case-information manifest for a native arm's assembled Stage-B prompt (BAS-07).
+
+    Mirrors what the baseline converters record: which case files carried content into the
+    prompt, and whether the test source was among them. Project files come from the
+    monolithic context blocks, staged files from the delivered file evidence.
+    """
+    prompt_files = list(context_block_paths(project_files_context))
+    if stage_a_context_delivered:
+        for item in evidence_items:
+            if not isinstance(item, Mapping) or str(item.get("type") or "") != "file":
+                continue
+            locator = str(item.get("path") or item.get("locator") or "").strip()
+            if locator:
+                prompt_files.append(locator)
+    exposure = (
+        TEST_SOURCE_FULL
+        if any(_is_test_source_path(path) for path in prompt_files)
+        else TEST_SOURCE_NONE
+    )
+    return case_information_record(test_source_exposure=exposure, prompt_files=prompt_files)
 
 
 def _build_full_tep_node_packets(
@@ -1215,20 +1256,30 @@ def _note_propose_prompt(
     attempt_metadata: dict[str, Any],
     attempt_dir: Path,
     record_prompt: str,
+    sent_prompts: list[str] | None = None,
 ) -> None:
     """Record a prompt that was actually sent for a patch (ATT-11).
 
     ``prompt.txt`` / ``prompt_xxh3_128`` describe the prompt before the syntax-retry and
     recovery cycles; the deciding call can differ. Every sent prompt's hash is kept, the
     last one is the final prompt, and with ``--record-prompt full`` it is written too.
+    *sent_prompts* collects the attempt's prompt texts, so the caller can tell what the
+    deciding call really contained (POL-11) whatever ``--record-prompt`` is set to; it stays
+    in memory. ``--record-prompt none`` suppresses the recorded hashes, like the prompt hash
+    the attempt recorder already withholds in that mode; only the char count is kept.
     """
+    if sent_prompts is not None:
+        sent_prompts.append(prompt_text)
+    attempt_metadata["final_prompt_chars"] = len(prompt_text)
+    normalized_record_prompt = str(record_prompt)
+    if normalized_record_prompt == "none":
+        return
     digest = _xxh3_128_text(prompt_text)
     hashes = [str(item) for item in attempt_metadata.get("propose_prompt_xxh3_128s") or []]
     hashes.append(digest)
     attempt_metadata["propose_prompt_xxh3_128s"] = hashes
     attempt_metadata["final_prompt_xxh3_128"] = digest
-    attempt_metadata["final_prompt_chars"] = len(prompt_text)
-    if str(record_prompt) == "full":
+    if normalized_record_prompt == "full":
         final_path = attempt_dir / "prompt_final.txt"
         final_path.write_text(prompt_text, encoding="utf-8")
         attempt_metadata["final_prompt_path"] = str(final_path)
@@ -1243,16 +1294,21 @@ def _fold_tep_learning_usage(
     """Add TEP critic/update calls to the attempt's usage (POL-02).
 
     They run after the propose-path aggregation, so token, latency and reward accounting
-    used to miss up to 12 calls per attempt.
+    used to miss up to 12 calls per attempt. The canonical usage fields on both the attempt
+    metadata and ``patch_meta`` are rewritten through the shared sync, so ``usage``,
+    ``tokens_input``/``tokens_output`` and the availability flag describe the same calls.
     """
     metas = learning.pop("llm_call_metas", None) or []
     calls = sum(_llm_call_count_from_meta(meta, default=1) for meta in metas)
     prompt = completion = total = 0
+    tep_usage_known = False
     for meta in metas:
         meta_prompt, meta_completion, meta_total = _usage_token_counts_from_patch_meta(meta)
         prompt += meta_prompt
         completion += meta_completion
         total += meta_total
+        if _token_usage_available_from_meta(meta):
+            tep_usage_known = True
     learning["llm_call_count"] = calls
     learning["tokens_prompt"] = prompt
     learning["tokens_completion"] = completion
@@ -1261,13 +1317,107 @@ def _fold_tep_learning_usage(
     patch_meta["tep_learning_tokens_total"] = total
     if not calls:
         return
-    for key, value in (
-        ("llm_call_count", calls),
-        ("tokens_prompt", prompt),
-        ("tokens_completion", completion),
-        ("tokens_total", total),
-    ):
-        attempt_metadata[key] = _nonnegative_int(attempt_metadata.get(key), default=0) + value
+
+    prior_calls = _nonnegative_int(attempt_metadata.get("llm_call_count"), default=0)
+    prior_available = _token_usage_available_from_meta(patch_meta)
+    prior_prompt, prior_completion, prior_total = (
+        _usage_token_counts_from_patch_meta(patch_meta) if prior_available else (0, 0, 0)
+    )
+    # Reasoning coverage over the propose segment plus every learning call.
+    reasoning_tokens, reasoning_available = _combine_reasoning_usage_segments(
+        (dict(patch_meta), prior_calls),
+        *((meta, 1) for meta in metas),
+    )
+    # A segment that served calls without reporting usage leaves the attempt partly
+    # covered; the known counts are still worth recording (the alternative is losing them).
+    missing_segments = [
+        name
+        for name, applicable, known in (
+            ("patch", prior_calls > 0, prior_available),
+            ("tep_learning", True, tep_usage_known),
+        )
+        if applicable and not known
+    ]
+    patch_meta["token_usage_available"] = prior_available or tep_usage_known
+    patch_meta["token_usage_partial"] = bool(missing_segments) and (
+        prior_available or tep_usage_known
+    )
+    patch_meta["token_usage_missing_segments"] = missing_segments
+    _apply_usage_totals_to_patch_meta(
+        patch_meta=patch_meta,
+        llm_call_count=prior_calls + calls,
+        tokens_prompt=prior_prompt + prompt,
+        tokens_completion=prior_completion + completion,
+        tokens_total=prior_total + total,
+        tokens_reasoning=reasoning_tokens,
+        reasoning_token_usage_available=reasoning_available,
+    )
+    _sync_attempt_usage_metadata(
+        attempt_metadata=attempt_metadata,
+        patch_meta=patch_meta,
+        llm_call_count=prior_calls + calls,
+    )
+    attempt_metadata["token_usage_partial"] = patch_meta["token_usage_partial"]
+    attempt_metadata["token_usage_missing_segments"] = list(missing_segments)
+
+
+def _accumulate_retry_gate_carry(
+    carry: dict[str, Any],
+    *,
+    attempt_metadata: dict[str, Any],
+    patch_meta: dict[str, Any],
+    attempt_wall_sec: float,
+) -> None:
+    """Remember what an unscored retry-gate block paid for (ATT-05).
+
+    The block row is an ``infra_event`` that analysis discards, so its Stage-A, planning
+    and compaction calls would otherwise be free in every cost total.
+    """
+    reasoning_tokens, _applicable, reasoning_available = _reasoning_usage_segment_from_meta(
+        patch_meta,
+        default_llm_calls=_nonnegative_int(attempt_metadata.get("llm_call_count"), default=0),
+    )
+    for key in ("llm_call_count", "tokens_prompt", "tokens_completion", "tokens_total"):
+        carry[key] = _nonnegative_int(carry.get(key), default=0) + _nonnegative_int(
+            attempt_metadata.get(key), default=0
+        )
+    carry[KEY_PROMPT_CHARS_TOTAL] = _nonnegative_int(
+        carry.get(KEY_PROMPT_CHARS_TOTAL), default=0
+    ) + _nonnegative_int(attempt_metadata.get(KEY_PROMPT_CHARS_TOTAL), default=0)
+    carry["completion_chars_total"] = _nonnegative_int(
+        carry.get("completion_chars_total"), default=0
+    ) + _nonnegative_int(attempt_metadata.get("completion_chars_total"), default=0)
+    carry["tokens_reasoning"] = (
+        _nonnegative_int(carry.get("tokens_reasoning"), default=0) + reasoning_tokens
+    )
+    carry["reasoning_token_usage_available"] = bool(
+        carry.get("reasoning_token_usage_available", True)
+    ) and bool(reasoning_available)
+    carry["token_usage_available"] = bool(carry.get("token_usage_available", True)) and bool(
+        attempt_metadata.get("token_usage_available")
+    )
+    carry["blocks"] = _nonnegative_int(carry.get("blocks"), default=0) + 1
+    carry["wall_sec"] = max(0.0, float(carry.get("wall_sec") or 0.0)) + max(
+        0.0, float(attempt_wall_sec)
+    )
+
+
+def _retry_gate_carry_usage_meta(carry: dict[str, Any]) -> dict[str, Any] | None:
+    """Render the carry as an LLM-call meta so the shared aggregation can read it."""
+    calls = _nonnegative_int(carry.get("llm_call_count"), default=0)
+    if not calls and not _nonnegative_int(carry.get("tokens_total"), default=0):
+        return None
+    return {
+        "llm_call_count": calls,
+        "token_usage_available": bool(carry.get("token_usage_available", True)),
+        "tokens_reasoning": _nonnegative_int(carry.get("tokens_reasoning"), default=0),
+        "reasoning_token_usage_available": bool(carry.get("reasoning_token_usage_available", True)),
+        "usage": {
+            "prompt_tokens": _nonnegative_int(carry.get("tokens_prompt"), default=0),
+            "completion_tokens": _nonnegative_int(carry.get("tokens_completion"), default=0),
+            "total_tokens": _nonnegative_int(carry.get("tokens_total"), default=0),
+        },
+    }
 
 
 def _unit_runtime_error_record(
@@ -1281,11 +1431,21 @@ def _unit_runtime_error_record(
 ) -> dict[str, Any]:
     """Terminal record for a unit that raised (ATT-08).
 
-    It is a failed scored attempt numbered after the last emitted one, unless the unit had
+    It is a failed scored attempt numbered after the last *scored* one, unless the unit had
     already used all ``k`` attempts; then it is an ``infra_event`` that doesn't count.
+    ``infra_event`` rows consume no attempt, so numbering past them would classify the
+    terminal failure as infra too and drop the unit out of the denominator again.
     """
     k = max(1, int(run_inputs.k))
-    last_attempt = max((int(r.get("attempt") or 0) for r in emitted_records), default=0)
+    last_attempt = max(
+        (
+            int(record.get("attempt") or 0)
+            for record in emitted_records
+            if str(record.get("record_type") or EVAL_RECORD_TYPE_ATTEMPT)
+            != EVAL_RECORD_TYPE_INFRA_EVENT
+        ),
+        default=0,
+    )
     attempt = last_attempt + 1
     metadata = {
         **_empty_attempt_metadata(attempt=attempt),
@@ -2047,6 +2207,9 @@ def _run_one_condition_attempts(
             (attempt_dir / "apply_error.txt").write_text(apply_error, encoding="utf-8")
         attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
         cumulative_runtime_sec += attempt_wall_sec
+        # ATT-17: an attempt that ends here never reaches the learning pass, so this is
+        # its only save; it has to happen before the record is streamed.
+        _save_adaptive_tep_state(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=False,
@@ -2448,6 +2611,22 @@ def _run_one_condition_attempts(
         )
     full_tep_enabled = adaptive_tep_controller is not None
 
+    def _save_adaptive_tep_state(
+        *, attempt_metadata: dict[str, Any], patch_meta: dict[str, Any]
+    ) -> str:
+        """Persist the TEP state and note a failed save on the attempt (ATT-17).
+
+        Every path that emits an attempt record calls this before building the record, so
+        the failure is in the serialized row. Attaching it afterwards only reaches the
+        in-memory copy: the row has already gone to ``record_sink``.
+        """
+        if adaptive_tep_controller is None:
+            return ""
+        save_error = adaptive_tep_controller.save()
+        attempt_metadata["adaptive_tep_save_error"] = save_error
+        patch_meta["adaptive_tep_save_error"] = save_error
+        return save_error
+
     def _bind_full_tep_generation_overrides(
         *,
         patcher_for_attempt: Any,
@@ -2793,6 +2972,9 @@ def _run_one_condition_attempts(
     # ───────────────────────────────────────────────────────────────────────
     retry_gate_consecutive_blocks = 0
     retry_gate_blocks_pending = 0
+    # ATT-05: an unscored block is still paid for. Its usage waits here for the next
+    # scored row instead of disappearing with the discarded infra_event rows.
+    retry_gate_carry: dict[str, Any] = {}
     while scored_attempts_consumed < k:
         attempt = scored_attempts_consumed + 1
         _resolve_expired_pending_online_credits(current_attempt=attempt)
@@ -2809,6 +2991,8 @@ def _run_one_condition_attempts(
         )
         attempt_dir = context_dir_base / f"attempt_{attempt:02d}"
         attempt_dir.mkdir(parents=True, exist_ok=True)
+        # POL-11: every patch prompt this attempt sends, in order; the last one decided.
+        attempt_sent_prompts: list[str] = []
         if is_baseline_patcher:
             remove_adaptive_controller_sidecars(context_dir=attempt_dir)
             _write_baseline_case_context(attempt_dir, case)
@@ -3962,7 +4146,17 @@ def _run_one_condition_attempts(
                 helper_reason_override = helper_reason_overrides.get(helper_outcome)
                 if helper_reason_override:
                     stage_a_data = replace(stage_a_data, reason=helper_reason_override)
-            attempt_context_protocol = "staged" if helper_materialized_context else "monolithic"
+            # ATT-03: a restricted action stays restricted even when layer-3 filtering
+            # emptied its request list. Falling back to the monolithic protocol would put
+            # the whole project back in the Stage-B prompt -- the evidence the policy denied.
+            adaptive_restricted_evidence_action = (
+                helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS
+            )
+            attempt_context_protocol = (
+                "staged"
+                if (helper_materialized_context or adaptive_restricted_evidence_action)
+                else "monolithic"
+            )
             snapshot_for_prompt = stage_b_snapshot if adaptive_snapshot_included else None
             if (
                 is_adaptive_llm_discretion
@@ -4597,6 +4791,21 @@ def _run_one_condition_attempts(
         include_project_files_in_prompt = stage_b_prompt_inputs.include_project_files
         compacted_context_for_prompt = stage_b_prompt_inputs.compacted_context
 
+        # ATT-06: both snapshot-inclusion fields describe the prompt that was delivered, so
+        # derive them from the assembled sections. Delta retries never carry a snapshot
+        # section, compaction can replace it, and the prompt budget can drop it -- all of
+        # which happen after the pre-assembly reveal decision.
+        stage_b_snapshot_in_prompt = bool(
+            include_snapshot_in_prompt
+            and stage_b_snapshot_for_prompt is not None
+            and prompt_budget_result.section_status.get("snapshot", "") not in {"", "dropped"}
+        )
+        if not stage_b_snapshot_in_prompt:
+            stage_b_snapshot_for_prompt = None
+            stage_b_snapshot_prompt_text = ""
+        if is_adaptive_condition:
+            adaptive_snapshot_included = stage_b_snapshot_in_prompt
+
         context_compaction_requested = native_prompt_result.context_compaction.requested
         context_compaction_request_reason = native_prompt_result.context_compaction.request_reason
         context_compaction_invoked = native_prompt_result.context_compaction.invoked
@@ -4923,19 +5132,31 @@ def _run_one_condition_attempts(
         attempt_metadata["seed_bundle_chars"] = (
             int(structured_seed_data.chars_returned) if structured_seed_active else 0
         )
-        stage_b_snapshot_section_text = ""
-        if stage_b_snapshot_in_prompt and not is_delta_retry:
-            # Same rendering as the Stage-B section builder (evals.eval_prompts).
-            stage_b_snapshot_section_text = (
-                _format_snapshot_payload_section(stage_b_snapshot_prompt_text)
-                if stage_b_snapshot_prompt_text.strip()
-                else _format_snapshot_section(stage_b_snapshot_for_prompt or {})
-            )
+        # ATT-03: audit the evidence that was delivered, not the bundles that were built.
+        # Sizes come from the final prompt's sections, items from the merged, delta-filtered
+        # set, so deduplicated and truncated evidence is not counted twice or in full.
+        delivered_section_chars = prompt_budget_result.section_chars
+        delivered_section_original_chars = prompt_budget_result.section_original_chars
+        stage_a_section_original_chars = int(
+            delivered_section_original_chars.get("stage_a_context", 0)
+        )
         attempt_metadata["evidence_chars_by_type"] = evidence_chars_by_type(
-            snapshot_text=stage_b_snapshot_section_text,
-            snapshot_lite_text=snapshot_lite_context if adaptive_snapshot_lite_included else "",
-            seed=structured_seed_data if structured_seed_active else None,
-            stage_a=stage_a_data,
+            DeliveredEvidence(
+                snapshot_chars=int(delivered_section_chars.get("snapshot", 0)),
+                snapshot_lite_chars=int(delivered_section_chars.get("snapshot_lite", 0)),
+                items=bookkeeping_evidence_items_for_prompt,
+                seed_item_ids=frozenset(
+                    _evidence_ids_from_items(structured_seed_data.evidence_items)
+                    if structured_seed_active
+                    else []
+                ),
+                stage_a_retained_fraction=(
+                    int(delivered_section_chars.get("stage_a_context", 0))
+                    / stage_a_section_original_chars
+                    if stage_a_section_original_chars > 0
+                    else 0.0
+                ),
+            )
         )
         attempt_metadata["prompt_order_mode"] = normalized_prompt_order_mode
         attempt_metadata["adaptive_tep_mode_requested"] = requested_adaptive_tep_mode
@@ -5028,6 +5249,21 @@ def _run_one_condition_attempts(
 
         patch_meta: dict[str, Any] = {}
         patch_meta["context_protocol"] = attempt_context_protocol
+        if not is_baseline_patcher:
+            # BAS-07: the baseline converters record their own manifest inside
+            # BaselinePatcher.propose_patch; the native arms need the other half of the
+            # comparison, derived from the prompt that was actually assembled.
+            patch_meta["case_information"] = _native_case_information(
+                project_files_context=(
+                    project_files_context if include_project_files_in_prompt else ""
+                ),
+                evidence_items=bookkeeping_evidence_items_for_prompt,
+                stage_a_context_delivered=bool(
+                    include_stage_a_context_in_prompt
+                    and prompt_budget_result.section_status.get("stage_a_context", "")
+                    not in {"", "dropped"}
+                ),
+            )
         patch_meta["adaptive_tep_mode_requested"] = requested_adaptive_tep_mode
         patch_meta["adaptive_tep_full_enabled"] = full_tep_enabled
         patch_meta["adaptive_tep_state_path"] = adaptive_tep_state_path
@@ -5500,6 +5736,42 @@ def _run_one_condition_attempts(
             attempt_tokens_prompt += retry_plan_tokens_prompt
             attempt_tokens_completion += retry_plan_tokens_completion
             attempt_tokens_total += retry_plan_tokens_total
+        # ATT-05: the unscored retry-gate blocks before this attempt were paid for; their
+        # usage joins this scored row, which is the only row analysis will read.
+        retry_gate_carry_meta = _retry_gate_carry_usage_meta(retry_gate_carry)
+        retry_gate_carried_calls = _nonnegative_int(
+            retry_gate_carry.get("llm_call_count"), default=0
+        )
+        if retry_gate_carry_meta is not None:
+            attempt_llm_calls += retry_gate_carried_calls
+            attempt_tokens_prompt += _nonnegative_int(
+                retry_gate_carry.get("tokens_prompt"), default=0
+            )
+            attempt_tokens_completion += _nonnegative_int(
+                retry_gate_carry.get("tokens_completion"), default=0
+            )
+            attempt_tokens_total += _nonnegative_int(
+                retry_gate_carry.get("tokens_total"), default=0
+            )
+            initial_prompt_chars_total += _nonnegative_int(
+                retry_gate_carry.get(KEY_PROMPT_CHARS_TOTAL), default=0
+            )
+            initial_completion_chars_total += _nonnegative_int(
+                retry_gate_carry.get("completion_chars_total"), default=0
+            )
+        for key, value in (
+            ("retry_gate_carried_llm_call_count", retry_gate_carried_calls),
+            (
+                "retry_gate_carried_tokens_total",
+                _nonnegative_int(retry_gate_carry.get("tokens_total"), default=0),
+            ),
+        ):
+            attempt_metadata[key] = value
+            patch_meta[key] = value
+        patch_meta["retry_gate_carried_wall_sec"] = max(
+            0.0, float(retry_gate_carry.get("wall_sec") or 0.0)
+        )
+        retry_gate_carry.clear()
         attempt_tokens_reasoning, reasoning_token_usage_available = (
             _combine_reasoning_usage_segments(
                 (
@@ -5514,6 +5786,7 @@ def _run_one_condition_attempts(
                     retry_plan_meta if retry_plan_meta else None,
                     1 if (retry_plan_invoked and is_openai_patcher) else 0,
                 ),
+                (retry_gate_carry_meta, retry_gate_carried_calls),
                 (patch_meta, 1 if is_openai_patcher else 0),
             )
         )
@@ -5820,6 +6093,15 @@ def _run_one_condition_attempts(
                 patch_meta["retry_gate_previous_evidence_fingerprint"] = prev_evidence_fingerprint
                 attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
                 cumulative_runtime_sec += attempt_wall_sec
+                # ATT-05: this row is unscored, so analysis drops it. Hand its paid work
+                # to the next scored row rather than losing it.
+                _accumulate_retry_gate_carry(
+                    retry_gate_carry,
+                    attempt_metadata=attempt_metadata,
+                    patch_meta=patch_meta,
+                    attempt_wall_sec=attempt_wall_sec,
+                )
+                patch_meta["retry_gate_usage_carried_forward"] = True
                 pending_credit = _finalize_adaptive_policy_attempt(
                     note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     success=False,
@@ -6117,6 +6399,7 @@ def _run_one_condition_attempts(
                 attempt_metadata=attempt_metadata,
                 attempt_dir=attempt_dir,
                 record_prompt=record_prompt,
+                sent_prompts=attempt_sent_prompts,
             )
             propose_invoke_count = 0
             # ATT-12: a transport replay removes only what the failed call created.
@@ -6131,7 +6414,9 @@ def _run_one_condition_attempts(
                 _remove_entries_created_since(replay_attempt_dir, keep=replay_keep)
                 replay_attempt_dir.mkdir(parents=True, exist_ok=True)
                 if is_baseline_patcher:
-                    remove_adaptive_controller_sidecars(context_dir=replay_attempt_dir)
+                    # ATT-12: the adaptive controller sidecars predate the failed call, so
+                    # the cleanup above keeps them; removing them here would hand the
+                    # replayed baseline a different intervention than the first call.
                     _write_baseline_case_context(replay_attempt_dir, case)
                 _write_run_outputs(
                     replay_attempt_dir,
@@ -6472,6 +6757,7 @@ def _run_one_condition_attempts(
                     attempt_metadata=attempt_metadata,
                     attempt_dir=attempt_dir,
                     record_prompt=record_prompt,
+                    sent_prompts=attempt_sent_prompts,
                 )
                 recovery_patch_start = time.perf_counter()
                 recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -6625,6 +6911,10 @@ def _run_one_condition_attempts(
                 diff_to_apply is None
                 and is_openai_patcher
                 and (not request_failed)
+                # A truncated answer is terminal (LLM-02): another proposal under the
+                # same token budget truncates again, and its metadata would replace the
+                # truncation with no_patch_proposed or a repair.
+                and not patcher_meta_truncated(patch_meta)
                 and str(patch_meta.get("error") or "").strip()
             ):
                 no_diff_recovery_sections = _build_stage_b_sections_for_attempt(
@@ -6662,6 +6952,7 @@ def _run_one_condition_attempts(
                     attempt_metadata=attempt_metadata,
                     attempt_dir=attempt_dir,
                     record_prompt=record_prompt,
+                    sent_prompts=attempt_sent_prompts,
                 )
                 no_diff_recovery_start = time.perf_counter()
                 no_diff_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7009,6 +7300,7 @@ def _run_one_condition_attempts(
                             attempt_metadata=attempt_metadata,
                             attempt_dir=attempt_dir,
                             record_prompt=record_prompt,
+                            sent_prompts=attempt_sent_prompts,
                         )
                         verifier_recovery_start = time.perf_counter()
                         verifier_recovery_patch = _run_openai_operation_with_transport_recovery(
@@ -7536,8 +7828,6 @@ def _run_one_condition_attempts(
             adaptive_progress_stop_reason=adaptive_progress_stop_reason_for_note,
             note=note,
         )
-        attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
-        cumulative_runtime_sec += attempt_wall_sec
         _update_aux_signals_from_attempt(
             online_kwargs=online_finalize_kwargs,
             budget_kwargs=budget_finalize_kwargs,
@@ -7592,6 +7882,7 @@ def _run_one_condition_attempts(
                     ),
                 },
             )
+            tep_learning_started = time.perf_counter()
             adaptive_tep_learning = run_post_attempt_learning(
                 controller=adaptive_tep_controller,
                 patcher=patcher_for_attempt,
@@ -7600,6 +7891,7 @@ def _run_one_condition_attempts(
                 case_id=case.case_id,
                 node_packets=tep_node_packets,
             )
+            tep_learning_duration_sec = max(0.0, time.perf_counter() - tep_learning_started)
             _fold_tep_learning_usage(
                 learning=adaptive_tep_learning,
                 attempt_metadata=attempt_metadata,
@@ -7608,10 +7900,41 @@ def _run_one_condition_attempts(
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
-            # ATT-17: persist after every learning pass and record a failed save.
-            tep_save_error = adaptive_tep_controller.save()
-            attempt_metadata["adaptive_tep_save_error"] = tep_save_error
-            patch_meta["adaptive_tep_save_error"] = tep_save_error
+            # POL-02: learning is LLM time inside the attempt, and a cost the budget
+            # policy's reward has to see; it used to land in neither.
+            _accumulate_timing_metadata_field(
+                "tep_learning_llm_sec",
+                tep_learning_duration_sec,
+                attempt_metadata,
+                patch_meta,
+            )
+            tep_learning_calls = _nonnegative_int(
+                adaptive_tep_learning.get("llm_call_count"), default=0
+            )
+            if tep_learning_calls > 0 or tep_learning_duration_sec > 0.0:
+                budget_local_llm_calls += tep_learning_calls
+                budget_local_tokens_prompt += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_prompt"), default=0
+                )
+                budget_local_tokens_completion += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_completion"), default=0
+                )
+                budget_local_tokens_total += _nonnegative_int(
+                    adaptive_tep_learning.get("tokens_total"), default=0
+                )
+                budget_local_wall_sec += tep_learning_duration_sec
+                budget_finalize_kwargs["local_accounting"] = _adaptive_policy_local_accounting(
+                    llm_call_count=budget_local_llm_calls,
+                    tokens_prompt=budget_local_tokens_prompt,
+                    tokens_completion=budget_local_tokens_completion,
+                    tokens_total=budget_local_tokens_total,
+                    wall_sec=budget_local_wall_sec,
+                )
+        # POL-02: the attempt's wall clock closes after learning, not before it.
+        attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
+        cumulative_runtime_sec += attempt_wall_sec
+        # ATT-17: persist after every learning pass and record a failed save.
+        _save_adaptive_tep_state(attempt_metadata=attempt_metadata, patch_meta=patch_meta)
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=success,
@@ -7653,9 +7976,14 @@ def _run_one_condition_attempts(
         )
 
         if success:
+            # POL-11: the IDs that survived prompt budgeting in the deciding call, not the
+            # ones selected for it; a trimmed-out helper block earns no rescue bonus.
             _resolve_pending_online_credits_for_success(
                 success_attempt=attempt,
-                prompt_evidence_ids=_evidence_ids_from_items(bookkeeping_evidence_items_for_prompt),
+                prompt_evidence_ids=_evidence_ids_rendered_in_prompt(
+                    items=bookkeeping_evidence_items_for_prompt,
+                    prompt_text=attempt_sent_prompts[-1] if attempt_sent_prompts else "",
+                ),
             )
             break
         if adaptive_stop_triggered:
@@ -7672,9 +8000,13 @@ def _run_one_condition_attempts(
 
     _resolve_remaining_pending_online_credits()
     if adaptive_tep_controller is not None:
+        # ATT-17: a backstop for state the loop changed without emitting a record (a
+        # retry-gate block, say). Every attempt record already carries the result of its
+        # own save, so this can only add a failure the records have not reported; it
+        # reaches the returned list, not the streamed rows, which is why the per-attempt
+        # saves above are the ones that matter.
         tep_save_error = adaptive_tep_controller.save()
         if tep_save_error and records:
-            # ATT-17: the failure used to be swallowed; attach it to the case's last record.
             last_metadata = records[-1].get("attempt_metadata")
             if isinstance(last_metadata, dict):
                 last_metadata["adaptive_tep_save_error"] = tep_save_error

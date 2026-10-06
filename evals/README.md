@@ -99,12 +99,18 @@ python -m evals.swebench.cli prepare-scoring-smoke \
 `--snapshot-dir` is required whenever the `llmdebug` condition is requested: it
 holds one `<instance_id>.txt|.md|.json` llmdebug artifact per instance, and
 generation fails fast without it (DAT-03). `run_metadata.json` records
-`prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
+`prompt_policy`, `prompt_policy_fingerprint` and `snapshot_coverage` (hits, misses,
+missing instance IDs). `--resume` refuses a run whose stored `prompt_policy` differs
+from the requested flags (and refuses metadata without a recorded policy), because the
+resumed predictions were generated under the stored policy.
 Prompts carry only the issue text by default; `--include-hints` (Lite) and
 `--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
 which are not part of the official task (DAT-01, DAT-02). A request that fails is not saved
 as an empty patch: the instance stays missing, `prepare-handoff` refuses the unequal paired
-sets, and `--resume` retries it (DAT-08).
+sets, and `--resume` retries it (DAT-08). That covers both a raised error and the transport
+outages the patcher reports by *returning* an empty result with a `request_failed` /
+`http_error` meta; a deterministic model-side refusal (context limit, reasoning-only answer)
+stays an empty prediction.
 
 Local Docker convenience wrapper:
 
@@ -173,8 +179,10 @@ current 1,828-case corpus limit what results can show. Changing them is a resear
   therefore restate per-category results and are not independent evidence that snapshots
   help where they "should".
 - *Run-to-run variance.* `python -m evals.importers.determinism` flags cases whose code uses
-  clocks, unseeded randomness, entropy sources, network modules or set iteration (DAT-14);
-  it flags 14 committed cases, which are kept until D12 decides.
+  clocks, unseeded randomness, entropy sources, network modules or set iteration (DAT-14).
+  A seed only exempts randomness when it is a non-`None` constant, for the same RNG, and
+  textually earlier in the same function or at module level; iterating a name bound to a set
+  counts as set iteration. It flags 25 committed cases, which are kept until D12 decides.
 
 ## SWE-Bench Pro (Contamination-free, multi-language, Docker-scored)
 
@@ -237,12 +245,20 @@ Available subcommands:
 - `generate-pro` — Produce paired predictions for each condition
 - `prepare-handoff` — Validate predictions and write handoff metadata
 - `score-docker` — Score predictions using pre-built DockerHub images and fail
-  the command when Docker/scorer infrastructure errors occur. A container that exits
+  the command when Docker/scorer infrastructure errors occur. It re-validates the paired
+  predictions against the run's `instance_ids.txt` when present, so a population reduced
+  in both arms (e.g. the same instance failed in both) can't be reported as a complete
+  comparison (DAT-05). A container that exits
   non-zero for any reason other than a patch that doesn't apply, a missing `output.json`,
   a wait timeout and an empty `fail_to_pass` list are infrastructure errors (DAT-04,
   DAT-09); a patch that doesn't apply under the official sequence (`git apply --verbose`,
-  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure.
-  `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
+  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure. Classification uses
+  only *this* execution's receipts: the workspace's `apply_status`, `run_status`,
+  `output.json` and logs are deleted before the container starts, `patch_apply_failed`
+  needs an `apply_status=failed` receipt (exit code 3 alone can come from a setup
+  command), a `run_status` of 126/127 or a signal exit means the test runner never ran,
+  and an unreadable or malformed `output.json` is an infrastructure error rather than a
+  wrong patch. `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
   `infrastructure_error` per instance and is written before the command fails. Cached
   outputs are reused only for the identical patch (`*_output.patch_sha256`, DAT-13), and
   dataset values are shell-quoted in the container entry script (DAT-11).
@@ -919,7 +935,10 @@ Resuming requires the same run settings: when the run settings fingerprint (whic
 patcher config, the case and condition selection, the record policy and `--seed`) differs from
 the existing results, the run aborts instead of writing records that would claim the old
 configuration (ORC-04). `--allow-settings-drift` resumes anyway; new records then carry fresh
-run metadata with `settings_drift_from_fingerprint`. `--seed` is always recorded, with
+run metadata with `settings_drift_from_fingerprint`, which links each settings generation to
+the one it replaced. A results file holding such a linked chain stays resumable: later
+invocations compare against the latest generation and reuse its metadata. An unlinked
+fingerprint change in the same file is still an error. `--seed` is always recorded, with
 `deterministic` as a separate flag, because it also seeds bandit exploration (ORC-05).
 
 For long-running units, enable richer in-flight visibility:
@@ -982,8 +1001,17 @@ Resume safety guardrails:
   warns so timestamp typos are easier to spot
 - if an existing `run_id` is missing `run_settings_fingerprint`, resume still aborts
   (cannot validate compatibility safely)
-- if an existing `run_id` has a different `run_settings_fingerprint`, the runner now prints
-  a warning and continues, reusing completed-unit state from existing records
+- if an existing `run_id` has a different `run_settings_fingerprint`, resume aborts unless
+  `--allow-settings-drift` is passed; with that option the runner prints a warning, continues,
+  and reuses completed-unit state from existing records. Subsequent invocations with those same
+  settings resume normally, because the drift record links back to the previous fingerprint
+- with an enabled decision-model role, the preflight resolves what the sidecar actually serves
+  (`patcher_config.adaptive_decision_model_serving`: model id, revision, device, dtype,
+  quantization, context limit) and resume aborts when it differs from the existing records'
+  identity unless `--allow-settings-drift` is passed. The settings fingerprint cannot cover
+  this: it is computed from the flags before the sidecar is contacted, and the request alias
+  (`--adaptive-decision-model-name clef-flash`) stays the same across revisions and
+  quantizations. Endpoints that report no identity on `/health` add no such entry
 
 Crash/recovery safeguards:
 - result records are appended incrementally during each unit, so progress survives process crashes
@@ -1115,7 +1143,7 @@ uv run python -m evals.run_eval \
 ```
 
 Key flags:
-- `--deterministic --seed <int>`: enforce deterministic mode; fails fast if OpenAI-compatible backend does not acknowledge seed support.
+- `--deterministic --seed <int>`: enforce deterministic mode; fails fast if OpenAI-compatible backend does not acknowledge seed support. The raw seed is what run metadata, the settings fingerprint and bandit exploration use; the pytest subprocess's `PYTHONHASHSEED` is `seed % 4294967296`, because CPython refuses to start outside `0..4294967295` (ORC-01).
 - `--record-prompt full|hash|none`: controls prompt persistence in `attempt_metadata`.
 - `--record-evidence full|hash|none`: controls evidence persistence in `attempt_metadata`.
 - `--record-env KEY` (repeatable): allowlist environment keys into `run_metadata`.
@@ -1141,6 +1169,11 @@ Key flags:
 - `--openai-transport-retry-backoff-base-sec <float>` and
   `--openai-transport-retry-backoff-max-sec <float>`: exponential backoff profile for those
   transport retries (defaults `1.0` and `8.0` seconds).
+- a `Retry-After` response header is a retry floor and is honoured above that cap (bounded at
+  120 seconds for runs without a propose deadline). When the resulting wait no longer fits the
+  remaining `--openai-max-propose-sec` budget, the request fails instead of retrying inside a
+  window the server already refused (`transport_retry_stop_reason=retry_delay_exceeds_deadline`,
+  LLM-22).
 - `--openai-transport-recovery` / `--no-openai-transport-recovery`: runner-managed outage
   recovery for OpenAI-compatible backends (default: enabled). When a high-level OpenAI
   operation still ends in a terminal transport/backend-unavailable failure after its internal
@@ -1240,7 +1273,7 @@ Key flags:
 - `--adaptive-online-include-case-labels` / `--no-adaptive-online-include-case-labels`: feed the `case.json` difficulty/snapshot-dependency/bug-source labels to the helper policy as features. Off by default since 2026-10: the labels are not observable at deployment time.
 - `--adaptive-lite-snapshot-mode replace|supplement`: with `--adaptive-reveal-mode full`, `replace` (default) makes `snapshot_lite`, `frame_locals_lite` and `snapshot_full_lite` replace the full snapshot section in the patch prompt; `supplement` restores the old behavior of adding them on top. Rows record `adaptive_lite_replaced_snapshot`.
 - `--adaptive-decision-model-role off|shadow|policy|features|prior`: consult a SystemOne-compatible System-1 decision model (for example Cloudflare clef-flash served by llama.cpp through llama-swap, or the `evals/docker/decision_model/` PyTorch sidecar) for `layered_adaptive_llm` helper decisions. `shadow` logs only; `policy` lets it select; `features` adds six diagnostic LinUCB features; `prior` guides warm-up and adds a fading score prior. `policy`/`features`/`prior` require `--adaptive-online-policy-mode on`. See `docs/adaptive_online_policy_design.md`.
-- `--adaptive-decision-model-url <url>` (default `$TRACEGATE_DECISION_MODEL_URL` or `http://127.0.0.1:8090`), `--adaptive-decision-model-api-key <key>` (default `$TRACEGATE_DECISION_MODEL_API_KEY`; bearer token for gateways such as llama-swap, redacted in lockfiles and rejected in config files), `--adaptive-decision-model-name <name>` (`clef-flash`), `--adaptive-decision-model-profile evidence_v1|evidence_v1_noaux|evidence_v1_text|evidence_v1_nohints|evidence_atomic_v1`, `--adaptive-decision-model-timeout-sec <float>` (`10`), `--adaptive-decision-model-temperature <float>` (`0` = argmax), `--adaptive-decision-model-prior-beta` / `--adaptive-decision-model-prior-anneal-updates` / `--adaptive-decision-model-warmup-mix` (`0.5` / `50` / `0.3`), `--adaptive-decision-model-log-state full|hash` (`full` writes rendered states to `<artifacts_root>/decision_model_states.jsonl`). The sidecar is health-checked before the first unit runs. Results carry `adaptive_online_dm_*` fields and policy events schema v5 carries a `decision_model` block.
+- `--adaptive-decision-model-url <url>` (default `$TRACEGATE_DECISION_MODEL_URL` or `http://127.0.0.1:8090`), `--adaptive-decision-model-api-key <key>` (default `$TRACEGATE_DECISION_MODEL_API_KEY`; bearer token for gateways such as llama-swap, redacted in lockfiles and rejected in config files), `--adaptive-decision-model-name <name>` (`clef-flash`), `--adaptive-decision-model-profile evidence_v1|evidence_v1_noaux|evidence_v1_text|evidence_v1_nohints|evidence_atomic_v1`, `--adaptive-decision-model-timeout-sec <float>` (`10`), `--adaptive-decision-model-temperature <float>` (`0` = argmax), `--adaptive-decision-model-prior-beta` / `--adaptive-decision-model-prior-anneal-updates` / `--adaptive-decision-model-warmup-mix` (`0.5` / `50` / `0.3`), `--adaptive-decision-model-log-state full|hash` (`full` writes rendered states to `<artifacts_root>/decision_model_states.jsonl`). The sidecar is health-checked before the first unit runs, and what it reports about the served release is recorded as `patcher_config.adaptive_decision_model_serving` (see the resume guardrails above). Results carry `adaptive_online_dm_*` fields and policy events schema v5 carries a `decision_model` block.
 - `--prompt-order-mode current|crash_first|evidence_last`: reorder the shared Stage-B prompt sections without changing evidence membership.
 - `--adaptive-reveal-mode full|traceback_first`: either send the policy-granted adaptive evidence immediately or start from traceback/failure-signature/snapshot-index-only prompting and reveal more only on explicit triggers. Under `full`, the full snapshot is in the prompt only when the executed helper action grants it (ATT-06, D5): rows record `adaptive_snapshot_requested`, `stage_b_snapshot_in_prompt` and `evidence_chars_by_type`.
 - `--snapshot-frame-pruning-mode off|heuristic`: heuristically trim prompt-facing snapshot frames while always keeping the crash frame and adjacent user-code frames.
@@ -1406,11 +1439,67 @@ unsupported and should be regenerated with the current harness before analysis.
   block is a non-scored `infra_event` and the attempt is retried once (ATT-05). A completion
   cut off at `max_tokens` is recorded as `note="truncated_response"` (patcher error
   `truncated_response`) instead of being repaired into a patch or recorded as
-  `no_patch_proposed` (LLM-02), and model diffs are taken from every fenced block with
-  reasoning stripped, the last diff per file winning (LLM-01, LLM-04). Run metadata records
+  `no_patch_proposed` (LLM-02), and model diffs are taken from fenced and unfenced sections in
+  response order with reasoning stripped, the last diff per file winning (LLM-01, LLM-04). Run
+  metadata records
   `llmdebug_snapshot_schema_version`, the debug-session schema the pytest plugin wrote for
   snapshot-based conditions, and the settings fingerprint includes it, so resuming a run
   across a snapshot-format change counts as settings drift.
+  Corrections from the codex review of the remediation branches (2026-10-06) extend v7:
+  Diff extraction keeps hunk lines after consecutive blank context lines, does not absorb trailing
+  prose bullets (including lowercase ones) as diff lines, and a `/dev/null` creation or deletion
+  keeps a real top-level `a/`/`b/` directory when a `diff --git` header declares it (LLM-03,
+  LLM-07, LLM-23). Truncation is terminal wherever it is detectable: a length-limited answer
+  without content, a truncated reasoning-only answer, and truncated Stage-A `request_context` /
+  `compact_context` answers all record `truncated_response`, and no recovery call follows
+  (LLM-02). Edit payloads with CRLF replacements keep single carriage returns, fuzzy block
+  recovery is skipped above 4,000 characters (LLM-09, LLM-12), a `Retry-After` is honoured above
+  the backoff cap (`transport_retry_stop_reason`, LLM-22), and patch cleanup keeps `.orig`/`.rej`
+  files the diff itself names (ATT-16).
+  `evidence_chars_by_type` counts the evidence as delivered (deduplicated across the seed bundle
+  and Stage-A requests, filtered to the new items on a delta retry, and scaled by what survived
+  compaction and the prompt budget), and `adaptive_snapshot_included` /
+  `stage_b_snapshot_in_prompt` are derived from the final prompt sections. A restricted helper
+  action whose request list is emptied keeps `context_protocol = "staged"` and receives no
+  monolithic project-file context (ATT-03). Native records carry a `patch_meta.case_information`
+  manifest (`prompt_files`, `test_source_exposure`, with a new `"none"` value) like the baselines'
+  (BAS-07).
+  Attempt usage includes every served LLM call: TEP equilibrium re-plans, transport-recovery
+  replays and the full-TEP learning pass, which `timing_breakdown.tep_learning_llm_sec` reports as
+  part of `llm_total_sec`; the attempt's wall clock closes after it. A retry-gate block's paid
+  work is carried into the next scored row (`retry_gate_carried_llm_call_count`,
+  `retry_gate_carried_tokens_total`). `token_usage_available` may be true when the patch call
+  reported no usage; `token_usage_partial` and `token_usage_missing_segments` then mark the
+  unknown segment. A terminal `unit_runtime_error` is numbered after the last scored attempt, so a
+  unit that crashes after an infra event stays in the denominator (ATT-05, ATT-08, POL-02).
+  Adaptive policy (Phase 3): `policy_defaults_version: 2` defaults (per-arm decay 1.0, random
+  greedy tie-breaking, widened feature family); escalation is charged only its incremental cost
+  (POL-08); the delayed rescue bonus requires the helper's evidence to survive into the successful
+  prompt (POL-11); BwK pacing penalizes scores by `λ·ĉ_k/target` (POL-04); TEP acceptance is a
+  paired critic comparison and unparsed critiques are excluded (POL-17); Thompson draws are keyed
+  per decision (POL-05). Decision-model runs (`--adaptive-decision-model-role`) carry
+  `adaptive_online_dm_*` attempt fields and helper-event schema v5's `decision_model` block; with
+  `--adaptive-reveal-mode full` the default `--adaptive-lite-snapshot-mode replace` makes the lite
+  snapshot sections replace the full snapshot in the patch prompt; shadow-mode helper rows carry
+  behaviour propensity 1.0 (analysis corrects older shadow rows at read time).
+  Baseline runs report the effective generation values in `patch_meta.baseline_generation`,
+  including baseline-specific overrides (`overrides`);
+  `patch_meta.baseline_repo_state.tree_patch_sha256` also covers untracked upstream file contents;
+  one wall-clock deadline bounds every blocking adapter step (`error="deadline_exceeded"` for
+  INTERVENOR, λ-RLM and RLM); TraceCoder prompts keep the full test source and the retry context;
+  and `--seed` affects baseline sampling only together with `--deterministic` (BAS-02, BAS-03,
+  BAS-04, BAS-07, BAS-08, BAS-11, BAS-14, BAS-19).
+  Run metadata and its fingerprints distinguish v7 configurations whose behaviour differs even
+  when every CLI flag matches: `patcher_config` records `policy_defaults_version`,
+  `evidence_policy_revision`, `attempt_accounting_version`, `retry_gate_max_consecutive_blocks`,
+  `oracle_policy` (the effective test-oracle policy: version, pristine test-surface restoration,
+  JUnit-counted verdict and the test-surface rule sets), `llmdebug_snapshot_schema_version`
+  (resolved from the executor that runs pytest; `container:<image>` for an unmounted container),
+  and, for baseline runs, the resolved generation contract (`baseline_generation`,
+  `baseline_api_timeout_sec`, `baseline_process_timeout_sec`, `baseline_max_iterations`,
+  `baseline_extra`). With a decision model, `patcher_config.adaptive_decision_model_serving`
+  records the model id, revision, device, dtype, quantization and context limit the sidecar
+  served. Resuming a results file whose records use an older `schema_version` is refused.
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
@@ -1426,9 +1515,18 @@ Runtime accounting now records canonical per-attempt wall-clock time as
 prefers this field when present across all attempts for a case-condition unit and
 falls back to legacy cumulative/before/after duration fields for backward compatibility.
 When resumed runs append duplicate attempt rows for the same
-`(run_id, case_id, condition, attempt)`, the analyzer resolves them with
-**last-write-wins** and reports `duplicate_attempt_rows_seen` /
-`duplicate_attempt_rows_resolved` under input diagnostics.
+`(run_id, case_id, condition, attempt)`, every reader resolves them through the one
+resolver in `evals/case_outcome.py` (`resolve_duplicate_attempt`): a real outcome beats a
+resume-eligible `unit_runtime_error` row, and otherwise **last-write-wins**. Input
+diagnostics report `duplicate_attempt_rows_seen`, `duplicate_attempt_rows_resolved` and
+`duplicate_attempt_rows_conflicting` — equal-priority rows that disagree about `success`,
+where no recorded field says which superseded the other. Those are warned about and
+`--strict-input` rejects them.
+Input diagnostics also list `record_schema_versions`, every schema version the analysis
+read. Older records stay readable, but `analyze_results`, `eval_summary`,
+`report_run_metrics` and `baselines.compare_results` all warn when one cohort mixes
+versions, and all four now report `records_schema_invalid` so a schema-invalid row cannot
+shrink the cohort silently.
 For adaptive OPE, DR reward models are fit separately per
 `*_feature_scaling_profile`; mixed-profile buckets still report IPS/SNIPS on the pooled
 samples and now expose the contributing `feature_scaling_profiles` in the summary.
@@ -1521,7 +1619,13 @@ When rows carry decision-model advice, `analyze_results` OPE also reports
 `decision_model_greedy`, `decision_model_stochastic` and `decision_model_atomic` targets (the
 atomic target re-applies the `evidence_atomic_v1` thresholds to logged aux answers when the run
 used another profile), and `shadow_corrected_samples` counts old shadow-mode rows whose behavior
-propensity was corrected to 1.0 at read time.
+propensity was corrected to 1.0 at read time. Those per-sample targets additionally report the
+behavior support of their probability mass (`behavior_supported_target_mass`,
+`unsupported_target_mass`, `unsupported_mass_samples`, `deterministic_behavior_samples`,
+`estimates_identifiable`) and set `support_warning="unsupported_target_mass"` when target mass
+sits on actions the behavior policy never could have taken; see
+`docs/adaptive_online_policy_design.md`. Bootstrap intervals are suppressed for estimators
+without behavior support (`ope_ci.ips`/`ope_ci.snips` are `null` rather than `[0, 0]`).
 
 ### Offline decision-model probe
 
@@ -1597,15 +1701,22 @@ Results written before the 2026-10-04 review fixes can be checked without re-run
 ```bash
 uv run python -m evals.reanalysis_audit evals/results/<run>*.jsonl \
   --a base_repair --b layered_adaptive_llm \
-  [--swebench-run-dir evals/swebench_runs/<id>] [--json audit.json]
+  [--swebench-run-dir evals/swebench_runs/<id>] [--json audit.json] [--strict-input]
 ```
 
 It prints the headline metrics computed with the corrected analysis next to the same metrics
 under the pre-review semantics (unmatched uplift, missing tokens as 0, run-level pairing,
-chi-square McNemar, the old power formula, uncorrected pairwise significance), and the data
-audits from "Impact on existing results" in `docs/2026-10-04-code-review-findings.md`:
+chi-square McNemar, the old power formula, run-level pairwise significance). The corrected
+metrics exclude `baseline_supported=False` cases and audit the validated, deduplicated
+attempts the headline is computed from; the legacy metrics keep counting every raw row.
+Unreadable files, malformed lines, schema-invalid records and conflicting duplicate rows are
+reported as a partial-input warning, and `--strict-input` rejects such input instead of
+auditing the readable subset. For a pre-fix SWE-Bench run that recorded no `prompt_policy`,
+the snapshot-directory status is `unknown_legacy_run` and needs external configuration
+evidence rather than counting as a missing snapshot directory. The data audits come from
+"Impact on existing results" in `docs/2026-10-04-code-review-findings.md`:
 successes that touched tests or pytest config, whole-file fallbacks and seed bundles on
-restricted actions, full-reveal runs, policy decay below 1.0, OPE propensity problems,
+restricted actions, full-reveal runs with adaptive attempts, policy decay below 1.0, OPE propensity problems,
 pre-fix deterministic runs, repeated runs, unmatched case sets, missing token usage, LDB case
 counts, retry-gate blocks scored as attempts, forced patches recorded as test failures, record
 schema versions, and per SWE-Bench run: `--snapshot-dir`, hints/test IDs in prompts and empty

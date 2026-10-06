@@ -13,7 +13,6 @@ from evals.analysis_ope_estimators import (
     _deterministic_target_ope,
 )
 from evals.analysis_ope_stochastic import (
-    StochasticTargetOpeSettings,
     _decision_model_advice_ok,
     _decision_model_targets,
 )
@@ -21,6 +20,9 @@ from evals.analysis_ope_support import (
     ADAPTIVE_BUDGET_REWARD_SCOPES,
     ADAPTIVE_ONLINE_REWARD_SCOPES,
     ADAPTIVE_OPE_RAW_PROPENSITY_FLOOR,
+    DEFAULT_OPE_SUMMARY_SETTINGS,
+    OpeSummarySettings,
+    TargetOpeSettings,
     _action_counts_for_samples,
     _action_rates_for_counts,
     _coerce_feature_values,
@@ -187,7 +189,10 @@ def _adaptive_ope_samples(
                 "feature_scaling_profile": feature_scaling_profile,
                 "propensity_shadow_corrected": shadow_mode and logged_propensity < 1.0,
                 "propensity_missing": propensity_missing,
-                "case_key": f"{record.get('run_id') or ''}\x1f{record.get('case_id') or ''}",
+                # STA-02: the case, not the run, is the independent unit. Keying this by
+                # (run_id, case_id) let repeated runs of one case count as independent
+                # cases in the bootstrap and in the cross-fitting folds.
+                "case_key": str(record.get("case_id") or ""),
                 **_ope_sample_policy_context(
                     attempt_meta_dict,
                     patch_meta_dict,
@@ -265,8 +270,7 @@ def _adaptive_ope_summary_from_records(
     prefix: str,
     action_space: set[str],
     target_policies: dict[str, str],
-    min_action_support: int,
-    propensity_floor: float,
+    settings: OpeSummarySettings = DEFAULT_OPE_SUMMARY_SETTINGS,
 ) -> dict[str, Any]:
     """Build an OPE summary directly from raw attempt records."""
     samples = _adaptive_ope_samples(
@@ -278,8 +282,7 @@ def _adaptive_ope_summary_from_records(
         samples=samples,
         action_space=action_space,
         target_policies=target_policies,
-        min_action_support=min_action_support,
-        propensity_floor=propensity_floor,
+        settings=settings,
     )
 
 
@@ -288,8 +291,7 @@ def _adaptive_ope_summary(
     samples: list[dict[str, Any]],
     action_space: set[str],
     target_policies: dict[str, str],
-    min_action_support: int,
-    propensity_floor: float,
+    settings: OpeSummarySettings = DEFAULT_OPE_SUMMARY_SETTINGS,
 ) -> dict[str, Any]:
     """Build an off-policy evaluation summary from pre-extracted samples.
 
@@ -297,6 +299,8 @@ def _adaptive_ope_summary(
     SNIPS / DR estimates. Samples without a logged propensity are dropped and counted
     in ``propensity_missing_dropped`` (STA-12).
     """
+    min_action_support = settings.min_action_support
+    propensity_floor = settings.propensity_floor
     propensity_missing_dropped = sum(1 for sample in samples if sample.get("propensity_missing"))
     samples = [sample for sample in samples if not sample.get("propensity_missing")]
     action_counts = _action_counts_for_samples(samples=samples, action_space=action_space)
@@ -318,28 +322,22 @@ def _adaptive_ope_summary(
         action_counts=action_counts,
         total_samples=len(samples),
     )
+    target_settings = TargetOpeSettings(
+        action_space=action_space,
+        min_action_support=support_threshold,
+        ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
+        propensity_floor=trimmed_propensity_floor,
+        bootstrap_seed=int(settings.bootstrap_seed),
+    )
     targets: dict[str, Any] = {}
     for target_name, target_action in target_policies.items():
         targets[target_name] = _deterministic_target_ope(
             samples=samples,
             target_action=target_action,
-            action_space=action_space,
             action_counts=action_counts,
-            min_action_support=support_threshold,
-            ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
-            propensity_floor=trimmed_propensity_floor,
+            settings=target_settings,
         )
-    targets.update(
-        _decision_model_targets(
-            samples=samples,
-            settings=StochasticTargetOpeSettings(
-                action_space=action_space,
-                min_action_support=support_threshold,
-                ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
-                propensity_floor=trimmed_propensity_floor,
-            ),
-        )
-    )
+    targets.update(_decision_model_targets(samples=samples, settings=target_settings))
     return {
         "sample_count": len(samples),
         "action_counts": action_counts,

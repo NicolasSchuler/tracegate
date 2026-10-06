@@ -138,8 +138,9 @@ eval framework, and adaptive online learning.
 
   STALL DETECTION (escape hatch):
   ┌──────────────────────────────────────────────────────────────────────────┐
-  │  IF same failure signature AND repeat_count ≥ stall_threshold           │
-  │     AND NOT hypothesis_advanced AND NOT plan_advanced                   │
+  │  IF same failure signature AND repair_streak ≥ stall_threshold          │
+  │     (unproductive bind_evidence/change/verify attempts; any new          │
+  │      evidence, hypothesis, plan or passing verify resets the streak)     │
   │  THEN → state forced to "stalled"                                      │
   │                                                                        │
   │  ┌──────────┐                                                          │

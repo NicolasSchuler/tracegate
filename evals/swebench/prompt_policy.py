@@ -9,15 +9,20 @@ refuses to run without a snapshot directory, because without one its prompt is t
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import _json as json
 from .types import CONDITION_LLMDEBUG
 
 _SNAPSHOT_SUFFIXES = (".txt", ".md", ".json")
 _MAX_RECORDED_MISSING_IDS = 50
+
+PROMPT_POLICY_FINGERPRINT_KEY = "prompt_policy_fingerprint"
+"""``run_metadata.json`` key holding the fingerprint of the effective prompt policy."""
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,56 @@ class PromptInputs:
             "include_test_ids": bool(self.include_test_ids),
             "snapshot_dir": str(self.snapshot_dir) if self.snapshot_dir is not None else None,
         }
+
+    def fingerprint(self) -> str:
+        """A stable digest of the effective prompt policy, for resume validation."""
+        return prompt_policy_fingerprint(self.to_metadata())
+
+
+def prompt_policy_fingerprint(policy: dict[str, Any]) -> str:
+    """The short digest of a ``prompt_policy`` metadata block."""
+    payload = json.dumps(policy, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def assert_resumable_prompt_policy(*, metadata_file: Path, prompt_inputs: PromptInputs) -> None:
+    """Refuse to resume a run whose stored prompt policy differs from this one.
+
+    Resuming keeps the existing predictions but rewrites ``run_metadata.json``, so a
+    resume with different flags would relabel leaked-test or hinted predictions as
+    official-task-only (DAT-01/02 bookkeeping). Legacy metadata without a recorded
+    policy cannot be verified and is rejected explicitly.
+    """
+    if not metadata_file.exists():
+        return
+    try:
+        stored_metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read {metadata_file} to validate --resume: {exc}") from exc
+    if not isinstance(stored_metadata, dict):
+        raise ValueError(f"cannot validate --resume: {metadata_file} is not a JSON object")
+
+    stored_policy = stored_metadata.get("prompt_policy")
+    if not isinstance(stored_policy, dict):
+        raise ValueError(
+            "cannot resume: the existing run predates prompt-policy bookkeeping "
+            f"({metadata_file} has no prompt_policy). Generate into a fresh run id."
+        )
+
+    current_policy = prompt_inputs.to_metadata()
+    if prompt_policy_fingerprint(stored_policy) == prompt_inputs.fingerprint():
+        return
+    differences = sorted(
+        f"{key}: stored={stored_policy.get(key)!r} requested={current_policy[key]!r}"
+        for key in current_policy
+        if stored_policy.get(key) != current_policy[key]
+    )
+    raise ValueError(
+        "cannot resume with a different prompt policy: the existing predictions were "
+        "generated under another information policy. "
+        f"Differences: {'; '.join(differences) or 'policy key set changed'}. "
+        "Re-run with the original flags, or generate into a fresh run id."
+    )
 
 
 def require_snapshot_dir(conditions: Sequence[str], snapshot_dir: Path | None) -> None:

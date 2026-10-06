@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.baseline_runtime import _baseline_extra_from_args, _baseline_patch_inventory
+from evals.decision_model.config import DECISION_MODEL_SERVING_CONFIG_KEY
 from evals.eval_recording import _build_run_metadata
 from evals.eval_types import is_baseline_condition
 from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
@@ -23,6 +24,7 @@ class RunMetadataInputs:
     args: Any
     conditions: Any
     config_state: Any
+    decision_model_serving: Any
     existing_run_metadata: Any
     openai_context_window_probe_error: Any
     openai_context_window_probe_provider: Any
@@ -125,6 +127,11 @@ def build_run_metadata_for_run(inputs: RunMetadataInputs) -> RunMetadataAssembly
             openai_context_window_probe_provider
         )
         patcher_config["openai_context_window_probe_error"] = openai_context_window_probe_error
+        # Resolved by the preflight, not by the flags: the request alias stays the same when
+        # the sidecar serves another revision or quantization (see the resume drift check).
+        serving = inputs.decision_model_serving
+        if isinstance(serving, dict) and serving:
+            patcher_config[DECISION_MODEL_SERVING_CONFIG_KEY] = dict(serving)
         if str(getattr(args, "patcher", "")) == "baseline":
             baseline_name = str(getattr(args, "baseline_name", "") or "").strip().lower()
             patcher_config["baseline_name"] = baseline_name

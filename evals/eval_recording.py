@@ -43,6 +43,7 @@ from .eval_types import (
     ADAPTIVE_REWARD_STAGNATION_SCALE_DEFAULT,
     ADAPTIVE_REWARD_SUCCESS_HINT_DEFAULT,
     ADAPTIVE_REWARD_TOKEN_SCALE_DEFAULT,
+    ATTEMPT_ACCOUNTING_VERSION,
     BASELINE_CONDITION_BY_NAME,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_ALPHA,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
@@ -61,14 +62,17 @@ from .eval_types import (
     DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES,
     DEFAULT_TRANSPORT_FAIL_FAST_STREAK,
     EVAL_RECORD_SCHEMA_VERSION,
+    EVIDENCE_POLICY_REVISION,
     PATCH_VERIFIER_MIN_SCORE,
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
     PATCH_VERIFIER_SCOPE_ALL,
     PATCH_VERIFIER_SCOPE_DISABLED,
     POLICY_DEFAULTS_VERSION,
+    RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
     CaseSpec,
     Condition,
 )
+from .oracle_integrity import oracle_policy_metadata
 from .policy_feature_scaling import DEFAULT_POLICY_FEATURE_SCALING_PROFILE
 
 DEFAULT_REPO_OPENAI_COMPAT_PROFILE = "lmstudio_model_yaml"
@@ -109,6 +113,28 @@ def _baseline_openai_compat_settings_from_args(*, args: argparse.Namespace) -> d
         allow_reasoning_fallback=getattr(args, "baseline_openai_allow_reasoning_fallback", True),
         enable_thinking=getattr(args, "baseline_openai_enable_thinking", True),
     )
+
+
+def _baseline_generation_settings_from_args(*, args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve the shared baseline generation contract (D4, BAS-03/04/11).
+
+    One source for the values the adapters receive and for the values
+    ``patcher_config`` records, so changing the temperature, the completion cap or the
+    retry count can never leave the resume fingerprint untouched. The seed follows the
+    same ``--deterministic`` gate as native generation, where a seed without
+    deterministic mode drives policy exploration only and must not change sampling.
+    """
+    return {
+        "temperature": float(getattr(args, "openai_temperature", 0.0)),
+        "seed": (
+            getattr(args, "seed", None) if bool(getattr(args, "deterministic", False)) else None
+        ),
+        "max_completion_tokens": int(getattr(args, "openai_max_tokens", 2048)),
+        "transport_max_retries": int(getattr(args, "openai_transport_max_retries", 0)),
+        "transport_retry_backoff_sec": float(
+            getattr(args, "openai_transport_retry_backoff_base_sec", 1.0)
+        ),
+    }
 
 
 class _RunResultsLock:
@@ -258,12 +284,13 @@ def _build_run_metadata(
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "llmdebug_version": _resolve_llmdebug_version(),
-        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
         "patcher_name": patcher_name,
         "patcher_config": patcher_config,
         "patcher_config_fingerprint": _xxh3_128_jsonlike(patcher_config),
         "run_settings_fingerprint": run_settings_fingerprint,
         "policy_defaults_version": POLICY_DEFAULTS_VERSION,
+        "attempt_accounting_version": ATTEMPT_ACCOUNTING_VERSION,
         "record_policy": {
             "prompt": str(args.record_prompt),
             "evidence": str(args.record_evidence),
@@ -283,7 +310,22 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
     config: dict[str, Any] = {
         "patcher": str(args.patcher),
         "patcher_name": patcher_name,
+        # POL-01 / POL-24 / POL-06: the adaptive-policy behaviour generation. Two runs with
+        # identical CLI knobs but different policy defaults are different runs, so the
+        # version belongs in the config and in the settings fingerprint derived from it;
+        # resuming across a bump is refused instead of mixing the two.
+        "policy_defaults_version": POLICY_DEFAULTS_VERSION,
+        # ATT-05 / ATT-08 / POL-02: the attempt-counting and cost-accounting contract. Two
+        # runs with identical CLI knobs but different contracts are not comparable, and the
+        # retry gate's blocking policy is not a CLI knob, so both belong in the config and
+        # in the settings fingerprint derived from it.
+        "attempt_accounting_version": ATTEMPT_ACCOUNTING_VERSION,
+        "retry_gate_max_consecutive_blocks": RETRY_GATE_MAX_CONSECUTIVE_BLOCKS,
         "k": int(args.k),
+        # CAP-20 / ATT-03: the snapshot format and the evidence-delivery contract are both
+        # part of what the patcher sees, so two runs that differ in either are not comparable.
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
+        "evidence_policy_revision": EVIDENCE_POLICY_REVISION,
         "transport_fail_fast_streak": int(
             getattr(args, "transport_fail_fast_streak", DEFAULT_TRANSPORT_FAIL_FAST_STREAK)
         ),
@@ -524,6 +566,9 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         "patch_verifier_infer_test_source_scope": bool(
             getattr(args, "patch_verifier_infer_test_source_scope", True)
         ),
+        # ATT-01: the oracle policy has no CLI knobs, so record its effective behaviour
+        # here; it is part of the success criteria and of the settings fingerprint.
+        "oracle_policy": oracle_policy_metadata(),
     }
     try:
         config["execution"] = _execution_config_payload(build_execution_config_from_args(args))
@@ -564,11 +609,28 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
             }
         )
     elif str(args.patcher) == "baseline":
+        # The adapters' own knobs, resolved exactly as make_patcher resolves them, so a
+        # changed cap, temperature, retry count, deadline or baseline-specific override
+        # changes the settings fingerprint and shows up in run metadata (BAS-03/04/11).
+        from evals.baseline_runtime import _baseline_extra_from_args
+
+        baseline_name = str(getattr(args, "baseline_name", "") or "").strip().lower()
+        baseline_process_timeout = getattr(args, "baseline_process_timeout_sec", None)
         config.update(
             {
-                "baseline_name": str(getattr(args, "baseline_name", "") or "").strip().lower(),
+                "baseline_name": baseline_name,
                 "baseline_repo_dir": str(getattr(args, "baseline_repo_dir", "") or "").strip(),
                 "baseline_python": str(getattr(args, "baseline_python", "") or "").strip(),
+                "baseline_generation": _baseline_generation_settings_from_args(args=args),
+                "baseline_api_timeout_sec": float(getattr(args, "openai_timeout_sec", 300.0)),
+                "baseline_process_timeout_sec": (
+                    float(baseline_process_timeout)
+                    if isinstance(baseline_process_timeout, (int, float))
+                    and float(baseline_process_timeout) > 0.0
+                    else float(getattr(args, "openai_timeout_sec", 300.0))
+                ),
+                "baseline_max_iterations": int(getattr(args, "baseline_max_iterations", None) or 2),
+                "baseline_extra": _baseline_extra_from_args(args=args, baseline_name=baseline_name),
             }
         )
     elif str(args.patcher) == "command":
@@ -588,8 +650,22 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
     return config
 
 
-def _resolve_llmdebug_snapshot_schema_version() -> str:
-    """Debug-session schema the pytest plugin writes; its locals reach snapshot prompts."""
+def _resolve_llmdebug_snapshot_schema_version(*, args: argparse.Namespace | None = None) -> str:
+    """Debug-session schema the pytest plugin writes; its locals reach snapshot prompts.
+
+    CAP-20: the schema must describe the environment that *runs* pytest. Under
+    ``--executor testcontainers`` without ``--container-mount-repo-src`` the container's own
+    llmdebug install writes the snapshots, so the parent process's version says nothing about
+    them; record the image instead of a number the run never produced.
+    """
+    container_provides_plugin = (
+        args is not None
+        and str(getattr(args, "executor", "local")) == "testcontainers"
+        and not bool(getattr(args, "container_mount_repo_src", True))
+    )
+    if container_provides_plugin:
+        image = str(getattr(args, "container_image", "") or "unknown")
+        return f"container:{image}"
     try:
         from llmdebug.capture import SCHEMA_VERSION
     except Exception:
@@ -1077,6 +1153,7 @@ def _empty_attempt_metadata(*, attempt: int) -> dict[str, Any]:
             "test_after_sec": 0.0,
             "recovery_llm_sec": 0.0,
             "recovery_total_sec": 0.0,
+            "tep_learning_llm_sec": 0.0,
             "llmdebug_total_sec": 0.0,
             "llm_total_sec": 0.0,
             "overhead_sec": 0.0,

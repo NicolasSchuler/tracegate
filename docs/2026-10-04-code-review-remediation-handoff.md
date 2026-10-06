@@ -452,6 +452,30 @@ These are behaviour-preserving refactors, each in its own commit or PR with no f
 - The pyright eval include list grows.
 - The signature-budget and `evals/` boundary tests pass.
 
+## Phase 6: codex review of the remediation branches (2026-10-06)
+
+Every branch of the stack (and `feat/decision-model-advisor`, which the 2026-10-04 review didn't cover) was reviewed on its own diff by codex (gpt-6.1-sol, xhigh): 29 reviews, 142 findings, 0 for 4.5. Each finding was re-verified at the stack tip; the corrections are on `fix/review-6-codex-review`, one commit per finding or tight cluster, tagged `codex <branch>#<n>`. Schema-bump findings are covered by v7, because the whole stack lands together and intermediate branch states collected no data; the v7 description in `evals/README.md` now lists the added semantics, and behaviour versions that distinguish two v7 configurations went into `patcher_config` and the settings fingerprint.
+
+- [x] **M1 decision model:** m1#1–9 fixed (OPE behaviour support, served identity, malformed `noul`, Docker sidecar URL, readiness after warm-up, breaker vs. revision lookups, probe token and containment, bounded state); m1#10 covered by v7.
+- [x] **Phase 0:** 0#2, 0#3 fixed (POL-01 and DAT-03 critical regressions now detect their defects); 0#1 already fixed by 640f0ef.
+- [x] **1A–1D:** ATT-03 completed (restricted actions no longer fall back to monolithic file context; delivered-evidence counts), ATT-06 telemetry from the final prompt, ATT-20 confinement before reads, BAS-07 native `case_information`, DAT-01/02 prompt-policy provenance on SWE-Bench resume, ORC-01 hash seed range, ORC-04 drift chains, POL-05 Thompson keyed per decision; resuming an older record schema is refused.
+- [x] **1B:** DAT-05, DAT-08, DAT-09 (four scorer misclassifications) and ATT-01 restore robustness completed; `patcher_config.oracle_policy`; ATT-16 keeps diff targets ending in `.orig`/`.rej`.
+- [ ] **1E:** BAS-02 (TraceCoder), BAS-03/04/11/19 (λ-RLM, RLM, env clients), BAS-07, BAS-08 (deadline enforced in INTERVENOR, λ-RLM, RLM), BAS-14 and ORC-03 completed; the λ-RLM/RLM API key no longer reaches candidate subprocesses. *(Open, needs the user: 1e#2 (LDB/TraceCoder upstream sampling still `enforced=false`; wiring needs provisioned repos) and 1e#9 (LDB retry feedback: upstream channel, `k = 1`, or status quo).)*
+- [x] **1F:** ATT-05, ATT-08, ATT-09/15, ATT-11, ATT-12 and POL-02 completed; `attempt_accounting_version` and `retry_gate_max_consecutive_blocks` in `patcher_config`.
+- [x] **1G and 5.6 LLM I/O:** LLM-01/02/03/04/07/09/12/22/23 completed. *(Residual: a one-sided prefix-less header without a `diff --git` line keeps the git-prefix reading; resolving it needs the workdir in `_extract_unified_diff`.)*
+- [x] **1H:** DAT-14 checker requires a constant same-RNG seed and tracks set bindings; the corpus scan now flags 25 committed cases (D12 owns dropping or fixing them).
+- [x] **Phase 2:** STA-01/09 (per-run budgets, joint token coverage), STA-02/11 (OPE clustered and cross-fitted by case, seeded), STA-13 (common attempt budget in every comparison), STA-25, DAT-24 (one duplicate resolver, conflicts reported), BAS-01 (one eligibility predicate), and six re-analysis audit corrections.
+- [x] **Phase 3:** POL-01 (defaults generation fingerprinted), POL-11 (rescue credit from the rendered prompt), POL-17 (equilibrium path), ATT-17 (save before the record is streamed).
+- [x] **Phase 4:** RCA-06 (stall counts unproductive repairs, `repair_streak`), RCA-02/D11 (implicit reads confined, read-only opener), RCA-03, RCA-05, RCA-16, CAP-01, CAP-10, CAP-15, CAP-17, CAP-21, CAP-23 (`2.1` description), X-07; CAP-03 redaction leaks closed, plus three rounds of follow-ups from the background security review.
+- [ ] **Phase 5:** golden harness isolated (environment, tokenizer, lock, permissions) and stricter (budgets and coefficients compared); 5-1#1 real context-handoff test; 5-6#6/#7 tests. *(Open, needs the user: 5-4#2 / X-03, the derived analysis-row contract, still the proposed deferral.)*
+
+**Decisions for the user** (each fix took the conservative option and records it):
+- Analysis: m1#1 unsupported stochastic OPE targets are qualified (`estimates_identifiable: false`), not suppressed; 2-1#1 equal-priority duplicates stay last-write-wins with conflict reporting; 2-3#2 DR reports `insufficient_crossfit_support` below two distinct cases; `compare_results` pairs runs by replicate index.
+- Policy and accounting: POL-11 counts evidence only while its `[id]` marker survives (compacted evidence earns no rescue credit); the full-TEP learning cost goes into the budget policy's bucket; `policy_defaults_version` invalidates resume for every condition; three behaviour-version constants could become one remediation generation.
+- Core: the gate's `loop_protection` and exploration budget still use `repeat_count`, so a clean strict walk shows a spurious repetition warning in `next_required` (fix: feed `repair_streak` to the gate; changes documented gate semantics); fail-closed redaction can remove non-secret siblings from a rendered line, and a custom `redact` list replaces the built-in patterns instead of extending them.
+- Reproducibility: the decision-model served identity is checked at resume rather than hashed into the fingerprint (the hash is built before the sidecar is contacted); SWE-Bench `--resume` refuses legacy run metadata without a prompt policy; the golden runs are a per-checkout lock (prompts carry the venv path).
+- Re-runs: baseline numbers (TraceCoder prompts, λ-RLM/RLM sampling, env-client compat defaults), adaptive numbers (ATT-03 smaller prompts, Thompson keying, POL-11) and Pro scores that hit the reclassified scorer paths aren't comparable with earlier runs.
+
 ---
 
 ## Coverage check

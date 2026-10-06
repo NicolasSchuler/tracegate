@@ -883,3 +883,178 @@ def test_attempt_usage_equals_sum_of_served_llm_calls(tmp_path) -> None:
     assert meta["llm_call_count"] == served
     assert meta["tokens_total"] == sum(b["usage"]["total_tokens"] for b in served_bodies)
     assert meta["tokens_prompt"] == sum(b["usage"]["prompt_tokens"] for b in served_bodies)
+
+
+def _tep_schema_name(payload: dict[str, Any]) -> str:
+    response_format = payload.get("response_format")
+    if not isinstance(response_format, dict):
+        return ""
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, dict):
+        return ""
+    return str(json_schema.get("name") or "")
+
+
+def _prompt_text(payload: dict[str, Any]) -> str:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    return "\n".join(str(message.get("content") or "") for message in messages)
+
+
+def test_remediated_accounting_seams_match_served_usage(tmp_path) -> None:
+    """Phase 1F acceptance (codex 1f#10): the real seams, compared against served usage.
+
+    One ``cot_repair`` attempt that drives all three remediated paths at once:
+    TEP equilibrium re-planning (ATT-09), a transport-recovery replay of the patch call
+    (ATT-15) and the full-TEP post-attempt learning pass (POL-02). Every served call is
+    given usage, and the scored row must account for all of it.
+    """
+    import shutil
+    from typing import Any as _Any
+
+    from evals.eval_types import Condition
+    from evals.transport_failures import _OpenAITransportRecoveryGate
+
+    case = _make_case(tmp_path)
+    workdir = tmp_path / "work"
+    shutil.copytree(case.path, workdir)
+
+    served_usage: list[dict[str, int]] = []
+    seen_kinds: list[str] = []
+    patch_calls = {"n": 0}
+    plan_text = (
+        "Diagnosis: helper.value() returns 1\n"
+        "Why previous attempt failed: n/a\n"
+        "New constraint: keep the signature\n"
+        "Minimal edit plan: return 2 from helper.value\n"
+        "Verification plan: rerun pytest\n"
+    )
+
+    def _json_with_usage(content: str, *, prompt_tokens: int, completion_tokens: int) -> _Any:
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        served_usage.append(dict(usage))
+        return {
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+            "usage": dict(usage),
+        }
+
+    def _responder(method: str, path: str, body: _Any) -> _Any:
+        from tests._openai_stub_server import StubbedResponse
+
+        if method == "GET":
+            # The recovery gate probes readiness before it replays.
+            return StubbedResponse(status=200, body={"status": "ok"}, headers={})
+        payload = body if isinstance(body, dict) else {}
+        schema_name = _tep_schema_name(payload)
+        prompt = _prompt_text(payload)
+        if schema_name.endswith("_critic"):
+            seen_kinds.append("tep_critic")
+            content = json.dumps(
+                {"overall_score_10": 6.0, "improvement_kind": "stable", "summary": "fine"}
+            )
+            return StubbedResponse(
+                status=200,
+                body=_json_with_usage(content, prompt_tokens=40, completion_tokens=8),
+                headers={},
+            )
+        if schema_name.endswith("_update"):
+            seen_kinds.append("tep_update")
+            content = json.dumps({"rationale": "keep", "system_prompts": {}, "blocks": {}})
+            return StubbedResponse(
+                status=200,
+                body=_json_with_usage(content, prompt_tokens=45, completion_tokens=9),
+                headers={},
+            )
+        if "RETURN ONLY THE REPAIR PLAN" in prompt:
+            seen_kinds.append("plan")
+            return StubbedResponse(
+                status=200,
+                body=_json_with_usage(plan_text, prompt_tokens=31, completion_tokens=12),
+                headers={},
+            )
+        patch_calls["n"] += 1
+        if patch_calls["n"] <= 2:
+            # A backend outage that outlives the patcher's own diff-mode retry, so the
+            # harness sees it and the recovery gate has to replay the call.
+            seen_kinds.append("patch_503")
+            return StubbedResponse(status=503, body={"error": "model loading"}, headers={})
+        seen_kinds.append("patch")
+        diff = _diff_response_body()["choices"][0]["message"]["content"]
+        return StubbedResponse(
+            status=200,
+            body=_json_with_usage(diff, prompt_tokens=57, completion_tokens=21),
+            headers={},
+        )
+
+    gate = _OpenAITransportRecoveryGate(enabled=True, max_wait_sec=5.0, poll_sec=0.1)
+    with OpenAIStubServer(responder=_responder) as server:
+        patcher = OpenAICompatPatcher(
+            base_url=server.base_url,
+            model="demo",
+            api_key="local",
+            response_mode="diff",
+            transport_max_retries=0,
+        )
+        previous = run_eval.set_active_execution_config(run_eval.ExecutionConfig(executor="local"))
+        try:
+            records = run_eval.run_one_condition(
+                case=case,
+                condition=Condition.COT_REPAIR,
+                workdir=workdir,
+                context_dir_base=tmp_path / "ctx",
+                patcher=patcher,
+                k=1,
+                output_format="json_compact",
+                run_id="accounting-seams-acceptance",
+                include_files_context=False,
+                force_patch_attempt=False,
+                patch_verifier_scope="disabled",
+                tep_equilibrium_check=True,
+                tep_equilibrium_max_iterations=3,
+                tep_equilibrium_similarity_threshold=0.95,
+                adaptive_tep_mode="full",
+                adaptive_tep_state_path=str(tmp_path / "tep_state.json"),
+                openai_transport_recovery=True,
+                transport_recovery_gate=gate,
+            )
+        finally:
+            run_eval.set_active_execution_config(previous)
+        served_requests = len(server.requests_for(method="POST", path="/v1/chat/completions"))
+
+    # All three seams actually ran.
+    assert seen_kinds.count("plan") >= 2, seen_kinds
+    assert "patch_503" in seen_kinds and seen_kinds.count("patch") >= 1, seen_kinds
+    assert "tep_critic" in seen_kinds, seen_kinds
+
+    scored = [r for r in records if str(r.get("record_type") or "attempt") != "infra_event"]
+    infra = [r for r in records if str(r.get("record_type") or "attempt") == "infra_event"]
+    assert len(scored) == 1
+    meta = scored[0]["attempt_metadata"]
+    patch_meta = scored[0]["patch_meta"]
+
+    # ATT-09: the equilibrium re-plans are counted, not just the first plan.
+    assert meta["plan_patch_tep_equilibrium_iterations"] >= 2
+    # ATT-15: the failed patch call was replayed on the same attempt.
+    assert len(infra) == 1
+    assert infra[0]["patch_meta"]["transport_recovery_recovered"] is True
+    assert patch_meta["transport_recovery_replayed"] is True
+    # POL-02: the learning pass served calls of its own.
+    assert meta["adaptive_tep_full_learning"]["llm_call_count"] >= 1
+
+    served_total = sum(usage["total_tokens"] for usage in served_usage)
+    served_prompt = sum(usage["prompt_tokens"] for usage in served_usage)
+    assert served_total > 0
+    assert meta["token_usage_available"] is True
+    assert meta["tokens_total"] == served_total
+    assert meta["tokens_prompt"] == served_prompt
+    # Every request the server answered -- plans, re-plans, the failed patch calls, the
+    # replay and the learning pass -- is one LLM call in the attempt's total.
+    assert meta["llm_call_count"] == served_requests
+    # POL-02: the learning pass is LLM time inside the attempt, not free overhead.
+    assert meta["timing_breakdown"]["tep_learning_llm_sec"] > 0.0
+    assert scored[0]["attempt_wall_clock_sec"] >= meta["timing_breakdown"]["tep_learning_llm_sec"]

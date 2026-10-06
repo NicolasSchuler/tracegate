@@ -1315,7 +1315,7 @@ def _apply_prompt_budget(
 
     prompt = _join_prompt_sections(capped_sections)
     total_budget = int(budget.get("total_chars", 0))
-    if total_budget <= 0:
+    if total_budget <= 0 or len(prompt) <= total_budget:
         final_by_key = _section_text_by_key(capped_sections)
         return PromptBudgetResult(
             prompt=prompt,
@@ -1327,18 +1327,13 @@ def _apply_prompt_budget(
                 for key, original in original_by_key.items()
                 if original
             },
-        )
-    if len(prompt) <= total_budget:
-        final_by_key = _section_text_by_key(capped_sections)
-        return PromptBudgetResult(
-            prompt=prompt,
-            used_chars=len(prompt),
-            overflow_chars=0,
-            dropped_sections=[],
-            section_status={
-                key: ("full" if final_by_key.get(key, "") == original else "truncated")
+            section_chars={
+                key: len(final_by_key.get(key, ""))
                 for key, original in original_by_key.items()
                 if original
+            },
+            section_original_chars={
+                key: len(original) for key, original in original_by_key.items() if original
             },
         )
 
@@ -1391,22 +1386,27 @@ def _apply_prompt_budget(
     overflow_chars = max(0, len(prompt) - total_budget)
     final_by_key = _section_text_by_key(capped_sections)
     section_status: dict[str, str] = {}
+    section_chars: dict[str, int] = {}
     for key, original_text in original_by_key.items():
         if not original_text:
             continue
         final_text = final_by_key.get(key, "")
         if not final_text.strip():
             section_status[key] = "dropped"
-        elif final_text == original_text:
-            section_status[key] = "full"
-        else:
-            section_status[key] = "truncated"
+            section_chars[key] = 0
+            continue
+        section_chars[key] = len(final_text)
+        section_status[key] = "full" if final_text == original_text else "truncated"
     return PromptBudgetResult(
         prompt=prompt,
         used_chars=len(prompt),
         overflow_chars=overflow_chars,
         dropped_sections=sorted(set(dropped_sections)),
         section_status=section_status,
+        section_chars=section_chars,
+        section_original_chars={
+            key: len(original) for key, original in original_by_key.items() if original
+        },
     )
 
 

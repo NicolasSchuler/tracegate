@@ -23,6 +23,7 @@ from evals.analysis_usage import (
     _is_external_baseline_condition,
     _mean_prompt_chars_by_condition,
 )
+from evals.stats import DEFAULT_BOOTSTRAP_SEED, comparison_eligible
 
 
 def _summarize_bucket(
@@ -31,6 +32,7 @@ def _summarize_bucket(
     records_by_case_condition: dict[tuple[str, str, str], list[dict[str, Any]]] | None = None,
     adaptive_ope_min_action_support: int = ADAPTIVE_OPE_MIN_ACTION_SUPPORT,
     adaptive_ope_propensity_floor: float = ADAPTIVE_OPE_PROPENSITY_FLOOR_DEFAULT,
+    bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Compute per-condition success rates and aggregate metrics for a bucket.
 
@@ -51,18 +53,26 @@ def _summarize_bucket(
         int(row.get("attempts_budget") or 0) for row in rows if int(row.get("attempts_budget") or 0)
     ]
     common_attempt_k = min(attempt_budgets) if attempt_budgets else None
-    case_rates = {
-        condition: _case_success_rates(
-            [row for row in condition_rows if row.get("baseline_supported", True)]
-        )
+    # STA-13 / D12: every uplift is compared at the bucket's common attempt budget; the
+    # own-budget rates stay as per-condition descriptives (codex 2-2#4).
+    eligible_rows = {
+        condition: [row for row in condition_rows if comparison_eligible(row)]
         for condition, condition_rows in by_condition.items()
+    }
+    case_rates = {
+        condition: _case_success_rates(rows_of_condition, within_attempts=common_attempt_k)
+        for condition, rows_of_condition in eligible_rows.items()
+    }
+    case_rates_own_budget = {
+        condition: _case_success_rates(rows_of_condition)
+        for condition, rows_of_condition in eligible_rows.items()
     }
 
     out: dict[str, Any] = {}
     for condition, all_condition_rows in sorted(by_condition.items()):
         # BAS-01 / D3: baselines are scored on the cases they can represent; the excluded
         # count is reported so the comparison's N stays explicit.
-        condition_rows = [row for row in all_condition_rows if row.get("baseline_supported", True)]
+        condition_rows = [row for row in all_condition_rows if comparison_eligible(row)]
         baseline_unsupported_cases = len(all_condition_rows) - len(condition_rows)
         successes = sum(1 for row in condition_rows if bool(row["success"]))
         cases = len(condition_rows)
@@ -565,6 +575,7 @@ def _summarize_bucket(
                 adaptive_ope_min_action_support=min_action_support,
                 adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
                 include_condition_only_counts=True,
+                bootstrap_seed=bootstrap_seed,
             ),
         }
     out["condition_matrix"] = [
@@ -578,9 +589,20 @@ def _summarize_bucket(
             key=lambda item: item[0],
         )
     ]
-    out["pairwise_uplifts"] = _pairwise_uplifts(case_rates)
+    out["pairwise_uplifts"] = _pairwise_uplifts(
+        case_rates,
+        own_budget_rates=case_rates_own_budget,
+        common_attempt_k=common_attempt_k,
+    )
 
     out["uplift_success_rate"] = _matched_uplift(case_rates, "base_repair", "layered_adaptive_llm")
+    out["uplift_success_rate_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_llm"
+    )
+    out["uplift_attempt_budget_basis"] = (
+        "common_k" if common_attempt_k is not None else "own_budget"
+    )
+    out["common_attempt_k"] = common_attempt_k
     stage_b_prompt_values = [
         float(row["stage_b_prompt_chars_mean"])
         for row in rows
@@ -645,6 +667,7 @@ def _summarize_bucket(
             adaptive_ope_min_action_support=min_action_support,
             adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
             include_condition_only_counts=False,
+            bootstrap_seed=bootstrap_seed,
         )
     )
     out["adaptive_rollup_conditions"] = sorted({str(row["condition"]) for row in adaptive_rows})
@@ -675,5 +698,11 @@ def _summarize_bucket(
     )
     out["uplift_layered_llm_vs_base"] = _matched_uplift(
         case_rates, "base_repair", "layered_adaptive_llm"
+    )
+    out["uplift_layered_gated_vs_base_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_gated"
+    )
+    out["uplift_layered_llm_vs_base_own_budget"] = _matched_uplift(
+        case_rates_own_budget, "base_repair", "layered_adaptive_llm"
     )
     return out

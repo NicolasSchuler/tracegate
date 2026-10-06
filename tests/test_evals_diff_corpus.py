@@ -66,14 +66,32 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
         f"{DIFF_A}\nNow b.py:\n{DIFF_B}",
         {"a.py": A_FIXED, "b.py": B_FIXED},
     ),
+    "fence_then_unfenced_second_file": (  # LLM-01
+        f"```diff\n{DIFF_A}```\nAnd b.py, without a fence this time:\n{DIFF_B}",
+        {"a.py": A_FIXED, "b.py": B_FIXED},
+    ),
+    "unfenced_revision_after_fenced_draft": (  # LLM-04
+        f"First try:\n```diff\n{DIFF_A.replace('return 2', 'return 5')}```\n"
+        f"Actually, better:\n{DIFF_A}",
+        {"a.py": A_FIXED},
+    ),
     "trailing_markdown_bullets": (  # LLM-07
         f"{DIFF_A}- This changes the return value to 2.\n- No other changes.\n",
+        {"a.py": A_FIXED},
+    ),
+    "trailing_lowercase_bullets": (  # LLM-07
+        f"{DIFF_A}- fixes the return value\n- leaves everything else alone\n",
         {"a.py": A_FIXED},
     ),
     "blank_context_line_without_space": (  # LLM-03
         "--- a/c.py\n+++ b/c.py\n@@ -1,5 +1,5 @@\n def f():\n-    return 1\n+    return 2\n"
         "\n\n def h():\n",
         {"c.py": "def f():\n    return 2\n\n\ndef h():\n    return 3\n"},
+    ),
+    "change_after_consecutive_blank_context_lines": (  # LLM-03
+        "--- a/c.py\n+++ b/c.py\n@@ -1,6 +1,6 @@\n def f():\n     return 1\n"
+        "\n\n def h():\n-    return 3\n+    return 4\n",
+        {"c.py": "def f():\n    return 1\n\n\ndef h():\n    return 4\n"},
     ),
     "orphan_think_close_with_draft": (  # LLM-04
         "Let me think. Draft:\n" + DIFF_A.replace("return 2", "return 99") + "</think>\n"
@@ -174,3 +192,17 @@ def test_truncated_response_is_not_applied(  # LLM-02
     assert result.diff is None
     assert result.meta is not None
     assert result.meta["error"] == "truncated_response"
+
+
+def test_failed_crlf_preparation_leaves_every_target_untouched(tmp_path: Path) -> None:  # LLM-09
+    root = _workdir(tmp_path, crlf=True)
+    before = {name: (root / name).read_bytes() for name in ("a.py", "b.py")}
+    (root / "b.py").chmod(0o444)
+    try:
+        ok, message = apply_diff(root, DIFF_A + DIFF_B)
+    finally:
+        (root / "b.py").chmod(0o644)
+
+    assert not ok
+    assert "CRLF" in message
+    assert {name: (root / name).read_bytes() for name in ("a.py", "b.py")} == before

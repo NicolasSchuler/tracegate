@@ -103,7 +103,9 @@ class TestIntervenorBehavioralConformance:
 
         call_order: list[str] = []
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 call_order.append("teacher")
                 return "Change + to *.", {"prompt_tokens": 5, "completion_tokens": 3}
@@ -130,7 +132,9 @@ class TestIntervenorBehavioralConformance:
 
         learner_prompts: list[str] = []
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 return "UNIQUE_TEACHER_OUTPUT_42", {
                     "prompt_tokens": 5,
@@ -168,7 +172,9 @@ class TestIntervenorBehavioralConformance:
 
         monkeypatch.setattr(adapter, "_run_case_tests", _counting_run_tests)
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 return "Change operator.", {"prompt_tokens": 5, "completion_tokens": 3}
             return "", {"prompt_tokens": 5, "completion_tokens": 3}  # empty learner
@@ -193,7 +199,9 @@ class TestIntervenorBehavioralConformance:
 
         attempt_count = 0
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             nonlocal attempt_count
             if "Modification method:" in prompt:
                 attempt_count += 1
@@ -222,7 +230,9 @@ class TestIntervenorBehavioralConformance:
         case_dir = _simple_case(tmp_path)
         case_input = _intervenor_case_dict(adapter, case_dir)
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 return "Change +.", {"prompt_tokens": 5, "completion_tokens": 3}
             return "def multiply(a, b):\n    return a * b\n", {
@@ -278,7 +288,9 @@ class TestIntervenorBehavioralConformance:
         case_dir = _simple_case(tmp_path)
         case_input = _intervenor_case_dict(adapter, case_dir)
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 return "Change +.", {"prompt_tokens": 5, "completion_tokens": 3}
             return "def multiply(a, b):\n    return a * b\n", {
@@ -319,7 +331,9 @@ class TestIntervenorBehavioralConformance:
         case_dir = _simple_case(tmp_path)
         case_input = _intervenor_case_dict(adapter, case_dir)
 
-        def _fake_generate_text(*, client, model, prompt, max_tokens, config=None):
+        def _fake_generate_text(
+            *, client, model, prompt, max_tokens, config=None, **_deadline_kwargs
+        ):
             if "Modification method:" in prompt:
                 return "Change +.", {}  # no usage on teacher call
             return "def multiply(a, b):\n    return a * b\n", {

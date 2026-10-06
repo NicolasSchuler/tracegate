@@ -667,3 +667,59 @@ def test_trim_replaces_the_store_atomically(tmp_path: Path, monkeypatch) -> None
         "a3",
     ]
     assert not (tmp_path / "rca_attempts.jsonl.tmp").exists()
+
+
+def _write_jsonl(tmp_path: Path, rows: list[dict[str, object]]) -> None:
+    (tmp_path / "rca_attempts.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+
+def test_merged_reads_break_equal_timestamps_by_append_order(tmp_path: Path, monkeypatch) -> None:
+    """RCA-05: `_now_utc` drops microseconds, so same-second appends are the common case."""
+    monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
+    out_dir = str(tmp_path)
+    same_second = "2026-02-27T10:00:00Z"
+    _write_jsonl(
+        tmp_path,
+        [
+            _record("older", state="changed", updated_at=same_second),
+            _record("newer", state="verified", updated_at=same_second),
+        ],
+    )
+
+    status = get_rca_status(out_dir=out_dir, session_id="sess-a")
+    assert status is not None
+    assert status["attempt_id"] == "newer"
+    assert [entry["attempt_id"] for entry in get_rca_history(out_dir=out_dir, limit=10)] == [
+        "newer",
+        "older",
+    ]
+
+
+def test_merged_reads_prefer_the_stored_copy_of_a_duplicate_attempt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """RCA-05: the migration lets sqlite win, so reads before it must agree."""
+    monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
+    out_dir = str(tmp_path)
+    persist_rca_record(
+        out_dir=out_dir,
+        record=_record("shared", state="verified", updated_at="2026-02-27T10:00:00Z"),
+    )
+    persist_rca_record(
+        out_dir=out_dir,
+        record=_record("stored-2", state="verified", updated_at="2026-02-27T10:00:01Z"),
+    )
+    # A conflicting copy with a newer timestamp, outside a one-row sqlite page.
+    _write_jsonl(
+        tmp_path,
+        [_record("shared", state="captured", updated_at="2026-02-27T11:00:00Z")],
+    )
+
+    status = get_rca_status(out_dir=out_dir, session_id="sess-a")
+    assert status is not None
+    assert status["attempt_id"] == "stored-2"
+
+    page = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=1)
+    assert [entry["attempt_id"] for entry in page] == ["stored-2"]

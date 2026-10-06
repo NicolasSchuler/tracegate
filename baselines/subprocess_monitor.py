@@ -165,12 +165,20 @@ def run_monitored_subprocess(
     # ORC-18: a timeout of 0 means "no deadline", not a zero-wait busy loop.
     deadline = started_at + int(timeout_sec) if int(timeout_sec) > 0 else math.inf
     next_poll = started_at + poll_interval
-    exited_at: float | None = None
+    drain_deadline: float | None = None
 
     while True:
         now = time.perf_counter()
+        if drain_deadline is not None and now >= drain_deadline:
+            # ORC-03: the child exited but a surviving grandchild still holds the pipes and
+            # may keep writing to them. The drain bound is wall-clock, so it must not depend
+            # on the queue running dry or on how long a progress callback takes.
+            _kill_process_group(process)
+            break
         timeout_remaining = max(0.0, deadline - now)
         queue_timeout = min(poll_interval, timeout_remaining) if not timed_out else poll_interval
+        if drain_deadline is not None:
+            queue_timeout = min(queue_timeout, max(0.0, drain_deadline - now))
         try:
             source, text = event_queue.get(timeout=queue_timeout)
         except queue.Empty:
@@ -202,12 +210,8 @@ def run_monitored_subprocess(
         if process.poll() is not None:
             if all(stream_done.values()) and event_queue.empty():
                 break
-            if exited_at is None:
-                exited_at = now
-            elif now - exited_at >= DRAIN_GRACE_SEC and event_queue.empty():
-                # ORC-03: a surviving grandchild holds the pipes; stop it and stop waiting.
-                _kill_process_group(process)
-                break
+            if drain_deadline is None:
+                drain_deadline = now + DRAIN_GRACE_SEC
 
     for thread in threads:
         thread.join(timeout=0.5)

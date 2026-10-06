@@ -17,6 +17,7 @@ from .rca_store import (
     latest_record,
     store_rca_record,
     store_rca_records_bulk,
+    stored_attempt_ids,
 )
 
 RCABackend = Literal["sqlite", "jsonl"]
@@ -204,13 +205,30 @@ def ensure_sqlite_migration(out_dir: str) -> None:
 
 
 def _pending_jsonl_records(out_dir: str, session_id: str | None) -> list[dict[str, Any]]:
-    """Valid JSONL rows not migrated to sqlite yet (reads don't migrate: no file writes)."""
-    return [
+    """Valid JSONL rows not migrated to sqlite yet, oldest first (append order).
+
+    Reads never migrate (that would write files), so a merged read has to drop the rows
+    whose ``attempt_id`` is already stored: the migration lets the stored copy win, and
+    a conflicting JSONL copy with a different timestamp would otherwise change what a
+    read returns depending on whether the migration has run yet.
+    """
+    candidates = [
         record
         for record in _iter_jsonl_records(_store_path(out_dir))
         if _is_valid_rca_record(record)
         and (not session_id or record.get("session_id") == session_id)
     ]
+    if not candidates:
+        return []
+    stored = stored_attempt_ids(
+        out_dir=out_dir,
+        attempt_ids=[str(record.get("attempt_id") or "") for record in candidates],
+    )
+    return [record for record in candidates if str(record.get("attempt_id") or "") not in stored]
+
+
+def _updated_at(record: Mapping[str, Any]) -> str:
+    return str(record.get("updated_at") or "")
 
 
 def get_rca_history(
@@ -225,9 +243,11 @@ def get_rca_history(
         pending = _pending_jsonl_records(out_dir, session_id)
         if not pending:
             return records
-        stored_ids = {record.get("attempt_id") for record in records}
-        merged = records + [row for row in pending if row.get("attempt_id") not in stored_ids]
-        merged.sort(key=lambda record: str(record.get("updated_at") or ""), reverse=True)
+        # `_now_utc` drops microseconds, so same-second attempts are common. Both inputs
+        # are newest-first before the stable sort, so equal timestamps keep that order
+        # instead of surfacing the oldest append as the newest attempt.
+        merged = records + list(reversed(pending))
+        merged.sort(key=_updated_at, reverse=True)
         return merged[:limit] if limit > 0 else merged
 
     records = _iter_jsonl_records(_store_path(out_dir))
@@ -246,8 +266,9 @@ def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, 
         pending = _pending_jsonl_records(out_dir, session_id)
         if not pending:
             return stored
-        newest_pending = max(pending, key=lambda record: str(record.get("updated_at") or ""))
-        if stored is None or str(newest_pending["updated_at"]) > str(stored.get("updated_at")):
+        # Reversed, so the newest of several same-second appends wins over the oldest.
+        newest_pending = max(reversed(pending), key=_updated_at)
+        if stored is None or _updated_at(newest_pending) > _updated_at(stored):
             return newest_pending
         return stored
 

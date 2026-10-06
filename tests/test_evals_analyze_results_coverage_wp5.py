@@ -495,8 +495,30 @@ def test_sta13_conditions_are_compared_within_a_common_attempt_budget() -> None:
                 attempt_metadata_extra={"max_attempts": 1},
             )
         ]
-    summary = ar._summarize_bucket(ar._derive_case_condition_rows(grouped))
+    rows = ar._derive_case_condition_rows(grouped)
+    summary = ar._summarize_bucket(rows)
     assert summary["base_repair"]["common_attempt_k"] == 1
     assert summary["base_repair"]["success_rate"] == 0.5  # solved at attempt 3
     assert summary["base_repair"]["success_within_common_k"] == 0.0
     assert summary["cot_repair"]["success_within_common_k"] == 0.5
+
+    # codex 2-2#4: the comparison paths use the common-budget outcomes, not own-budget.
+    assert summary["uplift_attempt_budget_basis"] == "common_k"
+    assert summary["common_attempt_k"] == 1
+    [pair] = summary["pairwise_uplifts"]
+    assert (pair["condition_a"], pair["condition_b"]) == ("base_repair", "cot_repair")
+    assert pair["attempt_budget_basis"] == "common_k"
+    assert pair["uplift_success_rate"] == pytest.approx(0.5)  # 0.5 - 0.0 at k=1
+    assert pair["uplift_success_rate_own_budget"] == pytest.approx(0.0)  # 0.5 - 0.5
+
+    stats = ar._run_statistical_analysis(
+        rows, aggregation="majority_vote", pair_a="base_repair", pair_b="cot_repair"
+    )
+    assert stats["attempt_budget_basis"] == "common_k"
+    assert stats["common_attempt_k"] == 1
+    assert stats["a_success_rate"] == pytest.approx(0.0)
+    assert stats["b_success_rate"] == pytest.approx(0.5)
+    assert stats["a_success_rate_own_budget"] == pytest.approx(0.5)
+    assert stats["b_success_rate_own_budget"] == pytest.approx(0.5)
+    # Own-budget pairing saw no discordant pair at all; at k=1 case c0 favours B.
+    assert (stats["overall_mcnemar"]["n_01"], stats["overall_mcnemar"]["n_10"]) == (1, 0)

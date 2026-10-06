@@ -17,6 +17,7 @@ STATE_DB_FILENAME = "llmdebug_state.sqlite3"
 _BUSY_TIMEOUT_MS = 30_000
 _WAL_RETRY_ATTEMPTS = 8
 _WAL_BASE_SLEEP_SEC = 0.01
+_ID_QUERY_CHUNK = 500
 _WAL_WARNED_PATHS: set[str] = set()
 _WAL_VERIFIED_PATHS: set[str] = set()
 
@@ -55,24 +56,35 @@ def _journal_mode(conn: sqlite3.Connection) -> str:
     return str(row[0]).lower() if row else ""
 
 
+def _file_identity(db_path: Path) -> str:
+    """A key that changes when the file at *db_path* is replaced, not just renamed."""
+    try:
+        stat = db_path.stat()
+    except OSError:
+        return str(db_path)
+    return f"{db_path}:{stat.st_dev}:{stat.st_ino}"
+
+
 def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path, created: bool) -> None:
     """Switch the database to WAL unless it already is, and check that it worked (RCA-16).
 
     The journal mode is stored in the database, so it is checked when this process first
-    opens the path and whenever the file was just created: the per-path "done" cache used
-    to survive the database being deleted and recreated in rollback mode. Reading the mode
-    on every open costs about 0.2 ms, three times per capture. The result of the switch is
-    checked (filesystems without shared memory stay in rollback mode).
+    opens the file and whenever the file was just created: the "done" cache used to
+    survive the database being deleted and recreated in rollback mode. It is keyed by
+    device and inode, so a replacement this process did not create is re-verified too.
+    Reading the mode on every open costs about 0.2 ms, three times per capture. The
+    result of the switch is checked (filesystems without shared memory stay in rollback
+    mode).
     """
-    key = str(db_path)
+    key = _file_identity(db_path)
     if key in _WAL_VERIFIED_PATHS and not created:
         return
     if _journal_mode(conn) != "wal":
         _enable_wal_mode(conn)
         mode = _journal_mode(conn)
         if mode != "wal":
-            if key not in _WAL_WARNED_PATHS:
-                _WAL_WARNED_PATHS.add(key)
+            if str(db_path) not in _WAL_WARNED_PATHS:
+                _WAL_WARNED_PATHS.add(str(db_path))
                 emit_warning(
                     f"could not enable WAL mode for {db_path} (journal_mode={mode or '?'}); "
                     "concurrent llmdebug processes may block each other"
@@ -158,6 +170,16 @@ def _schema_version(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+def _require_known_schema(conn: sqlite3.Connection) -> None:
+    """Refuse a database written by a newer llmdebug (RCA-11). Reads check this too."""
+    version = _schema_version(conn)
+    if version > STATE_DB_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"state database schema version {version} is newer than this llmdebug "
+            f"supports ({STATE_DB_SCHEMA_VERSION}); upgrade llmdebug"
+        )
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Bring the schema to ``STATE_DB_SCHEMA_VERSION`` via ``PRAGMA user_version`` (RCA-11).
 
@@ -173,12 +195,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         return
     conn.execute("BEGIN IMMEDIATE")
     try:
+        _require_known_schema(conn)
         version = _schema_version(conn)
-        if version > STATE_DB_SCHEMA_VERSION:
-            raise RuntimeError(
-                f"state database schema version {version} is newer than this llmdebug "
-                f"supports ({STATE_DB_SCHEMA_VERSION}); upgrade llmdebug"
-            )
         for migrate in _SCHEMA_MIGRATIONS[version:]:
             migrate(conn)
         conn.execute(f"PRAGMA user_version = {STATE_DB_SCHEMA_VERSION:d}")
@@ -204,13 +222,75 @@ def open_state_db(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def open_state_db_readonly(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
+    """Open an existing state DB for reading only.
+
+    Read helpers must not create or change files (RCA-02, decision D11), and
+    ``open_state_db`` does both even when the database is already there: the WAL switch
+    and ``PRAGMA user_version`` write to the database and its ``-wal``/``-shm`` sidecars,
+    which also makes reading a legacy (unversioned) database in a non-writable directory
+    fail instead of returning the records it holds.
+    """
+    # Absolute: `as_uri()` rejects a relative path, and ``out_dir`` is usually relative
+    # (the CLI default is ".llmdebug").
+    path = state_db_path(out_dir).resolve()
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=30.0)
+    try:
+        busy_timeout = read_env_int("LLMDEBUG_DB_BUSY_TIMEOUT_MS", _BUSY_TIMEOUT_MS, minimum=0)
+        conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
+        yield conn
+    finally:
+        conn.close()
+
+
+def _read_rows(
+    out_dir: str | Path,
+    statements: tuple[tuple[str, tuple[Any, ...]], ...],
+) -> tuple[list[Any], ...]:
+    """Run read-only statements on one connection, with empty results for no database.
+
+    A database that exists but predates a table reports the same "nothing stored yet"
+    as a missing one; running migrations to create the table would be a write.
+    """
+    empty = tuple([] for _ in statements)
+    if not state_db_exists(out_dir):
+        return empty
+    try:
+        with open_state_db_readonly(out_dir) as conn:
+            _require_known_schema(conn)
+            return tuple(conn.execute(sql, params).fetchall() for sql, params in statements)
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+        return empty
+
+
 def count_rca_records(out_dir: str | Path) -> int:
     """Return the number of persisted RCA attempt records for ``out_dir``."""
-    if not state_db_exists(out_dir):
-        return 0
-    with open_state_db(out_dir) as conn:
-        row = conn.execute("SELECT COUNT(*) FROM rca_attempts").fetchone()
-    return int(row[0]) if row else 0
+    (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM rca_attempts", ()),))
+    return int(rows[0][0]) if rows else 0
+
+
+def stored_rca_attempt_ids(out_dir: str | Path, attempt_ids: list[str]) -> set[str]:
+    """Which of *attempt_ids* already have a stored row.
+
+    The migration lets stored rows win over pending JSONL copies, so merged reads need
+    to know about every conflicting id, not just the ones on the page they fetched.
+    """
+    wanted = [value for value in dict.fromkeys(attempt_ids) if value]
+    if not wanted:
+        return set()
+    found: set[str] = set()
+    # Chunked to stay under SQLite's bound-parameter limit.
+    for start in range(0, len(wanted), _ID_QUERY_CHUNK):
+        chunk = wanted[start : start + _ID_QUERY_CHUNK]
+        marks = ",".join("?" * len(chunk))
+        # Only "?" markers are interpolated; the ids themselves are bound parameters.
+        sql = f"SELECT attempt_id FROM rca_attempts WHERE attempt_id IN ({marks})"  # nosec B608
+        (rows,) = _read_rows(out_dir, ((sql, tuple(chunk)),))
+        found.update(str(row[0]) for row in rows)
+    return found
 
 
 def _require_text_field(record: Mapping[str, Any], key: str) -> str:
@@ -328,10 +408,7 @@ def fetch_latest_rca_record(
         sql += " WHERE session_id = ?"
         params = (session_id,)
     sql += " ORDER BY updated_at DESC, rowid DESC LIMIT 1"
-    if not state_db_exists(out_dir):
-        return None
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, params).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, params),))
     decoded = _decode_payload_rows(rows)
     return decoded[0] if decoded else None
 
@@ -356,10 +433,7 @@ def fetch_rca_history_records(
     if limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
-    if not state_db_exists(out_dir):
-        return []
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, tuple(params)),))
     return _decode_payload_rows(rows)
 
 
@@ -393,11 +467,8 @@ def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
 
 def count_snapshot_records(out_dir: str | Path) -> int:
     """Return the number of snapshot index rows (0 without a database)."""
-    if not state_db_exists(out_dir):
-        return 0
-    with open_state_db(out_dir) as conn:
-        row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
-    return int(row[0]) if row else 0
+    (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM snapshots", ()),))
+    return int(rows[0][0]) if rows else 0
 
 
 def list_snapshot_records(
@@ -431,10 +502,7 @@ def list_snapshot_records(
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
-    if not state_db_exists(out_dir):
-        return []
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, tuple(params)),))
     return _snapshot_rows(rows)
 
 
@@ -459,16 +527,18 @@ def snapshot_index_window(out_dir: str | Path, *, limit: int) -> tuple[int, list
     Retention runs on every capture; one connection instead of two keeps the healthy-index
     check cheaper than the filesystem scan it replaces (CAP-15).
     """
-    if not state_db_exists(out_dir):
-        return 0, []
-    with open_state_db(out_dir) as conn:
-        count_row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
-        rows = conn.execute(
-            "SELECT path, mtime, name, exc_type, exc_message, file, line FROM snapshots "
-            "ORDER BY mtime DESC, path DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return (int(count_row[0]) if count_row else 0), _snapshot_rows(rows)
+    count_rows, rows = _read_rows(
+        out_dir,
+        (
+            ("SELECT COUNT(*) FROM snapshots", ()),
+            (
+                "SELECT path, mtime, name, exc_type, exc_message, file, line FROM snapshots "
+                "ORDER BY mtime DESC, path DESC LIMIT ?",
+                (limit,),
+            ),
+        ),
+    )
+    return (int(count_rows[0][0]) if count_rows else 0), _snapshot_rows(rows)
 
 
 def replace_snapshot_records(out_dir: str | Path, records: list[dict[str, Any]]) -> None:

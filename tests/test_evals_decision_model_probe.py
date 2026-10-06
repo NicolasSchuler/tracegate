@@ -14,6 +14,7 @@ from evals import pytest_runner
 from evals.decision_model import probe
 from evals.decision_model.client import SystemOneClient
 from evals.decision_model.config import (
+    DECISION_MODEL_API_KEY_ENV,
     ROLE_SHADOW,
     DecisionModelClientConfig,
     DecisionModelPolicyConfig,
@@ -744,3 +745,67 @@ def test_main_rejects_invalid_jobs(tmp_path: Path) -> None:
         ["--cases-dir", str(cases_dir), "--executor", "local", "--jobs", "0", "--split", "all"]
     )
     assert exit_code == 2
+
+
+def test_build_advisor_sends_the_gateway_token_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe must authenticate like the harness; otherwise llama-swap answers 401."""
+    monkeypatch.setenv(DECISION_MODEL_API_KEY_ENV, "dm-secret")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("authorization", ""))
+        return httpx.Response(200, json={"status": "ok", "revision": "abc123"})
+
+    advisor = probe.build_advisor(probe.build_parser().parse_args([]))
+    try:
+        assert advisor.client.config.api_key == "dm-secret"
+        # The resolved token reaches the wire as a bearer header.
+        authenticated = SystemOneClient(
+            advisor.client.config, transport=httpx.MockTransport(handler)
+        )
+        try:
+            assert authenticated.health().ok
+        finally:
+            authenticated.close()
+    finally:
+        advisor.close()
+
+    assert seen == ["Bearer dm-secret"]
+
+
+def test_probe_case_keeps_unexpected_advisor_failures_inside_the_case(
+    tmp_path: Path, fake_pytest: list[Path]
+) -> None:
+    """An httpx error the client does not map must not abort run_probe (codex m1#8)."""
+    cases_dir = tmp_path / "cases"
+    for index in range(2):
+        _write_case(cases_dir, f"async_case_{index}_medium")
+    from evals.run_eval import load_cases
+
+    cases = load_cases(cases_dir)
+    options = probe.ProbeOptions(profile=get_profile(DEFAULT_PROFILE_NAME), run_id="dmprobe-boom")
+    seen: list[dict[str, Any]] = []
+    queries = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"model": "clef-flash", "revision": "abc123"})
+        queries["count"] += 1
+        if queries["count"] == 1:
+            raise httpx.DecodingError("corrupt gzip body", request=request)
+        body = json.loads(request.content)
+        seen.append(body)
+        options_seen = list(body["questions"][QUESTION_NEXT_ACTION]["criteria"])
+        return httpx.Response(200, json=_systemone_body(sorted(options_seen)))
+
+    advisor = _advisor(transport=httpx.MockTransport(handler))
+    try:
+        records = probe.run_probe(cases, advisor=advisor, options=options, jobs=1)
+    finally:
+        advisor.close()
+
+    assert len(records) == 2
+    statuses = sorted(str(record["advice"]["status"]) for record in records)
+    assert statuses == ["error:DecodingError", "ok"]

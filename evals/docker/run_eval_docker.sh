@@ -52,6 +52,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEFAULT_IMAGE="llmdebug-eval:latest"
 DEFAULT_BASELINE_IMAGE="llmdebug-eval-baselines:latest"
+# Mirrors DEFAULT_DECISION_MODEL_URL in evals/decision_model/config.py: the harness falls
+# back to it when no URL is configured, and a test asserts both stay in sync.
+DEFAULT_DECISION_MODEL_URL="http://127.0.0.1:8090"
 IMAGE_BUILD_FINGERPRINT_LABEL="io.github.nicolasschuler.llmdebug.eval-build-fingerprint"
 IMAGE=""
 IMAGE_BASELINES_ENABLED=0
@@ -734,6 +737,7 @@ CONFIG_OPENAI_API_KEY_ENV="$(_config_value_from_files openai_api_key_env "${RAW_
 CONFIG_OPENAI_BASE_URL="$(_config_openai_value_from_files base_url "${RAW_CONFIG_PATHS[@]}" || true)"
 CONFIG_OPENAI_MODEL="$(_config_openai_value_from_files model "${RAW_CONFIG_PATHS[@]}" || true)"
 CONFIG_DECISION_MODEL_URL="$(_config_adaptive_value_from_files decision_model_url "${RAW_CONFIG_PATHS[@]}" || true)"
+CONFIG_DECISION_MODEL_ROLE="$(_config_adaptive_value_from_files decision_model_role "${RAW_CONFIG_PATHS[@]}" || true)"
 
 PATCHER="${CLI_PATCHER:-$CONFIG_PATCHER}"
 PATCHER="${PATCHER:-command}"
@@ -822,11 +826,20 @@ fi
 # Lift the decision-model sidecar URL from [run_eval.adaptive] (or the environment) into a CLI
 # arg so localhost translation can rewrite the effective value. The flag wins over the
 # forwarded TRACEGATE_DECISION_MODEL_URL env var inside the container.
+CLI_DECISION_MODEL_ROLE="$(_arg_value --adaptive-decision-model-role "${EVAL_ARGS[@]}" || true)"
+EFFECTIVE_DECISION_MODEL_ROLE="${CLI_DECISION_MODEL_ROLE:-${CONFIG_DECISION_MODEL_ROLE:-off}}"
 if ! _arg_present --adaptive-decision-model-url "${EVAL_ARGS[@]}"; then
     if [[ -n "${CONFIG_DECISION_MODEL_URL:-}" ]]; then
         EVAL_ARGS+=(--adaptive-decision-model-url "$CONFIG_DECISION_MODEL_URL")
     elif [[ -n "${TRACEGATE_DECISION_MODEL_URL:-}" ]]; then
         EVAL_ARGS+=(--adaptive-decision-model-url "$TRACEGATE_DECISION_MODEL_URL")
+    elif [[ "$EFFECTIVE_DECISION_MODEL_ROLE" != "off" ]]; then
+        # An enabled role without a configured URL uses the harness default, which points at
+        # the container's own loopback once we run inside Docker. Materialize it so the
+        # localhost translation below adds host networking (Linux) or rewrites the host
+        # (Darwin) instead of letting the preflight fail against nothing.
+        echo ">>> NOTE: Decision-model role '$EFFECTIVE_DECISION_MODEL_ROLE' without a URL; assuming $DEFAULT_DECISION_MODEL_URL" >&2
+        EVAL_ARGS+=(--adaptive-decision-model-url "$DEFAULT_DECISION_MODEL_URL")
     fi
 fi
 

@@ -147,7 +147,9 @@ def render_policy_defaults_block() -> str:
         "Runs take the CLI defaults; the Python API defaults apply only to configs built in "
         "code. Percentile caps freeze after "
         f"{DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES} observations per feature. Run metadata "
-        f"records `policy_defaults_version: {et.POLICY_DEFAULTS_VERSION}`.",
+        f"records `policy_defaults_version: {et.POLICY_DEFAULTS_VERSION}`, and so do "
+        "`patcher_config` and the run settings fingerprint derived from it, so resuming a "
+        "run recorded under an earlier generation is refused.",
         END_POLICY_DEFAULTS_MARKER,
     ]
     return "\n".join(lines)

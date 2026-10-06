@@ -5,10 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+from evals import eval_evidence
 from evals.eval_evidence import (
     RESTRICTED_ACTION_NO_VALID_REQUESTS,
+    DeliveredEvidence,
+    _evidence_ids_from_items,
+    _merge_evidence_items,
     build_fallback_context_bundle,
     deny_fallback_for_restricted_action,
+    evidence_chars_by_type,
     execute_context_requests,
 )
 from evals.eval_types import (
@@ -76,10 +83,22 @@ def test_att21_request_budget_zero_executes_no_request(tmp_path: Path) -> None:
     assert data.reason == "request_budget_zero"
 
 
-def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(tmp_path: Path) -> None:
+def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _workdir(tmp_path / "work")
     secret = tmp_path / "secret.py"
     secret.write_text("TOKEN = 'leak'\n", "utf-8")
+
+    read_paths: list[Path] = []
+    real_read = eval_evidence._read_text_limited
+
+    def _spy_read(path: Path, *, max_chars: int) -> str | None:
+        read_paths.append(path)
+        return real_read(path, max_chars=max_chars)
+
+    monkeypatch.setattr(eval_evidence, "_read_text_limited", _spy_read)
+
     for bad in ("../secret.py", str(secret), "/etc/passwd"):
         data = build_fallback_context_bundle(
             root=root,
@@ -92,3 +111,72 @@ def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(tmp_path: Path)
         )
         assert "leak" not in data.text
         assert all(".." not in str(block.get("path")) for block in data.blocks)
+    # ATT-20: neighbor discovery used to open the crash path before validating it, so
+    # assert the outside file was never read rather than merely absent from the result.
+    outside = [path for path in read_paths if not path.resolve().is_relative_to(root.resolve())]
+    assert not outside, outside
+
+
+def test_att03_duplicate_seed_and_requested_file_is_counted_once(tmp_path: Path) -> None:
+    """ATT-03: a file supplied by both the seed bundle and a Stage-A request is sent once."""
+    root = _workdir(tmp_path)
+    seed = build_fallback_context_bundle(
+        root=root,
+        snapshot=_SNAPSHOT,
+        stdout="test_buggy.py::test_f FAILED",
+        stderr="",
+        max_total_chars=10_000,
+        reason="adaptive_helper_seed_bundle",
+        file_index_lines=_INDEX,
+    )
+    stage_a = _execute(
+        root, {"need_more_context": True, "requests": [{"type": "file", "path": "buggy.py"}]}
+    )
+    assert any(block.get("path") == "buggy.py" for block in seed.blocks)
+    assert [block.get("path") for block in stage_a.blocks] == ["buggy.py"]
+
+    merged = _merge_evidence_items(seed.evidence_items, stage_a.evidence_items)
+    seed_ids = frozenset(_evidence_ids_from_items(seed.evidence_items))
+    chars = evidence_chars_by_type(
+        DeliveredEvidence(
+            snapshot_chars=0,
+            snapshot_lite_chars=0,
+            items=merged,
+            seed_item_ids=seed_ids,
+        )
+    )
+    # The shared buggy.py copy counts under "seed" only, never under both.
+    assert chars["seed"] > 0
+    assert chars["file"] == 0
+    assert sum(chars.values()) == sum(int(item["chars"]) for item in merged)
+
+
+def test_att03_truncated_stage_a_evidence_is_not_counted_in_full(tmp_path: Path) -> None:
+    """ATT-03: budget truncation and section drops shrink the evidence-volume audit."""
+    root = _workdir(tmp_path)
+    stage_a = _execute(
+        root, {"need_more_context": True, "requests": [{"type": "file", "path": "buggy.py"}]}
+    )
+    items = list(stage_a.evidence_items)
+    full = evidence_chars_by_type(
+        DeliveredEvidence(snapshot_chars=0, snapshot_lite_chars=0, items=items)
+    )
+    half = evidence_chars_by_type(
+        DeliveredEvidence(
+            snapshot_chars=0,
+            snapshot_lite_chars=0,
+            items=items,
+            stage_a_retained_fraction=0.5,
+        )
+    )
+    dropped = evidence_chars_by_type(
+        DeliveredEvidence(
+            snapshot_chars=0,
+            snapshot_lite_chars=0,
+            items=items,
+            stage_a_retained_fraction=0.0,
+        )
+    )
+    assert full["file"] > 0
+    assert half["file"] == round(full["file"] * 0.5)
+    assert dropped["file"] == 0

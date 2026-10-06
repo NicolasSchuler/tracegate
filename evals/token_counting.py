@@ -78,19 +78,81 @@ def merge_llm_call_usage(base: Any, extra: Any) -> dict[str, Any]:
     merged = dict(base) if isinstance(base, dict) else {}
     if not isinstance(extra, dict):
         return merged
-    merged["llm_call_count"] = int(merged.get("llm_call_count") or 1) + int(
-        extra.get("llm_call_count") or 1
-    )
+    base_calls = _merged_llm_call_count(merged)
+    extra_calls = _merged_llm_call_count(extra)
+    merged["llm_call_count"] = base_calls + extra_calls
     base_usage_raw = merged.get("usage")
     extra_usage_raw = extra.get("usage")
     base_usage = base_usage_raw if isinstance(base_usage_raw, dict) else {}
     extra_usage = extra_usage_raw if isinstance(extra_usage_raw, dict) else {}
     if base_usage or extra_usage:
-        merged["usage"] = {
+        usage: dict[str, int] = {
             key: _usage_value(base_usage, key) + _usage_value(extra_usage, key)
             for key in ("prompt_tokens", "completion_tokens", "total_tokens")
         }
+        reasoning_tokens, reasoning_covered = _merged_reasoning_tokens(
+            (base_calls, base_usage), (extra_calls, extra_usage)
+        )
+        if reasoning_covered:
+            usage["reasoning_tokens"] = reasoning_tokens
+        merged["usage"] = usage
+        if "tokens_reasoning" in merged or "reasoning_token_usage_available" in merged:
+            # Keep the canonical top-level fields consistent with the merged payload.
+            merged["tokens_reasoning"] = reasoning_tokens if reasoning_covered else 0
+            merged["reasoning_token_usage_available"] = reasoning_covered
     return merged
+
+
+def _merged_llm_call_count(meta: dict[str, Any]) -> int:
+    """Served-call count of one meta, defaulting to one only when it is missing.
+
+    A patcher that was rejected before it sent a request reports ``llm_call_count=0``;
+    treating that as one would invent a call that nobody paid for.
+    """
+    if "llm_call_count" not in meta:
+        return 1
+    try:
+        return max(0, int(meta["llm_call_count"]))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _merged_reasoning_tokens(
+    *segments: tuple[int, dict[str, Any]],
+) -> tuple[int, bool]:
+    """Sum reasoning tokens, reporting coverage only when every served call has them.
+
+    A segment that served no call and reported no usage is not applicable and cannot
+    break coverage; this mirrors the patcher-side aggregation.
+    """
+    total = 0
+    covered = True
+    for calls, usage in segments:
+        if not usage and calls <= 0:
+            continue
+        reasoning_tokens, available = _reasoning_tokens_from_usage(usage)
+        if available:
+            total += reasoning_tokens
+        else:
+            covered = False
+    return total, covered
+
+
+def _reasoning_tokens_from_usage(usage: dict[str, Any]) -> tuple[int, bool]:
+    candidates = (
+        usage,
+        usage.get("output_tokens_details"),
+        usage.get("completion_tokens_details"),
+    )
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or "reasoning_tokens" not in candidate:
+            continue
+        try:
+            parsed = int(candidate["reasoning_tokens"])
+        except (TypeError, ValueError):
+            continue
+        return max(0, parsed), True
+    return 0, False
 
 
 def _usage_value(usage: dict[str, Any], key: str) -> int:

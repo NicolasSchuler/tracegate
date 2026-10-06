@@ -96,19 +96,26 @@ stateDiagram-v2
 
 ### Stall Detection
 
-When a failure signature repeats without hypothesis or plan advancement, the
-engine marks the state `stalled` instead of the normal target. This triggers
+When repair attempts against one failure signature stop bringing anything new,
+the engine marks the state `stalled` instead of the normal target. This triggers
 when **all** of the following hold:
 
 - Same failure signature as the previous attempt
-- `repeat_count >= stall_threshold` (default: 3)
-- No hypothesis advancement (`hypothesis_delta` not in `added`, `refined`,
-  `replaced`)
-- No plan advancement
+- `repair_streak >= stall_threshold` (default: 3)
+- The gate allowed the action (a denied request never changes the state)
 - Action is one of `bind_evidence`, `change`, or `verify`
 
+`repair_streak` counts *consecutive unproductive repair attempts*, not every
+attempt that shares the signature. A `bind_evidence`, `change`, or `verify` that
+brings no new evidence, no advanced hypothesis or plan, and no passing
+verification adds one; any of those four kinds of progress resets it to 0, and
+other actions carry it forward unchanged. This is why the normal
+`capture -> bind_evidence -> hypothesize -> plan -> change -> verify -> resolve`
+walk never stalls even though `repeat_count` grows on every step.
+
 Recovery from `stalled` requires gathering new evidence (`bind_evidence`),
-revising the hypothesis (`hypothesize`), or updating the plan (`plan`).
+revising the hypothesis (`hypothesize`), or updating the plan (`plan`) — the
+escape route has to bring something new, otherwise the streak keeps counting.
 
 ## Gate Modes
 
@@ -223,6 +230,7 @@ def advance_rca_attempt(
     "state": "evidence_bound",
     "failure_signature": "KeyError:a1b2c3d4e5f6g7h8",
     "repeat_count": 1,
+    "repair_streak": 0,
     "evidence_refs": ["frame:0:src/parser.py:42"],
     "hypothesis": "...",
     "hypothesis_delta": "added",        # unchanged|refined|added|removed|replaced

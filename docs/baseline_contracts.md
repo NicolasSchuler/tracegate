@@ -25,6 +25,13 @@ Hybrid adaptive+baseline attempts additionally record:
 `baseline_case_context.json` is versioned with `schema_version` and currently
 uses `v1`.
 
+Each record's `patch_meta.baseline_repo_state` carries the observed upstream checkout
+(BAS-05, BAS-14): `observed_commit`, `dirty` and `tree_patch_sha256`. The tree hash covers
+the tracked diff against `HEAD` plus a path/content digest of the untracked files, so editing
+an untracked module the upstream patches added (TraceCoder's `src/exact_test_context.py`, for
+example) changes it. Untracked files larger than 4 MiB contribute their size instead of a
+content hash.
+
 ## Case-information contract (`case_info_policy = neutral_v1`)
 
 Defined in `baselines/case_information.py` (review findings ATT-02 and BAS-07,
@@ -40,31 +47,62 @@ decision D1). It fixes which case data any arm may see:
   INTERVENOR, TraceCoder, lambda-RLM and RLM see the full `test_buggy.py`
   (`test_source_exposure = "full"`). LDB's converter only accepts plain-assert
   test bodies and passes them as its visible tests, so LDB sees the assertions
-  (`test_source_exposure = "asserts"`).
+  (`test_source_exposure = "asserts"`). TraceCoder's
+  `--baseline-tracecoder-problem-summary-max-chars` budget applies to the generated task
+  summary only: `compact_problem_prompt` keeps the `Reference tests (test_buggy.py):`
+  section and anything appended after it (the retry context) intact, so the recorded
+  exposure stays true for long test files.
 - Each record's `patch_meta` carries `case_info_policy` and
   `case_information` (`case_info_policy`, `test_source_exposure`,
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
   the run-level policy.
+- The baseline arms' manifest comes from their converter; a native arm's
+  (`base_repair`, `cot_repair`, both adaptive conditions) is derived from the
+  assembled Stage-B prompt, so `prompt_files` lists the monolithic project-file
+  blocks plus the staged file evidence that was actually delivered. A native
+  attempt whose evidence policy or prompt budget left the test file out records
+  `test_source_exposure = "none"` — the native half of the BAS-07 comparison.
 
 ## Generation contract (decision D4, BAS-03/04/08/11)
 
 `run_eval` builds one `BaselineGenerationSettings` from the native flags and passes it to
 every adapter through `BaselineConfig.generation`: `--openai-temperature`, `--seed`,
 `--openai-max-tokens` (one completion cap) and `--openai-transport-max-retries`.
-Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
+Baseline-specific knobs such as `baseline_rlm_temperature` still win when set; each adapter
+declares those in `generation_override_keys`, and `patch_meta.baseline_generation` then reports
+the overriding value plus an `overrides` map naming the knob that won.
 
 | Adapter | Enforced | How |
 |---|---|---|
 | INTERVENOR | yes | request temperature, `max_tokens`, `seed`; client `max_retries` |
-| lambda-RLM, RLM | yes | env-client payload `temperature` and `max_tokens` |
+| lambda-RLM, RLM | yes | env-client payload `temperature`, `max_tokens`, `seed` and `transport_max_retries`, applied to the wrapped upstream client (`EnvClientGenerationSettings`) |
 | LDB, TraceCoder | no | `TRACEGATE_BASELINE_*` environment variables; the upstream patches still hard-code their own sampling until they read them |
 
 Each record's `patch_meta.baseline_generation` holds the effective values and `enforced`.
-`process_timeout_sec` is one wall-clock deadline per `run_repair` call: INTERVENOR stops
-iterating when it is reached (`error="deadline_exceeded"`), and every record carries
-`baseline_deadline_sec`, `baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
+`run_metadata.patcher_config` records the resolved contract for the run as
+`baseline_generation` (plus `baseline_api_timeout_sec`, `baseline_process_timeout_sec`,
+`baseline_max_iterations` and the resolved `baseline_extra`), so changing any of them changes
+the run-settings fingerprint and resume refuses to append incomparable records. The seed
+follows `--deterministic` exactly like native generation: `--seed` alone drives policy
+exploration and leaves baseline sampling unseeded.
+`process_timeout_sec` is one wall-clock deadline per `run_repair` call, computed once at entry
+(`RepairDeadline`). Every blocking step is clamped to what is left of it — the pytest
+precheck/postcheck, the generation request (in-process and through the env client) and the
+env-client subprocess — and no new step starts once it has expired: INTERVENOR stops before the
+learner call and before the postcheck, lambda-RLM and RLM stop before the next attempt, all with
+`error="deadline_exceeded"`. Every record carries `baseline_deadline_sec`,
+`baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
 TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
 (BAS-12).
+
+## Credentials in the env clients (LLM-25)
+
+The lambda-RLM and RLM env clients receive the API key in `TRACEGATE_ENV_CLIENT_API_KEY`,
+never in their request file. `baselines.openai_compat.env_client_api_key` *consumes* that
+variable: it is removed from the env client's own environment as it is read, and candidate
+subprocesses (the import smoke test and `run_case_tests`) are started from
+`candidate_subprocess_env()`, so model-written code can never print the key into
+model-visible output or into persisted artifacts.
 
 ## Retry context (BAS-02, decision D4)
 

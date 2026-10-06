@@ -15,7 +15,11 @@ from typing import Any
 from evals.patchers import OpenAICompatPatcher
 
 from .. import _json as json
-from .generation_meta import append_generation_meta, generation_meta_from_patch_meta
+from .generation_meta import (
+    append_generation_meta,
+    generation_meta_from_patch_meta,
+    transport_request_error_from_patch_meta,
+)
 from .io import (
     ensure_run_layout,
     instance_ids_path,
@@ -29,7 +33,9 @@ from .io import (
     write_predictions,
 )
 from .prompt_policy import (
+    PROMPT_POLICY_FINGERPRINT_KEY,
     PromptInputs,
+    assert_resumable_prompt_policy,
     render_snapshot_section,
     require_snapshot_dir,
     snapshot_coverage,
@@ -96,6 +102,12 @@ def generate_lite_predictions(
     require_snapshot_dir(condition_list, prompt_inputs.snapshot_dir)
 
     run_dir = run_dir_for_id(safe_run_id, root=root)
+    if resume:
+        # The resumed predictions were generated under the stored policy; rewriting
+        # run_metadata.json with a different one would mislabel them (DAT-01/02).
+        assert_resumable_prompt_policy(
+            metadata_file=metadata_path(run_dir), prompt_inputs=prompt_inputs
+        )
     ensure_run_layout(run_dir, conditions=condition_list)
 
     rows_by_id = _load_dataset_rows(dataset_name=dataset_name, split=split)
@@ -149,6 +161,7 @@ def generate_lite_predictions(
         "max_instances": int(max_instances),
         "resume": bool(resume),
         "prompt_policy": prompt_inputs.to_metadata(),
+        PROMPT_POLICY_FINGERPRINT_KEY: prompt_inputs.fingerprint(),
         "snapshot_coverage": (
             snapshot_coverage(snapshot_dir=prompt_inputs.snapshot_dir, instance_ids=selected_ids)
             if CONDITION_LLMDEBUG in condition_list
@@ -464,6 +477,11 @@ def _propose_prediction(
     is_empty = not bool(patch.strip())
     if is_empty:
         patch = ""
+    if request_error is None and is_empty:
+        # DAT-08: an exhausted timeout or HTTP outage is *returned* by the patcher, so
+        # without this the failure would be persisted as an empty prediction and skipped
+        # by --resume. A usable diff is kept even when an earlier stage failed.
+        request_error = transport_request_error_from_patch_meta(patch_meta)
 
     return ProposalOutcome(
         record=PredictionRecord(
@@ -517,6 +535,11 @@ async def _propose_prediction_async(
     is_empty = not bool(patch.strip())
     if is_empty:
         patch = ""
+    if request_error is None and is_empty:
+        # DAT-08: an exhausted timeout or HTTP outage is *returned* by the patcher, so
+        # without this the failure would be persisted as an empty prediction and skipped
+        # by --resume. A usable diff is kept even when an earlier stage failed.
+        request_error = transport_request_error_from_patch_meta(patch_meta)
 
     return ProposalOutcome(
         record=PredictionRecord(

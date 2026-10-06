@@ -13,7 +13,7 @@ from typing import Any, cast
 
 from ._debug_session import normalize_snapshot_view
 from ._formatting import frame_file_label
-from .state_db import count_snapshot_records
+from .state_db import list_snapshot_records
 
 SNAPSHOT_SUFFIXES = frozenset({".json", ".toon"})
 
@@ -36,29 +36,57 @@ def traceback_sidecar(snapshot_path: Path) -> Path:
     return snapshot_path.with_name(f"{snapshot_path.stem}.traceback.txt")
 
 
+def is_confined_to(path: Path, out_dir: str | Path) -> bool:
+    """Whether *path* still sits inside *out_dir* after following symlinks (RCA-02).
+
+    MCP callers only get to name a directory, so everything read from inside it -- the
+    ``latest.*`` pointer and the files a scan finds -- has to be checked too, or a
+    symlink planted in an allowed directory reads an arbitrary file.
+    """
+    try:
+        return path.resolve().is_relative_to(Path(out_dir).resolve())
+    except OSError:
+        return False
+
+
 def snapshot_files(out_dir: str | Path) -> list[Path]:
     """Snapshot files directly in *out_dir*; empty if it can't be listed.
 
-    Uses one directory scan, so no file is opened or parsed.
+    Uses one directory scan, so no file is opened or parsed. Symlinks are resolved
+    (and dropped when they leave *out_dir*); plain entries cannot escape, so the
+    capture-path callers pay nothing extra for the check.
     """
     try:
         with os.scandir(out_dir) as entries:
             return [
                 Path(entry.path)
                 for entry in entries
-                if is_snapshot_name(entry.name) and entry.is_file()
+                if is_snapshot_name(entry.name)
+                and entry.is_file()
+                and (not entry.is_symlink() or is_confined_to(Path(entry.path), out_dir))
             ]
     except OSError:
         return []
 
 
-def index_matches_disk(out_dir: str | Path) -> bool:
-    """Whether the index has as many rows as there are snapshot files on disk.
+def index_covers_disk(out_dir: str | Path) -> bool:
+    """Whether every snapshot file on disk has an index row.
 
     Index writes are best-effort, so the index can miss files (for example under
-    pytest-xdist contention). A mismatch means the listing must rescan the directory.
+    pytest-xdist contention), and a listing that cannot trust the index has to rescan
+    the directory. Equal row and file counts do not establish that trust: a stale row
+    for a deleted file balances out a missing row for a new one, and a reader that
+    stopped at its limit before reaching the stale row never pruned it, so the newer
+    snapshot stayed hidden for good (RCA-03).
     """
-    return count_snapshot_records(out_dir) == len(snapshot_files(out_dir))
+    disk_paths = {str(path.resolve()) for path in snapshot_files(out_dir)}
+    if not disk_paths:
+        return True
+    try:
+        indexed_paths = {str(row.get("path", "")) for row in list_snapshot_records(out_dir)}
+    except Exception:
+        return False
+    return disk_paths <= indexed_paths
 
 
 def index_entry_from_payload(snapshot_path: Path, payload: dict[str, Any]) -> dict[str, Any]:

@@ -472,10 +472,19 @@ def resolve_equilibrium_status(
     max_iterations: int,
     window: int,
     variance_threshold: float,
+    iterations_run: int | None = None,
 ) -> tuple[bool, str]:
+    """Decide whether a node's refinement loop has settled.
+
+    *scores* and *improvement_kinds* carry the parsed critiques only (POL-17), so
+    *iterations_run* reports how many rounds actually ran — including the unparsed ones
+    that must not count as agreement but do consume the iteration cap. It defaults to
+    ``len(scores)``.
+    """
+    rounds = len(scores) if iterations_run is None else max(0, int(iterations_run))
     if not scores:
-        return False, "not_run"
-    if max_iterations > 0 and len(scores) >= max_iterations:
+        return False, "critic_unparsed" if rounds else "not_run"
+    if max_iterations > 0 and rounds >= max_iterations:
         return True, "max_iterations"
     normalized_window = max(1, int(window))
     if len(scores) >= normalized_window:
@@ -703,37 +712,47 @@ class AdaptiveTepController:
         case_id: str,
         input_summary: str,
         output_summary: str,
-        critic_result: TepCriticResult,
-        scores: list[float],
-        improvement_kinds: list[str],
+        critiques: list[TepCriticResult],
         feedback_rounds: list[list[str]],
     ) -> TepNodeTrace:
+        """Record one refinement window of *critiques* for *node_id*.
+
+        POL-17: an unparsed critique has no score, so it is excluded from the convergence
+        test and from the validation buffer. A window whose critiques all failed to parse
+        used to read as three agreeing zeros — convergence by ``score_variance`` plus a
+        zero-score validation entry that then dragged the acceptance floor down.
+        """
+        parsed = [critique for critique in critiques if critique.critic_parsed]
+        scores = [float(critique.overall_score_10) for critique in parsed]
+        improvement_kinds = [str(critique.improvement_kind) for critique in parsed]
         converged, reason = resolve_equilibrium_status(
             scores=scores,
             improvement_kinds=improvement_kinds,
             max_iterations=self.equilibrium_max_iters,
             window=self.equilibrium_window,
             variance_threshold=self.equilibrium_variance_threshold,
+            iterations_run=len(critiques),
         )
         trace = TepNodeTrace(
             node_id=node_id,
-            iterations=len(scores),
+            iterations=len(critiques),
             converged=converged,
             convergence_reason=reason,
-            scores=list(scores),
-            improvement_kinds=list(improvement_kinds),
+            scores=scores,
+            improvement_kinds=improvement_kinds,
             feedback_rounds=[list(round_feedback) for round_feedback in feedback_rounds],
             input_summary=input_summary,
             output_summary=output_summary,
-            critic_summary=critic_result.summary,
+            critic_summary=parsed[-1].summary if parsed else "",
         )
         self.latest_traces[node_id] = trace
-        self.node(node_id).append_validation_entry(
-            case_id=case_id,
-            score=trace.final_score,
-            note=f"free:{reason}",
-            max_size=self.state.validation_buffer_size,
-        )
+        if parsed:
+            self.node(node_id).append_validation_entry(
+                case_id=case_id,
+                score=trace.final_score,
+                note=f"free:{reason}",
+                max_size=self.state.validation_buffer_size,
+            )
         return trace
 
     def apply_candidate_update(

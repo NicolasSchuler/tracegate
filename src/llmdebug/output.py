@@ -22,6 +22,7 @@ from ._warnings import emit_warning
 from .config import SnapshotConfig
 from .snapshot_index import (
     index_entry_from_payload,
+    is_confined_to,
     is_snapshot_name,
     snapshot_files,
     traceback_sidecar,
@@ -174,14 +175,20 @@ def _cleanup_indexed_snapshots(
 
 
 def _is_own_snapshot_file(out_dir: Path, path: Path) -> bool:
-    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink)."""
+    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink).
+
+    The index is data in a shared directory, so a row can name anything: an embedded
+    NUL raises ``ValueError`` and a symlink loop ``RuntimeError`` on some supported
+    Python versions. Either one used to propagate out of retention and abort the
+    capture; such a row is simply not ours.
+    """
     try:
         return (
             is_snapshot_name(path.name)
             and not path.is_symlink()
             and path.resolve().parent == out_dir.resolve()
         )
-    except OSError:
+    except (OSError, ValueError, RuntimeError):
         return False
 
 
@@ -350,6 +357,11 @@ def get_latest_snapshot(
     candidates: list[tuple[str, Path, float]] = []
     for kind, path in (("json", latest_json), ("toon", latest_toon)):
         if not path.exists():
+            continue
+        # The pointer is a file inside an untrusted directory, so a symlink out of it
+        # must not turn an implicit "latest" read into an arbitrary file read (RCA-02).
+        if not is_confined_to(path, out_path):
+            emit_warning(f"ignoring {path.name}: it resolves outside {out_path}")
             continue
         try:
             candidates.append((kind, path, path.stat().st_mtime))

@@ -179,6 +179,110 @@ def test_maybe_run_retry_plan_then_patch_tep_equilibrium_converges(monkeypatch) 
     assert result.retry_plan_text == "plan alpha"
 
 
+def _stub_prompt_build(monkeypatch) -> None:
+    monkeypatch.setattr(
+        flow,
+        "build_stage_b_prompt_with_budget",
+        lambda **kwargs: flow.StageBPromptBuildResult(
+            prompt="plan-prompt" if kwargs.get("planning_mode") else "final-prompt",
+            prompt_budget_result=PromptBudgetResult(
+                prompt="plan-prompt" if kwargs.get("planning_mode") else "final-prompt",
+                used_chars=20,
+                overflow_chars=0,
+                dropped_sections=[],
+                section_status={"retry_repair_plan": "kept"},
+            ),
+            include_stage_a_evidence_index=kwargs["include_stage_a_evidence_index"],
+            stage_a_index_reason=kwargs["stage_a_index_reason"],
+        ),
+    )
+
+
+def _run_equilibrium(plans, monkeypatch) -> flow.RetryPlanResult:
+    _stub_prompt_build(monkeypatch)
+    queued = iter(plans)
+    return flow.maybe_run_retry_plan_then_patch(
+        enabled=True,
+        plan_on_first_attempt=False,
+        attempt=2,
+        prompt_inputs=_prompt_inputs(),
+        attempt_prompt_budget={"total_chars": 200},
+        is_delta_retry=False,
+        include_stage_a_evidence_index=False,
+        stage_a_index_reason="redundant_skipped",
+        tep_equilibrium_check=True,
+        tep_equilibrium_max_iterations=3,
+        tep_equilibrium_similarity_threshold=0.95,
+        run_plan_patch=lambda _prompt: next(queued),
+    )
+
+
+def test_tep_equilibrium_keeps_reasoning_coverage_when_every_replan_reports_it(
+    monkeypatch,
+) -> None:
+    """Merging re-plan usage must not drop provider-reported reasoning tokens."""
+    from evals.attempt_usage import _reasoning_token_counts_from_patch_meta
+
+    def _meta(reasoning: int) -> dict[str, object]:
+        return {
+            "llm_call_count": 1,
+            "usage": {
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "total_tokens": 40,
+                "completion_tokens_details": {"reasoning_tokens": reasoning},
+            },
+        }
+
+    result = _run_equilibrium(
+        [("plan alpha", "raw", _meta(7)), ("plan alpha", "raw2", _meta(5))],
+        monkeypatch,
+    )
+
+    assert result.tep_equilibrium_iterations == 2
+    assert result.retry_plan_meta["llm_call_count"] == 2
+    assert result.retry_plan_meta["usage"]["total_tokens"] == 80
+    assert result.retry_plan_meta["usage"]["reasoning_tokens"] == 12
+    assert _reasoning_token_counts_from_patch_meta(result.retry_plan_meta) == (12, True)
+
+
+def test_tep_equilibrium_drops_reasoning_coverage_when_one_replan_omits_it(monkeypatch) -> None:
+    result = _run_equilibrium(
+        [
+            (
+                "plan alpha",
+                "raw",
+                {
+                    "llm_call_count": 1,
+                    "usage": {"prompt_tokens": 30, "reasoning_tokens": 7},
+                },
+            ),
+            ("plan alpha", "raw2", {"llm_call_count": 1, "usage": {"prompt_tokens": 30}}),
+        ],
+        monkeypatch,
+    )
+
+    assert "reasoning_tokens" not in result.retry_plan_meta["usage"]
+
+
+def test_tep_equilibrium_does_not_invent_a_call_that_was_never_sent(monkeypatch) -> None:
+    """A re-plan rejected before the HTTP request reports zero calls, not one."""
+    result = _run_equilibrium(
+        [
+            (
+                "plan alpha",
+                "raw",
+                {"llm_call_count": 1, "usage": {"prompt_tokens": 30, "completion_tokens": 10}},
+            ),
+            ("", None, {"llm_call_count": 0, "error": "deadline_exceeded"}),
+        ],
+        monkeypatch,
+    )
+
+    assert result.retry_plan_meta["llm_call_count"] == 1
+    assert result.retry_plan_meta["usage"]["total_tokens"] == 40
+
+
 def test_tep_equilibrium_is_independent_of_attempt_orchestrator(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "evals.eval_attempt_flow", None)
     monkeypatch.setattr(

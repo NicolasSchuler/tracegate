@@ -44,6 +44,12 @@ _CODE_CHARS = 300
 _LOCAL_CHARS = 160
 _HINT_CHARS = 240
 _HISTORY_TURN_CHARS = 400
+# Identifiers copied from the test run (pytest node ids of parameterized tests can be
+# arbitrarily long) and the short status strings of the history section.
+_IDENTIFIER_CHARS = 200
+_STATUS_CHARS = 120
+# Floor for the last-resort clip of the mandatory failure section (see _fit_to_budget).
+_MIN_CORE_FIELD_CHARS = 80
 _MAX_ASSERTION_LINES = 12
 _MAX_CALL_PATH_FRAMES = 6
 _MAX_LOCALS = 8
@@ -192,12 +198,17 @@ def _exception(inputs: DecisionStateInputs, output: str) -> tuple[str, str]:
 
 
 def _failing_test(inputs: DecisionStateInputs, output: str) -> str:
+    """Node id of the failing test, clipped like every other copied field.
+
+    Parameterized ids carry the repr of their parameters and can be thousands of characters
+    long; unclipped they used to push the rendered state past the profile's budget.
+    """
     snapshot = _snapshot_dict(inputs)
     pytest_info = snapshot.get("pytest") if snapshot else None
     if isinstance(pytest_info, Mapping) and str(pytest_info.get("nodeid") or ""):
-        return str(pytest_info.get("nodeid"))
+        return _clip(str(pytest_info.get("nodeid")), _IDENTIFIER_CHARS)
     match = _FAILED_TEST_RE.search(output)
-    return match.group(1) if match else ""
+    return _clip(match.group(1), _IDENTIFIER_CHARS) if match else ""
 
 
 def _failed_or_errored(output: str) -> int:
@@ -211,7 +222,7 @@ def _failed_or_errored(output: str) -> int:
 def _failure_section(inputs: DecisionStateInputs, output: str) -> dict[str, Any]:
     exception_type, message = _exception(inputs, output)
     return {
-        "exception": exception_type or "unknown",
+        "exception": _clip(exception_type, _IDENTIFIER_CHARS) or "unknown",
         "message": _clip(message, _MESSAGE_CHARS),
         "failing_test": _failing_test(inputs, output),
         "failed_or_errored_tests": _failed_or_errored(output),
@@ -224,8 +235,8 @@ def _crash_site_section(evidence: Mapping[str, Any]) -> dict[str, Any] | None:
     if not isinstance(frame, Mapping) or not str(frame.get("file_rel") or ""):
         return None
     return {
-        "location": f"{frame.get('file_rel')}:{frame.get('line')}",
-        "function": str(frame.get("function") or ""),
+        "location": _clip(f"{frame.get('file_rel')}:{frame.get('line')}", _IDENTIFIER_CHARS),
+        "function": _clip(str(frame.get("function") or ""), _IDENTIFIER_CHARS),
         "code": _clip(str(frame.get("code") or "").strip(), _CODE_CHARS),
     }
 
@@ -244,7 +255,12 @@ def _call_path(snapshot: Mapping[str, Any]) -> list[str]:
             break
         if not isinstance(frame, Mapping) or frame.get("file_rel") is None:
             continue
-        entries.append(f"{frame.get('file_rel')}:{frame.get('line')} in {frame.get('function')}()")
+        entries.append(
+            _clip(
+                f"{frame.get('file_rel')}:{frame.get('line')} in {frame.get('function')}()",
+                _IDENTIFIER_CHARS,
+            )
+        )
     return entries
 
 
@@ -288,9 +304,9 @@ def _history_section(inputs: DecisionStateInputs) -> dict[str, Any] | None:
     reasons = previous.get("patch_verifier_reasons")
     turns = [str(turn) for turn in inputs.retry_history_turns][-_MAX_HISTORY_TURNS:]
     return {
-        "previous_outcome": str(previous.get("note") or ""),
-        "progress": str(previous.get("adaptive_progress_reason") or ""),
-        "helper_outcome": str(previous.get("adaptive_helper_outcome") or ""),
+        "previous_outcome": _clip(str(previous.get("note") or ""), _STATUS_CHARS),
+        "progress": _clip(str(previous.get("adaptive_progress_reason") or ""), _STATUS_CHARS),
+        "helper_outcome": _clip(str(previous.get("adaptive_helper_outcome") or ""), _STATUS_CHARS),
         "verifier_reasons": [
             _clip(str(reason), _LINE_CHARS)
             for reason in (reasons if isinstance(reasons, list) else [])[:_MAX_VERIFIER_REASONS]
@@ -396,7 +412,33 @@ def _fit_to_budget(
         payload.pop(key, None)
         truncated.append(key)
         state, rendered = render_state(payload, state_format=profile.state_format)
+    overflow = len(rendered) - int(profile.max_state_chars)
+    if overflow > 0 and _clip_failure_section(payload, overflow=overflow):
+        truncated.append("1_failure")
+        state, rendered = render_state(payload, state_format=profile.state_format)
     return state, rendered
+
+
+def _clip_failure_section(payload: dict[str, Any], *, overflow: int) -> bool:
+    """Last-resort shrink of the mandatory failure section; ``True`` when it changed.
+
+    ``1_failure`` cannot be dropped, so once every optional section is gone the only way to
+    honor ``max_state_chars`` is to cut its copied text further.
+    """
+    section = payload.get("1_failure")
+    if not isinstance(section, dict):
+        return False
+    changed = False
+    for key in ("message", "failing_test"):
+        value = section.get(key)
+        if not isinstance(value, str):
+            continue
+        keep = max(_MIN_CORE_FIELD_CHARS, len(value) - int(overflow) - 64)
+        if keep >= len(value):
+            continue
+        section[key] = _clip(value, keep)
+        changed = True
+    return changed
 
 
 def build_decision_state(

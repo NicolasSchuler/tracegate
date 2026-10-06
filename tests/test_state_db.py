@@ -839,6 +839,25 @@ class TestWalAndSchemaVersion:
         with open_state_db(tmp_path) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
+    def test_database_replaced_by_another_process_is_switched_to_wal_again(
+        self, tmp_path: Path
+    ) -> None:
+        """RCA-16: the cache keyed only on the path, so a replacement was never re-checked."""
+        with open_state_db(tmp_path):
+            pass
+        db = state_db_path(tmp_path)
+        for db_file in tmp_path.glob("llmdebug_state.sqlite3-*"):
+            db_file.unlink()
+        db.unlink()
+        # Another process recreates it in rollback mode; this process never saw it go.
+        with closing(sqlite3.connect(db)) as foreign:
+            foreign.execute("PRAGMA journal_mode=DELETE")
+            state_db._create_schema_v1(foreign)
+            foreign.commit()
+
+        with open_state_db(tmp_path) as conn:
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
     def test_journal_mode_is_not_queried_on_every_open(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -871,8 +890,8 @@ class TestWalAndSchemaVersion:
 
         assert version == state_db.STATE_DB_SCHEMA_VERSION == 1
 
-    def test_unversioned_database_from_an_earlier_release_is_upgraded(self, tmp_path: Path) -> None:
-        """RCA-11: databases created before versioning have user_version 0 and keep their rows."""
+    def _legacy_database(self, tmp_path: Path) -> Path:
+        """A database as an earlier release left it: schema v1 rows, user_version 0."""
         db = state_db_path(tmp_path)
         conn = sqlite3.connect(db)
         state_db._create_schema_v1(conn)
@@ -883,12 +902,41 @@ class TestWalAndSchemaVersion:
         conn.commit()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
         conn.close()
+        return db
+
+    def test_unversioned_database_from_an_earlier_release_is_upgraded(self, tmp_path: Path) -> None:
+        """RCA-11: databases created before versioning have user_version 0 and keep their rows."""
+        self._legacy_database(tmp_path)
+
+        with open_state_db(tmp_path):
+            pass
+
+        with closing(sqlite3.connect(state_db_path(tmp_path))) as check:
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert check.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == 1
+
+    def test_reading_a_legacy_database_writes_nothing(self, tmp_path: Path) -> None:
+        """RCA-02: reads must not migrate the schema or add WAL/SHM sidecars."""
+        db = self._legacy_database(tmp_path)
+        before = sorted(path.name for path in tmp_path.iterdir())
 
         rows = list_snapshot_records(tmp_path)
 
         assert [row["path"] for row in rows] == ["/s.json"]
+        assert sorted(path.name for path in tmp_path.iterdir()) == before
         with closing(sqlite3.connect(db)) as check:
-            assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 0
+            assert check.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
+
+    def test_reading_from_a_non_writable_directory_returns_records(self, tmp_path: Path) -> None:
+        """RCA-02: a read-only directory must not turn a read into a failure."""
+        self._legacy_database(tmp_path)
+        tmp_path.chmod(0o500)
+        try:
+            assert [row["path"] for row in list_snapshot_records(tmp_path)] == ["/s.json"]
+            assert count_rca_records(tmp_path) == 0
+        finally:
+            tmp_path.chmod(0o700)
 
     def test_newer_schema_is_refused(self, tmp_path: Path) -> None:
         with open_state_db(tmp_path):
@@ -905,3 +953,35 @@ def test_count_snapshot_records_without_a_database_creates_nothing(tmp_path: Pat
 
     assert count_snapshot_records(tmp_path / "missing") == 0
     assert not (tmp_path / "missing").exists()
+
+
+def test_stored_rca_attempt_ids_without_candidates_does_not_query(tmp_path: Path) -> None:
+    from llmdebug.state_db import stored_rca_attempt_ids
+
+    assert stored_rca_attempt_ids(tmp_path, []) == set()
+    assert stored_rca_attempt_ids(tmp_path, ["", "  "]) == set()
+    assert not state_db_path(tmp_path).exists()
+
+
+def test_file_identity_falls_back_to_the_path_when_stat_fails(tmp_path: Path) -> None:
+    """RCA-16: a database that vanished between open and stat still needs a cache key."""
+    missing = tmp_path / "gone.sqlite3"
+
+    assert state_db._file_identity(missing) == str(missing)
+
+
+def test_reads_accept_a_relative_out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RCA-02: the read-only connection needs a file URI, which a relative path has none of."""
+    from llmdebug.state_db import count_rca_records, count_snapshot_records
+
+    out_dir = tmp_path / ".llmdebug"
+    out_dir.mkdir()
+    upsert_snapshot_record(
+        str(out_dir),
+        {"path": str(out_dir / "s.json"), "mtime": 1.0, "name": "n"},
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert count_snapshot_records(".llmdebug") == 1
+    assert count_rca_records(".llmdebug") == 0
+    assert [row["name"] for row in list_snapshot_records(".llmdebug")] == ["n"]

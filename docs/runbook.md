@@ -746,6 +746,8 @@ uv run python -m evals.eval_two_pass_summary <base_run_id> <rescue_run_id> \
 
 ```bash
 uv run python -m evals.reanalysis_audit "evals/results/${RUN_TAG}-*.jsonl" --json audit.json
+# --strict-input rejects unreadable files, malformed lines and schema-invalid records
+# instead of auditing the readable subset.
 ```
 
 ### Aggregate analysis across multiple runs

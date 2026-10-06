@@ -202,11 +202,31 @@ def test_sta07_bootstrap_seed_is_recorded_in_analysis_config(tmp_path, capsys) -
     results.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     out = tmp_path / "summary.json"
 
-    assert main([str(results), "--bootstrap-seed", "7", "--out", str(out)]) == 0
+    # codex 2-1#2: --stats, so the recorded seed is the seed the bootstrap really used.
+    argv = [
+        str(results),
+        "--bootstrap-seed",
+        "7",
+        "--stats",
+        "--aggregation",
+        "majority_vote",
+        "--stats-pair-a",
+        "base_repair",
+        "--stats-pair-b",
+        "cot_repair",
+        "--out",
+        str(out),
+    ]
+    assert main(argv) == 0
 
-    config = json.loads(out.read_text(encoding="utf-8"))["analysis_config"]
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    config = summary["analysis_config"]
     assert config["bootstrap_seed"] == 7
     assert config["bootstrap_method"] == "percentile"
+    statistics = summary["statistics"]
+    assert statistics["overall_bootstrap_ci"]["seed"] == 7
+    assert statistics["overall_bootstrap_ci"]["method"] == "percentile"
+    assert {entry["bootstrap_ci"]["seed"] for entry in statistics["per_category"].values()} == {7}
     capsys.readouterr()
 
 
