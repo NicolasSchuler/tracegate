@@ -300,12 +300,26 @@ def execute_context_requests(
             reason="sufficient_context",
         )
 
+    if max_requests <= 0:
+        # ATT-21: a request budget of zero means zero requests.
+        return StageAContextData(
+            blocks=[],
+            text="",
+            used_fallback=False,
+            requests_count=0,
+            chars_returned=0,
+            request_success=False,
+            request_payload=request_payload,
+            request_raw=None,
+            reason="request_budget_zero",
+        )
+
     allowed_paths: dict[str, str] = {}
     for line in file_index_lines:
         normalized = _normalize_context_rel_path(line)
         if normalized and normalized not in allowed_paths:
             allowed_paths[normalized] = normalized
-    capped = requests_raw[: max(1, max_requests)]
+    capped = requests_raw[:max_requests]
     blocks: list[dict[str, Any]] = []
     evidence_items: list[dict[str, Any]] = []
     seen_evidence_ids: set[str] = set()
@@ -548,6 +562,58 @@ def execute_context_requests(
     )
 
 
+EVIDENCE_CHAR_TYPES = ("snapshot", "snapshot_lite", "seed", "file", "search", "frame", "local_var")
+
+
+def evidence_chars_by_type(
+    *,
+    snapshot_text: str,
+    snapshot_lite_text: str,
+    seed: StageAContextData | None,
+    stage_a: StageAContextData,
+) -> dict[str, int]:
+    """Characters of evidence that reached the Stage-B prompt, per evidence type.
+
+    ``seed`` is the whole-file seed bundle; Stage-A blocks are split by request type.
+    Lets analysis check that restricted actions really deliver less (ATT-03/04/06).
+    """
+    out = dict.fromkeys(EVIDENCE_CHAR_TYPES, 0)
+    out["snapshot"] = len(snapshot_text or "")
+    out["snapshot_lite"] = len(snapshot_lite_text or "")
+    out["seed"] = int(seed.chars_returned) if seed is not None else 0
+    for block in stage_a.blocks:
+        kind = str(block.get("type") or "")
+        if kind in out:
+            out[kind] += int(block.get("chars") or 0)
+    return out
+
+
+RESTRICTED_ACTION_NO_VALID_REQUESTS = "restricted_action_no_valid_requests"
+
+
+def deny_fallback_for_restricted_action(
+    data: StageAContextData, *, restricted: bool
+) -> StageAContextData:
+    """Drop a fallback bundle when the policy restricted the evidence types (ATT-03).
+
+    The request filter (layer 3) may legitimately empty a restricted action's requests;
+    falling back to whole files would hand back exactly the evidence the policy denied.
+    """
+    if not restricted or not data.used_fallback:
+        return data
+    return StageAContextData(
+        blocks=[],
+        text="",
+        used_fallback=False,
+        requests_count=0,
+        chars_returned=0,
+        request_success=False,
+        request_payload=data.request_payload,
+        request_raw=data.request_raw,
+        reason=RESTRICTED_ACTION_NO_VALID_REQUESTS,
+    )
+
+
 def build_fallback_context_bundle(
     *,
     root: Path,
@@ -594,11 +660,24 @@ def build_fallback_context_bundle(
     evidence_items: list[dict[str, Any]] = []
     seen_evidence_ids: set[str] = set()
     total_chars = 0
+    allowed_paths = (
+        {
+            normalized
+            for line in file_index_lines
+            if (normalized := _normalize_context_rel_path(str(line))) is not None
+        }
+        if file_index_lines is not None
+        else None
+    )
+    root_resolved = root.resolve()
     for rel_path in candidate_paths:
-        rel = rel_path.strip()
-        if not rel:
+        # ATT-20: snapshot paths can be absolute or contain "..", so validate each one.
+        rel = _normalize_context_rel_path(rel_path)
+        if rel is None or (allowed_paths is not None and rel not in allowed_paths):
             continue
         target = root / rel
+        if not target.resolve().is_relative_to(root_resolved):
+            continue
         if not target.exists() or not target.is_file():
             continue
         remaining_chars = max_total_chars - total_chars

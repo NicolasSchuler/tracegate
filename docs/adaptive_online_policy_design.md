@@ -199,6 +199,19 @@ historical runs can be reproduced, and all are recorded in the run configuration
   bonus. Under `--adaptive-lite-snapshot-mode replace` (default) their compact section replaces
   the full snapshot section; `supplement` restores the old behavior. Rows record
   `adaptive_lite_replaced_snapshot`. `traceback_first` keeps its own reveal logic.
+- **The policy decides the snapshot (2026-10-04 review, ATT-06, D5).** Under
+  `--adaptive-reveal-mode full` the full snapshot reaches Stage-B only when the executed action
+  grants it: Stage-A asked for it (with a specific justification) under `invoke_helper` or
+  `retry_helper_strict_json`, the action is `compact_then_patch`, or a lite action runs in
+  `supplement` mode. Rows record `adaptive_snapshot_requested` (the Stage-A request),
+  `stage_b_snapshot_in_prompt`, and `adaptive_snapshot_included` (now equal to the latter).
+- **Restricted actions stay restricted (ATT-03, ATT-04).** When the request filter (layer 3)
+  empties a `frame_only`/`file_only`/`search_only` request list, or Stage-A returns an invalid
+  payload, those actions get an empty Stage-A context (reason
+  `restricted_action_no_valid_requests`) instead of the whole-file fallback bundle, and the
+  whole-file seed bundle is only added for `invoke_helper` and `retry_helper_strict_json`.
+  `attempt_metadata.seed_bundle_chars` and `evidence_chars_by_type` (snapshot, snapshot_lite,
+  seed, file, search, frame, local_var) record what reached the Stage-B prompt.
 - **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
   logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
   rows at read time.

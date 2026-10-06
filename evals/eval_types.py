@@ -216,6 +216,11 @@ HELPER_RESTRICTED_STAGE_A_ACTIONS = frozenset(
         ACTION_SEARCH_ONLY,
     }
 )
+HELPER_SEED_BUNDLE_ACTIONS = HELPER_STAGE_A_ACTIONS - HELPER_RESTRICTED_STAGE_A_ACTIONS
+"""Unrestricted Stage-A actions, the only ones that get the whole-file seed bundle (ATT-04)."""
+HELPER_FULL_SNAPSHOT_ACTIONS = frozenset({ACTION_COMPACT_THEN_PATCH})
+"""Actions whose Stage-B prompt carries the full snapshot under full reveal without a Stage-A
+request: compaction works on the full context (ATT-06, D5)."""
 _HELPER_ACTION_REQUEST_MINI_BUDGETS: dict[str, dict[str, int]] = {
     ACTION_FRAME_ONLY: {"frame": 1, "local_var": 2},
     ACTION_FILE_ONLY: {"file": 1},
