@@ -678,6 +678,29 @@ def test_att11_final_prompt_is_the_one_the_patcher_saw(tmp_path: Path) -> None:
     assert Path(meta["final_prompt_path"]).read_text(encoding="utf-8") == patcher.prompts[-1]
 
 
+@pytest.mark.parametrize("record_prompt", ["none", "hash", "full"])
+def test_att11_propose_prompt_hashes_honor_the_recording_mode(
+    tmp_path: Path, record_prompt: str
+) -> None:
+    """codex 1f#7: ``--record-prompt none`` suppresses the new hashes too."""
+    patcher = _DiffPatcher([_FIX])
+    records = _run(
+        tmp_path,
+        patcher,
+        patch_verifier_scope="disabled",
+        record_prompt=record_prompt,
+    )
+    meta = _attempts(records)[0]["attempt_metadata"]
+    hashed = record_prompt != "none"
+    # The pre-existing prompt hash sets the policy; the ATT-11 fields must follow it.
+    assert (meta.get("prompt_xxh3_128") is not None) is hashed
+    assert (meta.get("final_prompt_xxh3_128") is not None) is hashed
+    assert (meta.get("propose_prompt_xxh3_128s") is not None) is hashed
+    assert (meta.get("final_prompt_path") is not None) is (record_prompt == "full")
+    # Sizes are not prompt content: they stay recorded in every mode.
+    assert meta["final_prompt_chars"] == len(patcher.prompts[-1])
+
+
 def test_att12_replay_cleanup_keeps_harness_artifacts(tmp_path: Path) -> None:
     from evals.eval_attempt_flow import _remove_entries_created_since
 

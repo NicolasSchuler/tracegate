@@ -1263,17 +1263,22 @@ def _note_propose_prompt(
     recovery cycles; the deciding call can differ. Every sent prompt's hash is kept, the
     last one is the final prompt, and with ``--record-prompt full`` it is written too.
     *sent_prompts* collects the attempt's prompt texts, so the caller can tell what the
-    deciding call really contained (POL-11) whatever ``--record-prompt`` is set to.
+    deciding call really contained (POL-11) whatever ``--record-prompt`` is set to; it stays
+    in memory. ``--record-prompt none`` suppresses the recorded hashes, like the prompt hash
+    the attempt recorder already withholds in that mode; only the char count is kept.
     """
     if sent_prompts is not None:
         sent_prompts.append(prompt_text)
+    attempt_metadata["final_prompt_chars"] = len(prompt_text)
+    normalized_record_prompt = str(record_prompt)
+    if normalized_record_prompt == "none":
+        return
     digest = _xxh3_128_text(prompt_text)
     hashes = [str(item) for item in attempt_metadata.get("propose_prompt_xxh3_128s") or []]
     hashes.append(digest)
     attempt_metadata["propose_prompt_xxh3_128s"] = hashes
     attempt_metadata["final_prompt_xxh3_128"] = digest
-    attempt_metadata["final_prompt_chars"] = len(prompt_text)
-    if str(record_prompt) == "full":
+    if normalized_record_prompt == "full":
         final_path = attempt_dir / "prompt_final.txt"
         final_path.write_text(prompt_text, encoding="utf-8")
         attempt_metadata["final_prompt_path"] = str(final_path)
