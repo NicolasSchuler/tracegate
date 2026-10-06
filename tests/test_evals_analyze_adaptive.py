@@ -200,6 +200,7 @@ def test_analyze_adaptive_helper_metrics(tmp_path) -> None:
         "files_unreadable": 0,
         "json_lines_invalid": 0,
         "records_skipped": 0,
+        "records_schema_invalid": 0,
         "infra_event_rows_seen": 0,
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,

@@ -19,7 +19,7 @@ import math
 import random
 from typing import Any
 
-from scipy.stats import binomtest
+from scipy.stats import binomtest, norm
 
 DEFAULT_ALPHA = 0.05
 DEFAULT_BOOTSTRAP_SEED = 42
@@ -144,14 +144,16 @@ def cohens_h(p1: float, p2: float) -> dict[str, Any]:
 
 
 def bootstrap_ci(
-    pairs: list[BinaryPair],
+    pairs: list[BinaryPair] | list[NumericPair],
     n_bootstrap: int = 10000,
     confidence: float = 0.95,
     seed: int | None = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Paired bootstrap CI for success-rate uplift (B - A).
 
-    Resamples (case_id, A, B) tuples together to preserve pairing.
+    Resamples one (A, B) pair per case so the pairing is kept. Pairs may be booleans or
+    per-case success rates over repeated runs; with rates this is a cluster bootstrap
+    with the case as the unit (STA-02).
     Returns dict with: uplift, ci_lower, ci_upper, confidence, n_bootstrap.
     """
     if not pairs:
@@ -168,18 +170,12 @@ def bootstrap_ci(
     rng = random.Random(seed)
     n = len(pairs)
 
-    # Observed uplift.
-    a_rate = sum(1 for a, _ in pairs if a) / n
-    b_rate = sum(1 for _, b in pairs if b) / n
-    observed_uplift = b_rate - a_rate
+    differences = [float(b) - float(a) for a, b in pairs]
+    observed_uplift = sum(differences) / n
 
-    # Bootstrap.
-    deltas: list[float] = []
-    for _ in range(n_bootstrap):
-        sample = [pairs[rng.randint(0, n - 1)] for _ in range(n)]
-        sa = sum(1 for a, _ in sample if a) / n
-        sb = sum(1 for _, b in sample if b) / n
-        deltas.append(sb - sa)
+    deltas = [
+        sum(differences[rng.randint(0, n - 1)] for _ in range(n)) / n for _ in range(n_bootstrap)
+    ]
 
     ci_lower, ci_upper = _percentile_interval(deltas, confidence)
     return {
@@ -292,27 +288,31 @@ def holm_bonferroni(
 # ---------------------------------------------------------------------------
 
 
-def power_report(n_cases: int, n_discordant: int, uplift: float) -> dict[str, Any]:
-    """Rough post-hoc power assessment.
+def power_report(
+    n_cases: int, n_01: int, n_10: int, *, alpha: float = DEFAULT_ALPHA
+) -> dict[str, Any]:
+    """Approximate power of the two-sided McNemar test at the observed discordance.
 
-    Uses the normal approximation for McNemar's test power:
-    power ~ Phi(sqrt(n_discordant) * |uplift| / sqrt(1 - uplift^2) - z_alpha/2)
-
-    This is approximate — true power depends on the marginal proportions.
+    Normal approximation for discordant counts ``n_01`` (favour B) and ``n_10``
+    (favour A): ``power = Phi(|n_01 - n_10| / sqrt(n_01 + n_10) - z_{alpha/2})``.
+    The old formula mixed the discordant count with the overall uplift and reported
+    0.245 where the true power is about 0.949 (n=200, pi01=0.25, pi10=0.10; STA-04).
     """
-    if n_discordant == 0 or abs(uplift) < 1e-10:
+    n_discordant = n_01 + n_10
+    uplift = (n_01 - n_10) / n_cases if n_cases > 0 else 0.0
+    if n_discordant == 0 or n_01 == n_10:
         return {
             "n_cases": n_cases,
             "n_discordant": n_discordant,
             "uplift": uplift,
+            "alpha": alpha,
             "approximate_power": 0.0,
             "sufficient": False,
             "recommendation": "Need more discordant pairs or larger effect size.",
         }
 
-    z_alpha_half = 1.96  # alpha = 0.05, two-sided
-    denom = math.sqrt(1 - uplift**2) if abs(uplift) < 1.0 else 0.01
-    z_power = math.sqrt(n_discordant) * abs(uplift) / denom - z_alpha_half
+    z_alpha_half = float(norm.ppf(1.0 - alpha / 2.0))
+    z_power = abs(n_01 - n_10) / math.sqrt(n_discordant) - z_alpha_half
     power = _normal_cdf(z_power)
 
     if power >= 0.8:
@@ -329,6 +329,7 @@ def power_report(n_cases: int, n_discordant: int, uplift: float) -> dict[str, An
         "n_cases": n_cases,
         "n_discordant": n_discordant,
         "uplift": uplift,
+        "alpha": alpha,
         "approximate_power": round(power, 4),
         "sufficient": sufficient,
         "recommendation": recommendation,
@@ -340,23 +341,36 @@ def power_report(n_cases: int, n_discordant: int, uplift: float) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def _majority(votes: int, k: int) -> bool | None:
+    """Strict majority of *k* runs; ``None`` for a tie (half of an even k)."""
+    if 2 * votes > k:
+        return True
+    if 2 * votes < k:
+        return False
+    return None
+
+
 def majority_vote_aggregation(
     runs: dict[str, list[BinaryPair]],
 ) -> list[BinaryPair]:
     """Aggregate k>1 runs per case_id into majority-vote binary pairs.
 
     ``runs`` maps case_id -> list of (A_success, B_success) across k runs.
-    Returns one (A_majority, B_majority) pair per case_id.
+    Returns one (A_majority, B_majority) pair per decided case_id. A case where either
+    side ties (exactly half of an even k succeeded) is undecided and left out; a tie
+    used to count as a failure, so k=2 needed both runs to succeed (STA-14).
     """
     result: list[BinaryPair] = []
     for case_id in sorted(runs):
         case_runs = runs[case_id]
         if not case_runs:
             continue
-        a_votes = sum(1 for a, _ in case_runs if a)
-        b_votes = sum(1 for _, b in case_runs if b)
-        threshold = len(case_runs) / 2
-        result.append((a_votes > threshold, b_votes > threshold))
+        k = len(case_runs)
+        a_majority = _majority(sum(1 for a, _ in case_runs if a), k)
+        b_majority = _majority(sum(1 for _, b in case_runs if b), k)
+        if a_majority is None or b_majority is None:
+            continue
+        result.append((a_majority, b_majority))
     return result
 
 
@@ -380,6 +394,22 @@ def any_success_aggregation(
 # ---------------------------------------------------------------------------
 
 
+def pass_at_k(n: int, c: int, k: int) -> float:
+    """Unbiased pass@k estimate from *n* samples with *c* successes (Chen et al., 2021).
+
+    ``1 - C(n - c, k) / C(n, k)``: the probability that at least one of *k* samples
+    drawn without replacement from the *n* succeeds. Requires ``1 <= k <= n`` (STA-13).
+    """
+    if not 1 <= k <= n or not 0 <= c <= n:
+        raise ValueError(f"pass_at_k needs 1 <= k <= n and 0 <= c <= n, got n={n} c={c} k={k}")
+    if n - c < k:
+        return 1.0
+    return 1.0 - math.comb(n - c, k) / math.comb(n, k)
+
+
+RUN_AGGREGATIONS = ("majority_vote", "any_success", "per_run")
+
+
 def analyze_paired_results(
     rows: list[dict[str, Any]],
     *,
@@ -387,62 +417,111 @@ def analyze_paired_results(
     seed: int | None = DEFAULT_BOOTSTRAP_SEED,
     condition_a: str = "base_repair",
     condition_b: str = "layered_adaptive_llm",
+    run_aggregation: str = "majority_vote",
 ) -> dict[str, Any]:
-    """Run full statistical analysis on derived case-condition rows.
+    """Run full statistical analysis on derived case-condition rows, case as the unit.
 
     Expects rows with keys: case_id, condition, category, success, run_id.
-    Returns a complete statistics summary.
+
+    STA-02: repeated runs of a case used to be independent McNemar pairs and bootstrap
+    draws, so tripling an identical result turned p=0.29 into p=0.02. Now each case
+    contributes one pair. With several runs per case, McNemar uses the case's
+    *run_aggregation* (``majority_vote``, the default, or ``any_success``; a majority
+    tie leaves the case out and is counted in ``tied_cases``), and the bootstrap
+    resamples cases with their run-averaged success rates. ``per_run`` refuses data
+    with more than one run per case.
     """
-    pairs, categories = _extract_pairs(
+    if run_aggregation not in RUN_AGGREGATIONS:
+        raise ValueError(f"unknown run_aggregation {run_aggregation!r}")
+    case_runs, case_categories = _case_run_pairs(
         rows,
         condition_a=condition_a,
         condition_b=condition_b,
     )
-
-    if not pairs:
+    if not case_runs:
         return {"error": "No matched A/B pairs found."}
 
-    a_rate = sum(1 for a, _ in pairs if a) / len(pairs)
-    b_rate = sum(1 for _, b in pairs if b) / len(pairs)
+    runs_per_case_max = max(len(runs) for runs in case_runs.values())
+    if run_aggregation == "per_run" and runs_per_case_max > 1:
+        return {
+            "error": (
+                f"per_run pooling would count up to {runs_per_case_max} runs of the same "
+                "case as independent pairs (STA-02); use majority_vote or any_success"
+            ),
+            "runs_per_case_max": runs_per_case_max,
+        }
+
+    decided = _aggregate_case_runs(case_runs, run_aggregation=run_aggregation)
+    case_ids = sorted(case_runs)
+    rates = [_case_success_rates(case_runs[case_id]) for case_id in case_ids]
+    pairs = [decided[case_id] for case_id in case_ids if case_id in decided]
+    a_rate = sum(a for a, _ in rates) / len(rates)
+    b_rate = sum(b for _, b in rates) / len(rates)
 
     overall_mcnemar = mcnemar_test(pairs)
     result: dict[str, Any] = {
-        "n_pairs": len(pairs),
+        "n_pairs": len(case_ids),
+        "unit": "case",
+        "run_aggregation": run_aggregation,
+        "runs_per_case_max": runs_per_case_max,
+        "n_decided_pairs": len(pairs),
+        "tied_cases": len(case_ids) - len(pairs),
         "condition_a": condition_a,
         "condition_b": condition_b,
         "a_success_rate": a_rate,
         "b_success_rate": b_rate,
         "overall_mcnemar": overall_mcnemar,
         "overall_cohens_h": cohens_h(a_rate, b_rate),
-        "overall_bootstrap_ci": bootstrap_ci(pairs, n_bootstrap=n_bootstrap, seed=seed),
-        "overall_power": power_report(len(pairs), overall_mcnemar["n_discordant"], b_rate - a_rate),
+        "overall_bootstrap_ci": bootstrap_ci(rates, n_bootstrap=n_bootstrap, seed=seed),
+        "overall_power": power_report(len(pairs), overall_mcnemar["n_01"], overall_mcnemar["n_10"]),
     }
 
     # Per-category analysis with Holm-Bonferroni.
-    if categories:
-        cat_results: dict[str, Any] = {}
-        cat_p_values: dict[str, float] = {}
-        for cat, cat_pairs in sorted(categories.items()):
-            if not cat_pairs:
-                continue
-            cat_a_rate = sum(1 for a, _ in cat_pairs if a) / len(cat_pairs)
-            cat_b_rate = sum(1 for _, b in cat_pairs if b) / len(cat_pairs)
-            cat_mcnemar = mcnemar_test(cat_pairs)
-            cat_results[cat] = {
-                "n_pairs": len(cat_pairs),
-                "a_success_rate": cat_a_rate,
-                "b_success_rate": cat_b_rate,
-                "mcnemar": cat_mcnemar,
-                "cohens_h": cohens_h(cat_a_rate, cat_b_rate),
-                "bootstrap_ci": bootstrap_ci(cat_pairs, n_bootstrap=n_bootstrap, seed=seed),
-            }
-            cat_p_values[cat] = cat_mcnemar["p_value"]
-
-        result["per_category"] = cat_results
-        if cat_p_values:
-            result["holm_bonferroni"] = holm_bonferroni(cat_p_values)
-
+    by_category: dict[str, list[str]] = {}
+    for case_id in case_ids:
+        by_category.setdefault(case_categories[case_id], []).append(case_id)
+    cat_results: dict[str, Any] = {}
+    cat_p_values: dict[str, float] = {}
+    for cat, cat_case_ids in sorted(by_category.items()):
+        cat_rates = [_case_success_rates(case_runs[case_id]) for case_id in cat_case_ids]
+        cat_pairs = [decided[case_id] for case_id in cat_case_ids if case_id in decided]
+        cat_a_rate = sum(a for a, _ in cat_rates) / len(cat_rates)
+        cat_b_rate = sum(b for _, b in cat_rates) / len(cat_rates)
+        cat_mcnemar = mcnemar_test(cat_pairs)
+        cat_results[cat] = {
+            "n_pairs": len(cat_case_ids),
+            "a_success_rate": cat_a_rate,
+            "b_success_rate": cat_b_rate,
+            "mcnemar": cat_mcnemar,
+            "cohens_h": cohens_h(cat_a_rate, cat_b_rate),
+            "bootstrap_ci": bootstrap_ci(cat_rates, n_bootstrap=n_bootstrap, seed=seed),
+        }
+        cat_p_values[cat] = cat_mcnemar["p_value"]
+    result["per_category"] = cat_results
+    result["holm_bonferroni"] = holm_bonferroni(cat_p_values)
     return result
+
+
+def _case_success_rates(runs: list[BinaryPair]) -> NumericPair:
+    k = len(runs)
+    return (sum(1 for a, _ in runs if a) / k, sum(1 for _, b in runs if b) / k)
+
+
+def _aggregate_case_runs(
+    case_runs: dict[str, list[BinaryPair]], *, run_aggregation: str
+) -> dict[str, BinaryPair]:
+    """One decided (A, B) pair per case; majority ties are left out (STA-14)."""
+    decided: dict[str, BinaryPair] = {}
+    for case_id, runs in case_runs.items():
+        if run_aggregation == "any_success":
+            decided[case_id] = (any(a for a, _ in runs), any(b for _, b in runs))
+            continue
+        k = len(runs)
+        a_majority = _majority(sum(1 for a, _ in runs if a), k)
+        b_majority = _majority(sum(1 for _, b in runs if b), k)
+        if a_majority is not None and b_majority is not None:
+            decided[case_id] = (a_majority, b_majority)
+    return decided
 
 
 def analyze_condition_matrix(
@@ -467,42 +546,37 @@ def analyze_condition_matrix(
     return out
 
 
-def _extract_pairs(
+def _case_run_pairs(
     rows: list[dict[str, Any]],
     *,
     condition_a: str,
     condition_b: str,
-) -> tuple[list[BinaryPair], dict[str, list[BinaryPair]]]:
-    """Extract matched (A, B) pairs from rows, grouped by (run_id, case_id).
+) -> tuple[dict[str, list[BinaryPair]], dict[str, str]]:
+    """Matched (A, B) pairs per case, one per run in which both conditions ran.
 
-    Returns (overall_pairs, category_pairs_dict).
+    Returns ``(pairs by case_id, category by case_id)``. Rows whose patch metadata says
+    ``baseline_supported=False`` are left out (BAS-01, D3).
     """
-    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    by_key: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for row in rows:
         if row.get("baseline_supported") is False:
             continue  # BAS-01 / D3: not a comparable outcome
-        run_id = str(row.get("run_id", ""))
-        case_id = str(row.get("case_id", ""))
-        condition = str(row.get("condition", ""))
-        key = (run_id, case_id)
-        if key not in by_key:
-            by_key[key] = {}
-        by_key[key][condition] = row
+        key = (str(row.get("case_id", "")), str(row.get("run_id", "")))
+        by_key.setdefault(key, {})[str(row.get("condition", ""))] = row
 
-    pairs: list[BinaryPair] = []
-    categories: dict[str, list[BinaryPair]] = {}
-    for key in sorted(by_key):
-        entries = by_key[key]
+    case_runs: dict[str, list[BinaryPair]] = {}
+    categories: dict[str, str] = {}
+    for case_id, run_id in sorted(by_key):
+        entries = by_key[(case_id, run_id)]
         a_row = entries.get(condition_a)
         b_row = entries.get(condition_b)
         if a_row is None or b_row is None:
             continue
-        pair = (bool(a_row.get("success")), bool(b_row.get("success")))
-        pairs.append(pair)
-        cat = str(a_row.get("category", "unknown"))
-        categories.setdefault(cat, []).append(pair)
-
-    return pairs, categories
+        case_runs.setdefault(case_id, []).append(
+            (bool(a_row.get("success")), bool(b_row.get("success")))
+        )
+        categories.setdefault(case_id, str(a_row.get("category", "unknown")))
+    return case_runs, categories
 
 
 # ---------------------------------------------------------------------------

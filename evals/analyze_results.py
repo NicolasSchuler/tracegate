@@ -34,6 +34,7 @@ from .decision_model.policy import atomic_action_from_answers
 from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
 from .eval_types import (
     CONDITION_FAMILIES,
+    CONDITION_FAMILY_ADAPTIVE,
     CONDITION_FAMILY_EXTERNAL_BASELINE,
     EVAL_RECORD_SCHEMA_VERSION,
     condition_family,
@@ -203,7 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict-input",
         action="store_true",
-        help="Fail on first unreadable input file or malformed JSONL record.",
+        help=(
+            "Fail on the first unreadable file, malformed JSONL line or schema-invalid "
+            "record; without it, such records are skipped and counted."
+        ),
     )
     parser.add_argument(
         "--stats",
@@ -214,7 +218,10 @@ def main(argv: list[str] | None = None) -> int:
         "--aggregation",
         choices=["per_run", "majority_vote", "any_success"],
         default="per_run",
-        help="Aggregation strategy for multi-run (k>1) analysis.",
+        help=(
+            "How repeated runs of a case form one paired observation: per_run (one run "
+            "per case; refuses several), majority_vote (ties are left out) or any_success."
+        ),
     )
     parser.add_argument(
         "--bootstrap-seed",
@@ -391,6 +398,7 @@ def _load_and_group_records(
         "files_unreadable": 0,
         "json_lines_invalid": 0,
         "records_skipped": 0,
+        "records_schema_invalid": 0,
         "infra_event_rows_seen": 0,
         "infra_event_rows_skipped": 0,
         "duplicate_attempt_rows_seen": 0,
@@ -430,7 +438,14 @@ def _load_and_group_records(
                     if strict_input:
                         raise ValueError(f"{src}:{line_no}: missing case_id/condition")
                     continue
-                _validate_eval_record_schema(record, src=src, line_no=line_no)
+                try:
+                    _validate_eval_record_schema(record, src=src, line_no=line_no)
+                except ValueError:
+                    # STA-25: --strict-input now governs schema errors too.
+                    input_errors["records_schema_invalid"] += 1
+                    if strict_input:
+                        raise
+                    continue
                 record_type = str(record.get("record_type") or "attempt").strip() or "attempt"
                 if record_type == "infra_event":
                     input_errors["infra_event_rows_seen"] += 1
@@ -646,14 +661,20 @@ def _derive_case_condition_rows(
             if attempts_to_success is not None and attempts_budget > 0
             else None
         )
-        token_prompt, token_completion, token_total = _token_usage_breakdown(ordered)
+        token_usage = _token_usage(ordered)
+        token_prompt, token_completion, token_total = (
+            token_usage.prompt,
+            token_usage.completion,
+            token_usage.total,
+        )
         token_reasoning, reasoning_token_usage_available, reasoning_token_usage_per_attempt_mean = (
             _reasoning_token_usage_breakdown(ordered)
         )
         tokens = token_total
+        # STA-09: divide by the attempts that reported tokens, not all executed attempts.
         token_usage_per_attempt_mean = (
-            (token_total / float(attempts_executed))
-            if token_total is not None and attempts_executed > 0
+            (token_total / float(token_usage.covered_attempts))
+            if token_total is not None and token_usage.covered_attempts > 0
             else None
         )
         runtime = _runtime_used(ordered)
@@ -844,6 +865,8 @@ def _derive_case_condition_rows(
                 "token_usage_reasoning": token_reasoning,
                 "reasoning_token_usage_available": reasoning_token_usage_available,
                 "token_usage_per_attempt_mean": token_usage_per_attempt_mean,
+                "token_covered_attempts": token_usage.covered_attempts,
+                "token_covered_fraction": _ratio(token_usage.covered_attempts, attempts_executed),
                 "reasoning_token_usage_per_attempt_mean": (reasoning_token_usage_per_attempt_mean),
                 "runtime_sec": runtime,
                 "llm_calls_total": llm_calls_total,
@@ -1278,6 +1301,21 @@ def _summarize_bucket(
     by_condition: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_condition[str(row["condition"])].append(row)
+    # STA-03: every condition is compared on the cases both ran; the bucket's expected
+    # case set is every case any condition ran.
+    cases_expected = {str(row.get("case_id") or "") for row in rows}
+    # STA-13 / D12: conditions with different attempt budgets are compared at the
+    # smallest budget among them, as success within the first K attempts.
+    attempt_budgets = [
+        int(row.get("attempts_budget") or 0) for row in rows if int(row.get("attempts_budget") or 0)
+    ]
+    common_attempt_k = min(attempt_budgets) if attempt_budgets else None
+    case_rates = {
+        condition: _case_success_rates(
+            [row for row in condition_rows if row.get("baseline_supported", True)]
+        )
+        for condition, condition_rows in by_condition.items()
+    }
 
     out: dict[str, Any] = {}
     for condition, all_condition_rows in sorted(by_condition.items()):
@@ -1288,6 +1326,7 @@ def _summarize_bucket(
         successes = sum(1 for row in condition_rows if bool(row["success"]))
         cases = len(condition_rows)
         success_rate = (successes / cases) if cases else 0.0
+        condition_case_ids = {str(row.get("case_id") or "") for row in all_condition_rows}
         successful_attempts = [
             int(row["attempts_to_success"])
             for row in condition_rows
@@ -1611,6 +1650,10 @@ def _summarize_bucket(
             "cases": cases,
             "successes": successes,
             "success_rate": success_rate,
+            "common_attempt_k": common_attempt_k,
+            "success_within_common_k": _success_within_attempts(condition_rows, common_attempt_k),
+            "cases_expected": len(cases_expected),
+            "cases_missing": len(cases_expected - condition_case_ids),
             "baseline_unsupported_cases": baseline_unsupported_cases,
             "median_attempts_to_success": _median(successful_attempts),
             "mean_attempts_to_success": _mean(successful_attempt_values),
@@ -1626,6 +1669,16 @@ def _summarize_bucket(
             "mean_tokens_per_attempt": _mean(token_per_attempt_values),
             "mean_reasoning_tokens_per_attempt": _mean(reasoning_token_per_attempt_values),
             "mean_llm_calls_per_case": _mean(llm_call_values),
+            "token_covered_cases": sum(
+                1 for row in condition_rows if row["token_usage"] is not None
+            ),
+            "token_covered_attempts": sum(
+                int(row.get("token_covered_attempts") or 0) for row in condition_rows
+            ),
+            "token_covered_fraction": _ratio(
+                sum(int(row.get("token_covered_attempts") or 0) for row in condition_rows),
+                sum(int(row.get("attempts_executed") or 0) for row in condition_rows),
+            ),
             "reasoning_token_covered_cases": sum(
                 1 for row in condition_rows if bool(row.get("reasoning_token_usage_available"))
             ),
@@ -1784,9 +1837,9 @@ def _summarize_bucket(
             key=lambda item: item[0],
         )
     ]
-    out["pairwise_uplifts"] = _pairwise_uplifts(summary=out)
+    out["pairwise_uplifts"] = _pairwise_uplifts(case_rates)
 
-    out["uplift_success_rate"] = _uplift_success_rate(out)
+    out["uplift_success_rate"] = _matched_uplift(case_rates, "base_repair", "layered_adaptive_llm")
     stage_b_prompt_values = [
         float(row["stage_b_prompt_chars_mean"])
         for row in rows
@@ -1841,15 +1894,20 @@ def _summarize_bucket(
     out["test_touch_attempt_rate"] = (
         (total_test_touch_attempts / total_patch_attempts) if total_patch_attempts > 0 else None
     )
+    # STA-16: bucket-level adaptive rates count only rows with adaptive telemetry; the
+    # non-adaptive conditions used to dilute them.
+    adaptive_rows = [row for row in rows if _has_adaptive_telemetry(row)]
     out.update(
         _adaptive_rollup_metrics(
-            rows,
+            adaptive_rows,
             records_by_case_condition=records_by_case_condition,
             adaptive_ope_min_action_support=min_action_support,
             adaptive_ope_propensity_floor=adaptive_ope_propensity_floor,
             include_condition_only_counts=False,
         )
     )
+    out["adaptive_rollup_conditions"] = sorted({str(row["condition"]) for row in adaptive_rows})
+    out["adaptive_rollup_cases"] = len(adaptive_rows)
 
     staged_rows = [
         row
@@ -1871,15 +1929,11 @@ def _summarize_bucket(
         out["uplift_staged_vs_monolithic"] = staged_rate - monolithic_rate
     else:
         out["uplift_staged_vs_monolithic"] = None
-    out["uplift_layered_gated_vs_base"] = _uplift_between_conditions(
-        summary=out,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_gated",
+    out["uplift_layered_gated_vs_base"] = _matched_uplift(
+        case_rates, "base_repair", "layered_adaptive_gated"
     )
-    out["uplift_layered_llm_vs_base"] = _uplift_between_conditions(
-        summary=out,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_llm",
+    out["uplift_layered_llm_vs_base"] = _matched_uplift(
+        case_rates, "base_repair", "layered_adaptive_llm"
     )
     return out
 
@@ -2018,6 +2072,13 @@ def _increment_string_count(target: dict[str, int], value: Any) -> None:
     if not normalized:
         return
     target[normalized] = int(target.get(normalized, 0) + 1)
+
+
+def _has_adaptive_telemetry(row: dict[str, Any]) -> bool:
+    """An adaptive-family condition, or a run of another condition with an adaptive mode."""
+    if condition_family(row.get("condition")) == CONDITION_FAMILY_ADAPTIVE:
+        return True
+    return str(row.get("adaptive_mode") or "none") != "none"
 
 
 def _adaptive_rollup_metrics(
@@ -2978,26 +3039,60 @@ def _records_for_rows(
     return out
 
 
-def _pairwise_uplifts(*, summary: dict[str, Any]) -> list[dict[str, Any]]:
-    """Compute pairwise success-rate uplifts for all condition pairs."""
-    conditions = sorted(
-        condition
-        for condition, stats in summary.items()
-        if isinstance(stats, dict) and "cases" in stats and "success_rate" in stats
+def _success_within_attempts(rows: list[dict[str, Any]], k: int | None) -> float | None:
+    """Share of rows solved within the first *k* attempts (STA-13, D12)."""
+    if k is None or not rows:
+        return None
+    solved = sum(
+        1
+        for row in rows
+        if row.get("attempts_to_success") is not None and int(row["attempts_to_success"]) <= k
     )
+    return solved / len(rows)
+
+
+def _case_success_rates(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Success rate per case_id over its runs (1.0/0.0 for a single run)."""
+    outcomes: dict[str, list[bool]] = defaultdict(list)
+    for row in rows:
+        outcomes[str(row.get("case_id") or "")].append(bool(row.get("success")))
+    return {case_id: sum(values) / len(values) for case_id, values in outcomes.items()}
+
+
+def _matched_uplift(
+    case_rates: dict[str, dict[str, float]], a_condition: str, b_condition: str
+) -> float | None:
+    """Success uplift (B - A) over the cases both conditions ran (STA-03).
+
+    Raw per-condition rates over different case sets used to be subtracted: A on 10
+    cases at 30% and B on the 5 easiest at 60% printed +30pp where the matched
+    uplift is 0.
+    """
+    a_rates = case_rates.get(a_condition)
+    b_rates = case_rates.get(b_condition)
+    if not a_rates or not b_rates:
+        return None
+    matched = sorted(set(a_rates) & set(b_rates))
+    if not matched:
+        return None
+    return sum(b_rates[case_id] - a_rates[case_id] for case_id in matched) / len(matched)
+
+
+def _pairwise_uplifts(case_rates: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
+    """Pairwise success-rate uplifts over each pair's matched cases (STA-03)."""
+    conditions = sorted(condition for condition, rates in case_rates.items() if rates)
     out: list[dict[str, Any]] = []
     for idx, condition_a in enumerate(conditions):
         for condition_b in conditions[idx + 1 :]:
-            uplift = _uplift_between_conditions(
-                summary=summary,
-                a_condition=condition_a,
-                b_condition=condition_b,
-            )
+            a_cases = set(case_rates[condition_a])
+            b_cases = set(case_rates[condition_b])
             out.append(
                 {
                     "condition_a": condition_a,
                     "condition_b": condition_b,
-                    "uplift_success_rate": uplift,
+                    "uplift_success_rate": _matched_uplift(case_rates, condition_a, condition_b),
+                    "n_matched_cases": len(a_cases & b_cases),
+                    "case_sets_match": a_cases == b_cases,
                 }
             )
     return out
@@ -5299,28 +5394,34 @@ def _llm_calls_total(records: list[dict[str, Any]]) -> int:
     return total
 
 
-def _token_usage_breakdown(
-    records: list[dict[str, Any]],
-) -> tuple[float | None, float | None, float | None]:
-    """Sum prompt, completion, and total token counts across records.
+@dataclass(frozen=True)
+class TokenUsage:
+    """Token counts summed over the attempts that reported them (STA-01, STA-09)."""
 
-    Falls back to legacy ``patch_meta.usage.total_tokens`` when the
-    structured ``attempt_metadata`` fields are unavailable.
+    prompt: float | None
+    completion: float | None
+    total: float | None
+    covered_attempts: int
 
-    Returns:
-        Tuple of (prompt_total, completion_total, grand_total); any
-        component may be None if data is missing.
+
+def _token_usage(records: list[dict[str, Any]]) -> TokenUsage:
+    """Sum prompt, completion and total tokens over the attempts that reported them.
+
+    An attempt with ``token_usage_available is False`` is not covered. When no attempt
+    is covered the totals are ``None``; they used to be 0, so a baseline that timed out
+    without usage looked cheapest and token coverage read 100% (STA-01). Falls back to
+    legacy ``patch_meta.usage.total_tokens`` for records without structured counts.
     """
     prompt_total = 0.0
     completion_total = 0.0
     total_total = 0.0
+    covered = 0
     found_attempt_meta = False
     for record in records:
         attempt_meta = record.get("attempt_metadata")
         if not isinstance(attempt_meta, dict):
             continue
-        token_usage_available = attempt_meta.get("token_usage_available")
-        if token_usage_available is False:
+        if attempt_meta.get("token_usage_available") is False:
             found_attempt_meta = True
             continue
         prompt_tokens = attempt_meta.get("tokens_prompt")
@@ -5333,15 +5434,17 @@ def _token_usage_breakdown(
         if not isinstance(total_tokens, (int, float)):
             continue
         found_attempt_meta = True
+        covered += 1
         prompt_total += float(prompt_tokens)
         completion_total += float(completion_tokens)
         total_total += float(total_tokens)
+    if covered:
+        return TokenUsage(prompt_total, completion_total, total_total, covered)
     if found_attempt_meta:
-        return prompt_total, completion_total, total_total
+        return TokenUsage(None, None, None, 0)
 
     # Backward-compatible fallback for older records.
     fallback_total = 0.0
-    found = False
     for record in records:
         patch_meta = record.get("patch_meta")
         if not isinstance(patch_meta, dict):
@@ -5351,11 +5454,19 @@ def _token_usage_breakdown(
             continue
         value = usage.get("total_tokens")
         if isinstance(value, (int, float)):
-            found = True
+            covered += 1
             fallback_total += float(value)
-    if not found:
-        return None, None, None
-    return None, None, fallback_total
+    if not covered:
+        return TokenUsage(None, None, None, 0)
+    return TokenUsage(None, None, fallback_total, covered)
+
+
+def _token_usage_breakdown(
+    records: list[dict[str, Any]],
+) -> tuple[float | None, float | None, float | None]:
+    """Return (prompt, completion, total) from :func:`_token_usage`."""
+    usage = _token_usage(records)
+    return usage.prompt, usage.completion, usage.total
 
 
 def _legacy_patch_meta_has_usage(patch_meta: dict[str, Any] | None) -> bool:
@@ -5735,33 +5846,6 @@ def _condition_token_breakdown_mean(
     return {key: _mean(values) for key, values in accumulators.items()}
 
 
-def _uplift_success_rate(summary: dict[str, Any]) -> float | None:
-    """Uplift from base_repair to layered_adaptive_llm."""
-    return _uplift_between_conditions(
-        summary=summary,
-        a_condition="base_repair",
-        b_condition="layered_adaptive_llm",
-    )
-
-
-def _uplift_between_conditions(
-    *,
-    summary: dict[str, Any],
-    a_condition: str,
-    b_condition: str,
-) -> float | None:
-    """Compute success-rate uplift (b - a) between two conditions."""
-    a = summary.get(a_condition)
-    b = summary.get(b_condition)
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return None
-    ar = a.get("success_rate")
-    br = b.get("success_rate")
-    if not isinstance(ar, (int, float)) or not isinstance(br, (int, float)):
-        return None
-    return float(br - ar)
-
-
 def _print_summary(summary: dict[str, Any]) -> None:
     """Print the human-readable evaluation summary to stdout."""
     print("Overall:")
@@ -5892,12 +5976,16 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
         )
         print(
             f"{prefix}- {condition}: {successes}/{cases} ({rate:.1%}), "
+            f"within common k={stats.get('common_attempt_k')} attempts="
+            f"{_fmt_percent(stats.get('success_within_common_k'))}, "
+            f"missing cases={int(stats.get('cases_missing') or 0)}, "
             f"median attempts={_fmt_num(med_attempts)}, "
             f"mean budget={_fmt_num(mean_attempt_budget)}, "
             f"mean success attempt ratio={_fmt_num(mean_attempt_ratio)}, "
             f"mean tokens(total/prompt/completion)={_fmt_num(mean_tokens)}/"
             f"{_fmt_num(mean_prompt_tokens)}/{_fmt_num(mean_completion_tokens)}, "
             f"mean tokens/attempt={_fmt_num(mean_tokens_per_attempt)}, "
+            f"token coverage={_fmt_percent(stats.get('token_covered_fraction'))} of attempts, "
             f"mean llm calls={_fmt_num(mean_llm_calls)}, "
             f"mean runtime={_fmt_num(mean_runtime)}s, "
             f"test-touch patches={test_touch_attempts}/{patch_attempts} "
@@ -5979,7 +6067,11 @@ def _print_bucket(bucket: dict[str, Any], prefix: str = "") -> None:
             condition_b = str(entry.get("condition_b") or "")
             uplift = entry.get("uplift_success_rate")
             if condition_a and condition_b:
-                print(f"{prefix}  {condition_a} -> {condition_b}: {_fmt_signed_percent(uplift)}")
+                print(
+                    f"{prefix}  {condition_a} -> {condition_b}: {_fmt_signed_percent(uplift)} "
+                    f"(n={entry.get('n_matched_cases', 'n/a')} matched cases"
+                    f"{'' if entry.get('case_sets_match', True) else ', case sets differ'})"
+                )
     uplift = bucket.get("uplift_success_rate")
     print(f"{prefix}- uplift_success_rate: {_fmt_signed_percent(uplift)}")
     print(
@@ -6032,22 +6124,25 @@ def _print_input_errors(input_errors: Any) -> None:
     files_unreadable = int(input_errors.get("files_unreadable", 0))
     json_lines_invalid = int(input_errors.get("json_lines_invalid", 0))
     records_skipped = int(input_errors.get("records_skipped", 0))
+    records_schema_invalid = int(input_errors.get("records_schema_invalid", 0))
     duplicate_attempt_rows_seen = int(input_errors.get("duplicate_attempt_rows_seen", 0))
     duplicate_attempt_rows_resolved = int(input_errors.get("duplicate_attempt_rows_resolved", 0))
     if (
         files_unreadable == 0
         and json_lines_invalid == 0
         and records_skipped == 0
+        and records_schema_invalid == 0
         and duplicate_attempt_rows_seen == 0
     ):
         return
     print("\nInput diagnostics:")
-    if files_unreadable > 0 or json_lines_invalid > 0 or records_skipped > 0:
+    if files_unreadable or json_lines_invalid or records_skipped or records_schema_invalid:
         print(
             "- errors: "
             f"files_unreadable={files_unreadable}, "
             f"json_lines_invalid={json_lines_invalid}, "
-            f"records_skipped={records_skipped}"
+            f"records_skipped={records_skipped}, "
+            f"records_schema_invalid={records_schema_invalid}"
         )
     if duplicate_attempt_rows_seen > 0:
         print(
@@ -6260,8 +6355,34 @@ def _run_statistical_analysis(
                     }
                 )
             pairwise.append(entry)
+    _apply_pairwise_holm(pairwise)
     primary["pairwise"] = pairwise
+    primary["pairwise_correction"] = PAIRWISE_CORRECTION_FAMILY
     return primary
+
+
+PAIRWISE_CORRECTION_FAMILY = "holm_across_all_condition_pairs"
+
+
+def _apply_pairwise_holm(pairwise: list[dict[str, Any]]) -> None:
+    """Holm-adjust the McNemar p-values across every condition pair (STA-06).
+
+    Nine conditions give 36 tests; at an uncorrected 0.05 about 1.8 are significant by
+    chance. ``mcnemar_significant`` keeps the raw test; ``holm_rejected`` is the
+    family-wise decision.
+    """
+    from evals.stats import holm_bonferroni
+
+    p_values = {
+        f"{entry['condition_a']}|{entry['condition_b']}": float(entry["mcnemar_p_value"])
+        for entry in pairwise
+        if isinstance(entry.get("mcnemar_p_value"), (int, float))
+    }
+    adjusted = holm_bonferroni(p_values)
+    for entry in pairwise:
+        holm = adjusted.get(f"{entry['condition_a']}|{entry['condition_b']}")
+        entry["mcnemar_p_adjusted"] = holm["adjusted_p"] if holm else None
+        entry["holm_rejected"] = bool(holm["rejected"]) if holm else None
 
 
 def _run_statistical_analysis_pair(
@@ -6272,84 +6393,22 @@ def _run_statistical_analysis_pair(
     pair_b: str,
     seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
-    """Run statistical analysis for one selected condition pair."""
-    from evals.stats import (
-        analyze_paired_results,
-        any_success_aggregation,
-        majority_vote_aggregation,
-    )
+    """Run statistical analysis for one selected condition pair, case as the unit.
 
-    if aggregation in ("majority_vote", "any_success"):
-        # Group rows by (case_id, condition) across runs.
-        from evals.stats import BinaryPair
-
-        by_case: dict[str, list[BinaryPair]] = {}
-        case_meta: dict[str, dict[str, str]] = {}
-        # First, group by (run_id, case_id) to get matched pairs per run.
-        run_case_map: dict[str, dict[str, dict[str, Any]]] = defaultdict(lambda: defaultdict(dict))
-        for row in rows:
-            run_id = str(row.get("run_id", ""))
-            case_id = str(row.get("case_id", ""))
-            condition = str(row.get("condition", ""))
-            run_case_map[run_id][case_id][condition] = row
-            if case_id not in case_meta:
-                case_meta[case_id] = {
-                    "category": str(row.get("category", "unknown")),
-                    "run_id": run_id,
-                }
-
-        # Build per-case lists of (A, B) pairs across runs.
-        for cases in run_case_map.values():
-            for case_id, conditions in cases.items():
-                a = conditions.get(pair_a)
-                b = conditions.get(pair_b)
-                if a is not None and b is not None:
-                    pair: BinaryPair = (bool(a.get("success")), bool(b.get("success")))
-                    by_case.setdefault(case_id, []).append(pair)
-
-        if aggregation == "majority_vote":
-            aggregated_pairs = majority_vote_aggregation(by_case)
-        else:
-            aggregated_pairs = any_success_aggregation(by_case)
-
-        # Rebuild rows from aggregated pairs for analyze_paired_results.
-        aggregated_rows: list[dict[str, Any]] = []
-        for case_id, pair_val in zip(sorted(by_case), aggregated_pairs, strict=True):
-            meta = case_meta.get(case_id, {})
-            aggregated_rows.append(
-                {
-                    "run_id": "aggregated",
-                    "case_id": case_id,
-                    "condition": pair_a,
-                    "category": meta.get("category", "unknown"),
-                    "success": pair_val[0],
-                }
-            )
-            aggregated_rows.append(
-                {
-                    "run_id": "aggregated",
-                    "case_id": case_id,
-                    "condition": pair_b,
-                    "category": meta.get("category", "unknown"),
-                    "success": pair_val[1],
-                }
-            )
-        result = analyze_paired_results(
-            aggregated_rows,
-            condition_a=pair_a,
-            condition_b=pair_b,
-            seed=seed,
-        )
-        result["aggregation"] = aggregation
-        return result
+    ``per_run`` refuses inputs with several runs of a case instead of pooling them as
+    independent pairs (STA-02); ``majority_vote`` and ``any_success`` aggregate a
+    case's runs first.
+    """
+    from evals.stats import analyze_paired_results
 
     result = analyze_paired_results(
         rows,
         condition_a=pair_a,
         condition_b=pair_b,
         seed=seed,
+        run_aggregation=aggregation,
     )
-    result["aggregation"] = "per_run"
+    result["aggregation"] = aggregation
     return result
 
 
@@ -6406,7 +6465,7 @@ def _print_stats(stats: dict[str, Any]) -> None:
 
     pairwise = stats.get("pairwise")
     if isinstance(pairwise, list) and pairwise:
-        print("  Pairwise matrix:")
+        print("  Pairwise matrix (Holm across all condition pairs):")
         for entry in pairwise:
             if not isinstance(entry, dict):
                 continue
@@ -6422,7 +6481,8 @@ def _print_stats(stats: dict[str, Any]) -> None:
                 f"uplift={_fmt_signed_percent(entry.get('uplift_success_rate'))}, "
                 f"n={_fmt_num(entry.get('n_pairs'))}, "
                 f"p={format_p_value(entry.get('mcnemar_p_value'))}, "
-                f"sig={'yes' if entry.get('mcnemar_significant') else 'no'}"
+                f"Holm adj p={format_p_value(entry.get('mcnemar_p_adjusted'))}, "
+                f"sig (Holm)={'yes' if entry.get('holm_rejected') else 'no'}"
             )
 
 

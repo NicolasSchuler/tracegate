@@ -135,8 +135,12 @@ def test_two_pass_summary_computes_rescue_uplift(tmp_path: Path, capsys) -> None
     assert "- success: 1/3 (33.3%)" in out
     assert "- attempted failed cases: 2/2 (100.0%)" in out
     assert "1/2 on attempted (50.0%), 1/2 on failed pool (50.0%)" in out
-    assert "- final success: 2/3 (66.7%)" in out
-    assert "- absolute uplift vs baseline: +33.3%" in out
+    # STA-22: a cumulative two-pass result, not an uplift vs the baseline.
+    assert "- final success after both passes: 2/3 (66.7%)" in out
+    assert "- cumulative gain over the first pass: +33.3%" in out
+    assert "not a treatment effect" in out
+    assert "- rescue-pass cost (attempted failed cases): tokens=" in out
+    assert "absolute uplift" not in out
 
 
 def test_two_pass_summary_handles_no_failed_baseline(tmp_path: Path, capsys) -> None:
@@ -160,8 +164,8 @@ def test_two_pass_summary_handles_no_failed_baseline(tmp_path: Path, capsys) -> 
     out = capsys.readouterr().out
     assert "- failed cases: 0" in out
     assert "- attempted failed cases: 0/0 (n/a)" in out
-    assert "- final success: 1/1 (100.0%)" in out
-    assert "- absolute uplift vs baseline: +0.0%" in out
+    assert "- final success after both passes: 1/1 (100.0%)" in out
+    assert "- cumulative gain over the first pass: +0.0%" in out
 
 
 def test_two_pass_summary_rejects_mixed_run_ids_in_input_file(tmp_path: Path, capsys) -> None:

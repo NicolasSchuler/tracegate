@@ -28,13 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.analyze_results import _derive_case_condition_rows, _load_and_group_records
-from evals.stats import (
-    bootstrap_ci,
-    cohens_h,
-    format_p_value,
-    holm_bonferroni,
-    mcnemar_test,
-)
+from evals.stats import analyze_paired_results, format_p_value, holm_bonferroni
 
 # ------------------------------------------------------------------
 # Data loading
@@ -61,11 +55,10 @@ def _load_results(
     with derived metrics (success, attempts, tokens, etc.).
     """
     grouped, errors = _load_and_group_records(jsonl_paths, strict_input=strict)
-    if errors.get("files_unreadable"):
-        print(
-            f"Warning: {len(errors['files_unreadable'])} unreadable file(s)",
-            file=sys.stderr,
-        )
+    unreadable = int(errors.get("files_unreadable") or 0)
+    if unreadable:
+        # BAS-09: the counter is an int; len() on it raised TypeError instead of warning.
+        print(f"Warning: {unreadable} unreadable file(s)", file=sys.stderr)
     rows = _derive_case_condition_rows(grouped)
     return rows
 
@@ -73,29 +66,6 @@ def _load_results(
 # ------------------------------------------------------------------
 # Comparison logic
 # ------------------------------------------------------------------
-
-
-def _build_paired_outcomes(
-    rows: list[dict[str, Any]],
-    condition_a: str,
-    condition_b: str,
-) -> list[tuple[str, bool, bool]]:
-    """Build paired (case_id, a_success, b_success) tuples.
-
-    Only includes cases that appear in both conditions.
-    """
-    by_condition: dict[str, dict[str, bool]] = {}
-    for row in rows:
-        cond = row.get("condition", "")
-        case_id = row.get("case_id", "")
-        success = bool(row.get("success", False))
-        by_condition.setdefault(cond, {})[case_id] = success
-
-    a_map = by_condition.get(condition_a, {})
-    b_map = by_condition.get(condition_b, {})
-    common = sorted(set(a_map) & set(b_map))
-
-    return [(cid, a_map[cid], b_map[cid]) for cid in common]
 
 
 def _compute_pairwise(
@@ -106,71 +76,55 @@ def _compute_pairwise(
     n_bootstrap: int = 10_000,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """Compute a full pairwise comparison between two conditions."""
-    pairs = _build_paired_outcomes(rows, condition_a, condition_b)
-    bool_pairs = [(a, b) for _, a, b in pairs]
-    n = len(pairs)
+    """Compute a full pairwise comparison between two conditions, case as the unit.
 
-    if n == 0:
+    BAS-06: success used to be keyed by case only, so with repeated runs the last run
+    in file-glob order overwrote the others and the paired and per-category N
+    disagreed. This uses the shared ``analyze_paired_results``: one pair per case,
+    repeated runs aggregated by majority vote, the run count reported.
+    """
+    result = analyze_paired_results(
+        rows,
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+        condition_a=condition_a,
+        condition_b=condition_b,
+    )
+    if "error" in result:
         return {
             "condition_a": condition_a,
             "condition_b": condition_b,
             "n_cases": 0,
             "error": "no_common_cases",
         }
-
-    a_wins = sum(1 for _, a, b in pairs if a and not b)
-    b_wins = sum(1 for _, a, b in pairs if b and not a)
-    a_rate = sum(1 for _, a, _ in pairs if a) / n
-    b_rate = sum(1 for _, _, b in pairs if b) / n
-
-    mcnemar = mcnemar_test(bool_pairs)
-    effect = cohens_h(a_rate, b_rate)
-    bci = bootstrap_ci(bool_pairs, n_bootstrap=n_bootstrap, seed=seed)
-
+    mcnemar = result["overall_mcnemar"]
+    a_rate = float(result["a_success_rate"])
+    b_rate = float(result["b_success_rate"])
     return {
         "condition_a": condition_a,
         "condition_b": condition_b,
-        "n_cases": n,
+        "n_cases": result["n_pairs"],
+        "runs_per_case_max": result["runs_per_case_max"],
+        "tied_cases": result["tied_cases"],
         "a_rate": round(a_rate, 4),
         "b_rate": round(b_rate, 4),
         "uplift_pp": round(b_rate - a_rate, 4),
         "relative_change": round((b_rate - a_rate) / a_rate, 4) if a_rate > 0 else None,
-        "a_only_wins": a_wins,
-        "b_only_wins": b_wins,
+        "a_only_wins": mcnemar["n_10"],
+        "b_only_wins": mcnemar["n_01"],
         "mcnemar": mcnemar,
-        "cohens_h": effect,
-        "bootstrap_ci": bci,
+        "cohens_h": result["overall_cohens_h"],
+        "bootstrap_ci": result["overall_bootstrap_ci"],
+        "per_category": {
+            category: {
+                "a_cases": stats["n_pairs"],
+                "a_rate": round(float(stats["a_success_rate"]), 4),
+                "b_cases": stats["n_pairs"],
+                "b_rate": round(float(stats["b_success_rate"]), 4),
+            }
+            for category, stats in result["per_category"].items()
+        },
     }
-
-
-def _compute_per_category(
-    rows: list[dict[str, Any]],
-    condition_a: str,
-    condition_b: str,
-) -> dict[str, dict[str, Any]]:
-    """Compute per-category success rates for two conditions."""
-    categories: dict[str, dict[str, list[bool]]] = {}
-    for row in rows:
-        cond = row.get("condition", "")
-        if cond not in (condition_a, condition_b):
-            continue
-        cat = row.get("category", "unknown")
-        success = bool(row.get("success", False))
-        categories.setdefault(cat, {}).setdefault(cond, []).append(success)
-
-    result: dict[str, dict[str, Any]] = {}
-    for cat, cond_map in sorted(categories.items()):
-        a_list = cond_map.get(condition_a, [])
-        b_list = cond_map.get(condition_b, [])
-        result[cat] = {
-            "a_cases": len(a_list),
-            "a_rate": round(sum(a_list) / len(a_list), 4) if a_list else 0.0,
-            "b_cases": len(b_list),
-            "b_rate": round(sum(b_list) / len(b_list), 4) if b_list else 0.0,
-        }
-
-    return result
 
 
 def compare_all(
@@ -206,14 +160,13 @@ def compare_all(
 
     for target in targets:
         comparison = _compute_pairwise(rows, reference, target, n_bootstrap=n_bootstrap, seed=seed)
+        per_category[f"{reference}_vs_{target}"] = comparison.pop("per_category", {})
         pairwise.append(comparison)
 
         mcnemar_result = comparison.get("mcnemar", {})
         p = mcnemar_result.get("p_value")
         if p is not None:
             p_values[f"{reference}_vs_{target}"] = p
-
-        per_category[f"{reference}_vs_{target}"] = _compute_per_category(rows, reference, target)
 
     # Apply Holm-Bonferroni correction.
     corrected = holm_bonferroni(p_values) if p_values else {}

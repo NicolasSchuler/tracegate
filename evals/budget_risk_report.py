@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from . import _json as json
+from .case_outcome import case_outcomes
 
 _GUARD_STOP_REASONS = frozenset(
     {
@@ -30,7 +31,12 @@ _NATIVE_ATTEMPT_FINISH_REASON_CONDITIONS = frozenset(
 
 
 def _load_rows(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+    """Scored attempt rows of *path*, one per (run, case, condition, attempt) (STA-18).
+
+    ``infra_event`` rows and retried duplicates of an attempt are resolved by the shared
+    case-outcome rule, as in ``analyze_results``.
+    """
+    raw_rows: list[dict[str, Any]] = []
     for line_no, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw_line.strip()
         if not line:
@@ -38,8 +44,10 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
         payload = json.loads(line)
         if not isinstance(payload, dict):
             raise ValueError(f"{path}:{line_no}: expected JSON object rows")
-        rows.append(payload)
-    return rows
+        raw_rows.append(payload)
+    return [
+        dict(row) for outcome in case_outcomes(raw_rows).values() for row in outcome.attempts
+    ]
 
 
 def _is_success(row: dict[str, Any]) -> bool:
@@ -280,13 +288,13 @@ def _lower_bound_harmed_cases(
     *,
     finish_reason_getter,
 ) -> int:
-    by_case: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    by_case: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         condition = _condition(row)
         case_id = str(row.get("case_id") or "").strip()
         if not condition or not case_id:
             continue
-        by_case[(condition, case_id)].append(row)
+        by_case[(str(row.get("run_id") or ""), condition, case_id)].append(row)
 
     harmed = 0
     for case_rows in by_case.values():

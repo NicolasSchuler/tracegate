@@ -255,34 +255,53 @@ class TestHolmBonferroni:
 
 class TestPowerReport:
     def test_sufficient_power(self) -> None:
-        """Large n_discordant with strong uplift -> sufficient."""
-        result = power_report(200, 80, 0.4)
+        result = power_report(200, 50, 20)
         assert result["sufficient"] is True
         assert result["approximate_power"] >= 0.8
 
     def test_zero_discordant(self) -> None:
-        """Zero discordant -> zero power."""
-        result = power_report(50, 0, 0.2)
+        result = power_report(50, 0, 0)
         assert result["approximate_power"] == 0.0
         assert result["sufficient"] is False
 
-    def test_zero_uplift(self) -> None:
-        """Zero uplift -> zero power."""
-        result = power_report(50, 20, 0.0)
+    def test_balanced_discordance_has_no_power(self) -> None:
+        result = power_report(50, 10, 10)
         assert result["approximate_power"] == 0.0
         assert result["sufficient"] is False
 
     def test_moderate_power(self) -> None:
-        """Moderate power: 0.5 <= power < 0.8."""
-        result = power_report(100, 20, 0.5)
+        result = power_report(100, 20, 6)
         assert not result["sufficient"]
         assert "Moderate power" in result["recommendation"]
 
     def test_low_power(self) -> None:
-        """Very few discordant pairs -> low power."""
-        result = power_report(50, 5, 0.1)
+        result = power_report(50, 4, 1)
         assert not result["sufficient"]
         assert "Low power" in result["recommendation"]
+
+    def test_sta04_matches_simulated_power_of_the_exact_test(self) -> None:
+        """STA-04: n=200, pi01=0.25, pi10=0.10 reported 0.245; simulation gives ~0.949."""
+        import random
+
+        from scipy.stats import binomtest
+
+        n, pi_01, pi_10 = 200, 0.25, 0.10
+        rng = random.Random(0)
+        reps = 2000
+        rejections = 0
+        for _ in range(reps):
+            n_01 = n_10 = 0
+            for _ in range(n):
+                draw = rng.random()
+                if draw < pi_01:
+                    n_01 += 1
+                elif draw < pi_01 + pi_10:
+                    n_10 += 1
+            rejections += binomtest(n_01, n_01 + n_10, 0.5).pvalue <= 0.05
+        simulated = rejections / reps
+
+        expected = power_report(n, round(n * pi_01), round(n * pi_10))["approximate_power"]
+        assert expected == pytest.approx(simulated, abs=0.02)
 
 
 # ---------------------------------------------------------------------------
@@ -639,27 +658,70 @@ class TestAnalyzeWithCategories:
         result = analyze_paired_results(rows, seed=42, n_bootstrap=100, condition_b="cot_repair")
         assert result["n_pairs"] == 1
 
-    def test_empty_cat_pairs_continue(self, monkeypatch) -> None:
-        """When _extract_pairs returns a category with an empty list, it is skipped (line 353)."""
-        import evals.stats as stats_mod
+    def test_per_category_holm_is_always_present(self) -> None:
+        rows = [
+            {"run_id": "r1", "case_id": "c1", "condition": "a", "category": "x", "success": True},
+            {"run_id": "r1", "case_id": "c1", "condition": "b", "category": "x", "success": False},
+        ]
+        result = analyze_paired_results(
+            rows, seed=42, n_bootstrap=50, condition_a="a", condition_b="b"
+        )
+        assert set(result["per_category"]) == {"x"}
+        assert set(result["holm_bonferroni"]) == {"x"}
 
-        pairs = [(True, False), (False, True)]
-        categories = {"real_cat": [(True, False)], "empty_cat": []}
 
-        monkeypatch.setattr(stats_mod, "_extract_pairs", lambda *a, **kw: (pairs, categories))
-        result = analyze_paired_results([{"dummy": True}], seed=42, n_bootstrap=50, condition_b="b")
-        assert "per_category" in result
-        assert "real_cat" in result["per_category"]
-        assert "empty_cat" not in result["per_category"]
+def _runs(per_case: list[list[tuple[bool, bool]]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for idx, runs in enumerate(per_case):
+        for run_no, (a_ok, b_ok) in enumerate(runs):
+            for condition, ok in (("a", a_ok), ("b", b_ok)):
+                rows.append(
+                    {
+                        "run_id": f"r{run_no}",
+                        "case_id": f"c{idx}",
+                        "condition": condition,
+                        "category": "logic",
+                        "success": ok,
+                    }
+                )
+    return rows
 
-    def test_no_categories_skips_per_category(self, monkeypatch) -> None:
-        """When _extract_pairs returns empty categories dict, per_category is omitted (branch [348,371])."""
-        import evals.stats as stats_mod
 
-        pairs = [(True, False), (False, True)]
-        monkeypatch.setattr(stats_mod, "_extract_pairs", lambda *a, **kw: (pairs, {}))
-        result = analyze_paired_results([{"dummy": True}], seed=42, n_bootstrap=50, condition_b="b")
-        assert "per_category" not in result
+def test_sta02_case_is_the_unit_and_runs_are_averaged_in_the_bootstrap() -> None:
+    rows = _runs([[(False, True), (False, False), (False, True)], [(True, True)] * 3])
+    result = analyze_paired_results(rows, condition_a="a", condition_b="b", n_bootstrap=200)
+    assert result["n_pairs"] == 2
+    assert result["unit"] == "case"
+    assert result["runs_per_case_max"] == 3
+    assert result["b_success_rate"] == pytest.approx((2 / 3 + 1) / 2)
+    assert result["overall_bootstrap_ci"]["uplift"] == pytest.approx((2 / 3) / 2)
+    assert result["overall_mcnemar"]["n_01"] == 1  # the majority of c0's runs favour B
+
+
+def test_sta02_per_run_refuses_repeated_runs_of_a_case() -> None:
+    rows = _runs([[(True, False), (True, False)]])
+    result = analyze_paired_results(
+        rows, condition_a="a", condition_b="b", run_aggregation="per_run"
+    )
+    assert "STA-02" in result["error"]
+    assert result["runs_per_case_max"] == 2
+    single = analyze_paired_results(
+        _runs([[(True, False)]]), condition_a="a", condition_b="b", run_aggregation="per_run"
+    )
+    assert single["n_pairs"] == 1
+
+
+def test_sta14_majority_vote_tie_is_undecided_not_a_failure() -> None:
+    """STA-14: with k=2, one success of two used to count as a failure."""
+    assert majority_vote_aggregation({"c": [(True, True), (False, True)]}) == []
+    assert majority_vote_aggregation({"c": [(True, True), (True, False), (True, True)]}) == [
+        (True, True)
+    ]
+    result = analyze_paired_results(
+        _runs([[(True, True), (False, True)], [(False, True)]]), condition_a="a", condition_b="b"
+    )
+    assert result["tied_cases"] == 1
+    assert result["n_decided_pairs"] == 1
 
 
 def test_sta24_holm_rejects_at_the_exact_boundary() -> None:
@@ -677,3 +739,22 @@ def test_sta24_holm_rejection_follows_the_adjusted_p() -> None:
     for entry in result.values():
         assert entry["rejected"] == (entry["adjusted_p"] <= 0.05)
     assert [result[key]["rejected"] for key in "abcd"] == [True, False, False, False]
+
+
+@pytest.mark.parametrize(("n", "c", "k"), [(5, 2, 1), (5, 2, 3), (6, 0, 2), (6, 6, 2), (10, 3, 4)])
+def test_sta13_pass_at_k_matches_brute_force(n: int, c: int, k: int) -> None:
+    from itertools import combinations
+
+    from evals.stats import pass_at_k
+
+    samples = [True] * c + [False] * (n - c)
+    subsets = list(combinations(range(n), k))
+    expected = sum(any(samples[i] for i in subset) for subset in subsets) / len(subsets)
+    assert pass_at_k(n, c, k) == pytest.approx(expected)
+
+
+def test_sta13_pass_at_k_rejects_k_above_n() -> None:
+    from evals.stats import pass_at_k
+
+    with pytest.raises(ValueError):
+        pass_at_k(2, 1, 3)

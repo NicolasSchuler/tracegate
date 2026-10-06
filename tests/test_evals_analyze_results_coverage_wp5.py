@@ -77,50 +77,41 @@ def _record(
 
 
 # ---------------------------------------------------------------------------
-# _uplift_between_conditions - non-numeric success_rate
+# _matched_uplift / _pairwise_uplifts (STA-03)
 # ---------------------------------------------------------------------------
 
 
-class TestUpliftBetweenConditions:
-    """Uplift returns None when success_rate is non-numeric."""
+class TestMatchedUplift:
+    """Uplifts compare conditions on the cases both ran."""
 
-    def test_returns_none_for_missing_conditions(self) -> None:
-        summary: dict[str, Any] = {}
-        assert (
-            ar._uplift_between_conditions(
-                summary=summary,
-                a_condition="a",
-                b_condition="b",
-            )
-            is None
-        )
+    def test_returns_none_for_missing_or_disjoint_conditions(self) -> None:
+        assert ar._matched_uplift({}, "a", "b") is None
+        assert ar._matched_uplift({"a": {"c1": 1.0}, "b": {"c2": 0.0}}, "a", "b") is None
 
-    def test_returns_none_for_non_numeric_success_rate(self) -> None:
-        summary: dict[str, Any] = {
-            "a": {"success_rate": "not_a_number"},
-            "b": {"success_rate": 0.5},
+    def test_sta03_unmatched_case_sets_do_not_create_an_uplift(self) -> None:
+        """A ran 10 cases (3 solved), B only the 5 easiest (3 solved): +30pp was printed."""
+        a_rates = {f"c{i}": 1.0 if i < 3 else 0.0 for i in range(10)}
+        b_rates = {f"c{i}": 1.0 if i < 3 else 0.0 for i in range(5)}
+        rates = {"a": a_rates, "b": b_rates}
+        assert ar._matched_uplift(rates, "a", "b") == 0.0
+        [entry] = ar._pairwise_uplifts(rates)
+        assert entry["n_matched_cases"] == 5
+        assert entry["case_sets_match"] is False
+
+    def test_summarize_bucket_reports_expected_and_missing_cases(self) -> None:
+        grouped = {
+            ("run", f"c{i}", cond): [_record(case_id=f"c{i}", condition=cond, success=i < 3)]
+            for i in range(10)
+            for cond in ("base_repair", "cot_repair")
+            if cond == "base_repair" or i < 5
         }
-        assert (
-            ar._uplift_between_conditions(
-                summary=summary,
-                a_condition="a",
-                b_condition="b",
-            )
-            is None
-        )
-
-    def test_returns_float_for_valid_rates(self) -> None:
-        summary: dict[str, Any] = {
-            "a": {"success_rate": 0.4},
-            "b": {"success_rate": 0.8},
-        }
-        result = ar._uplift_between_conditions(
-            summary=summary,
-            a_condition="a",
-            b_condition="b",
-        )
-        assert result is not None
-        assert abs(result - 0.4) < 1e-6
+        summary = ar._summarize_bucket(ar._derive_case_condition_rows(grouped))
+        assert summary["base_repair"]["success_rate"] == 0.3
+        assert summary["cot_repair"]["success_rate"] == 0.6
+        assert summary["cot_repair"]["cases_expected"] == 10
+        assert summary["cot_repair"]["cases_missing"] == 5
+        [entry] = summary["pairwise_uplifts"]
+        assert entry["uplift_success_rate"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -488,3 +479,54 @@ class TestFitRidgeActionModels:
         )
         # Should not raise, and should produce a model
         assert "a" in models
+
+
+def test_sta16_bucket_adaptive_rates_ignore_non_adaptive_conditions() -> None:
+    """STA-16: base_repair rows (no helper possible) diluted the helper invocation rate."""
+    grouped = {}
+    for idx in range(4):
+        grouped[("run", f"c{idx}", "base_repair")] = [
+            _record(case_id=f"c{idx}", condition="base_repair")
+        ]
+        grouped[("run", f"c{idx}", "layered_adaptive_llm")] = [
+            _record(
+                case_id=f"c{idx}",
+                condition="layered_adaptive_llm",
+                attempt_metadata_extra={
+                    "adaptive_mode": "llm",
+                    "adaptive_helper_invoked": idx < 2,
+                },
+            )
+        ]
+    rows = ar._derive_case_condition_rows(grouped)
+    bucket = ar._summarize_bucket(rows)
+
+    assert bucket["adaptive_rollup_conditions"] == ["layered_adaptive_llm"]
+    assert bucket["adaptive_rollup_cases"] == 4
+    # 2 of the 4 adaptive cases invoked the helper; the 4 base_repair rows made it 2/8.
+    assert bucket["layered_adaptive_llm"]["helper_invocation_case_rate"] == pytest.approx(0.5)
+    assert bucket["helper_invocation_case_rate"] == pytest.approx(0.5)
+
+
+def test_sta13_conditions_are_compared_within_a_common_attempt_budget() -> None:
+    """STA-13: a 3-attempt condition was compared with a 1-attempt one head to head."""
+    grouped = {}
+    for idx in range(2):
+        grouped[("run", f"c{idx}", "base_repair")] = [
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=1, success=False),
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=2, success=False),
+            _record(case_id=f"c{idx}", condition="base_repair", attempt=3, success=idx == 0),
+        ]
+        grouped[("run", f"c{idx}", "cot_repair")] = [
+            _record(
+                case_id=f"c{idx}",
+                condition="cot_repair",
+                success=idx == 0,
+                attempt_metadata_extra={"max_attempts": 1},
+            )
+        ]
+    summary = ar._summarize_bucket(ar._derive_case_condition_rows(grouped))
+    assert summary["base_repair"]["common_attempt_k"] == 1
+    assert summary["base_repair"]["success_rate"] == 0.5  # solved at attempt 3
+    assert summary["base_repair"]["success_within_common_k"] == 0.0
+    assert summary["cot_repair"]["success_within_common_k"] == 0.5

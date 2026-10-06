@@ -9,6 +9,7 @@ diagnostics.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -101,16 +102,68 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _print_two_pass_summary(
-        baseline_run_id=str(args.baseline_run_id),
-        rescue_run_id=str(args.rescue_run_id),
-        baseline_condition=str(args.baseline_condition),
-        rescue_condition=str(args.rescue_condition),
-        baseline_case_map=baseline_case_map,
-        rescue_case_map=rescue_case_map,
-        baseline_path=baseline_path,
-        rescue_path=rescue_path,
+        baseline=PassSummary(
+            run_id=str(args.baseline_run_id),
+            condition=str(args.baseline_condition),
+            path=baseline_path,
+            case_success=baseline_case_map,
+            case_costs=_case_costs(rows=baseline_rows, condition=str(args.baseline_condition)),
+        ),
+        rescue=PassSummary(
+            run_id=str(args.rescue_run_id),
+            condition=str(args.rescue_condition),
+            path=rescue_path,
+            case_success=rescue_case_map,
+            case_costs=_case_costs(rows=rescue_rows, condition=str(args.rescue_condition)),
+        ),
     )
     return 0
+
+
+@dataclass(frozen=True)
+class CaseCost:
+    tokens: float | None
+    runtime_sec: float | None
+
+
+@dataclass(frozen=True)
+class PassSummary:
+    """One pass of the two-pass workflow: its run, condition, case outcomes and costs."""
+
+    run_id: str
+    condition: str
+    path: Path
+    case_success: dict[str, bool]
+    case_costs: dict[str, CaseCost]
+
+
+def _case_costs(*, rows: list[dict[str, Any]], condition: str) -> dict[str, CaseCost]:
+    out: dict[str, CaseCost] = {}
+    for row in rows:
+        if str(row.get("condition") or "").strip() != condition.strip():
+            continue
+        case_id = str(row.get("case_id") or "")
+        tokens = row.get("token_usage_total")
+        runtime = row.get("runtime_sec")
+        out[case_id] = CaseCost(
+            tokens=float(tokens) if isinstance(tokens, (int, float)) else None,
+            runtime_sec=float(runtime) if isinstance(runtime, (int, float)) else None,
+        )
+    return out
+
+
+def _cost_line(costs: dict[str, CaseCost], case_ids: list[str]) -> str:
+    """Total tokens and runtime over *case_ids*, with how many cases reported each."""
+    tokens = [costs[c].tokens for c in case_ids if c in costs and costs[c].tokens is not None]
+    runtimes = [
+        costs[c].runtime_sec for c in case_ids if c in costs and costs[c].runtime_sec is not None
+    ]
+    return (
+        f"tokens={sum(t for t in tokens if t is not None):.0f} "
+        f"(reported by {len(tokens)}/{len(case_ids)} cases), "
+        f"runtime={sum(r for r in runtimes if r is not None):.1f}s "
+        f"(reported by {len(runtimes)}/{len(case_ids)} cases)"
+    )
 
 
 def _load_rows(*, path: Path) -> list[dict[str, Any]]:
@@ -145,17 +198,15 @@ def _case_success_map(*, rows: list[dict[str, Any]], condition: str) -> dict[str
     return out
 
 
-def _print_two_pass_summary(
-    *,
-    baseline_run_id: str,
-    rescue_run_id: str,
-    baseline_condition: str,
-    rescue_condition: str,
-    baseline_case_map: dict[str, bool],
-    rescue_case_map: dict[str, bool],
-    baseline_path: Path,
-    rescue_path: Path,
-) -> None:
+def _print_two_pass_summary(*, baseline: PassSummary, rescue: PassSummary) -> None:
+    """Print the two-pass outcome.
+
+    STA-22: the rescue pass runs only on the first pass's failures, so the final rate is
+    the cumulative result of up to twice the compute and can never show a regression. It
+    is labelled as such, next to each pass's own cost, not as an uplift vs the baseline.
+    """
+    baseline_case_map = baseline.case_success
+    rescue_case_map = rescue.case_success
     baseline_total_cases = len(baseline_case_map)
     baseline_successes = sum(1 for success in baseline_case_map.values() if success)
     baseline_failed_ids = sorted(
@@ -194,9 +245,9 @@ def _print_two_pass_summary(
 
     print("Two-Pass Workflow Summary")
     print(
-        f"- baseline: run_id={baseline_run_id} condition={baseline_condition} file={baseline_path}"
+        f"- baseline: run_id={baseline.run_id} condition={baseline.condition} file={baseline.path}"
     )
-    print(f"- rescue: run_id={rescue_run_id} condition={rescue_condition} file={rescue_path}")
+    print(f"- rescue: run_id={rescue.run_id} condition={rescue.condition} file={rescue.path}")
 
     print("\nBaseline")
     print(
@@ -219,12 +270,23 @@ def _print_two_pass_summary(
     )
     print(f"- remaining failed after rescue: {remaining_failed}")
 
-    print("\nNet Outcome")
+    print("\nCumulative Two-Pass Outcome (not a treatment effect)")
     print(
-        f"- final success: {final_successes}/{baseline_total_cases} "
+        "- the rescue pass ran only on first-pass failures: this is the result of extra "
+        "compute and cannot show a regression"
+    )
+    print(
+        f"- final success after both passes: {final_successes}/{baseline_total_cases} "
         f"({_fmt_percent(final_success_rate)})"
     )
-    print(f"- absolute uplift vs baseline: {_fmt_signed_percent(absolute_uplift)}")
+    print(f"- cumulative gain over the first pass: {_fmt_signed_percent(absolute_uplift)}")
+    print(
+        f"- first-pass cost (all cases): {_cost_line(baseline.case_costs, sorted(baseline_case_map))}"
+    )
+    print(
+        "- rescue-pass cost (attempted failed cases): "
+        f"{_cost_line(rescue.case_costs, rescue_attempted_failed_ids)}"
+    )
 
     print("\nCoverage Diagnostics")
     print(f"- baseline failed not attempted in rescue: {rescue_missing_failed}")

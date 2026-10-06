@@ -116,7 +116,9 @@ def _print_core_summary(
             condition_a = str(entry.get("condition_a") or "?")
             condition_b = str(entry.get("condition_b") or "?")
             uplift = _fmt_signed_percent(entry.get("uplift_success_rate"))
-            print(f"- {condition_a} -> {condition_b}: {uplift}")
+            matched = entry.get("n_matched_cases", "n/a")
+            differ = "" if entry.get("case_sets_match", True) else ", case sets differ"
+            print(f"- {condition_a} -> {condition_b}: {uplift} (n={matched} matched cases{differ})")
 
     print("\nReliability & Input Quality")
     patch_attempts = int(overall.get("patch_attempts") or 0)
@@ -237,6 +239,9 @@ def _print_condition_row(stats: dict[str, Any]) -> None:
         f"mean_llm_calls={_fmt_num(stats.get('mean_llm_calls_per_case'))}, "
         f"mean_runtime_sec={_fmt_num(stats.get('mean_runtime_sec'))}"
     )
+    cases_missing = int(stats.get("cases_missing") or 0)
+    if cases_missing > 0:  # STA-03
+        row += f", missing {cases_missing}/{int(stats.get('cases_expected') or 0)} cases"
     reasoning_covered_cases = int(stats.get("reasoning_token_covered_cases") or 0)
     if reasoning_covered_cases > 0:
         row += (

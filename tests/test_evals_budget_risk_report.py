@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from evals import _json as json
 from evals import budget_risk_report as report
 
 
@@ -398,7 +399,10 @@ class TestLoadRowsEdgeCases:
 
     def test_empty_lines_are_skipped(self, tmp_path: Path) -> None:
         path = tmp_path / "data.jsonl"
-        path.write_text('{"case_id":"a"}\n\n\n{"case_id":"b"}\n', encoding="utf-8")
+        path.write_text(
+            '{"case_id":"a","condition":"ldb"}\n\n\n{"case_id":"b","condition":"ldb"}\n',
+            encoding="utf-8",
+        )
         rows = report._load_rows(path)  # type: ignore[attr-defined]
         assert len(rows) == 2
 
@@ -816,3 +820,33 @@ class TestMainTextFormat:
         assert exit_code == 0
         # Multiple summaries are joined with double newlines
         assert captured.out.count("Source:") == 2
+
+
+def test_sta18_retried_attempts_are_deduplicated_and_runs_kept_apart(tmp_path: Path) -> None:
+    """STA-18: retried rows were double-counted and runs of one case merged."""
+    rows = [
+        {"run_id": "r1", "case_id": "a", "condition": "ldb", "attempt": 1, "success": False},
+        {"run_id": "r1", "case_id": "a", "condition": "ldb", "attempt": 1, "success": False},
+        {
+            "run_id": "r1",
+            "case_id": "a",
+            "condition": "ldb",
+            "attempt": 1,
+            "record_type": "infra_event",
+        },
+        {"run_id": "r2", "case_id": "a", "condition": "ldb", "attempt": 1, "success": True},
+    ]
+    path = tmp_path / "data.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    loaded = report._load_rows(path)  # type: ignore[attr-defined]
+    assert [(row["run_id"], row.get("success")) for row in loaded] == [("r1", False), ("r2", True)]
+
+    def finish_reason(row: dict[str, object]) -> str:
+        return "length"
+
+    # r1's case failed with a length finish; r2's run of the same case succeeded.
+    harmed = report._lower_bound_harmed_cases(  # type: ignore[attr-defined]
+        loaded, finish_reason_getter=finish_reason
+    )
+    assert harmed == 1
