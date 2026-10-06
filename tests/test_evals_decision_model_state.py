@@ -214,3 +214,17 @@ def test_machine_specific_paths_are_normalized() -> None:
     assert home not in built.rendered
     assert "<python>/lib/x.py" in built.rendered or "<venv>/lib/x.py" in built.rendered
     assert "~/projects/y.py" in built.rendered
+
+
+def test_hints_keep_one_hypothesis_per_pattern(monkeypatch) -> None:
+    """CAP-16 changed llmdebug's default; the decision state keeps the earlier inputs."""
+    seen: dict[str, object] = {}
+
+    def _fake(snapshot, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(state, "generate_hypotheses", _fake)
+    _build(_inputs())
+
+    assert seen == {"max_per_pattern": 1}

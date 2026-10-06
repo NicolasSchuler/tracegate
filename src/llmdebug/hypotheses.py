@@ -457,13 +457,24 @@ def _detect_assertion_failure(snapshot: dict[str, Any]) -> list[Hypothesis]:  # 
 # ---------------------------------------------------------------------------
 
 
-def generate_hypotheses(snapshot: dict[str, Any]) -> list[Hypothesis]:
+DEFAULT_MAX_HYPOTHESES_PER_PATTERN = 3
+
+
+def generate_hypotheses(
+    snapshot: dict[str, Any], *, max_per_pattern: int = DEFAULT_MAX_HYPOTHESES_PER_PATTERN
+) -> list[Hypothesis]:
     """Run all detectors and return hypotheses sorted by confidence (descending).
+
+    Identical hypotheses (same pattern and description) are reported once, and each
+    pattern keeps at most *max_per_pattern* of them, in detector order. De-duplicating by
+    pattern alone kept only the first, so a ``KeyError`` with three dict locals named one
+    of them (CAP-16); ``max_per_pattern=1`` reproduces that behaviour.
 
     Detector exceptions are silently swallowed to ensure the engine never crashes.
     """
     results: list[Hypothesis] = []
-    seen_patterns: set[str] = set()
+    seen: set[tuple[str, str]] = set()
+    per_pattern: dict[str, int] = {}
 
     for detector in _detectors:
         try:
@@ -471,10 +482,12 @@ def generate_hypotheses(snapshot: dict[str, Any]) -> list[Hypothesis]:
         except Exception:  # nosec B112 — fault isolation per detector
             continue
         for h in hypotheses:
-            # Deduplicate by pattern (keep highest confidence)
-            if h.pattern in seen_patterns:
+            if (h.pattern, h.description) in seen or per_pattern.get(h.pattern, 0) >= max(
+                max_per_pattern, 1
+            ):
                 continue
-            seen_patterns.add(h.pattern)
+            seen.add((h.pattern, h.description))
+            per_pattern[h.pattern] = per_pattern.get(h.pattern, 0) + 1
             results.append(h)
 
     results.sort(key=lambda h: h.confidence, reverse=True)

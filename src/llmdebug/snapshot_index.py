@@ -27,6 +27,15 @@ def is_snapshot_name(name: str) -> bool:
     )
 
 
+def traceback_sidecar(snapshot_path: Path) -> Path:
+    """The ``.traceback.txt`` file written next to a snapshot.
+
+    Replaces only the final suffix: snapshot names keep dots (``test_mod.py``), and
+    ``with_suffix("").with_suffix(...)`` cut the name at the first of them (CAP-05).
+    """
+    return snapshot_path.with_name(f"{snapshot_path.stem}.traceback.txt")
+
+
 def snapshot_files(out_dir: str | Path) -> list[Path]:
     """Snapshot files directly in *out_dir*; empty if it can't be listed.
 

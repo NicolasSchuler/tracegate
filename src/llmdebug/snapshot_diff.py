@@ -18,18 +18,16 @@ from .snapshot_types import ExceptionDict, SnapshotDict
 
 _ARRAY_KEYS = ("__array__", "__dataframe__", "__series__")
 
-# Typed empty sentinels reused across the module to avoid repeated `cast(dict[str,Any], {})`
-# and `cast(list[Any], [])` expressions.
-_EMPTY_DICT: dict[str, Any] = {}
-_EMPTY_LIST: list[Any] = []
 
-
+# Fresh empties every time: shared module-level sentinels ended up in public result
+# fields (SnapshotDiffResult.old_git/new_git), so a caller mutating one corrupted every
+# later diff (CAP-14).
 def _as_dict(value: Any) -> dict[str, Any]:
-    return cast(dict[str, Any], value) if isinstance(value, dict) else _EMPTY_DICT
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
 def _as_list(value: Any) -> list[Any]:
-    return cast(list[Any], value) if isinstance(value, list) else _EMPTY_LIST
+    return cast(list[Any], value) if isinstance(value, list) else []
 
 
 def _text_or_empty(value: Any) -> str:
@@ -516,11 +514,10 @@ def diff_snapshots(old: dict[str, Any], new: dict[str, Any]) -> SnapshotDiffResu
     old_view_t = cast(SnapshotDict, old_view)
     new_view_t = cast(SnapshotDict, new_view)
 
-    _empty_exc = cast(ExceptionDict, _EMPTY_DICT)
     old_exc_raw = old_view_t.get("exception")
     new_exc_raw = new_view_t.get("exception")
-    old_exc = old_exc_raw if isinstance(old_exc_raw, dict) else _empty_exc
-    new_exc = new_exc_raw if isinstance(new_exc_raw, dict) else _empty_exc
+    old_exc = old_exc_raw if isinstance(old_exc_raw, dict) else cast(ExceptionDict, {})
+    new_exc = new_exc_raw if isinstance(new_exc_raw, dict) else cast(ExceptionDict, {})
     exc_diff = diff_exception(old_exc, new_exc)
 
     old_frames = _as_list(old_view_t.get("frames"))
@@ -530,11 +527,11 @@ def diff_snapshots(old: dict[str, Any], new: dict[str, Any]) -> SnapshotDiffResu
     loc_diff = diff_location(old_frames, new_frames, old_cfi, new_cfi)
 
     # Locals diff from crash frames
-    old_crash = (
-        old_frames[old_cfi] if old_frames and 0 <= old_cfi < len(old_frames) else _EMPTY_DICT
+    old_crash: dict[str, Any] = (
+        old_frames[old_cfi] if old_frames and 0 <= old_cfi < len(old_frames) else {}
     )
-    new_crash = (
-        new_frames[new_cfi] if new_frames and 0 <= new_cfi < len(new_frames) else _EMPTY_DICT
+    new_crash: dict[str, Any] = (
+        new_frames[new_cfi] if new_frames and 0 <= new_cfi < len(new_frames) else {}
     )
     locals_diff = diff_locals(old_crash, new_crash)
 

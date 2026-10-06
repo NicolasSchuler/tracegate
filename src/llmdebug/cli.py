@@ -72,6 +72,7 @@ from .export_artifact import (
     render_bundle_index_html,
     render_export_html,
 )
+from .snapshot_index import traceback_sidecar
 
 # Rich Table is used directly by the list command; other Rich rendering
 # lives in _cli_display.  The conditional import keeps Rich optional.
@@ -707,7 +708,7 @@ def _compute_delete_list(
     else:
         for snap in snapshot_files[keep:] if keep < len(snapshot_files) else []:
             to_delete.append(snap)
-            tb_file = snap.with_suffix("").with_suffix(".traceback.txt")
+            tb_file = traceback_sidecar(snap)
             if tb_file.exists():
                 to_delete.append(tb_file)
     return to_delete

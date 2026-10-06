@@ -305,50 +305,14 @@ def _sample_array_head(arr: Any, max_items: int = 5) -> list[float]:
 
 
 def count_anomalies(arr: Any) -> dict[str, int] | None:
-    """Count NaN and Inf values in tensor.
+    """Count NaN and Inf values in a NumPy, CuPy, PyTorch or JAX array.
 
     Returns dict with counts only if anomalies exist, None otherwise.
-    Works with NumPy, PyTorch, and JAX arrays.
     """
     try:
-        module = type(arr).__module__
-
-        nan_count = 0
-        inf_count = 0
-
-        if module.startswith("torch"):
-            # PyTorch
-            import torch  # type: ignore[import-not-found]
-
-            _torch: Any = torch
-            nan_count = int(_torch.isnan(arr).sum().item())
-            inf_count = int(_torch.isinf(arr).sum().item())
-        elif module.startswith("jax"):
-            # JAX
-            import jax.numpy as jnp  # type: ignore[import-not-found]
-
-            _jnp: Any = jnp
-            nan_count = int(_jnp.isnan(arr).sum())
-            inf_count = int(_jnp.isinf(arr).sum())
-        elif module.startswith("numpy"):
-            # NumPy
-            import numpy as np
-
-            nan_count = int(np.isnan(arr).sum())
-            inf_count = int(np.isinf(arr).sum())
-        else:
-            return None
-
-        if nan_count > 0 or inf_count > 0:
-            result: dict[str, int] = {}
-            if nan_count > 0:
-                result["nan"] = nan_count
-            if inf_count > 0:
-                result["inf"] = inf_count
-            return result
+        return _stats_and_anomalies(arr, want_stats=False)[1]
     except Exception:  # nosec B110 — safe serialization fallback
-        pass
-    return None
+        return None
 
 
 def compute_array_stats(
@@ -363,66 +327,11 @@ def compute_array_stats(
         Returns None for empty arrays, non-numeric dtypes, or on error.
     """
     try:
-        element_count = get_array_element_count(arr)
-        if element_count is not None and element_count > max_elements:
+        if _array_exceeds_limit(arr, max_elements=max_elements) or _is_empty_array(arr):
             return None
-
-        module = type(arr).__module__
-
-        # Check if numeric dtype
-        dtype_str = str(getattr(arr, "dtype", ""))
-        # Complex types are intentionally excluded: "min/max/mean/std" are ambiguous
-        # without choosing a projection (real/imag/magnitude), and converting to float
-        # would silently drop information.
-        if not any(t in dtype_str for t in ("float", "int", "uint")):
-            return None
-
-        # Check for empty array
-        if hasattr(arr, "size") and arr.size == 0:
-            return None
-
-        if module.startswith("torch"):
-            # PyTorch - move to CPU for stats
-            import torch  # type: ignore[import-not-found]
-
-            _torch: Any = torch
-            arr_cpu = arr.detach().cpu().float()
-            return {
-                "min": round(float(_torch.min(arr_cpu).item()), 6),
-                "max": round(float(_torch.max(arr_cpu).item()), 6),
-                "mean": round(float(_torch.mean(arr_cpu).item()), 6),
-                # Match NumPy/JAX default semantics (population std, not unbiased).
-                "std": round(float(_torch.std(arr_cpu, unbiased=False).item()), 6),
-            }
-        elif module.startswith("jax"):
-            # JAX
-            import jax.numpy as jnp  # type: ignore[import-not-found]
-
-            _jnp: Any = jnp
-            arr_float = arr.astype(_jnp.float32)
-            return {
-                "min": round(float(_jnp.min(arr_float)), 6),
-                "max": round(float(_jnp.max(arr_float)), 6),
-                "mean": round(float(_jnp.mean(arr_float)), 6),
-                "std": round(float(_jnp.std(arr_float)), 6),
-            }
-        elif module.startswith(("numpy", "cupy")):
-            # NumPy/CuPy
-            import numpy as np
-
-            # Handle CuPy by converting to numpy
-            if module.startswith("cupy"):
-                arr = arr.get()
-            arr_float = arr.astype(np.float64)
-            return {
-                "min": round(float(np.min(arr_float)), 6),
-                "max": round(float(np.max(arr_float)), 6),
-                "mean": round(float(cast(Any, np.mean(arr_float))), 6),
-                "std": round(float(np.std(arr_float)), 6),
-            }
+        return _stats_and_anomalies(arr, want_anomalies=False)[0]
     except Exception:  # nosec B110 — safe serialization fallback
-        pass
-    return None
+        return None
 
 
 def _compute_array_stats_and_anomalies(
@@ -435,25 +344,38 @@ def _compute_array_stats_and_anomalies(
     Intended for summarize_array(include_array_stats=True) to avoid duplicate scans.
     """
     try:
-        if _array_exceeds_limit(arr, max_elements=max_elements):
+        if _array_exceeds_limit(arr, max_elements=max_elements) or _is_empty_array(arr):
             return None, None
-        if _is_empty_array(arr):
-            return None, None
-
-        module = type(arr).__module__
-        is_numeric_dtype = _is_numeric_array_dtype(arr)
-        # Dispatch to backend-specific implementations by module prefix.
-        # Order doesn't matter — these frameworks never share module namespaces.
-        if module.startswith("torch"):
-            return _torch_stats_and_anomalies(arr, is_numeric_dtype=is_numeric_dtype)
-        if module.startswith("jax"):
-            return _jax_stats_and_anomalies(arr, is_numeric_dtype=is_numeric_dtype)
-        if module.startswith(("numpy", "cupy")):
-            return _numpy_like_stats_and_anomalies(
-                arr, module=module, is_numeric_dtype=is_numeric_dtype
-            )
+        return _stats_and_anomalies(arr)
     except Exception:  # nosec B110 — safe serialization fallback
-        pass
+        return None, None
+
+
+def _stats_and_anomalies(
+    arr: Any, *, want_stats: bool = True, want_anomalies: bool = True
+) -> tuple[dict[str, float] | None, dict[str, int] | None]:
+    """The single backend dispatch for array statistics and NaN/Inf counts (CAP-23).
+
+    ``count_anomalies`` and ``compute_array_stats`` used to be separate copies of the
+    backend code and had drifted from this path: anomalies were counted on the up-cast
+    copy (a float32 cast turns large float64 values into Inf) and CuPy got none.
+    Complex dtypes get anomaly counts but no stats (min/max/mean/std need a projection).
+    """
+    module = type(arr).__module__
+    is_numeric_dtype = want_stats and _is_numeric_array_dtype(arr)
+    # Order doesn't matter — these frameworks never share module namespaces.
+    if module.startswith("torch"):
+        return _torch_stats_and_anomalies(
+            arr, is_numeric_dtype=is_numeric_dtype, want_anomalies=want_anomalies
+        )
+    if module.startswith("jax"):
+        return _jax_stats_and_anomalies(
+            arr, is_numeric_dtype=is_numeric_dtype, want_anomalies=want_anomalies
+        )
+    if module.startswith(("numpy", "cupy")):
+        return _numpy_like_stats_and_anomalies(
+            arr, module=module, is_numeric_dtype=is_numeric_dtype, want_anomalies=want_anomalies
+        )
     return None, None
 
 
@@ -483,18 +405,23 @@ def _build_anomaly_counts(nan_count: int, inf_count: int) -> dict[str, int] | No
 
 
 def _torch_stats_and_anomalies(
-    arr: Any, *, is_numeric_dtype: bool
+    arr: Any, *, is_numeric_dtype: bool, want_anomalies: bool = True
 ) -> tuple[dict[str, float] | None, dict[str, int] | None]:
     import torch  # type: ignore[import-not-found]
 
     _torch: Any = torch
-    arr_float = arr.detach().cpu().float()
-    anomalies = _build_anomaly_counts(
-        int(_torch.isnan(arr_float).sum().item()),
-        int(_torch.isinf(arr_float).sum().item()),
+    tensor = arr.detach()
+    anomalies = (
+        _build_anomaly_counts(
+            int(_torch.isnan(tensor).sum().item()),
+            int(_torch.isinf(tensor).sum().item()),
+        )
+        if want_anomalies
+        else None
     )
     if not is_numeric_dtype:
         return None, anomalies
+    arr_float = tensor.cpu().float()
     stats = {
         "min": round(float(_torch.min(arr_float).item()), 6),
         "max": round(float(_torch.max(arr_float).item()), 6),
@@ -506,18 +433,19 @@ def _torch_stats_and_anomalies(
 
 
 def _jax_stats_and_anomalies(
-    arr: Any, *, is_numeric_dtype: bool
+    arr: Any, *, is_numeric_dtype: bool, want_anomalies: bool = True
 ) -> tuple[dict[str, float] | None, dict[str, int] | None]:
     import jax.numpy as jnp  # type: ignore[import-not-found]
 
     _jnp: Any = jnp
-    arr_float = arr.astype(_jnp.float32)
-    anomalies = _build_anomaly_counts(
-        int(_jnp.isnan(arr_float).sum()),
-        int(_jnp.isinf(arr_float).sum()),
+    anomalies = (
+        _build_anomaly_counts(int(_jnp.isnan(arr).sum()), int(_jnp.isinf(arr).sum()))
+        if want_anomalies
+        else None
     )
     if not is_numeric_dtype:
         return None, anomalies
+    arr_float = arr.astype(_jnp.float32)
     stats = {
         "min": round(float(_jnp.min(arr_float)), 6),
         "max": round(float(_jnp.max(arr_float)), 6),
@@ -528,23 +456,20 @@ def _jax_stats_and_anomalies(
 
 
 def _numpy_like_stats_and_anomalies(
-    arr: Any, *, module: str, is_numeric_dtype: bool
+    arr: Any, *, module: str, is_numeric_dtype: bool, want_anomalies: bool = True
 ) -> tuple[dict[str, float] | None, dict[str, int] | None]:
     import numpy as np
 
     if module.startswith("cupy"):
         arr = arr.get()
-    arr_float = arr.astype(np.float64)
-
-    anomalies = None
-    if module.startswith("numpy"):
-        anomalies = _build_anomaly_counts(
-            int(np.isnan(arr_float).sum()),
-            int(np.isinf(arr_float).sum()),
-        )
-
+    anomalies = (
+        _build_anomaly_counts(int(np.isnan(arr).sum()), int(np.isinf(arr).sum()))
+        if want_anomalies
+        else None
+    )
     if not is_numeric_dtype:
         return None, anomalies
+    arr_float = arr.astype(np.float64)
     stats = {
         "min": round(float(np.min(arr_float)), 6),
         "max": round(float(np.max(arr_float)), 6),

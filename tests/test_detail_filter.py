@@ -531,3 +531,28 @@ class TestFullLayerKeysDefinition:
         assert result.get("_capture_warnings") == ["warn1"]
         assert "env" not in result
         assert "git" not in result
+
+
+def test_crash_detail_key_order_is_the_same_in_every_process(tmp_path):
+    """CAP-11: crash detail iterated a frozenset, so key order followed PYTHONHASHSEED."""
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import json\n"
+        "from llmdebug.detail_filter import filter_snapshot\n"
+        "snap = {'name': 'n', 'timestamp_utc': 't', 'schema_version': '2.1', 'exception': {},\n"
+        "        'crash_frame_index': 0, 'llmdebug_version': 'v', 'frames': [{}], 'env': {}}\n"
+        "print(list(filter_snapshot(snap, detail='crash')))\n"
+    )
+    orders = set()
+    for seed in ("1", "2", "3", "4"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True
+        )
+        orders.add(out.stdout.strip())
+
+    assert len(orders) == 1
+    assert orders.pop().startswith("['name', 'timestamp_utc', 'schema_version'")

@@ -70,11 +70,10 @@ def filter_snapshot(snapshot: dict[str, Any], detail: DetailLevel = "crash") -> 
                 result[key] = snapshot[key]
         return result
 
-    # detail == "crash"
-    result = {}
-    for key in _LAYER_CRASH_KEYS:
-        if key in snapshot:
-            result[key] = snapshot[key]
+    # detail == "crash". Iterate the snapshot, not the frozenset: the frozenset's order
+    # depends on string hash randomization, which made the key order differ per process
+    # and broke diffs and prompt caching (CAP-11).
+    result = {key: value for key, value in snapshot.items() if key in _LAYER_CRASH_KEYS}
 
     # Trim frames to only the crash frame
     frames = snapshot.get("frames", [])

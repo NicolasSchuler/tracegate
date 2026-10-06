@@ -397,7 +397,7 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] **CAP-09, CAP-10, CAP-12, CAP-13, CAP-08** (use `linecache`), **CAP-15, CAP-21.** *(CAP-10 keeps the repr order up to 1,000 elements and uses natural-order `heapq.nsmallest` above that; it stays deterministic, unlike a capped iteration-order scan. CAP-15 needed two follow-ups: a single-connection index window, and no disk count when over the limit. The RCA-16 per-open journal-mode query cost about 0.2 ms × 3 per capture and now runs on creation and first open only. Minimal-config capture went 2.62 → 2.27 ms against the Phase 4.6 baseline, same session.)*
 
 ### 4.7. Remaining
-- [ ] **CAP-05, CAP-11, CAP-14, CAP-16, CAP-17, CAP-23.**
+- [x] **CAP-05, CAP-11, CAP-14, CAP-16, CAP-17, CAP-23.** *(CAP-16: `generate_hypotheses(max_per_pattern=3)` de-duplicates by pattern and description. The eval decision-model state passes `max_per_pattern=1`, which reproduces its old inputs exactly. CAP-17 deletes the 16 dead entries, after checking that none occurs outside user data. CAP-23 also fixes the drift: anomalies are counted on the original array, and CuPy is included.)*
 
 **Acceptance:**
 - Coverage stays at or above 95% with no regression against `quality/coverage_baseline.json`.

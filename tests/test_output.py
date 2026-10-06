@@ -607,3 +607,19 @@ def test_retention_never_deletes_paths_a_poisoned_index_names(tmp_path, kind):
     assert victim.read_text(encoding="utf-8") == "{}"
     assert target.exists()
     assert str(target) not in {row["path"] for row in list_snapshot_records(str(out_dir))}
+
+
+def test_traceback_sidecars_of_dotted_names_are_cleaned_up(tmp_path):
+    """CAP-05: six pytest-style captures with max_snapshots=2 left six orphaned sidecars."""
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=2)
+    for i in range(6):
+        write_bundle(
+            {"name": f"tests_test_mod.py_test_case_{i}", "traceback": "tb", "frames": []}, cfg
+        )
+
+    snapshots = [p for p in tmp_path.glob("*.json") if p.name != "latest.json"]
+    sidecars = list(tmp_path.glob("*.traceback.txt"))
+    assert len(snapshots) == 2
+    assert sorted(p.name for p in sidecars) == sorted(
+        p.name.removesuffix(".json") + ".traceback.txt" for p in snapshots
+    )

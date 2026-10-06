@@ -434,11 +434,11 @@ class TestDetectTypeMismatch:
         )
         hyps = generate_hypotheses(snap)
         matching = [h for h in hyps if h.pattern == "type_mismatch"]
-        assert len(matching) == 1
-        h = matching[0]
-        assert h.confidence == 0.8
-        # "str" appears in the message and is the type of "name"
-        assert "name" in h.description or "count" in h.description
+        # Both "int" and "str" appear in the message: both locals are named (CAP-16).
+        assert len(matching) == 2
+        assert all(h.confidence == 0.8 for h in matching)
+        assert {"name", "count"} <= {word for h in matching for word in h.description.split("'")}
+        assert len(generate_hypotheses(snap, max_per_pattern=1)) == 1
 
     def test_no_type_in_message_no_trigger(self) -> None:
         snap = _snap(
@@ -808,20 +808,20 @@ class TestGenerateHypotheses:
         finally:
             _detectors.remove(_boom)
 
-    def test_deduplication_keeps_first_by_pattern(self) -> None:
-        """If two detectors emit the same pattern, only the first is kept."""
+    def test_deduplication_by_pattern_and_description(self) -> None:
+        """CAP-16: distinct hypotheses of one pattern are kept (up to a cap); exact
+        duplicates once; max_per_pattern=1 keeps only the first, as before."""
         from llmdebug.hypotheses import _detectors
 
         def _duplicate_file_detector(snapshot: dict[str, Any]) -> list[Hypothesis]:
-            return [
-                Hypothesis(
-                    confidence=0.5,
-                    pattern="file_not_found",
-                    description="duplicate",
-                    evidence=(),
-                    suggestion="none",
-                )
-            ]
+            other = Hypothesis(
+                confidence=0.5,
+                pattern="file_not_found",
+                description="duplicate",
+                evidence=(),
+                suggestion="none",
+            )
+            return [other, other]
 
         _detectors.append(_duplicate_file_detector)
         try:
@@ -831,9 +831,10 @@ class TestGenerateHypotheses:
             )
             hyps = generate_hypotheses(snap)
             file_hyps = [h for h in hyps if h.pattern == "file_not_found"]
-            # Only one kept (first one wins)
-            assert len(file_hyps) == 1
-            assert file_hyps[0].confidence == 0.95  # original, not the 0.5 duplicate
+            assert [h.confidence for h in file_hyps] == [0.95, 0.5]  # exact duplicate once
+
+            first_only = generate_hypotheses(snap, max_per_pattern=1)
+            assert [h.confidence for h in first_only if h.pattern == "file_not_found"] == [0.95]
         finally:
             _detectors.remove(_duplicate_file_detector)
 

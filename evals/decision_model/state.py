@@ -269,7 +269,9 @@ def _hints_section(
     hypotheses: list[str] = []
     if snapshot is not None:
         try:
-            ranked = generate_hypotheses(dict(snapshot))
+            # One hypothesis per pattern, as before CAP-16: the decision state stays the
+            # same as in earlier runs (llmdebug's default now keeps up to three).
+            ranked = generate_hypotheses(dict(snapshot), max_per_pattern=1)
         except Exception:  # hints are optional; a detector failure must not block the decision
             ranked = []
         hypotheses = [
