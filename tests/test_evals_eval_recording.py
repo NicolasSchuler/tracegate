@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from evals import oracle_integrity
 from evals.attempt_metadata import (
     AdaptiveAttemptMetadata,
     AttemptMetadataRequest,
@@ -51,6 +52,8 @@ from evals.eval_recording import (
     _SynchronizedJsonlWriter,
 )
 from evals.eval_types import BASELINE_CONDITION_BY_NAME, CaseSpec, Condition
+from evals.oracle_integrity import oracle_policy_metadata
+from evals.run_state import _build_run_settings_fingerprint
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -566,6 +569,25 @@ class TestBuildPatcherConfig:
         )
         config = _build_patcher_config(args=args, patcher_name="command")
         assert config["patch_cmd_timeout_sec"] == 30.0
+
+    def test_oracle_policy_is_recorded_and_fingerprinted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ATT-01: the oracle policy has no CLI knob, so the records carry its version.
+
+        Two runs whose success criteria differ would otherwise share a settings
+        fingerprint and be indistinguishable.
+        """
+        args = _minimal_patcher_args(patcher="openai", cases_dir="cases")
+        config = _build_patcher_config(args=args, patcher_name="openai")
+        assert config["oracle_policy"] == oracle_policy_metadata()
+        assert config["oracle_policy"]["verdict_source"] == "junit_counts"
+        assert config["oracle_policy"]["restore_test_surface_before_verification"] is True
+        assert "conftest.py" in config["oracle_policy"]["test_surface_filenames"]
+
+        fingerprint = _build_run_settings_fingerprint(args=args, cases=[], conditions=[])
+        monkeypatch.setattr(oracle_integrity, "ORACLE_POLICY_VERSION", 2)
+        assert _build_run_settings_fingerprint(args=args, cases=[], conditions=[]) != fingerprint
 
     def test_execution_config_valueerror_swallowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ValueError from build_execution_config_from_args → swallowed."""

@@ -51,6 +51,25 @@ JUNIT_REPORT_PREFIX = ".tracegate_pytest_verdict"
 
 _IGNORED_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 
+ORACLE_POLICY_VERSION = 1
+"""Behaviour version of the oracle policy below. Bump it when the policy changes."""
+
+
+def oracle_policy_metadata() -> dict[str, object]:
+    """The effective test-oracle policy, for ``patcher_config`` and the run fingerprint.
+
+    The policy has no CLI knobs, so without this two runs whose success criteria differ
+    (restored test surface, JUnit-counted verdict, surface rule set) would share a
+    settings fingerprint and be indistinguishable in the records.
+    """
+    return {
+        "version": int(ORACLE_POLICY_VERSION),
+        "restore_test_surface_before_verification": True,
+        "verdict_source": "junit_counts",
+        "test_surface_filenames": sorted(TEST_SURFACE_FILENAMES),
+        "test_surface_shadow_dirs": sorted(_TEST_SURFACE_DIR_NAMES),
+    }
+
 
 def is_test_surface_path(relative: Path) -> bool:
     """Return whether a workdir-relative path belongs to the test oracle."""

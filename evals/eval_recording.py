@@ -69,6 +69,7 @@ from .eval_types import (
     CaseSpec,
     Condition,
 )
+from .oracle_integrity import oracle_policy_metadata
 from .policy_feature_scaling import DEFAULT_POLICY_FEATURE_SCALING_PROFILE
 
 DEFAULT_REPO_OPENAI_COMPAT_PROFILE = "lmstudio_model_yaml"
@@ -551,6 +552,9 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         "patch_verifier_infer_test_source_scope": bool(
             getattr(args, "patch_verifier_infer_test_source_scope", True)
         ),
+        # ATT-01: the oracle policy has no CLI knobs, so record its effective behaviour
+        # here; it is part of the success criteria and of the settings fingerprint.
+        "oracle_policy": oracle_policy_metadata(),
     }
     try:
         config["execution"] = _execution_config_payload(build_execution_config_from_args(args))
