@@ -1,8 +1,0 @@
-{
-  "completeness_percent": 100.0,
-  "exported_known": 657,
-  "exported_ambiguous": 0,
-  "exported_unknown": 0,
-  "source": "pyright --verifytypes --ignoreexternal",
-  "updated_at_utc": "2026-03-14T11:02:17.179471Z"
-}
