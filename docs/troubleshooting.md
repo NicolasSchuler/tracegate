@@ -166,7 +166,10 @@ logging.getLogger("llmdebug.diagnostics").setLevel(logging.DEBUG)  # also show c
 The logger doesn't propagate to the root logger, so these messages never end up in
 a snapshot's captured logs. Problems during capture itself are also stored in the
 snapshot's `_capture_warnings` field; at `DEBUG` level they are logged as
-`llmdebug: debug: capture: <message>` too.
+`llmdebug: debug: capture: <message>` too. `LLMDEBUG_DEBUG=1` (or
+`SnapshotConfig(debug=True)`) raises them to `llmdebug: warning: capture: <message>`
+so they show at the default level — on the same logger, so `ERROR` still silences
+them.
 
 ### Pytest Plugin Not Activating
 
@@ -614,8 +617,8 @@ Benchmark results are stored in `.benchmarks/capture-overhead-current.json`.
 If none of the above resolves your issue:
 
 1. **Check existing issues**: Search the repository issue tracker.
-2. **Enable debug mode**: `LLMDEBUG_DEBUG=1` prints capture diagnostics
-   to stderr.
+2. **Enable debug mode**: `LLMDEBUG_DEBUG=1` reports capture diagnostics
+   through the `llmdebug.diagnostics` logger (stderr by default).
 3. **Collect diagnostic info**:
    ```bash
    uv run python -c "

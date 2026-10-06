@@ -54,3 +54,17 @@ def emit_warning(message: str) -> None:
 def emit_debug(message: str) -> None:
     """Record a diagnostic at DEBUG level; hidden unless the ``llmdebug`` logger is lowered."""
     logger.debug("%s", message)
+
+
+def emit_capture_diagnostics(messages: list[str]) -> None:
+    """Surface buffered capture diagnostics for ``SnapshotConfig(debug=True)`` (X-07).
+
+    Capture used to write these straight to stderr, so configuring the diagnostics
+    logger neither silenced nor retargeted them. They go through the logger now, at
+    WARNING so the debug flag still shows them with the default level -- and only when
+    DEBUG is off, because each one was already logged there as it was recorded.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        return
+    for message in messages:
+        logger.warning("capture: %s", message)

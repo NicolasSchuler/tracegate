@@ -101,3 +101,63 @@ def test_reimporting_the_module_keeps_one_stderr_handler(
     reloaded = importlib.reload(warnings_module)
     reloaded.emit_warning("once")
     assert capsys.readouterr().err == "llmdebug: warning: once\n"
+
+
+def _capture_with_debug(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run one capture that records a warning, with ``SnapshotConfig(debug=True)``."""
+    import llmdebug._version as version_module
+    from llmdebug.capture import capture_exception
+    from llmdebug.config import SnapshotConfig
+
+    monkeypatch.delattr(version_module, "__version__", raising=False)
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        capture_exception(
+            "debug_diagnostics",
+            exc,
+            exc.__traceback__,
+            SnapshotConfig(
+                out_dir=str(tmp_path),
+                output_format="json",
+                locals_mode="meta",
+                include_git=False,
+                include_async_context=False,
+                capture_logs=False,
+                debug=True,
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("level", "expected_prefix"),
+    [
+        (logging.ERROR, None),
+        (logging.WARNING, "llmdebug: warning: capture: "),
+        (logging.DEBUG, "llmdebug: debug: capture: "),
+    ],
+)
+def test_debug_capture_diagnostics_follow_the_logger_level(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    level: int,
+    expected_prefix: str | None,
+) -> None:
+    """X-07: `debug=True` wrote to stderr directly, so the logger could not reach it."""
+    diagnostics = logging.getLogger(LOGGER_NAME)
+    previous = diagnostics.level
+    diagnostics.setLevel(level)
+    try:
+        _capture_with_debug(tmp_path, monkeypatch)
+    finally:
+        diagnostics.setLevel(previous)
+
+    lines = [
+        line for line in capsys.readouterr().err.splitlines() if "version detection failed" in line
+    ]
+    if expected_prefix is None:
+        assert lines == []
+    else:
+        assert len(lines) == 1
+        assert lines[0].startswith(expected_prefix)
