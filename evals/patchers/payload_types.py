@@ -157,6 +157,9 @@ class TransportMeta(TypedDict, total=False):
     transport_retry_attempts: list[dict[str, Any]]
     transport_error: str
     retry_after_sec: float
+    # LLM-22: why the retry loop stopped early, and the delay that did not fit.
+    transport_retry_stop_reason: str
+    transport_retry_delay_sec: float
 
 
 class ResponseMeta(TypedDict, total=False):
