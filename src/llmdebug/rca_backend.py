@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -11,8 +11,8 @@ from typing import Any, Literal, cast
 from filelock import FileLock
 
 from . import _json as json
+from ._warnings import emit_warning
 from .rca_store import (
-    has_any_records,
     history,
     latest_record,
     store_rca_record,
@@ -138,7 +138,7 @@ def _latest_jsonl_record(path: Path, *, session_id: str | None = None) -> dict[s
     return None
 
 
-def _append_record(path: Path, record: dict[str, Any]) -> None:
+def _append_record(path: Path, record: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with _store_lock(path):
         with path.open("a", encoding="utf-8") as handle:
@@ -163,7 +163,13 @@ def _append_record(path: Path, record: dict[str, Any]) -> None:
 
 
 def ensure_sqlite_migration(out_dir: str) -> None:
-    """Best-effort one-way migration from JSONL store to sqlite store."""
+    """Best-effort one-way migration from JSONL store to sqlite store.
+
+    JSONL records are merged by ``attempt_id`` (rows already in sqlite win), then the
+    JSONL file is rotated to ``.bak``, so the migration runs once. It used to stop as soon
+    as sqlite had any row, leaving the JSONL history unmerged and the file in place, so
+    every later read and write paid for the lock and a count query again (RCA-05).
+    """
     jsonl_path = _store_path(out_dir)
     if not jsonl_path.exists():
         return
@@ -171,29 +177,25 @@ def ensure_sqlite_migration(out_dir: str) -> None:
     with _store_lock(jsonl_path):
         if not jsonl_path.exists():
             return
-        if has_any_records(out_dir=out_dir):
-            return
 
-        records = _iter_jsonl_records(jsonl_path)
-        if records:
-            valid_records = [record for record in records if _is_valid_rca_record(record)]
-            if valid_records:
-                store_rca_records_bulk(
-                    valid_records,
-                    out_dir=out_dir,
-                    max_records=max_rca_records(),
-                )
+        valid_records = [
+            record for record in _iter_jsonl_records(jsonl_path) if _is_valid_rca_record(record)
+        ]
+        if valid_records:
+            store_rca_records_bulk(
+                valid_records,
+                out_dir=out_dir,
+                max_records=max_rca_records(),
+                keep_existing=True,
+            )
 
         backup_path = Path(f"{jsonl_path}.bak")
         try:
             backup_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        try:
             jsonl_path.replace(backup_path)
-        except OSError:
-            # Keep original JSONL if backup rotation fails.
-            pass
+        except OSError as exc:
+            # The merge is idempotent, so it is retried on the next call.
+            emit_warning(f"could not rotate {jsonl_path.name} after migration: {exc}")
 
 
 def get_rca_history(
@@ -225,7 +227,7 @@ def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, 
     return _latest_jsonl_record(_store_path(out_dir), session_id=session_id)
 
 
-def persist_rca_record(*, out_dir: str, record: dict[str, Any]) -> None:
+def persist_rca_record(*, out_dir: str, record: Mapping[str, Any]) -> None:
     """Persist one RCA record using the configured backend."""
     if _backend() == "sqlite":
         ensure_sqlite_migration(out_dir)

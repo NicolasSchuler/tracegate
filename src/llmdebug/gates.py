@@ -5,17 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from .rca_transitions import allowed_actions_for_state
+from .rca_types import RCAState
+
+__all__ = ["GateFeedback", "GateRequest", "RCAState", "evaluate_gate", "normalize_gate_mode"]
+
 GateMode = Literal["off", "soft", "strict"]
-RCAState = Literal[
-    "captured",
-    "evidence_bound",
-    "hypothesized",
-    "planned",
-    "changed",
-    "verified",
-    "resolved",
-    "stalled",
-]
 GateSeverity = Literal["info", "warning", "error"]
 
 _VALID_GATE_MODES = {"off", "soft", "strict"}
@@ -60,14 +55,26 @@ def normalize_gate_mode(mode: str | None) -> GateMode:
     return _DEFAULT_GATE_MODE
 
 
+@dataclass(frozen=True)
+class GateRequest:
+    """Inputs for one gate evaluation; see :func:`evaluate_gate` for the fields (RCA-23)."""
+
+    action: str
+    payload: dict[str, Any]
+    mode: str | None = None
+    current_state: RCAState | str | None = None
+    repeated_signature_count: int = 1
+    exploration_budget: int = 2
+    exploration_budget_remaining: int | None = None
+
+
 def _collect_gate_issues(
-    action: str,
-    payload: dict[str, Any],
-    repeated_signature_count: int,
-    exploration_budget: int,
-    exploration_budget_remaining: int | None = None,
+    request: GateRequest,
 ) -> tuple[list[str], list[str], list[str], bool]:
     """Evaluate all gate checks and return (warnings, next_required, triggered_checks, hard_failed)."""
+    action = request.action
+    payload = request.payload
+    current_state = request.current_state
     has_evidence = bool(payload.get("evidence_refs"))
     has_hypothesis = bool(payload.get("hypothesis"))
     has_plan = bool(payload.get("experiment_plan"))
@@ -121,13 +128,13 @@ def _collect_gate_issues(
                 hard=True,
             )
     effective_budget = (
-        exploration_budget_remaining
-        if exploration_budget_remaining is not None
-        else exploration_budget
+        request.exploration_budget_remaining
+        if request.exploration_budget_remaining is not None
+        else request.exploration_budget
     )
     if (
         action in {"change", "verify", "resolve"}
-        and repeated_signature_count > max(effective_budget, 1)
+        and request.repeated_signature_count > max(effective_budget, 1)
         and not hypothesis_advanced
     ):
         _add(
@@ -136,6 +143,16 @@ def _collect_gate_issues(
             "Exploration is still allowed, but RCA should be updated.",
             "Revise hypothesis or gather new evidence before repeating equivalent patch attempts.",
         )
+    # Last, so the earlier checks keep their order in warnings (RCA-06).
+    if current_state is not None:
+        allowed_actions = allowed_actions_for_state(current_state)
+        if action not in allowed_actions:
+            _add(
+                "illegal_transition",
+                f"Action '{action}' is not a transition from state '{current_state}'.",
+                f"Use one of the allowed actions: {', '.join(allowed_actions)}.",
+                hard=True,
+            )
 
     return warnings, next_required, triggered_checks, hard_failed
 
@@ -159,17 +176,12 @@ def _make_feedback(
     )
 
 
-def evaluate_gate(
-    *,
-    mode: str | None,
-    current_state: RCAState | str,
-    action: str,
-    payload: dict[str, Any],
-    repeated_signature_count: int = 1,
-    exploration_budget: int = 2,
-    exploration_budget_remaining: int | None = None,
-) -> GateFeedback:
+def evaluate_gate(request: GateRequest | None = None, /, **legacy_kwargs: Any) -> GateFeedback:
     """Evaluate whether an RCA action should proceed under the active gate policy.
+
+    Pass a :class:`GateRequest`. The keyword form
+    ``evaluate_gate(mode=..., current_state=..., action=..., payload=...)`` still works
+    but emits a ``DeprecationWarning``.
 
     Runs a series of prerequisite checks against the supplied *payload*
     (evidence, hypothesis, plan, verification status) and returns structured
@@ -197,12 +209,16 @@ def evaluate_gate(
     - ``loop_protection`` — repeated failure signature without
       hypothesis advancement triggers a warning when the exploration
       budget is exceeded.
+    - ``illegal_transition`` — the action isn't an allowed transition
+      from *current_state* (hard; checked last).
 
-    Args:
+    ``GateRequest`` fields:
         mode: Gate policy — ``"off"``, ``"soft"``, or ``"strict"``.
             ``None`` or unrecognized values default to ``"soft"``.
-        current_state: The current RCA state.  Reserved for future
-            state-aware policies; not used by current checks.
+        current_state: The current RCA state, or ``None`` for a session's
+            first attempt.  An action that isn't one of
+            :func:`allowed_actions_for_state` for it triggers the hard
+            ``illegal_transition`` check.
         action: The requested RCA action (e.g. ``"hypothesize"``,
             ``"plan"``, ``"change"``, ``"verify"``, ``"resolve"``).
         payload: Dict carrying the current attempt's data for gate
@@ -223,18 +239,24 @@ def evaluate_gate(
         ``warnings``, ``next_required`` steps, and ``triggered_checks``
         populated according to the gate policy and check results.
     """
-    _ = current_state  # Kept for future state-aware policies.
-    gate_mode = normalize_gate_mode(mode)
+    if request is None:
+        import warnings as _warnings
+
+        _warnings.warn(
+            "evaluate_gate(mode=..., current_state=..., ...) is deprecated; "
+            "pass a GateRequest instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        request = GateRequest(**legacy_kwargs)
+    elif legacy_kwargs:
+        raise TypeError("evaluate_gate() takes a GateRequest or keyword arguments, not both")
+    gate_mode = normalize_gate_mode(request.mode)
     if gate_mode == "off":
         return _make_feedback(gate_mode, [], [], [], allowed=True, severity="info")
 
-    warnings, next_required, triggered_checks, hard_failed = _collect_gate_issues(
-        action,
-        payload,
-        repeated_signature_count,
-        exploration_budget,
-        exploration_budget_remaining,
-    )
+    warnings, next_required, triggered_checks, hard_failed = _collect_gate_issues(request)
+    payload = request.payload
 
     if gate_mode == "soft":
         severity: GateSeverity = "warning" if warnings else "info"

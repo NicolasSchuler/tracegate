@@ -381,8 +381,8 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] **CAP-06:** refuse or mark redacted exports that redact nothing. **CAP-07:** atomic redactor cache. *(CAP-06 refuses: `ValueError` in the API, a usage error in the CLI. CAP-07 uses `lru_cache`; the race doesn't reproduce under the GIL, so the thread test documents the invariant.)*
 
 ### 4.3. RCA state machine
-- [ ] **RCA-01, RCA-04, RCA-06, RCA-12, RCA-05.**
-- [ ] **RCA-22:** a single `RCAState` and an `RCAAttemptRecord` TypedDict. **RCA-23:** `TransitionInputs` and `GateRequest` objects.
+- [x] **RCA-01, RCA-04, RCA-06, RCA-12, RCA-05.** *(RCA-06 enforces the transition matrix as an `illegal_transition` gate check, checked last: blocks in strict, warns in soft, first attempt exempt. RCA-12: `build_failure_signature(normalize=True)` by default, but the eval harness passes `normalize=False`, because `failure_signature_repeat` drives adaptive reveal, stagnation features and the no-progress stop. Switching the harness is the user's call. None of the 4.3 fixes changes eval behaviour or prompts.)*
+- [x] **RCA-22:** a single `RCAState` and an `RCAAttemptRecord` TypedDict. **RCA-23:** `TransitionInputs` and `GateRequest` objects. *(Also `TransitionStep` and `AttemptProgress`; the keyword form of `evaluate_gate` is deprecated, not removed. `handle_frame`/`handle_diff` stay on the arity ratchet because they mirror the MCP tool parameters.)*
 
 ### 4.4. MCP and persistence
 - [ ] **RCA-02:** root confinement per D11, and read-only tools never create files.

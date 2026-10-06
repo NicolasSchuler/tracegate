@@ -31,7 +31,7 @@ from .rca_state import (
     get_rca_history,
     get_rca_status,
 )
-from .rca_types import RCAAttemptRequest, RCASnapshotAdvanceRequest
+from .rca_types import RCAAttemptRecord, RCAAttemptRequest, RCASnapshotAdvanceRequest
 from .snapshot_types import FrameDict, SnapshotDict
 
 _logger = logging.getLogger("llmdebug.mcp")
@@ -210,7 +210,7 @@ def extract_evidence_refs(snapshot: dict[str, Any]) -> list[str]:
 def advance_rca(
     *,
     request: RCASnapshotAdvanceRequest,
-) -> dict[str, Any] | None:
+) -> RCAAttemptRecord | None:
     """Attempt an RCA state advance, returning None on failure."""
     try:
         session_id = derive_session_id(request.snapshot, out_dir=request.out_dir, fallback="mcp")
@@ -246,7 +246,7 @@ def advance_rca_with_snapshot_refs(
     *,
     request: RCASnapshotAdvanceRequest,
     extra_evidence_refs: list[str] | None = None,
-) -> dict[str, Any] | None:
+) -> RCAAttemptRecord | None:
     """Like ``advance_rca`` but auto-extracts evidence refs from the snapshot."""
     refs = extract_evidence_refs(request.snapshot) if isinstance(request.snapshot, dict) else []
     if extra_evidence_refs:

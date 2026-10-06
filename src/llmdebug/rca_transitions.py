@@ -2,29 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from dataclasses import dataclass
+from typing import Any, NamedTuple, cast, get_args
 
-RCAState = Literal[
-    "captured",
-    "evidence_bound",
-    "hypothesized",
-    "planned",
-    "changed",
-    "verified",
-    "resolved",
-    "stalled",
-]
-RCAAction = Literal[
-    "capture",
-    "bind_evidence",
-    "hypothesize",
-    "plan",
-    "change",
-    "verify",
-    "resolve",
-]
+from .rca_types import RCAAction, RCAState
+
+__all__ = ["RCAAction", "RCAState"]  # re-exported: defined once in rca_types (RCA-22)
 
 DEFAULT_STATE: RCAState = "captured"
+_VALID_STATES: frozenset[str] = frozenset(get_args(RCAState))
 _VALID_ACTIONS: set[str] = {
     "capture",
     "bind_evidence",
@@ -123,9 +109,18 @@ def merge_evidence_refs(
     return merged
 
 
-def resolve_previous_values(
-    previous: dict[str, Any] | None,
-) -> tuple[str, str, str, Any, Any, str]:
+class PreviousAttemptValues(NamedTuple):
+    """Carry-forward inputs read from the previous attempt record."""
+
+    state: str
+    hypothesis: str
+    experiment_plan: str
+    evidence_refs: list[Any]
+    verification_result: Any
+    change_summary: str
+
+
+def resolve_previous_values(previous: dict[str, Any] | None) -> PreviousAttemptValues:
     """Extract previous attempt values with stable defaults."""
     previous_state = str(previous.get("state")) if previous else DEFAULT_STATE
     previous_hypothesis = str(previous.get("hypothesis") or "") if previous else ""
@@ -141,13 +136,13 @@ def resolve_previous_values(
     previous_change_summary = (
         str(previous.get("proposed_change_summary") or "") if isinstance(previous, dict) else ""
     )
-    return (
-        previous_state,
-        previous_hypothesis,
-        previous_plan,
-        previous_refs,
-        previous_verification,
-        previous_change_summary,
+    return PreviousAttemptValues(
+        state=previous_state,
+        hypothesis=previous_hypothesis,
+        experiment_plan=previous_plan,
+        evidence_refs=previous_refs,
+        verification_result=previous_verification,
+        change_summary=previous_change_summary,
     )
 
 
@@ -170,20 +165,66 @@ def resolve_attempt_values(
     previous_hypothesis: str,
     previous_plan: str,
     previous_change_summary: str,
-    previous_verification: Any,
     hypothesis: str | None,
     experiment_plan: str | None,
     proposed_change_summary: str | None,
-    verification_result: dict[str, Any] | None,
-) -> tuple[str, str, Any, str]:
-    """Resolve effective attempt values (input overrides previous)."""
+) -> tuple[str, str, str]:
+    """Resolve effective text values (input overrides previous)."""
     hypothesis_value = (hypothesis or "").strip() or previous_hypothesis
     plan_value = (experiment_plan or "").strip() or previous_plan
-    verification_value = (
-        verification_result if verification_result is not None else previous_verification
-    )
     proposed_change_value = (proposed_change_summary or "").strip() or previous_change_summary
-    return hypothesis_value, plan_value, verification_value, proposed_change_value
+    return hypothesis_value, plan_value, proposed_change_value
+
+
+def carry_forward_verification(
+    previous_verification: Any,
+    verification_result: dict[str, Any] | None,
+    *,
+    same_signature: bool,
+    action: RCAAction,
+) -> Any:
+    """Return the verification result that applies to this attempt.
+
+    A new result always wins. The previous one describes the failure and the code it ran
+    against, so it carries forward only while the failure signature is unchanged and no
+    new change is being applied; otherwise a stale ``pass`` would satisfy the strict
+    ``resolve`` gate for a different failure (RCA-01).
+    """
+    if verification_result is not None:
+        return verification_result
+    if same_signature and action != "change":
+        return previous_verification
+    return None
+
+
+class AttemptProgress(NamedTuple):
+    """Repeat and progression signals of the current attempt versus the previous one."""
+
+    same_signature: bool
+    repeat_count: int
+    hypothesis_delta: str
+    plan_advanced: bool
+    hypothesis_advanced: bool
+
+
+@dataclass(frozen=True)
+class TransitionInputs:
+    """The requested action and how the attempt progressed (RCA-23)."""
+
+    action: RCAAction
+    progress: AttemptProgress
+    stall_threshold: int
+
+
+@dataclass(frozen=True)
+class TransitionStep:
+    """One row of ``transition_history`` (RCA-23)."""
+
+    action: RCAAction
+    from_state: str
+    to_state: RCAState
+    gate_allowed: bool
+    gate_mode: str
 
 
 def derive_attempt_progress(
@@ -194,7 +235,7 @@ def derive_attempt_progress(
     hypothesis_value: str,
     previous_plan: str,
     plan_value: str,
-) -> tuple[bool, int, str, bool, bool]:
+) -> AttemptProgress:
     """Compute repeat counts and progression signals for current attempt."""
     same_signature = (
         bool(previous) and str(previous.get("failure_signature") or "") == failure_signature
@@ -203,7 +244,13 @@ def derive_attempt_progress(
     hypothesis_delta = classify_hypothesis_delta(previous_hypothesis, hypothesis_value)
     plan_advanced = bool(plan_value) and plan_value != previous_plan
     hypothesis_advanced = hypothesis_delta in {"added", "refined", "replaced"}
-    return same_signature, repeat_count, hypothesis_delta, plan_advanced, hypothesis_advanced
+    return AttemptProgress(
+        same_signature=same_signature,
+        repeat_count=repeat_count,
+        hypothesis_delta=hypothesis_delta,
+        plan_advanced=plan_advanced,
+        hypothesis_advanced=hypothesis_advanced,
+    )
 
 
 def resolve_target_state(
@@ -215,30 +262,25 @@ def resolve_target_state(
     target_state = _STATE_TRANSITIONS.get(normalized_action, "evidence_bound")
     if gate_allowed:
         return target_state
-    return cast(
-        RCAState,
-        previous_state if previous_state in _STATE_TRANSITIONS.values() else "captured",
-    )
+    # A denied action keeps any valid state, including "stalled", which no action targets
+    # (RCA-04): resetting it to "captured" dropped the stall marker.
+    return cast(RCAState, previous_state if previous_state in _VALID_STATES else DEFAULT_STATE)
 
 
 def apply_stall_rule(
+    inputs: TransitionInputs,
     *,
     target_state: RCAState,
     gate_warnings: list[str],
-    same_signature: bool,
-    repeat_count: int,
-    stall_threshold: int,
-    hypothesis_advanced: bool,
-    plan_advanced: bool,
-    normalized_action: RCAAction,
 ) -> tuple[RCAState, list[str]]:
     """Apply stall detection for repeated signatures without progression."""
+    progress = inputs.progress
     if (
-        same_signature
-        and repeat_count >= max(stall_threshold, 2)
-        and not hypothesis_advanced
-        and not plan_advanced
-        and normalized_action in {"bind_evidence", "change", "verify"}
+        progress.same_signature
+        and progress.repeat_count >= max(inputs.stall_threshold, 2)
+        and not progress.hypothesis_advanced
+        and not progress.plan_advanced
+        and inputs.action in {"bind_evidence", "change", "verify"}
     ):
         gate_warnings.append(
             "Repeated failure signature without hypothesis/plan advancement; state marked stalled."
@@ -248,14 +290,10 @@ def apply_stall_rule(
 
 
 def build_transition_history(
-    *,
     previous: dict[str, Any] | None,
+    *,
     now: str,
-    normalized_action: RCAAction,
-    previous_state: str,
-    target_state: RCAState,
-    gate_allowed: bool,
-    gate_mode: str,
+    step: TransitionStep,
 ) -> list[dict[str, Any]]:
     """Append one transition row while capping history length."""
     previous_history_raw = (
@@ -271,11 +309,11 @@ def build_transition_history(
     transition_history.append(
         {
             "at": now,
-            "action": normalized_action,
-            "from": previous_state,
-            "to": target_state,
-            "gate_allowed": gate_allowed,
-            "gate_mode": gate_mode,
+            "action": step.action,
+            "from": step.from_state,
+            "to": step.to_state,
+            "gate_allowed": step.gate_allowed,
+            "gate_mode": step.gate_mode,
         }
     )
     if len(transition_history) > 32:

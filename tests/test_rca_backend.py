@@ -74,19 +74,43 @@ def test_jsonl_roundtrip_status_and_history(tmp_path: Path, monkeypatch) -> None
     assert len(lines) == 2
 
 
-def test_sqlite_migration_guard_skips_when_rows_exist(tmp_path: Path, monkeypatch) -> None:
+def test_sqlite_migration_merges_when_rows_exist(tmp_path: Path, monkeypatch) -> None:
+    """RCA-05: JSONL history is merged by attempt_id (sqlite wins) and the file is rotated."""
     monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
     out_dir = str(tmp_path)
 
-    persist_rca_record(out_dir=out_dir, record=_record("sql-1"))
+    persist_rca_record(out_dir=out_dir, record=_record("shared", state="verified"))
 
     jsonl_path = tmp_path / "rca_attempts.jsonl"
-    jsonl_path.write_text(json.dumps(_record("jsonl-1")) + "\n", encoding="utf-8")
+    jsonl_rows = [
+        _record("jsonl-1", updated_at="2026-02-27T09:00:00Z"),
+        _record("shared", state="captured"),
+    ]
+    jsonl_path.write_text("\n".join(json.dumps(row) for row in jsonl_rows) + "\n", "utf-8")
 
     history = get_rca_history(out_dir=out_dir, session_id="sess-a", limit=10)
-    assert history
-    assert jsonl_path.exists()
-    assert not Path(f"{jsonl_path}.bak").exists()
+
+    assert {row["attempt_id"] for row in history} == {"shared", "jsonl-1"}
+    assert next(row for row in history if row["attempt_id"] == "shared")["state"] == "verified"
+    assert not jsonl_path.exists()
+    assert Path(f"{jsonl_path}.bak").exists()
+
+
+def test_sqlite_migration_runs_once(tmp_path: Path, monkeypatch) -> None:
+    import llmdebug.rca_backend as backend
+
+    monkeypatch.setenv("LLMDEBUG_RCA_BACKEND", "sqlite")
+    out_dir = str(tmp_path)
+    persist_rca_record(out_dir=out_dir, record=_record("sql-1"))
+    (tmp_path / "rca_attempts.jsonl").write_text(json.dumps(_record("j1")) + "\n", "utf-8")
+    get_rca_history(out_dir=out_dir, limit=10)
+
+    calls: list[object] = []
+    monkeypatch.setattr(backend, "_store_lock", lambda path: calls.append(path))
+    get_rca_history(out_dir=out_dir, limit=10)
+    persist_rca_record(out_dir=out_dir, record=_record("sql-2"))
+
+    assert calls == []
 
 
 def test_sqlite_migration_filters_invalid_records_and_applies_retention(

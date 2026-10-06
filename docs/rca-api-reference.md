@@ -132,9 +132,16 @@ The gate system evaluates these prerequisites before allowing a transition:
 | `plan_required` | `change`, `verify`, `resolve` without experiment plan | No | Missing experiment plan. |
 | `verification_required` | `resolve` without `verification_result.status == "pass"` | Yes | Cannot resolve without passing verification. |
 | `loop_protection` | `change`, `verify`, `resolve` with repeated signature exceeding exploration budget and no hypothesis change | No | Failure signature repeated without hypothesis change. |
+| `illegal_transition` | An action that isn't an edge out of the current state in the diagram above (`allowed_actions`). Not checked on a session's first attempt. Checked last. | Yes | Action is not a transition from the current state. |
 
 **Hard fail** checks block the transition in `strict` mode. In `soft` mode,
 all checks produce warnings but never block.
+
+Hypothesis, plan, change summary and evidence carry forward from the previous attempt
+when a request omits them. A previous `verification_result` carries forward only while
+the failure signature is unchanged and the action is not `change`: a result verified
+one failure, or the code before a new change, so it can't satisfy `verification_required`
+for another.
 
 ### Strict Mode Override
 
@@ -197,7 +204,7 @@ def advance_rca_attempt(
     *,
     out_dir: str,
     request: RCAAttemptRequest,
-) -> dict[str, Any]:
+) -> RCAAttemptRecord:
 ```
 
 **Parameters:**
@@ -207,7 +214,7 @@ def advance_rca_attempt(
 | `out_dir` | `str` | — | Snapshot output directory (e.g. `".llmdebug"`). |
 | `request` | `RCAAttemptRequest` | — | Grouped attempt inputs: `session_id`, `action`, `failure_signature`, `evidence_refs`, optional hypothesis/plan/change summary, verification result, and gate settings. |
 
-**Returns:** `dict[str, Any]` — the persisted attempt record containing:
+**Returns:** `RCAAttemptRecord` (a `TypedDict` in `llmdebug.rca_types`) — the persisted attempt record containing:
 
 ```python
 {
@@ -321,6 +328,7 @@ def build_failure_signature(
     *,
     stdout: str = "",
     stderr: str = "",
+    normalize: bool = True,
 ) -> str:
 ```
 
@@ -328,17 +336,24 @@ def build_failure_signature(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `snapshot` | `dict \| None` | — | Parsed snapshot dict. Preferred source — uses exception type, crash frame location, and pytest nodeid. |
-| `stdout` | `str` | `""` | Fallback: raw stdout text (used when snapshot is `None`). |
-| `stderr` | `str` | `""` | Fallback: raw stderr text (used when snapshot is `None`). |
+| `snapshot` | `dict \| None` | — | Parsed snapshot dict. Preferred source — uses exception type and message, crash frame location, and pytest nodeid. |
+| `stdout` | `str` | `""` | Fallback: raw stdout text (used when snapshot is `None`); its last three non-empty lines are hashed. |
+| `stderr` | `str` | `""` | Fallback: raw stderr text (used when snapshot is `None`), preferred over `stdout`. |
+| `normalize` | `bool` | `True` | Replace run-specific values in the message or output tail before hashing: UUIDs, `0x…` addresses, absolute paths (such as `tmp_path`), hex ids of 12+ characters, and numbers become `<uuid>`, `<addr>`, `<path>`, `<hex>` and `<n>`. `False` gives the raw signature used before this option existed. |
 
 **Returns:** A string of the form `"ExceptionType:hexdigest"` (snapshot) or
-`"TextFailure:hexdigest"` (text fallback). The hex digest is a truncated
-SHA-256 (16 chars) of the canonicalized failure data.
+`"TextFailure:hexdigest"` (text fallback). The hex digest is the first 16
+characters of an xxh64 hash of the canonicalized failure data.
 
-**Signature stability:** Two calls with the same exception type, crash
-location, and nodeid produce the same signature. This is how repeat
-detection and stall detection work.
+**Signature stability:** Two calls with the same exception type, normalized
+message, crash location (file, line, function), and nodeid produce the same
+signature. This is how repeat detection and stall detection work. Without
+normalization, a message that embeds a memory address, a `tmp_path` or a
+count made every attempt look new, so stall detection rarely fired. The
+crash line is still part of the signature, so an edit that moves the
+failing line starts a new signature. The eval harness passes
+`normalize=False` to keep its adaptive conditions comparable with earlier
+runs.
 
 ---
 
@@ -381,27 +396,34 @@ RCA engine.
 **Module:** `llmdebug.gates`
 
 ```python
-def evaluate_gate(
-    *,
-    mode: str | None,
-    current_state: RCAState | str,
-    action: str,
-    payload: dict[str, Any],
-    repeated_signature_count: int = 1,
-    exploration_budget: int = 2,
-) -> GateFeedback:
+@dataclass(frozen=True)
+class GateRequest:
+    action: str
+    payload: dict[str, Any]
+    mode: str | None = None
+    current_state: RCAState | str | None = None
+    repeated_signature_count: int = 1
+    exploration_budget: int = 2
+    exploration_budget_remaining: int | None = None
+
+
+def evaluate_gate(request: GateRequest) -> GateFeedback:
 ```
 
-**Parameters:**
+The keyword form `evaluate_gate(mode=..., current_state=..., action=..., payload=...)`
+still works but emits a `DeprecationWarning`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `mode` | `str \| None` | — | Gate mode. `None` defaults to `"soft"`. |
-| `current_state` | `str` | — | Current RCA state before the transition. |
+**`GateRequest` fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
 | `action` | `str` | — | Requested RCA action. |
 | `payload` | `dict` | — | Action payload with keys: `evidence_refs`, `hypothesis`, `experiment_plan`, `verification_result`, `exploratory`, `override_reason`, `hypothesis_advanced`. |
+| `mode` | `str \| None` | `None` | Gate mode. `None` defaults to `"soft"`. |
+| `current_state` | `str \| None` | `None` | Current RCA state before the transition; `None` for a session's first attempt, which skips `illegal_transition`. |
 | `repeated_signature_count` | `int` | `1` | How many times the current failure signature has been seen. |
 | `exploration_budget` | `int` | `2` | How many repeats are tolerated before `loop_protection` fires. |
+| `exploration_budget_remaining` | `int \| None` | `None` | Budget left after earlier repeats; falls back to `exploration_budget`. |
 
 **Returns:** A [`GateFeedback`](#gatefeedback-object) instance.
 
@@ -559,15 +581,17 @@ The gate system is designed for composition. To customize gate logic:
    `override_reason` to bypass strict gates on individual actions without
    changing the global mode.
 
-3. **Wrap `evaluate_gate()`** — Call `evaluate_gate()` directly with a
-   custom payload to implement domain-specific gate checks before calling
-   the engine.
+3. **Wrap `evaluate_gate()`** — Call `evaluate_gate(GateRequest(...))` directly
+   with a custom payload to implement domain-specific gate checks before
+   calling the engine.
 
 ### Adding New States
 
-States and transitions are defined in `rca_transitions.py`:
+The `RCAState` and `RCAAction` literals and the `RCAAttemptRecord` TypedDict are
+defined once, in `rca_types.py` (`gates` and `rca_transitions` re-export them).
+Transitions are defined in `rca_transitions.py`:
 
-1. Add the new state to the `RCAState` literal type.
+1. Add the new state to the `RCAState` literal type in `rca_types.py`.
 2. If the state is reached by a new action, add the action to `RCAAction`
    and `_VALID_ACTIONS`, and map it in `_STATE_TRANSITIONS`.
 3. Update `allowed_actions_for_state()` to define which actions are valid
