@@ -1,4 +1,4 @@
-"""The golden-run harness itself: isolation, pinned environment and offline tokenizer.
+"""The golden-run harness itself: normalization, isolation, pinned environment, tokenizer.
 
 These guard ``tests/golden_eval/runner.py``, which the golden fixture runs
 (``tests/test_evals_golden_runs.py``) depend on. They are fast and run no scenario.
@@ -6,6 +6,7 @@ These guard ``tests/golden_eval/runner.py``, which the golden fixture runs
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
@@ -159,3 +160,134 @@ def test_run_scenarios_runs_a_repeated_scenario_once(
 
     assert runner.run_scenarios(["native_default", "native_default"], tmp_path) == {}
     assert started == ["native_default"]
+
+
+# ---------------------------------------------------------------------------
+# Normalization: only measurements may be replaced by placeholders.
+# ---------------------------------------------------------------------------
+
+
+def _normalized(record: dict[str, object], tmp_path: Path) -> dict[str, object]:
+    normalizer = runner.Normalizer(tmp_path, 47000)
+    result = normalizer.value(record)
+    assert isinstance(result, dict)
+    return result
+
+
+def test_normalization_distinguishes_budgets_coefficients_and_counts(tmp_path: Path) -> None:
+    """A refactor that miscomputes a deadline must not produce identical golden output."""
+    baseline: dict[str, object] = {
+        "attempt_shared_propose_budget_sec": 330.0,
+        "propose_budget_sec": 300.0,
+        "effective_timeout_sec": 120.0,
+        "openai_transport_retry_backoff_max_sec": 8.0,
+        "adaptive_reward_mu_latency": 0.0,
+        "adaptive_budget_reward_latency_scale": 10.0,
+        "adaptive_budget_selected_time_attempts": 1,
+        "adaptive_budget_selected_time_rate": 1.0,
+        "budget_can_raise_time": 1.0,
+    }
+    for key, altered in (
+        ("attempt_shared_propose_budget_sec", 60.0),
+        ("propose_budget_sec", 30.0),
+        ("effective_timeout_sec", 5.0),
+        ("openai_transport_retry_backoff_max_sec", 0.0),
+        ("adaptive_reward_mu_latency", 0.25),
+        ("adaptive_budget_reward_latency_scale", 1.0),
+        ("adaptive_budget_selected_time_attempts", 3),
+        ("adaptive_budget_selected_time_rate", 0.5),
+        ("budget_can_raise_time", 0.0),
+    ):
+        changed = {**baseline, key: altered}
+        assert _normalized(baseline, tmp_path) != _normalized(changed, tmp_path), key
+        assert _normalized(changed, tmp_path)[key] == altered
+
+
+def test_normalization_replaces_measured_times(tmp_path: Path) -> None:
+    """Wall-clock measurements differ on every run, so they carry no information."""
+    measured: dict[str, object] = {
+        "propose_duration_sec": 1.23,
+        "attempt_wall_clock_sec": 4.56,
+        "max_propose_sec": 329.998,
+        "attempt_shared_propose_call_budget_sec": 329.998,
+        "started_at_utc": "2026-10-06T07:54:03Z",
+        "timestamp_utc": "2026-10-06T07:54:03.716292Z",
+        "adaptive_online_dm_latency_ms": 12.5,
+    }
+    normalized = _normalized(measured, tmp_path)
+    assert set(normalized.values()) == {"<T>"}
+    # Missing measurements stay missing.
+    assert _normalized({"propose_duration_sec": None}, tmp_path) == {"propose_duration_sec": None}
+
+
+def test_fixed_times_only_rewrites_measured_times() -> None:
+    """The analysis tools see stable inputs without losing the configured values."""
+    record = {
+        "propose_duration_sec": 1.23,
+        "started_at_utc": "2026-10-06T07:54:03Z",
+        "propose_budget_sec": 300.0,
+        "adaptive_budget_selected_time_attempts": 2,
+    }
+    assert runner._fixed_times(record) == {
+        "propose_duration_sec": 1.0,
+        "started_at_utc": "2026-01-01T00:00:00Z",
+        "propose_budget_sec": 300.0,
+        "adaptive_budget_selected_time_attempts": 2,
+    }
+
+
+def test_token_estimates_distinguish_numeric_from_missing(tmp_path: Path) -> None:
+    """A regression that drops the estimates must not match the golden output."""
+    numeric = _normalized(
+        {
+            "adaptive_toon_encoded_tokens_estimate": 1200,
+            "adaptive_toon_json_tokens_estimate": 1500,
+            "adaptive_toon_savings_tokens_estimate": 300,
+            "adaptive_toon_savings_tokens_frac": 0.2,
+        },
+        tmp_path,
+    )
+    missing = _normalized(
+        {
+            "adaptive_toon_encoded_tokens_estimate": None,
+            "adaptive_toon_json_tokens_estimate": None,
+            "adaptive_toon_savings_tokens_estimate": None,
+            "adaptive_toon_savings_tokens_frac": None,
+        },
+        tmp_path,
+    )
+    assert set(numeric.values()) == {runner._SIZE_ESTIMATE_PLACEHOLDER}
+    assert set(missing.values()) == {None}
+    assert numeric != missing
+
+
+def test_measured_and_configured_time_keys_are_disjoint() -> None:
+    assert not runner._MEASURED_TIME_KEYS & runner._CONFIGURED_TIME_KEYS
+
+
+def test_every_time_like_key_in_the_golden_files_is_classified() -> None:
+    """An unclassified time-like key is compared, so it would make the goldens flaky."""
+    unclassified: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lowered = str(key).lower()
+                if (
+                    runner._TIME_KEY.search(lowered)
+                    and lowered not in runner._MEASURED_TIME_KEYS
+                    and lowered not in runner._CONFIGURED_TIME_KEYS
+                ):
+                    unclassified.add(str(key))
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for name in sorted(runner.SCENARIOS):
+        walk(json.loads(runner.read_golden(name)))
+
+    assert not unclassified, (
+        "classify these in tests/golden_eval/runner.py as measurements "
+        f"or as configured values: {sorted(unclassified)}"
+    )

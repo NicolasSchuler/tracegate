@@ -245,16 +245,133 @@ def _systemone_answers(body: dict[str, Any]) -> dict[str, Any]:
 
 # --- normalization ----------------------------------------------------------------------
 
+# Every record key that reads like a time. Each one must be classified below: the
+# regex alone also matches configured budgets, reward coefficients and attempt counts,
+# and normalizing those away made a refactor that miscomputes an effective deadline
+# produce identical golden output.
 _TIME_KEY = re.compile(
     r"(^|_)(sec|secs|seconds|ms|ns|ts|time|timestamp|duration|elapsed|latency|at|eta)"
     r"(_[a-z0-9]+)?$"
 )
-_TIME_KEY_EXCEPTIONS = frozenset(
+# Measurements: wall-clock durations, latencies and timestamps, replaced by a
+# placeholder because they differ on every run.
+_MEASURED_TIME_KEYS = frozenset(
     {
-        # Configuration values, not measurements.
-        "timeout_sec",
+        "adaptive_budget_local_wall_sec",
+        "adaptive_budget_mean_local_wall_sec",
+        "adaptive_budget_reward_latency_penalty",
+        "adaptive_controller_prepare_sec",
+        "adaptive_controller_sidecar_build_sec",
+        "adaptive_controller_sidecar_write_sec",
+        "adaptive_controller_summarizer_sec",
+        "adaptive_online_dm_latency_ms",
+        "adaptive_online_local_wall_sec",
+        "adaptive_online_mean_local_wall_sec",
+        "adaptive_online_reward_latency_penalty",
+        "after_duration_sec",
+        "apply_duration_sec",
+        "attempt_shared_propose_budget_remaining_sec",
+        "attempt_shared_propose_call_budget_sec",
+        "attempt_wall_clock_sec",
+        "baseline_case_conversion_sec",
+        "baseline_eval_sec",
+        "baseline_internal_total_sec",
+        "baseline_orchestration_sec",
+        "baseline_sidecar_load_sec",
+        "before_duration_sec",
+        "compact_context_duration_sec",
+        "context_compaction_llm_sec",
+        "context_compaction_total_sec",
+        "created_at_utc",
+        "cumulative_runtime_sec",
+        "duration_sec",
+        "generated_at_utc",
+        "json_generation_duration_sec",
+        "latency_ms",
+        "llm_total_sec",
+        "llmdebug_total_sec",
+        "local_wall_sec",
+        "max_propose_sec",
+        "mean_runtime_sec",
+        "no_diff_recovery_duration_sec",
+        "overhead_sec",
+        "patch_apply_sec",
+        "patch_verifier_recovery_duration_sec",
+        "plan_patch_duration_sec",
+        "prompt_assembly_sec",
+        "propose_duration_sec",
+        "recovery_llm_sec",
+        "recovery_total_sec",
+        "remaining_budget_sec",
+        "request_context_duration_sec",
+        "retry_plan_then_patch_duration_sec",
+        "reward_latency_penalty",
+        "runner_forced_patch_build_sec",
+        "saved_at_utc",
+        "server_ready_probe_duration_sec",
+        "snapshot_read_sec",
+        "stage_a_context_fulfillment_sec",
+        "stage_a_llm_sec",
+        "stage_a_total_sec",
+        "stage_b_llm_sec",
+        "started_at_utc",
+        "syntax_preflight_sec",
+        "test_after_sec",
+        "test_before_sec",
+        "time",
+        "timestamp_utc",
+        "transport_recovery_wait_sec",
     }
 )
+# Configured budgets and deadlines, reward coefficients, attempt counts and the rates
+# derived from them: deterministic, behaviour-defining, and therefore compared.
+_CONFIGURED_TIME_KEYS = frozenset(
+    {
+        "adaptive_budget_applied_time_attempts",
+        "adaptive_budget_applied_time_rate",
+        "adaptive_budget_reward_eta_progress",
+        "adaptive_budget_reward_latency_scale",
+        "adaptive_budget_reward_mu_latency",
+        "adaptive_budget_selected_time_attempts",
+        "adaptive_budget_selected_time_rate",
+        "adaptive_controller_lambda_rlm_timeout_sec",
+        "adaptive_decision_model_timeout_sec",
+        "adaptive_online_reward_eta_progress",
+        "adaptive_online_reward_latency_scale",
+        "adaptive_online_reward_mu_latency",
+        "adaptive_reward_eta_progress",
+        "adaptive_reward_latency_scale",
+        "adaptive_reward_mu_latency",
+        "attempt_shared_propose_budget_base_sec",
+        "attempt_shared_propose_budget_sec",
+        "base_propose_budget_sec",
+        "budget_can_raise_time",
+        "effective_timeout_sec",
+        "openai_max_propose_sec",
+        "openai_timeout_sec",
+        "openai_transport_recovery_max_wait_sec",
+        "openai_transport_recovery_poll_sec",
+        "openai_transport_retry_backoff_base_sec",
+        "openai_transport_retry_backoff_max_sec",
+        "propose_budget_sec",
+        "timeout_sec",
+        "transport_retry_backoff_base_sec",
+        "transport_retry_backoff_max_sec",
+    }
+)
+
+
+def is_measured_time(key: str) -> bool:
+    """Whether *key*'s value is a measurement that must be normalized away.
+
+    An allowlist, not a pattern: an unclassified time-like key stays in the comparison,
+    so a new budget or coefficient cannot silently escape the lock. A new measurement
+    makes two runs differ instead, and ``test_every_time_like_key_is_classified`` names
+    it before that happens.
+    """
+    return bool(key) and key.lower() in _MEASURED_TIME_KEYS
+
+
 _PYTEST_TIMING = re.compile(r"\b(passed|failed|error|errors|skipped)( in) \d+(\.\d+)?s\b")
 _ADDRESS = re.compile(r"\b0x[0-9a-fA-F]{6,}\b")
 _VERDICT_FILE = re.compile(r"(tracegate_pytest_verdict_)[0-9a-f]{32}")
@@ -266,6 +383,7 @@ _RANDOM_ID_KEY = re.compile(r"decision_ids?$")
 # vary by a few characters per process, and these size estimates follow.
 _OBJECT_ID_KEY = re.compile(r"^\d{9,}$")
 _SIZE_ESTIMATE_KEY = re.compile(r"^adaptive_toon_(encoded_tokens|json_tokens|savings_tokens)")
+_SIZE_ESTIMATE_PLACEHOLDER = "<SIZE>"
 
 
 class Normalizer:
@@ -301,10 +419,15 @@ class Normalizer:
             return self.alias(value)
         if key == "python_version" and isinstance(value, str):
             return ".".join(value.split(".")[:2])
-        if key and key not in _TIME_KEY_EXCEPTIONS and _TIME_KEY.search(key.lower()):
-            return "<T>" if isinstance(value, (int, float, str)) and value is not True else value
+        if is_measured_time(key):
+            if isinstance(value, bool) or value is None:
+                return value
+            return "<T>" if isinstance(value, (int, float, str)) else value
         if _SIZE_ESTIMATE_KEY.search(key):
-            return "<SIZE>"
+            # Missingness is a recording regression, so None is kept; the magnitude is
+            # not comparable because the encoded snapshot holds pytest's own object
+            # reprs, whose length varies by a few characters per process.
+            return value if value is None else _SIZE_ESTIMATE_PLACEHOLDER
         if isinstance(value, dict):
             return {
                 (f"<OBJID{index}>" if _OBJECT_ID_KEY.match(str(k)) else str(k)): self.value(
@@ -321,7 +444,7 @@ class Normalizer:
 
 def _fixed_times(value: Any, key: str = "") -> Any:
     """Replace measured times by constants so the analysis tools see stable inputs."""
-    if key and key not in _TIME_KEY_EXCEPTIONS and _TIME_KEY.search(key.lower()):
+    if is_measured_time(key):
         if isinstance(value, bool) or value is None:
             return value
         if isinstance(value, (int, float)):
