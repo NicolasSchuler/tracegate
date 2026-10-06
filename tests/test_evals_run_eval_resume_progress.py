@@ -1592,7 +1592,7 @@ def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
     tmp_path, monkeypatch, capsys
 ) -> None:
     """A v6-or-older run carries no settings fingerprint, so it cannot be resumed into a
-    v7 run — not even with `--allow-settings-drift` (codex 3-1#4)."""
+    v7 run — not even with `--allow-settings-drift` (codex 3-1#4, 1d#4)."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
@@ -1631,10 +1631,11 @@ def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
         "1",
     ]
 
+    # The record-schema guard (codex 1d#4) rejects the v6 file before the fingerprint check.
     assert _run_eval_main(argv) != 0
-    assert "missing run_settings_fingerprint" in capsys.readouterr().out
+    assert "predates this harness" in capsys.readouterr().out
     assert _run_eval_main(["--allow-settings-drift", *argv]) != 0
-    assert "missing run_settings_fingerprint" in capsys.readouterr().out
+    assert "predates this harness" in capsys.readouterr().out
 
 
 def test_run_eval_resume_continues_after_permitted_settings_drift(
