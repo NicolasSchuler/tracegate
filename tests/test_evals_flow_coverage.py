@@ -1455,9 +1455,11 @@ class TestEvalSummaryCoverage:
     def test_select_adaptive_stats_fallback(self) -> None:
         from evals.eval_summary import _select_adaptive_stats
 
-        matrix = [{"condition": "custom_adaptive_v2"}]
+        # The condition-family registry decides, not the substring "adaptive".
+        matrix = [{"condition": "custom_adaptive_v2"}, {"condition": "layered_adaptive_gated"}]
         cond, _stats = _select_adaptive_stats(matrix)
-        assert cond == "custom_adaptive_v2"
+        assert cond == "layered_adaptive_gated"
+        assert _select_adaptive_stats([{"condition": "custom_adaptive_v2"}]) == (None, None)
 
     def test_fmt_signed_percent_none(self) -> None:
         from evals.eval_summary import _fmt_signed_percent

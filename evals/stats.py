@@ -1,12 +1,16 @@
 """Statistical analysis for paired binary A/B evaluation results.
 
-Provides McNemar's test (exact binomial or chi-squared), Cohen's h effect
-size, bootstrap confidence intervals, Holm-Bonferroni correction, post-hoc
-power analysis, and majority-vote aggregation for multi-run eval data.
+Provides McNemar's test (exact binomial), Cohen's h effect size, bootstrap
+confidence intervals, Holm-Bonferroni correction, post-hoc power analysis, and
+majority-vote aggregation for multi-run eval data.
 
-No hard dependency on scipy — uses chi-squared approximation when scipy is
-unavailable, with optional exact binomial when scipy *is* installed and
-discordant pairs < 25.
+Conventions shared by every eval report (2026-10-04 review, Phase 2.1):
+
+- McNemar is always the exact binomial test (``scipy.stats.binomtest``); a result
+  is significant when ``p <= alpha`` (STA-23).
+- Every bootstrap is the percentile method over a seeded ``random.Random``;
+  ``DEFAULT_BOOTSTRAP_SEED`` is the default seed (STA-05, STA-07).
+- p-values are printed with :func:`format_p_value` (STA-15).
 """
 
 from __future__ import annotations
@@ -14,6 +18,12 @@ from __future__ import annotations
 import math
 import random
 from typing import Any
+
+from scipy.stats import binomtest
+
+DEFAULT_ALPHA = 0.05
+DEFAULT_BOOTSTRAP_SEED = 42
+BOOTSTRAP_METHOD = "percentile"
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -28,14 +38,19 @@ NumericPair = tuple[float, float]  # (condition_A_value, condition_B_value)
 # ---------------------------------------------------------------------------
 
 
-def mcnemar_test(pairs: list[BinaryPair]) -> dict[str, Any]:
-    """McNemar's test for paired binary outcomes.
+def mcnemar_test(pairs: list[BinaryPair], *, alpha: float = DEFAULT_ALPHA) -> dict[str, Any]:
+    """Exact McNemar test for paired binary outcomes.
 
     Counts discordant pairs:
       n_01 = A fails, B succeeds (favors B)
       n_10 = A succeeds, B fails (favors A)
 
-    Returns dict with: n_01, n_10, n_concordant, statistic, p_value, method.
+    The p-value is the exact two-sided binomial test of ``n_01`` out of the discordant
+    pairs under p=0.5 at any sample size; the chi-square approximation above 25
+    discordant pairs and the hardcoded alpha are gone (STA-23).
+
+    Returns dict with: n_01, n_10, n_concordant, statistic, p_value, method, alpha,
+    significant.
     """
     n_01 = 0  # A=0, B=1
     n_10 = 0  # A=1, B=0
@@ -62,30 +77,39 @@ def mcnemar_test(pairs: list[BinaryPair]) -> dict[str, Any]:
             "statistic": 0.0,
             "p_value": 1.0,
             "method": "no_discordant_pairs",
+            "alpha": alpha,
             "significant": False,
         }
 
-    # Use exact binomial when discordant < 25, chi-squared otherwise.
-    if n_discordant < 25:
-        p_value = _exact_binomial_two_sided(n_01, n_discordant)
-        method = "exact_binomial"
-        statistic = float(n_01)
-    else:
-        # McNemar's chi-squared with continuity correction.
-        statistic = (abs(n_01 - n_10) - 1) ** 2 / n_discordant
-        p_value = _chi2_sf(statistic, df=1)
-        method = "chi_squared_cc"
-
+    p_value = exact_binomial_p_value(n_01, n_discordant)
     return {
         "n_01": n_01,
         "n_10": n_10,
         "n_concordant": n_00 + n_11,
         "n_discordant": n_discordant,
-        "statistic": statistic,
+        "statistic": float(n_01),
         "p_value": p_value,
-        "method": method,
-        "significant": p_value < 0.05,
+        "method": "exact_binomial",
+        "alpha": alpha,
+        "significant": p_value <= alpha,
     }
+
+
+def exact_binomial_p_value(k: int, n: int) -> float:
+    """Two-sided exact binomial p-value under p=0.5 (McNemar, paired sign test)."""
+    return float(binomtest(k, n, 0.5, alternative="two-sided").pvalue)
+
+
+def format_p_value(p_value: float | None) -> str:
+    """Format a p-value without hiding the difference between 0.004 and 0.0004 (STA-15).
+
+    Three significant digits, ``<0.0001`` below that, ``n/a`` when missing.
+    """
+    if p_value is None or not math.isfinite(p_value):
+        return "n/a"
+    if p_value < 0.0001:
+        return "<0.0001"
+    return f"{p_value:.3g}"
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +147,7 @@ def bootstrap_ci(
     pairs: list[BinaryPair],
     n_bootstrap: int = 10000,
     confidence: float = 0.95,
-    seed: int | None = None,
+    seed: int | None = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Paired bootstrap CI for success-rate uplift (B - A).
 
@@ -137,6 +161,8 @@ def bootstrap_ci(
             "ci_upper": 0.0,
             "confidence": confidence,
             "n_bootstrap": 0,
+            "method": BOOTSTRAP_METHOD,
+            "seed": seed,
         }
 
     rng = random.Random(seed)
@@ -155,17 +181,15 @@ def bootstrap_ci(
         sb = sum(1 for _, b in sample if b) / n
         deltas.append(sb - sa)
 
-    deltas.sort()
-    alpha = 1.0 - confidence
-    lo_idx = max(0, math.floor(alpha / 2 * n_bootstrap))
-    hi_idx = min(n_bootstrap - 1, math.floor((1 - alpha / 2) * n_bootstrap))
-
+    ci_lower, ci_upper = _percentile_interval(deltas, confidence)
     return {
         "uplift": observed_uplift,
-        "ci_lower": deltas[lo_idx],
-        "ci_upper": deltas[hi_idx],
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
         "confidence": confidence,
         "n_bootstrap": n_bootstrap,
+        "method": BOOTSTRAP_METHOD,
+        "seed": seed,
     }
 
 
@@ -174,7 +198,7 @@ def bootstrap_mean_ci(
     *,
     n_bootstrap: int = 10000,
     confidence: float = 0.95,
-    seed: int | None = None,
+    seed: int | None = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Bootstrap CI for the arithmetic mean of numeric values.
 
@@ -188,6 +212,8 @@ def bootstrap_mean_ci(
             "ci_upper": mean_value,
             "confidence": confidence,
             "n_bootstrap": max(0, int(n_bootstrap)),
+            "method": BOOTSTRAP_METHOD,
+            "seed": seed,
         }
 
     rng = random.Random(seed)
@@ -197,17 +223,26 @@ def bootstrap_mean_ci(
         sample = [values[rng.randint(0, n - 1)] for _ in range(n)]
         bootstrap_means.append(sum(sample) / float(n))
 
-    bootstrap_means.sort()
-    alpha = 1.0 - confidence
-    lo_idx = max(0, math.floor(alpha / 2 * n_bootstrap))
-    hi_idx = min(int(n_bootstrap) - 1, math.floor((1 - alpha / 2) * n_bootstrap))
+    ci_lower, ci_upper = _percentile_interval(bootstrap_means, confidence)
     return {
         "mean": mean_value,
-        "ci_lower": bootstrap_means[lo_idx],
-        "ci_upper": bootstrap_means[hi_idx],
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
         "confidence": confidence,
         "n_bootstrap": int(n_bootstrap),
+        "method": BOOTSTRAP_METHOD,
+        "seed": seed,
     }
+
+
+def _percentile_interval(resampled: list[float], confidence: float) -> tuple[float, float]:
+    """Percentile bootstrap interval; the only interval method in eval reports (STA-05)."""
+    ordered = sorted(resampled)
+    n_bootstrap = len(ordered)
+    alpha = 1.0 - confidence
+    lo_idx = max(0, math.floor(alpha / 2 * n_bootstrap))
+    hi_idx = min(n_bootstrap - 1, math.floor((1 - alpha / 2) * n_bootstrap))
+    return ordered[lo_idx], ordered[hi_idx]
 
 
 def paired_numeric_deltas(pairs: list[NumericPair]) -> list[float]:
@@ -220,43 +255,35 @@ def paired_numeric_deltas(pairs: list[NumericPair]) -> list[float]:
 # ---------------------------------------------------------------------------
 
 
-def holm_bonferroni(p_values: dict[str, float], alpha: float = 0.05) -> dict[str, dict[str, Any]]:
+def holm_bonferroni(
+    p_values: dict[str, float], alpha: float = DEFAULT_ALPHA
+) -> dict[str, dict[str, Any]]:
     """Holm-Bonferroni step-down correction for multiple comparisons.
 
-    Returns dict mapping each key to {p_value, adjusted_p, rejected, rank}.
+    The adjusted p-value is the running maximum of ``p * (m - rank + 1)``, capped at 1,
+    and a hypothesis is rejected when its adjusted p is ``<= alpha``. That is the
+    step-down procedure, including the boundary case ``p == alpha / (m - k + 1)``,
+    which the old strict ``<`` didn't reject (STA-24).
+
+    Returns dict mapping each key to {p_value, adjusted_p, rejected, rank, alpha}.
     """
     if not p_values:
         return {}
 
     m = len(p_values)
-    sorted_items = sorted(p_values.items(), key=lambda kv: kv[1])
+    sorted_items = sorted(p_values.items(), key=lambda kv: (kv[1], kv[0]))
 
     results: dict[str, dict[str, Any]] = {}
-    any_not_rejected = False
+    running_max = 0.0
     for rank_0, (key, p) in enumerate(sorted_items):
-        rank = rank_0 + 1
-        adjusted_alpha = alpha / (m - rank_0)
-        if any_not_rejected:
-            rejected = False
-        else:
-            rejected = p < adjusted_alpha
-            if not rejected:
-                any_not_rejected = True
-        # Adjusted p-value (Holm): max of p*(m-k+1) up to this point, capped at 1.
-        adjusted_p = min(1.0, p * (m - rank_0))
+        running_max = max(running_max, min(1.0, p * (m - rank_0)))
         results[key] = {
             "p_value": p,
-            "adjusted_p": adjusted_p,
-            "rejected": rejected,
-            "rank": rank,
+            "adjusted_p": running_max,
+            "rejected": running_max <= alpha,
+            "rank": rank_0 + 1,
+            "alpha": alpha,
         }
-
-    # Enforce monotonicity of adjusted p-values.
-    prev_adjusted = 0.0
-    for key, _ in sorted_items:
-        results[key]["adjusted_p"] = max(results[key]["adjusted_p"], prev_adjusted)
-        prev_adjusted = results[key]["adjusted_p"]
-
     return results
 
 
@@ -357,7 +384,7 @@ def analyze_paired_results(
     rows: list[dict[str, Any]],
     *,
     n_bootstrap: int = 10000,
-    seed: int | None = None,
+    seed: int | None = DEFAULT_BOOTSTRAP_SEED,
     condition_a: str = "base_repair",
     condition_b: str = "layered_adaptive_llm",
 ) -> dict[str, Any]:
@@ -479,67 +506,8 @@ def _extract_pairs(
 
 
 # ---------------------------------------------------------------------------
-# Internal math helpers (avoid scipy dependency)
+# Internal math helpers
 # ---------------------------------------------------------------------------
-
-
-def _exact_binomial_two_sided(k: int, n: int) -> float:
-    """Two-sided exact binomial p-value under H0: p=0.5.
-
-    Tries scipy.stats.binomtest first, falls back to manual calculation.
-    """
-    try:
-        from scipy.stats import binomtest  # type: ignore[import-untyped]
-
-        result = binomtest(k, n, 0.5, alternative="two-sided")
-        return float(result.pvalue)
-    except ImportError:
-        pass
-
-    # Manual: sum P(X <= min(k, n-k)) + P(X >= max(k, n-k)) under Binom(n, 0.5).
-    lo = min(k, n - k)
-    hi = max(k, n - k)
-    if lo == hi:
-        # Symmetric case (k = n/2): the distribution is symmetric around 0.5,
-        # so the two-sided p-value is 1.0.
-        return 1.0
-    p = 0.0
-    for i in range(lo + 1):
-        p += _binom_pmf(i, n, 0.5)
-    for i in range(hi, n + 1):
-        p += _binom_pmf(i, n, 0.5)
-    return min(1.0, p)
-
-
-def _binom_pmf(k: int, n: int, p: float) -> float:
-    """Binomial PMF: C(n,k) * p^k * (1-p)^(n-k)."""
-    if k < 0 or k > n:
-        return 0.0
-    return math.comb(n, k) * (p**k) * ((1 - p) ** (n - k))
-
-
-def _chi2_sf(x: float, df: int) -> float:
-    """Survival function (1 - CDF) for chi-squared distribution.
-
-    Tries scipy first, falls back to normal approximation for df=1.
-    """
-    if x < 0:
-        return 1.0
-    try:
-        from scipy.stats import chi2  # type: ignore[import-untyped]
-
-        return float(chi2.sf(x, df))
-    except ImportError:
-        pass
-
-    # For df=1, chi2 = Z^2 where Z ~ N(0,1).
-    if df == 1:
-        z = math.sqrt(x)
-        return 2.0 * (1.0 - _normal_cdf(z))
-
-    # General fallback: Wilson-Hilferty approximation.
-    z = ((x / df) ** (1 / 3) - (1 - 2 / (9 * df))) / math.sqrt(2 / (9 * df))
-    return 1.0 - _normal_cdf(z)
 
 
 def _normal_cdf(z: float) -> float:

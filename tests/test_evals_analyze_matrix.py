@@ -151,3 +151,60 @@ def test_statistical_analysis_includes_pairwise_matrix_entries() -> None:
     assert pair_map[("base_repair", "cot_repair")]["n_pairs"] == 2
     assert pair_map[("base_repair", "layered_adaptive_gated")]["n_pairs"] == 2
     assert pair_map[("cot_repair", "layered_adaptive_gated")]["n_pairs"] == 2
+
+
+def _paired_rows(n: int) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for idx in range(n):
+        for condition, success in (("base_repair", idx % 3 == 0), ("cot_repair", idx % 2 == 0)):
+            rows.append(
+                {
+                    "run_id": "r1",
+                    "case_id": f"c{idx}",
+                    "condition": condition,
+                    "category": "logic_error",
+                    "success": success,
+                }
+            )
+    return rows
+
+
+def test_sta07_statistics_are_reproducible_and_seeded() -> None:
+    """STA-07: the --stats bootstrap was unseeded, so reruns gave different CIs."""
+    rows = _paired_rows(40)
+    first = _run_statistical_analysis(rows, pair_a="base_repair", pair_b="cot_repair")
+    second = _run_statistical_analysis(rows, pair_a="base_repair", pair_b="cot_repair")
+    assert first["overall_bootstrap_ci"] == second["overall_bootstrap_ci"]
+    assert first["overall_bootstrap_ci"]["seed"] == 42
+    other = _run_statistical_analysis(rows, pair_a="base_repair", pair_b="cot_repair", seed=1)
+    assert other["overall_bootstrap_ci"]["seed"] == 1
+
+
+def test_sta07_bootstrap_seed_is_recorded_in_analysis_config(tmp_path, capsys) -> None:
+    from evals import _json as json
+    from evals.analyze_results import main
+    from tests.test_evals_analyze_grouping import _record
+
+    results = tmp_path / "results.jsonl"
+    records = [
+        _record(
+            run_id="r1",
+            case_id=str(row["case_id"]),
+            condition=str(row["condition"]),
+            attempt=1,
+            success=bool(row["success"]),
+            category="logic_error",
+            difficulty="easy",
+            snapshot_dependency="helpful",
+        )
+        for row in _paired_rows(6)
+    ]
+    results.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    out = tmp_path / "summary.json"
+
+    assert main([str(results), "--bootstrap-seed", "7", "--out", str(out)]) == 0
+
+    config = json.loads(out.read_text(encoding="utf-8"))["analysis_config"]
+    assert config["bootstrap_seed"] == 7
+    assert config["bootstrap_method"] == "percentile"
+    capsys.readouterr()

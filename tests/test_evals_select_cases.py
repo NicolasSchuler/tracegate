@@ -430,9 +430,10 @@ def test_terminal_by_case_keeps_higher_attempt_when_lower_follows() -> None:
         {"case_id": "c1", "condition": "base_repair", "attempt": 1, "success": True},
     ]
     terminal = select_cases._terminal_by_case(rows=rows, condition="base_repair")
-    # The attempt-3 row must be kept because 1 < 3.
+    # The attempt-3 row is the terminal row because 1 < 3, but the case succeeded at
+    # attempt 1. STA-19: this used to say failed while analyze_results said solved.
     assert terminal["c1"]["attempt"] == 3
-    assert terminal["c1"]["success"] is False
+    assert terminal["c1"]["success"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -491,3 +492,39 @@ def test_budget_exceeded_false_when_attempt_metadata_has_different_error() -> No
         "attempt_metadata": {"error": "connection_timeout"},
     }
     assert select_cases._is_request_budget_exceeded_failure(row) is False
+
+
+def test_sta19_runtime_error_terminal_row_is_a_failure_not_a_missing_case() -> None:
+    """A unit_runtime_error row stays in the denominator (ATT-08) instead of vanishing."""
+    rows = [
+        {
+            "case_id": "c1",
+            "condition": "base_repair",
+            "attempt": 1,
+            "success": False,
+            "note": "unit_runtime_error",
+            "patch_meta": {"infra_resume_eligible": True},
+        }
+    ]
+    terminal = select_cases._terminal_by_case(rows=rows, condition="base_repair")
+    assert terminal["c1"]["success"] is False
+
+
+def test_dat24_duplicate_attempt_prefers_the_real_outcome_over_a_runtime_error() -> None:
+    """DAT-24: a resumed unit's rows used to be chosen by file order alone."""
+    runtime_error = {
+        "case_id": "c1",
+        "condition": "base_repair",
+        "attempt": 1,
+        "success": False,
+        "patch_meta": {"infra_resume_eligible": True},
+    }
+    real = {"case_id": "c1", "condition": "base_repair", "attempt": 1, "success": True}
+    for rows in ([runtime_error, real], [real, runtime_error]):
+        terminal = select_cases._terminal_by_case(rows=rows, condition="base_repair")
+        assert terminal["c1"]["success"] is True
+
+
+def test_sta19_condition_names_are_stripped() -> None:
+    rows = [{"case_id": "c1", "condition": " base_repair ", "attempt": 1, "success": False}]
+    assert set(select_cases._terminal_by_case(rows=rows, condition="base_repair")) == {"c1"}

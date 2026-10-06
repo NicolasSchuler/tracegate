@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import _json as json
+from .case_outcome import case_outcomes
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -49,29 +50,27 @@ def _terminal_by_case(
 ) -> dict[str, dict[str, Any]]:
     """Return the terminal (highest-attempt) row per case for *condition*.
 
-    Last-write-wins for duplicate rows at the same attempt number.
+    Outcomes come from :func:`evals.case_outcome.case_outcomes` (STA-19, DAT-24), so a
+    case listed here as failed is also a failure in ``analyze_results``. The returned
+    row's ``success`` is the case outcome. With several runs in one file, a case
+    succeeded only if it succeeded in every run, and the highest terminal attempt is
+    kept.
     """
     terminal: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if str(row.get("record_type") or "attempt").strip() == "infra_event":
-            continue
-        patch_meta = row.get("patch_meta")
-        if isinstance(patch_meta, dict) and bool(patch_meta.get("infra_resume_eligible")):
-            continue
-        if str(row.get("condition") or "") != condition:
-            continue
-        case_id = str(row.get("case_id") or "").strip()
-        if not case_id:
-            continue
-        attempt = _coerce_attempt(row.get("attempt"))
+    for (_run_id, case_id, _condition), outcome in case_outcomes(rows, condition=condition).items():
+        row = {**outcome.terminal, "success": outcome.success}
         previous = terminal.get(case_id)
         if previous is None:
             terminal[case_id] = row
             continue
-        prev_attempt = _coerce_attempt(previous.get("attempt"))
-        if attempt > prev_attempt or attempt == prev_attempt:
-            # Last-write-wins for duplicate rows at the same attempt number.
-            terminal[case_id] = row
+        terminal[case_id] = {
+            **(
+                row
+                if _coerce_attempt(row.get("attempt")) >= _coerce_attempt(previous.get("attempt"))
+                else previous
+            ),
+            "success": bool(previous.get("success")) and outcome.success,
+        }
     return terminal
 
 

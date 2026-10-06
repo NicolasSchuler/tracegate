@@ -26,7 +26,15 @@ from evals.analyze_results import (
     _records_by_case_condition,
     _summarize_bucket,
 )
-from evals.stats import analyze_paired_results, bootstrap_mean_ci, paired_numeric_deltas
+from evals.case_outcome import case_outcomes
+from evals.eval_types import normalize_condition_name
+from evals.stats import (
+    analyze_paired_results,
+    bootstrap_mean_ci,
+    exact_binomial_p_value,
+    format_p_value,
+    paired_numeric_deltas,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -744,12 +752,7 @@ def _summarize_paired_deltas(
     )
     sign = _paired_sign_test(deltas)
     wilcoxon = _paired_wilcoxon_test(deltas)
-    ci = _bootstrap_mean_ci(
-        values=deltas,
-        n_bootstrap=max(0, n_bootstrap),
-        confidence=0.95,
-        seed=seed,
-    )
+    ci = bootstrap_mean_ci(deltas, n_bootstrap=max(0, n_bootstrap), confidence=0.95, seed=seed)
     return {
         "available": True,
         "label": label,
@@ -776,7 +779,7 @@ def _paired_sign_test(deltas: list[float]) -> dict[str, Any]:
             "n_negative": 0,
             "p_value": 1.0,
         }
-    p_value = _exact_binomial_two_sided(positives, nonzero)
+    p_value = exact_binomial_p_value(positives, nonzero)
     return {
         "n_nonzero": nonzero,
         "n_positive": positives,
@@ -820,51 +823,6 @@ def _paired_wilcoxon_test(deltas: list[float]) -> dict[str, Any]:
         }
 
 
-def _exact_binomial_two_sided(k: int, n: int) -> float:
-    result = stats.binomtest(k, n, 0.5, alternative="two-sided")
-    return float(result.pvalue)
-
-
-def _bootstrap_mean_ci(
-    *,
-    values: list[float],
-    n_bootstrap: int,
-    confidence: float,
-    seed: int | None,
-) -> dict[str, Any]:
-    if not values or n_bootstrap <= 0 or len(values) < 2:
-        mean_value = _mean(values)
-        return {
-            "mean": mean_value,
-            "ci_lower": mean_value,
-            "ci_upper": mean_value,
-            "confidence": confidence,
-            "n_bootstrap": max(0, n_bootstrap),
-        }
-
-    bootstrap_kwargs: dict[str, Any] = {}
-    if seed is not None:
-        bootstrap_kwargs["random_state"] = seed
-
-    result = cast(Any, stats.bootstrap)(
-        (values,),
-        statistic=lambda sample: float(sum(sample) / len(sample)),
-        vectorized=False,
-        n_resamples=n_bootstrap,
-        confidence_level=confidence,
-        method="basic",
-        **bootstrap_kwargs,
-    )
-    mean_value = _mean(values)
-    return {
-        "mean": mean_value,
-        "ci_lower": float(result.confidence_interval.low),
-        "ci_upper": float(result.confidence_interval.high),
-        "confidence": confidence,
-        "n_bootstrap": n_bootstrap,
-    }
-
-
 def _compute_failure_diagnostics(
     *,
     raw_records: list[dict[str, Any]],
@@ -889,19 +847,17 @@ def _compute_failure_diagnostics(
     """
     conditions = {condition_a, condition_b}
     flattened: list[dict[str, Any]] = []
-    terminal_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
+    # STA-19: case success and the terminal row come from the shared case outcome.
+    outcomes = {
+        key: outcome for key, outcome in case_outcomes(raw_records).items() if key[2] in conditions
+    }
 
     for record in raw_records:
-        condition = str(record.get("condition") or "")
+        condition = normalize_condition_name(record.get("condition"))
         if condition not in conditions:
             continue
         run_id = str(record.get("run_id") or "")
         case_id = str(record.get("case_id") or "")
-        key = (run_id, case_id, condition)
-        attempt = int(record.get("attempt") or 0)
-        previous = terminal_rows.get(key)
-        if previous is None or attempt >= int(previous.get("attempt") or 0):
-            terminal_rows[key] = record
 
         patch_meta = record.get("patch_meta")
         error = ""
@@ -982,11 +938,9 @@ def _compute_failure_diagnostics(
         }
         for condition in conditions
     }
-    for record in terminal_rows.values():
-        condition = str(record.get("condition") or "")
-        if condition not in conditions:
-            continue
-        success = bool(record.get("success"))
+    for (_run_id, _case_id, condition), outcome in outcomes.items():
+        record = dict(outcome.terminal)
+        success = outcome.success
         if not success:
             reason = _terminal_failure_reason(record)
             terminal_reason_counts[condition][reason] = (
@@ -1625,8 +1579,8 @@ def _print_report(
         else:
             for row in rows[:12]:
                 uplift = _fmt_signed_pp(row.get("uplift"))
-                p_val = _fmt_float(row.get("mcnemar_p"))
-                adj = _fmt_float(row.get("holm_adjusted_p"))
+                p_val = _fmt_p(row.get("mcnemar_p"))
+                adj = _fmt_p(row.get("holm_adjusted_p"))
                 sig = "yes" if row.get("holm_rejected") else "no"
                 print(
                     f"- {row.get('category')}: uplift={uplift}, n={row.get('n_pairs', 0)}, "
@@ -1956,7 +1910,7 @@ def _conclusion_line(*, condition_a: str, condition_b: str, effect: dict[str, An
     direction = "better" if uplift_pp > 0 else "worse" if uplift_pp < 0 else "equal"
     return (
         f"On snapshot-relevant cases, {condition_b} is {abs(uplift_pp):.2f} pp {direction} than "
-        f"{condition_a} (McNemar p={_fmt_float((effect.get('mcnemar') or {}).get('p_value'))})."
+        f"{condition_a} (McNemar p={_fmt_p((effect.get('mcnemar') or {}).get('p_value'))})."
     )
 
 
@@ -1986,7 +1940,7 @@ def _print_effect_line(
     print(
         f"- {label}: {condition_b} is {abs(float(uplift_pp)):.2f} pp {direction} than {condition_a} "
         f"({_fmt_pct(a_rate)} -> {_fmt_pct(b_rate)}), n={effect.get('n_pairs', 0)}, "
-        f"McNemar p={_fmt_float(mcn.get('p_value'))} "
+        f"McNemar p={_fmt_p(mcn.get('p_value'))} "
         f"(n_01={mcn.get('n_01', 0)}, n_10={mcn.get('n_10', 0)}), "
         f"95% CI[{_fmt_pct_signed(bci.get('ci_lower'))}, {_fmt_pct_signed(bci.get('ci_upper'))}], "
         f"Cohen h={_fmt_float(ch.get('h'))}, "
@@ -2009,9 +1963,9 @@ def _print_efficiency_line(summary: dict[str, Any]) -> None:
         f"mean A={_fmt_float(summary.get('mean_a'))}, "
         f"mean B={_fmt_float(summary.get('mean_b'))}, "
         f"pct vs A={_fmt_pct_signed(summary.get('pct_change_vs_a'))}, "
-        f"sign-test p={_fmt_float(sign.get('p_value'))} "
+        f"sign-test p={_fmt_p(sign.get('p_value'))} "
         f"(+={sign.get('n_positive', 0)}, -={sign.get('n_negative', 0)}), "
-        f"Wilcoxon p={_fmt_float(wilcoxon.get('p_value'))}, "
+        f"Wilcoxon p={_fmt_p(wilcoxon.get('p_value'))}, "
         f"bootstrap 95% CI mean delta="
         f"[{_fmt_float(ci.get('ci_lower'))}, {_fmt_float(ci.get('ci_upper'))}]"
     )
@@ -2125,6 +2079,10 @@ def _median(values: list[float]) -> float | None:
     if n % 2 == 1:
         return ordered[mid]
     return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _fmt_p(value: Any) -> str:
+    return format_p_value(float(value)) if isinstance(value, (int, float)) else "n/a"
 
 
 def _fmt_float(value: Any) -> str:

@@ -1575,9 +1575,9 @@ uv run python -m evals.analyze_results \
 ```
 
 The `--stats` flag adds:
-- **McNemar's test**: Paired binary significance test (exact binomial for <25 discordant pairs, chi-squared otherwise).
+- **McNemar's test**: Exact paired binary significance test (binomial on the discordant pairs at any sample size).
 - **Cohen's h**: Effect size for proportions (small >= 0.2, medium >= 0.5, large >= 0.8).
-- **Bootstrap CI**: 95% confidence interval for uplift via paired bootstrap (10k resamples).
+- **Bootstrap CI**: 95% percentile interval for uplift via paired bootstrap (10k resamples), seeded with `--bootstrap-seed` (default 42) and recorded in `analysis_config`.
 - **Holm-Bonferroni**: Multiple comparison correction for per-category p-values.
 - **Power report**: Post-hoc power assessment to gauge result trustworthiness.
 - **Pairwise condition matrix**: always reports pairwise A/B summaries for all conditions in the input.

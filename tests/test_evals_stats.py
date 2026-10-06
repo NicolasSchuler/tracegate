@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from evals.stats import (
     BinaryPair,
     NumericPair,
@@ -45,15 +47,23 @@ class TestMcNemarTest:
         # At alpha=0.05, this is borderline
         assert isinstance(result["significant"], bool)
 
-    def test_large_sample_chi_squared(self) -> None:
-        """>=25 discordant pairs uses chi-squared with continuity correction."""
+    def test_large_sample_is_exact_and_matches_scipy(self) -> None:
+        """STA-23: >=25 discordant pairs used a chi-square approximation; now always exact."""
+        from scipy.stats import binomtest
+
         pairs: list[BinaryPair] = [(False, True)] * 20 + [(True, False)] * 5
         result = mcnemar_test(pairs)
         assert result["n_discordant"] == 25
-        assert result["method"] == "chi_squared_cc"
-        # With 20 vs 5, should be significant
-        assert result["p_value"] < 0.01
+        assert result["method"] == "exact_binomial"
+        assert result["p_value"] == pytest.approx(binomtest(20, 25, 0.5).pvalue, abs=1e-12)
         assert result["significant"] is True
+
+    def test_alpha_is_a_parameter_and_the_boundary_is_significant(self) -> None:
+        pairs: list[BinaryPair] = [(False, True)] * 6 + [(True, False)] * 1
+        p_value = mcnemar_test(pairs)["p_value"]
+        assert mcnemar_test(pairs, alpha=p_value)["significant"] is True
+        assert mcnemar_test(pairs, alpha=p_value / 2)["significant"] is False
+        assert mcnemar_test(pairs, alpha=0.2)["alpha"] == 0.2
 
     def test_all_concordant(self) -> None:
         """All concordant pairs -> p=1.0, no discordant."""
@@ -518,103 +528,39 @@ class TestCohensHNegligible:
 # ---------------------------------------------------------------------------
 
 
-class TestChi2SfFallback:
-    def test_chi2_sf_negative_x_returns_one(self) -> None:
-        """x < 0 should return 1.0 (line 478)."""
-        from evals.stats import _chi2_sf
+class TestExactBinomialPValue:
+    """The one exact binomial helper (McNemar and the paired sign test)."""
 
-        assert _chi2_sf(-1.0, df=1) == 1.0
+    @pytest.mark.parametrize(("k", "n"), [(3, 10), (5, 10), (0, 7), (40, 50)])
+    def test_matches_scipy(self, k: int, n: int) -> None:
+        from scipy.stats import binomtest
 
-    def test_chi2_sf_no_scipy_df1(self, monkeypatch) -> None:
-        """Without scipy, df=1 uses Z-based approximation (lines 487-489)."""
-        import builtins
+        from evals.stats import exact_binomial_p_value
 
-        import evals.stats as stats_mod
-
-        real_import = builtins.__import__
-
-        def fail_scipy(name, *a, **kw):
-            if "scipy" in name:
-                raise ImportError("no scipy")
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(builtins, "__import__", fail_scipy)
-        p = stats_mod._chi2_sf(3.84, df=1)
-        assert 0.0 < p < 0.1
-
-    def test_chi2_sf_no_scipy_general_df(self, monkeypatch) -> None:
-        """Without scipy, df>1 uses Wilson-Hilferty (lines 492-493)."""
-        import builtins
-
-        import evals.stats as stats_mod
-
-        real_import = builtins.__import__
-
-        def fail_scipy(name, *a, **kw):
-            if "scipy" in name:
-                raise ImportError("no scipy")
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(builtins, "__import__", fail_scipy)
-        p = stats_mod._chi2_sf(7.81, df=3)
-        assert 0.0 < p < 0.1
+        assert exact_binomial_p_value(k, n) == pytest.approx(binomtest(k, n, 0.5).pvalue)
 
 
-# ---------------------------------------------------------------------------
-# Manual binomial fallback (lines 447-462)
-# ---------------------------------------------------------------------------
+class TestFormatPValue:
+    """STA-15: 0.0004 vs 0.004 and 0.049 vs 0.051 used to print the same."""
 
+    @pytest.mark.parametrize(
+        ("p_value", "text"),
+        [
+            (0.0004, "0.0004"),
+            (0.004, "0.004"),
+            (0.049, "0.049"),
+            (0.051, "0.051"),
+            (0.04961, "0.0496"),
+            (0.00001, "<0.0001"),
+            (1.0, "1"),
+            (None, "n/a"),
+            (float("nan"), "n/a"),
+        ],
+    )
+    def test_format(self, p_value: float | None, text: str) -> None:
+        from evals.stats import format_p_value
 
-class TestExactBinomialFallback:
-    def test_manual_fallback_when_scipy_unavailable(self, monkeypatch) -> None:
-        """When scipy is not available, use the manual binomial sum."""
-        import builtins
-
-        import evals.stats as stats_mod
-
-        real_import = builtins.__import__
-
-        def fail_scipy(name, *a, **kw):
-            if "scipy" in name:
-                raise ImportError("no scipy")
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(builtins, "__import__", fail_scipy)
-        # 3 out of 10 under H0:p=0.5 -> two-sided p
-        p = stats_mod._exact_binomial_two_sided(3, 10)
-        assert 0.0 < p <= 1.0
-        # Compare with known value: P(X<=3) + P(X>=7) for Binom(10,0.5)
-        # = 2*P(X<=3) by symmetry = 2*(C(10,0)*0.5^10 + ... + C(10,3)*0.5^10)
-        assert abs(p - 0.34375) < 0.01
-
-    def test_manual_fallback_symmetric_case(self, monkeypatch) -> None:
-        """k == n-k (symmetric) should return 1.0."""
-        import builtins
-
-        import evals.stats as stats_mod
-
-        real_import = builtins.__import__
-
-        def fail_scipy(name, *a, **kw):
-            if "scipy" in name:
-                raise ImportError("no scipy")
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(builtins, "__import__", fail_scipy)
-        p = stats_mod._exact_binomial_two_sided(5, 10)
-        assert p == 1.0
-
-    def test_binom_pmf_out_of_range(self) -> None:
-        """_binom_pmf returns 0 for k < 0 or k > n."""
-        from evals.stats import _binom_pmf
-
-        assert _binom_pmf(-1, 10, 0.5) == 0.0
-        assert _binom_pmf(11, 10, 0.5) == 0.0
-
-
-# ---------------------------------------------------------------------------
-# Per-category analysis with Holm-Bonferroni
-# ---------------------------------------------------------------------------
+        assert format_p_value(p_value) == text
 
 
 class TestAnalyzeWithCategories:
@@ -714,3 +660,20 @@ class TestAnalyzeWithCategories:
         monkeypatch.setattr(stats_mod, "_extract_pairs", lambda *a, **kw: (pairs, {}))
         result = analyze_paired_results([{"dummy": True}], seed=42, n_bootstrap=50, condition_b="b")
         assert "per_category" not in result
+
+
+def test_sta24_holm_rejects_at_the_exact_boundary() -> None:
+    """STA-24: p == alpha / (m - k + 1) wasn't rejected under the strict `<`."""
+    result = holm_bonferroni({"a": 0.025, "b": 0.05}, alpha=0.05)
+    assert result["a"]["adjusted_p"] == pytest.approx(0.05)
+    assert result["a"]["rejected"] is True
+    assert result["b"]["rejected"] is True
+    assert holm_bonferroni({"a": 0.0251}, alpha=0.025)["a"]["rejected"] is False
+
+
+def test_sta24_holm_rejection_follows_the_adjusted_p() -> None:
+    p_values = {"a": 0.001, "b": 0.02, "c": 0.04, "d": 0.3}
+    result = holm_bonferroni(p_values, alpha=0.05)
+    for entry in result.values():
+        assert entry["rejected"] == (entry["adjusted_p"] <= 0.05)
+    assert [result[key]["rejected"] for key in "abcd"] == [True, False, False, False]
