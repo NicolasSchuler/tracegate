@@ -1326,11 +1326,21 @@ def _unit_runtime_error_record(
 ) -> dict[str, Any]:
     """Terminal record for a unit that raised (ATT-08).
 
-    It is a failed scored attempt numbered after the last emitted one, unless the unit had
+    It is a failed scored attempt numbered after the last *scored* one, unless the unit had
     already used all ``k`` attempts; then it is an ``infra_event`` that doesn't count.
+    ``infra_event`` rows consume no attempt, so numbering past them would classify the
+    terminal failure as infra too and drop the unit out of the denominator again.
     """
     k = max(1, int(run_inputs.k))
-    last_attempt = max((int(r.get("attempt") or 0) for r in emitted_records), default=0)
+    last_attempt = max(
+        (
+            int(record.get("attempt") or 0)
+            for record in emitted_records
+            if str(record.get("record_type") or EVAL_RECORD_TYPE_ATTEMPT)
+            != EVAL_RECORD_TYPE_INFRA_EVENT
+        ),
+        default=0,
+    )
     attempt = last_attempt + 1
     metadata = {
         **_empty_attempt_metadata(attempt=attempt),

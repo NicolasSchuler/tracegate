@@ -557,6 +557,87 @@ def test_att08_unit_runtime_error_record_is_schema_valid_and_scored(tmp_path: Pa
     assert record["attempt"] == 1 and record["record_type"] == "attempt"
 
 
+def test_att08_terminal_failure_after_an_infra_event_stays_in_the_denominator(
+    tmp_path: Path,
+) -> None:
+    """codex 1f#1: infra events consume no attempt, so the terminal row must stay scored.
+
+    The real seam: a transport failure writes an ``infra_event``, the recovered replay
+    raises, and ``execute_eval_unit_impl`` has to number the terminal row from the scored
+    records only -- otherwise both rows are discarded and the unit vanishes from the
+    denominator again.
+    """
+    import argparse
+    from types import SimpleNamespace
+
+    from evals.eval_types import EvalUnitInputs, RunConditionInputs
+    from evals.patchers.base import PatchResult
+
+    calls = {"n": 0}
+
+    def _propose(**_kwargs: Any) -> PatchResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return PatchResult(
+                diff=None,
+                meta={"error": "request_failed", "exc": "ConnectionError: connection refused"},
+            )
+        raise RuntimeError("boom during the replayed call")
+
+    patcher = SimpleNamespace(
+        name="openai",
+        model="stub-model",
+        response_mode="text",
+        propose_patch=_propose,
+        probe_server_ready=lambda **_kw: True,
+    )
+    gate = SimpleNamespace(
+        wait_if_open=lambda: None,
+        recover=lambda **_kw: {
+            "attempted": True,
+            "recovered": True,
+            "timed_out": False,
+            "wait_sec": 0.0,
+            "probe_attempts": [1],
+        },
+    )
+    streamed: list[dict[str, Any]] = []
+    previous = run_eval.set_active_execution_config(run_eval.ExecutionConfig(executor="local"))
+    try:
+        outcome = eval_attempt_flow.execute_eval_unit_impl(
+            case=_case(tmp_path),
+            condition=Condition.BASE_REPAIR,
+            artifacts_root=tmp_path / "artifacts",
+            inputs=EvalUnitInputs(
+                patcher_args=argparse.Namespace(),
+                patcher_override=patcher,
+                progress_verbosity="basic",
+                progress_heartbeat_sec=0.0,
+                run_condition=RunConditionInputs(
+                    k=1,
+                    output_format="json_compact",
+                    run_id="phase1",
+                    include_files_context=False,
+                    force_patch_attempt=False,
+                    run_metadata={"run_id": "phase1"},
+                    record_sink=streamed.append,
+                    openai_transport_recovery=True,
+                    transport_recovery_gate=gate,
+                ),
+            ),
+        )
+    finally:
+        run_eval.set_active_execution_config(previous)
+
+    assert outcome.runtime_error is not None and "boom" in outcome.runtime_error
+    assert [(r["attempt"], r.get("record_type")) for r in streamed] == [
+        (1, "infra_event"),
+        (1, "attempt"),
+    ]
+    assert streamed[-1]["note"] == "unit_runtime_error"
+    assert streamed[-1]["success"] is False
+
+
 def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
     from evals.eval_attempt_flow import _fold_tep_learning_usage
 
