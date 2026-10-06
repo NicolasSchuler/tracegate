@@ -10,43 +10,33 @@ import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from evals.adaptive_budget_online_policy import (
-    AdaptiveBudgetPolicyController,
-    BudgetPolicyConfig,
-)
-from evals.adaptive_online_policy import (
-    AdaptiveOnlinePolicyController,
-    OnlinePolicyConfig,
-)
 from evals.attempt_usage import (
-    _completion_chars_from_response,
     _format_progress_token_usage,
-    _nonnegative_int,
-    _record_token_usage_state,
-    _usage_token_counts_from_patch_meta,
 )
-from evals.baseline_runtime import (
-    _baseline_extra_from_args,
-    _baseline_patch_inventory,
-)
-from evals.decision_model.config import decision_model_settings_from_args
-from evals.decision_model.runtime import build_decision_model_binding
 from evals.eval_attempt_flow import execute_eval_unit_impl as _execute_eval_unit
 from evals.eval_config import (
-    _parse_adaptive_online_action_score_biases,
     set_active_execution_config,
 )
 from evals.eval_containers import (
     _EvalContainerPool,
 )
+from evals.eval_main_metadata import (
+    RunMetadataInputs,
+    build_run_metadata_for_run,
+)
+from evals.eval_main_outcome import (
+    RunUsageTotals,
+    extract_unit_progress_metrics,
+)
+from evals.eval_main_policies import (
+    PolicyControllerInputs,
+    build_policy_controllers,
+)
 from evals.eval_main_resume import prepare_main_resume
 from evals.eval_main_setup import MainFlowCliError, prepare_main_setup
 from evals.eval_recording import (
-    _build_run_metadata,
     _SynchronizedJsonlWriter,
 )
 from evals.eval_seams import EvalSeams, default_eval_seams
@@ -56,14 +46,12 @@ from evals.eval_types import (
     EvalUnitInputs,
     UnitExecutionOutcome,
     _ActiveRunSettings,
-    is_baseline_condition,
 )
 from evals.eval_types import RunConditionInputs as _RunConditionInputs
 from evals.native_stage_b_flow import openai_usable_prompt_tokens
 from evals.patcher_factory import (
     _resolve_openai_context_window_for_run,
 )
-from evals.patchers.baseline_patcher import BaselinePatcher, baseline_case_support
 from evals.progress_display import (
     DisplayRunSummary,
     _format_duration,
@@ -78,7 +66,6 @@ from evals.progress_output import (
 )
 from evals.run_condition_builder import build_run_condition_inputs
 from evals.run_context import RunContext
-from evals.seed_derivation import derive_seed
 from evals.transport_failures import (
     _filter_attempt_records,
     _is_transport_runtime_error,
@@ -88,41 +75,6 @@ from evals.transport_failures import (
 )
 
 RunConditionInputs = _RunConditionInputs
-
-
-_BUDGET_POLICY_CONDITIONS = (Condition.LAYERED_ADAPTIVE_GATED, Condition.LAYERED_ADAPTIVE_LLM)
-
-
-def _per_condition_budget_configs(
-    config: BudgetPolicyConfig,
-    *,
-    conditions: list[Condition],
-    seed: int | None,
-    horizon_decisions: int = 0,
-) -> dict[str, BudgetPolicyConfig]:
-    """Budget-policy configs keyed by condition value (POL-05, POL-23).
-
-    With more than one adaptive condition each gets its own state and event files
-    (``<stem>.<condition><suffix>``); every controller gets a seed derived from the run
-    seed and its condition. Runs without an adaptive condition keep one shared config.
-    *horizon_decisions* (cases x attempts per condition) sets the ``bwk_v1`` pacing
-    horizon (POL-04).
-    """
-    keys = [condition.value for condition in conditions if condition in _BUDGET_POLICY_CONDITIONS]
-    separate_files = len(keys) > 1
-    out: dict[str, BudgetPolicyConfig] = {}
-    for key in keys or [""]:
-        updates: dict[str, Any] = {
-            "random_seed": derive_seed(int(seed), "budget", key) if seed is not None else None,
-            "bwk_horizon_decisions": max(0, int(horizon_decisions)),
-        }
-        if separate_files:
-            for field_name in ("state_path", "events_path"):
-                path = getattr(config, field_name)
-                if path is not None:
-                    updates[field_name] = path.with_name(f"{path.stem}.{key}{path.suffix}")
-        out[key] = replace(config, **updates)
-    return out
 
 
 def _with_run_context(unit_inputs: EvalUnitInputs, run_context: RunContext) -> EvalUnitInputs:
@@ -222,13 +174,7 @@ def run_main_flow(
         max_wait_sec=float(getattr(args, "openai_transport_recovery_max_wait_sec", 60.0)),
         poll_sec=float(getattr(args, "openai_transport_recovery_poll_sec", 2.0)),
     )
-    run_prompt_chars_total = 0
-    run_completion_chars_total = 0
-    run_tokens_prompt_total = 0
-    run_tokens_completion_total = 0
-    run_tokens_total = 0
-    run_token_usage_available_records = 0
-    run_token_usage_unavailable_records = 0
+    run_usage = RunUsageTotals()
     jobs = int(args.jobs)
     try:
         patcher = seams.make_patcher(args)
@@ -289,247 +235,42 @@ def run_main_flow(
             style="info",
         )
 
-    existing_fingerprint = (
-        existing_run_metadata.get("run_settings_fingerprint")
-        if isinstance(existing_run_metadata, dict)
-        else None
-    )
-    if isinstance(existing_run_metadata, dict) and existing_fingerprint in {
-        None,
-        run_settings_fingerprint,
-    }:
-        run_metadata = dict(existing_run_metadata)
-        run_metadata.setdefault("run_id", run_id)
-        run_metadata.setdefault("run_settings_fingerprint", run_settings_fingerprint)
-    else:
-        started_at_utc = (
-            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        )
-        run_metadata = _build_run_metadata(
+    build_run_metadata_for_run_result = build_run_metadata_for_run(
+        RunMetadataInputs(
             args=args,
-            patcher_name=patcher_name,
-            run_id=run_id,
-            started_at_utc=started_at_utc,
-            run_settings_fingerprint=run_settings_fingerprint,
-        )
-        if existing_fingerprint is not None:
-            # ORC-04: resumed with --allow-settings-drift; keep the link to the old settings.
-            run_metadata["settings_drift_from_fingerprint"] = existing_fingerprint
-    baseline_adapter = getattr(patcher, "adapter", None)
-    if isinstance(patcher, BaselinePatcher) and baseline_adapter is not None:
-        run_metadata["baseline_case_support"] = baseline_case_support(
-            baseline_adapter, [(case.case_id, case.path) for case in setup.cases]
-        )
-    if config_state.config_paths:
-        run_metadata.setdefault("config_files", list(config_state.config_paths))
-    if resolved_config_lock_path is not None:
-        run_metadata.setdefault("resolved_config_lock_path", str(resolved_config_lock_path))
-    patcher_config = run_metadata.get("patcher_config")
-    if isinstance(patcher_config, dict):
-        native_baseline_mode = str(getattr(args, "native_baseline_mode", "") or "").strip()
-        if native_baseline_mode:
-            patcher_config["native_baseline_mode"] = native_baseline_mode
-        if len(conditions) == 1:
-            patcher_config["resolved_condition"] = conditions[0].value
-        elif conditions:
-            patcher_config["resolved_conditions"] = [condition.value for condition in conditions]
-        patcher_config["openai_auto_context_window"] = bool(
-            getattr(args, "openai_auto_context_window", False)
-        )
-        patcher_config["openai_response_mode_autoswitch"] = str(
-            getattr(args, "openai_response_mode_autoswitch", "off")
-        )
-        patcher_config["openai_context_window_tokens_effective"] = int(
-            openai_context_window_tokens_effective
-        )
-        patcher_config["openai_context_window_source"] = openai_context_window_source
-        patcher_config["openai_context_window_probe_provider"] = (
-            openai_context_window_probe_provider
-        )
-        patcher_config["openai_context_window_probe_error"] = openai_context_window_probe_error
-        if str(getattr(args, "patcher", "")) == "baseline":
-            baseline_name = str(getattr(args, "baseline_name", "") or "").strip().lower()
-            patcher_config["baseline_name"] = baseline_name
-            patcher_config["baseline_condition"] = (
-                conditions[0].value
-                if len(conditions) == 1 and is_baseline_condition(conditions[0])
-                else ""
-            )
-            patcher_config["baseline_repo_dir"] = str(
-                Path(str(getattr(args, "baseline_repo_dir", "") or "")).expanduser()
-            )
-            baseline_python = str(getattr(args, "baseline_python", "") or "").strip()
-            if not baseline_python:
-                candidate = (
-                    seams.repo_root / "baselines" / "envs" / baseline_name / "bin" / "python"
-                )
-                if candidate.is_file():
-                    baseline_python = str(candidate)
-            if baseline_python:
-                patcher_config["baseline_python"] = baseline_python
-            repo_commit = str(
-                getattr(patcher, "repo_commit", "")
-                or getattr(getattr(patcher, "adapter", None), "repo_commit", "")
-                or ""
-            ).strip()
-            if repo_commit:
-                patcher_config["baseline_repo_commit"] = repo_commit
-            compatibility_patches = _baseline_patch_inventory(baseline_name)
-            if compatibility_patches:
-                patcher_config["baseline_compatibility_patches"] = compatibility_patches
-            baseline_extra = _baseline_extra_from_args(args=args, baseline_name=baseline_name)
-            if baseline_extra:
-                patcher_config["baseline_extra"] = baseline_extra
-            patcher_config["baseline_api_timeout_sec"] = float(
-                getattr(args, "openai_timeout_sec", 0.0) or 0.0
-            )
-            baseline_process_timeout = getattr(args, "baseline_process_timeout_sec", None)
-            if (
-                isinstance(baseline_process_timeout, (int, float))
-                and float(baseline_process_timeout) > 0.0
-            ):
-                patcher_config["baseline_process_timeout_sec"] = float(baseline_process_timeout)
-
-    try:
-        online_init_state_path = str(getattr(args, "adaptive_online_init_state_path", "") or "")
-        online_action_score_biases = _parse_adaptive_online_action_score_biases(
-            getattr(args, "adaptive_online_action_score_biases", "")
-        )
-        online_policy_config = OnlinePolicyConfig.normalize(
-            mode=str(args.adaptive_online_policy_mode),
-            algorithm=str(args.adaptive_online_policy_algo),
-            alpha=float(args.adaptive_online_alpha),
-            epsilon=float(args.adaptive_online_epsilon),
-            l2=float(args.adaptive_online_l2),
-            warmup_decisions=int(args.adaptive_online_warmup_decisions),
-            save_every=int(args.adaptive_online_save_every),
-            decay=float(args.adaptive_online_decay),
-            feature_scaling_profile=str(args.adaptive_online_feature_scaling_profile),
-            init_state_path=(
-                Path(online_init_state_path).expanduser().resolve()
-                if online_init_state_path.strip()
-                else None
-            ),
-            state_path=Path(str(args.adaptive_online_state_path)).expanduser().resolve(),
-            events_path=Path(str(args.adaptive_online_events_path)).expanduser().resolve(),
-            # POL-23: each controller gets its own stream, derived from the run seed.
-            random_seed=(derive_seed(int(args.seed), "helper") if args.seed is not None else None),
-            action_score_biases=online_action_score_biases,
-        )
-    except BaseException:
-        _close_run_results_io()
-        display.close()
-        raise
-    if online_policy_config.mode == "off":
-        online_policy_controller: AdaptiveOnlinePolicyController | None = None
-    else:
-        try:
-            decision_model_binding = build_decision_model_binding(
-                decision_model_settings_from_args(args),
-                artifacts_root=artifacts_root,
-            )
-            # Pass the binding only when a role is active (keeps the one-argument form intact).
-            online_policy_controller = (
-                AdaptiveOnlinePolicyController(
-                    online_policy_config,
-                    decision_model=decision_model_binding,
-                )
-                if decision_model_binding is not None
-                else AdaptiveOnlinePolicyController(online_policy_config)
-            )
-        except BaseException:
-            _close_run_results_io()
-            display.close()
-            raise
-        if online_policy_controller.load_error:
-            display.add_event(
-                message=(
-                    "Online adaptive policy state load warning: "
-                    f"{online_policy_controller.load_error}; starting with a fresh state."
-                ),
-                style="warning",
-            )
-    if isinstance(patcher_config, dict):
-        patcher_config["adaptive_online_warm_start_source"] = online_init_state_path
-        patcher_config["adaptive_online_warm_start_result"] = (
-            "load_error"
-            if online_policy_controller is not None and online_policy_controller.load_error
-            else ("loaded" if online_init_state_path else "fresh")
-        )
-
-    try:
-        budget_init_state_path = str(getattr(args, "adaptive_budget_init_state_path", "") or "")
-        budget_policy_config = BudgetPolicyConfig.normalize(
-            mode=str(args.adaptive_budget_policy_mode),
-            algorithm=str(args.adaptive_budget_policy_algo),
-            architecture=str(args.adaptive_budget_policy_architecture),
-            alpha=float(args.adaptive_budget_online_alpha),
-            epsilon=float(args.adaptive_budget_online_epsilon),
-            l2=float(args.adaptive_budget_online_l2),
-            warmup_decisions=int(args.adaptive_budget_online_warmup_decisions),
-            save_every=int(args.adaptive_budget_online_save_every),
-            decay=float(args.adaptive_budget_online_decay),
-            feature_scaling_profile=str(args.adaptive_budget_feature_scaling_profile),
-            init_state_path=(
-                Path(budget_init_state_path).expanduser().resolve()
-                if budget_init_state_path.strip()
-                else None
-            ),
-            state_path=Path(str(args.adaptive_budget_online_state_path)).expanduser().resolve(),
-            events_path=Path(str(args.adaptive_budget_online_events_path)).expanduser().resolve(),
-            bwk_run_token_budget=int(getattr(args, "adaptive_budget_bwk_run_token_budget", 0)),
-            random_seed=None,
-        )
-    except BaseException:
-        _close_run_results_io()
-        display.close()
-        raise
-    # POL-05: one budget controller per adaptive condition, so the conditions being
-    # compared don't train (and draw exploration from) one shared model.
-    budget_policy_controllers: dict[str, AdaptiveBudgetPolicyController] = {}
-    if budget_policy_config.mode != "off":
-        for condition_key, condition_config in _per_condition_budget_configs(
-            budget_policy_config,
             conditions=conditions,
-            seed=args.seed,
-            # POL-04: bwk_v1 paces its token budget over at most one decision per attempt.
-            horizon_decisions=len(cases) * max(1, int(getattr(args, "k", 1) or 1)),
-        ).items():
-            try:
-                controller = AdaptiveBudgetPolicyController(condition_config)
-            except BaseException:
-                for created in budget_policy_controllers.values():
-                    created.close()
-                _close_run_results_io()
-                display.close()
-                raise
-            if controller.load_error:
-                display.add_event(
-                    message=(
-                        "Online adaptive budget policy state load warning: "
-                        f"{controller.load_error}; starting with a fresh state."
-                    ),
-                    style="warning",
-                )
-            budget_policy_controllers[condition_key] = controller
-    budget_policy_controller: AdaptiveBudgetPolicyController | None = next(
-        iter(budget_policy_controllers.values()), None
-    )
-    if isinstance(patcher_config, dict) and budget_policy_controllers:
-        patcher_config["adaptive_budget_controllers"] = {
-            (key or "shared"): {
-                "state_path": str(controller.config.state_path),
-                "events_path": str(controller.config.events_path),
-            }
-            for key, controller in budget_policy_controllers.items()
-        }
-    if isinstance(patcher_config, dict):
-        patcher_config["adaptive_budget_warm_start_source"] = budget_init_state_path
-        patcher_config["adaptive_budget_warm_start_result"] = (
-            "load_error"
-            if budget_policy_controller is not None and budget_policy_controller.load_error
-            else ("loaded" if budget_init_state_path else "fresh")
+            config_state=config_state,
+            existing_run_metadata=existing_run_metadata,
+            openai_context_window_probe_error=openai_context_window_probe_error,
+            openai_context_window_probe_provider=openai_context_window_probe_provider,
+            openai_context_window_source=openai_context_window_source,
+            openai_context_window_tokens_effective=openai_context_window_tokens_effective,
+            patcher=patcher,
+            patcher_name=patcher_name,
+            resolved_config_lock_path=resolved_config_lock_path,
+            run_id=run_id,
+            run_settings_fingerprint=run_settings_fingerprint,
+            seams=seams,
+            setup=setup,
         )
+    )
+    patcher_config = build_run_metadata_for_run_result.patcher_config
+    run_metadata = build_run_metadata_for_run_result.run_metadata
+
+    build_policy_controllers_result = build_policy_controllers(
+        PolicyControllerInputs(
+            _close_run_results_io=_close_run_results_io,
+            args=args,
+            artifacts_root=artifacts_root,
+            cases=cases,
+            conditions=conditions,
+            display=display,
+            patcher_config=patcher_config,
+        )
+    )
+    budget_policy_controller = build_policy_controllers_result.budget_policy_controller
+    budget_policy_controllers = build_policy_controllers_result.budget_policy_controllers
+    online_policy_controller = build_policy_controllers_result.online_policy_controller
 
     previous_execution_config = set_active_execution_config(execution_config)
     # X-02: passed down explicitly instead of through run_eval module globals.
@@ -567,14 +308,14 @@ def run_main_flow(
                 failure_reasons=run_progress_summary.failure_reasons.copy(),
                 elapsed_sec=elapsed_sec,
                 eta_sec=eta_sec,
-                prompt_chars_total=run_prompt_chars_total,
-                completion_chars_total=run_completion_chars_total,
+                prompt_chars_total=run_usage.prompt_chars,
+                completion_chars_total=run_usage.completion_chars,
                 token_usage_text=_format_progress_token_usage(
-                    prompt_tokens=run_tokens_prompt_total,
-                    completion_tokens=run_tokens_completion_total,
-                    total_tokens=run_tokens_total,
-                    available_records=run_token_usage_available_records,
-                    unavailable_records=run_token_usage_unavailable_records,
+                    prompt_tokens=run_usage.prompt_tokens,
+                    completion_tokens=run_usage.completion_tokens,
+                    total_tokens=run_usage.total_tokens,
+                    available_records=run_usage.usage_available_records,
+                    unavailable_records=run_usage.usage_unavailable_records,
                 ),
             )
         )
@@ -595,120 +336,6 @@ def run_main_flow(
         if units_per_sec <= 0:
             return None
         return remaining_units / units_per_sec
-
-    def _extract_progress_metrics(
-        case_records: list[dict[str, Any]],
-    ) -> tuple[int, int, float, float, int, int, int, int, int, int, int]:
-        """Return attempt/time/usage totals for a case.
-
-        For test time: count the initial ``before_duration_sec`` once, then
-        only ``after_duration_sec`` for each attempt (the next attempt's
-        "before" is the previous attempt's "after", so this avoids
-        double-counting).
-        """
-        scored_records = _filter_attempt_records(case_records)
-        attempts_used = len(scored_records)
-        max_attempts = 0
-        if scored_records:
-            meta = scored_records[0].get("attempt_metadata")
-            if isinstance(meta, dict):
-                max_attempts = int(meta.get("max_attempts", 0) or 0)
-
-        total_llm_sec = 0.0
-        total_test_sec = (
-            float(scored_records[0].get("before_duration_sec", 0) or 0) if scored_records else 0.0
-        )
-        total_prompt_chars = 0
-        total_completion_chars = 0
-        total_prompt_tokens = 0
-        total_completion_tokens = 0
-        total_tokens = 0
-        token_usage_available_records = 0
-        token_usage_unavailable_records = 0
-        for r in scored_records:
-            pm = r.get("patch_meta")
-            attempt_meta = r.get("attempt_metadata")
-            if isinstance(pm, dict):
-                total_llm_sec += float(pm.get("propose_duration_sec", 0) or 0)
-            total_test_sec += float(r.get("after_duration_sec", 0) or 0)
-            prompt_chars = (
-                _nonnegative_int(
-                    attempt_meta.get("prompt_chars_total"),
-                    default=_nonnegative_int(pm.get("prompt_chars_total"), default=0)
-                    if isinstance(pm, dict)
-                    else 0,
-                )
-                if isinstance(attempt_meta, dict)
-                else _nonnegative_int(pm.get("prompt_chars_total"), default=0)
-                if isinstance(pm, dict)
-                else 0
-            )
-            completion_chars = (
-                _nonnegative_int(
-                    attempt_meta.get("completion_chars_total"),
-                    default=_nonnegative_int(pm.get("completion_chars_total"), default=0)
-                    if isinstance(pm, dict)
-                    else _completion_chars_from_response(
-                        patch_meta=pm if isinstance(pm, dict) else None
-                    ),
-                )
-                if isinstance(attempt_meta, dict)
-                else _nonnegative_int(pm.get("completion_chars_total"), default=0)
-                if isinstance(pm, dict)
-                else 0
-            )
-            if isinstance(attempt_meta, dict):
-                prompt_tokens = _nonnegative_int(
-                    attempt_meta.get("tokens_prompt"),
-                    default=_usage_token_counts_from_patch_meta(pm)[0]
-                    if isinstance(pm, dict)
-                    else 0,
-                )
-                completion_tokens = _nonnegative_int(
-                    attempt_meta.get("tokens_completion"),
-                    default=_usage_token_counts_from_patch_meta(pm)[1]
-                    if isinstance(pm, dict)
-                    else 0,
-                )
-                tokens_total = _nonnegative_int(
-                    attempt_meta.get("tokens_total"),
-                    default=_usage_token_counts_from_patch_meta(pm)[2]
-                    if isinstance(pm, dict)
-                    else 0,
-                )
-            else:
-                prompt_tokens, completion_tokens, tokens_total = (
-                    _usage_token_counts_from_patch_meta(pm)
-                )
-            total_prompt_chars += prompt_chars
-            total_completion_chars += completion_chars
-            total_prompt_tokens += prompt_tokens
-            total_completion_tokens += completion_tokens
-            total_tokens += tokens_total
-            token_usage_state = _record_token_usage_state(
-                attempt_meta=attempt_meta if isinstance(attempt_meta, dict) else None,
-                patch_meta=pm if isinstance(pm, dict) else None,
-                prompt_tokens=prompt_tokens,
-                total_tokens=tokens_total,
-            )
-            if token_usage_state == "available":
-                token_usage_available_records += 1
-            elif token_usage_state == "unavailable":
-                token_usage_unavailable_records += 1
-
-        return (
-            attempts_used,
-            max_attempts,
-            total_llm_sec,
-            total_test_sec,
-            total_prompt_chars,
-            total_completion_chars,
-            total_prompt_tokens,
-            total_completion_tokens,
-            total_tokens,
-            token_usage_available_records,
-            token_usage_unavailable_records,
-        )
 
     def _append_records_safely(case_records: list[dict[str, Any]]) -> None:
         if not case_records:
@@ -737,13 +364,6 @@ def run_main_flow(
         nonlocal transport_failure_streak
         nonlocal transport_fail_fast_triggered
         nonlocal transport_fail_fast_reason
-        nonlocal run_prompt_chars_total
-        nonlocal run_completion_chars_total
-        nonlocal run_tokens_prompt_total
-        nonlocal run_tokens_completion_total
-        nonlocal run_tokens_total
-        nonlocal run_token_usage_available_records
-        nonlocal run_token_usage_unavailable_records
         unit_duration = max(0.0, float(outcome.unit_duration_sec))
         completed_units += 1
         executed_units += 1
@@ -756,26 +376,19 @@ def run_main_flow(
         if not outcome.records_streamed:
             _append_records_safely(case_records)
         # ORC-17: usage a unit streamed before it failed still counts toward the run.
-        (
-            attempts_used,
-            max_attempts,
-            total_llm_sec,
-            total_test_sec,
-            total_prompt_chars,
-            total_completion_chars,
-            total_prompt_tokens,
-            total_completion_tokens,
-            total_tokens,
-            token_usage_available_records,
-            token_usage_unavailable_records,
-        ) = _extract_progress_metrics(case_records)
-        run_prompt_chars_total += total_prompt_chars
-        run_completion_chars_total += total_completion_chars
-        run_tokens_prompt_total += total_prompt_tokens
-        run_tokens_completion_total += total_completion_tokens
-        run_tokens_total += total_tokens
-        run_token_usage_available_records += token_usage_available_records
-        run_token_usage_unavailable_records += token_usage_unavailable_records
+        metrics = extract_unit_progress_metrics(case_records)
+        attempts_used = metrics.attempts_used
+        max_attempts = metrics.max_attempts
+        total_llm_sec = metrics.total_llm_sec
+        total_test_sec = metrics.total_test_sec
+        total_prompt_chars = metrics.total_prompt_chars
+        total_completion_chars = metrics.total_completion_chars
+        total_prompt_tokens = metrics.total_prompt_tokens
+        total_completion_tokens = metrics.total_completion_tokens
+        total_tokens = metrics.total_tokens
+        token_usage_available_records = metrics.token_usage_available_records
+        token_usage_unavailable_records = metrics.token_usage_unavailable_records
+        run_usage.add(metrics)
         if outcome.runtime_error is not None:
             reason = _single_line_error(outcome.runtime_error)
             runtime_errors.append((case_id, condition_value, reason))
@@ -1165,11 +778,11 @@ def run_main_flow(
     total_elapsed = time.monotonic() - run_started
     errors_suffix = f", errors={len(runtime_errors)}" if runtime_errors else ""
     run_token_usage_text = _format_progress_token_usage(
-        prompt_tokens=run_tokens_prompt_total,
-        completion_tokens=run_tokens_completion_total,
-        total_tokens=run_tokens_total,
-        available_records=run_token_usage_available_records,
-        unavailable_records=run_token_usage_unavailable_records,
+        prompt_tokens=run_usage.prompt_tokens,
+        completion_tokens=run_usage.completion_tokens,
+        total_tokens=run_usage.total_tokens,
+        available_records=run_usage.usage_available_records,
+        unavailable_records=run_usage.usage_unavailable_records,
     )
     _sync_display_summary(elapsed_sec=total_elapsed, eta_sec=0.0)
     display.close()
@@ -1177,7 +790,7 @@ def run_main_flow(
         "Progress: finished "
         f"executed={executed_units}, skipped={skipped_units}, total={total_units}, "
         f"elapsed={_format_duration(total_elapsed)} "
-        f"chars=in:{run_prompt_chars_total}ch,out:{run_completion_chars_total}ch "
+        f"chars=in:{run_usage.prompt_chars}ch,out:{run_usage.completion_chars}ch "
         f"{run_token_usage_text}{errors_suffix}"
     ]
     final_lines.extend(
