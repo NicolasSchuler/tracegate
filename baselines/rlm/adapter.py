@@ -11,6 +11,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from baselines._runtime import (
@@ -91,6 +92,15 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
     retry_context_prompt_field = "prompt_context"
 
     honours_generation_contract = True
+
+    #: D4: these knobs beat the shared contract, so the record reports them.
+    generation_override_keys = MappingProxyType(
+        {
+            "baseline_rlm_temperature": "temperature",
+            "baseline_rlm_top_p": "top_p",
+            "baseline_rlm_max_tokens": "max_completion_tokens",
+        }
+    )
 
     default_model: str = "gpt-4o-mini"
     _config: BaselineConfig | None = None

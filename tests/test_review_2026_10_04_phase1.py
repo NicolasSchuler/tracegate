@@ -800,3 +800,79 @@ def test_bas03_baseline_seed_follows_the_deterministic_switch() -> None:
         build_parser().parse_args(["--patcher", "openai", "--openai-model", "m", "--seed", "7"])
     )
     assert getattr(native, "seed", "missing") is None
+
+
+def test_bas03_record_reports_the_baseline_specific_generation_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#7: the record shows the override the request used, not the shared value."""
+    import subprocess
+
+    from baselines.adapter_base import (
+        BaselineConfig,
+        BaselineGenerationSettings,
+        BaselineResult,
+    )
+    from baselines.rlm.adapter import RLMAdapter
+    from evals.patchers.baseline_patcher import BaselinePatcher
+
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def compute(value):\n    return value\n", encoding="utf-8")
+    (case_dir / "test_buggy.py").write_text(
+        "from buggy import compute\n\n\ndef test_compute():\n    assert compute(3) == 6\n",
+        encoding="utf-8",
+    )
+    config = BaselineConfig(
+        repo_dir=tmp_path,
+        python_executable=tmp_path / "python",
+        model="test-model",
+        process_timeout_sec=30,
+        generation=BaselineGenerationSettings(
+            temperature=0.0, max_completion_tokens=2048, transport_max_retries=6
+        ),
+        extra={"baseline_rlm_max_tokens": 8192, "baseline_rlm_temperature": 0.9},
+    )
+    adapter = RLMAdapter()
+    monkeypatch.setattr(
+        adapter,
+        "run_repair",
+        lambda case_input, cfg: BaselineResult(
+            repaired_code="def compute(value):\n    return value * 2\n", success=True
+        ),
+    )
+    patcher = BaselinePatcher(adapter=adapter, config=config)
+
+    result = patcher.propose_patch(prompt="ignored", context_dir=case_dir, cwd=case_dir)
+
+    assert result.meta is not None
+    generation = result.meta["baseline_generation"]
+    assert generation["max_completion_tokens"] == 8192
+    assert generation["temperature"] == pytest.approx(0.9)
+    assert generation["enforced"] is True
+    assert generation["overrides"] == {
+        "temperature": "baseline_rlm_temperature",
+        "max_completion_tokens": "baseline_rlm_max_tokens",
+    }
+
+    # ... and the request really uses those values, so record and payload agree.
+    payloads: list[dict[str, Any]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        payloads.append(json.loads(Path(cmd[2]).read_text(encoding="utf-8")))
+        Path(cmd[3]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("baselines.rlm.adapter.subprocess.run", _fake_run)
+    RLMAdapter()._invoke_rlm(
+        prompt_context="ctx",
+        root_prompt="root",
+        work_dir=tmp_path,
+        python_args=["-m", "pytest", "-q"],
+        test_timeout_sec=15,
+        config=config,
+        timeout_sec=30,
+    )
+    assert payloads[0]["max_tokens"] == 8192
+    assert payloads[0]["temperature"] == pytest.approx(0.9)

@@ -759,9 +759,8 @@ class BaselinePatcher(Patcher):
         repo_state = getattr(self.adapter, "repo_state", None)
         if isinstance(repo_state, dict):
             meta["baseline_repo_state"] = dict(repo_state)
-        meta["baseline_generation"] = self.config.generation.record(
-            enforced=bool(getattr(self.adapter, "honours_generation_contract", False))
-        )
+        # The values the adapter really requests, baseline-specific overrides included.
+        meta["baseline_generation"] = self.adapter.effective_generation(self.config)
         contract = self.adapter.contract()
         meta.update(contract.to_dict())
         if not meta.get("contract_version"):

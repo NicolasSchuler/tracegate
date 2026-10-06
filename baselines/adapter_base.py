@@ -33,10 +33,11 @@ import hashlib
 import logging
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from baselines.case_information import CASE_INFO_POLICY
@@ -290,6 +291,13 @@ class BaselineAdapter(ABC):
     honours_generation_contract: bool = False
     """Whether ``run_repair`` applies ``BaselineConfig.generation`` itself (decision D4)."""
 
+    generation_override_keys: Mapping[str, str] = MappingProxyType({})
+    """``config.extra`` keys that beat the shared contract, mapped to the recorded field.
+
+    Adapters whose baseline-specific knob wins over ``BaselineConfig.generation`` declare it
+    here so the record reports the value the request actually used.
+    """
+
     retry_context_prompt_field: str | None = None
     """Free-text ``case_input`` field the harness may extend with retry context (BAS-02)."""
 
@@ -298,6 +306,25 @@ class BaselineAdapter(ABC):
 
     #: Fallback model used when the harness does not configure one.
     default_model: str = ""
+
+    def effective_generation(self, config: BaselineConfig) -> dict[str, Any]:
+        """The generation values this adapter really requests, for the record (D4).
+
+        Resolves ``generation_override_keys`` on top of the shared contract so a
+        baseline-specific knob is reported instead of the shared value it replaced.
+        """
+        record = config.generation.record(enforced=bool(self.honours_generation_contract))
+        applied: dict[str, Any] = {}
+        for extra_key, field_name in self.generation_override_keys.items():
+            value = config.extra.get(extra_key)
+            if value is None:
+                continue
+            resolved = int(value) if field_name.endswith("tokens") else float(value)
+            record[field_name] = resolved
+            applied[field_name] = extra_key
+        if applied:
+            record["overrides"] = applied
+        return record
 
     def contract(self) -> BaselineContract:
         """Return machine-readable metadata for this adapter contract."""

@@ -51,7 +51,9 @@ decision D1). It fixes which case data any arm may see:
 `run_eval` builds one `BaselineGenerationSettings` from the native flags and passes it to
 every adapter through `BaselineConfig.generation`: `--openai-temperature`, `--seed`,
 `--openai-max-tokens` (one completion cap) and `--openai-transport-max-retries`.
-Baseline-specific knobs such as `baseline_rlm_temperature` still win when set.
+Baseline-specific knobs such as `baseline_rlm_temperature` still win when set; each adapter
+declares those in `generation_override_keys`, and `patch_meta.baseline_generation` then reports
+the overriding value plus an `overrides` map naming the knob that won.
 
 | Adapter | Enforced | How |
 |---|---|---|
