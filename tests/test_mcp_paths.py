@@ -135,8 +135,10 @@ def test_read_only_tools_do_not_create_the_state_database(root: Path, tool_name:
 
 def test_tools_do_not_block_the_event_loop(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """RCA-09: sync tools ran on the event loop; a slow git call stalled every other call."""
+    import threading
     import time
 
+    from llmdebug._rate_limiter import load_mcp_rate_limiter
     from llmdebug.config import SnapshotConfig
     from llmdebug.output import write_bundle
 
@@ -145,22 +147,31 @@ def test_tools_do_not_block_the_event_loop(root: Path, monkeypatch: pytest.Monke
         SnapshotConfig(out_dir=str(root / ".llmdebug"), output_format="json"),
     )
 
+    ran = threading.Event()
+
     def _slow_git(*_args: object, **_kwargs: object) -> None:
+        ran.set()
         time.sleep(0.6)
 
     monkeypatch.setattr(mcp_server, "get_enhanced_git_context", _slow_git)
+    # A full bucket, so earlier tests in this process cannot turn the call into a
+    # RATE_LIMITED response that never reaches the slow operation at all.
+    monkeypatch.setattr(mcp_server, "_mcp_limiter", load_mcp_rate_limiter())
 
-    async def scenario() -> float:
+    async def scenario() -> tuple[float, object]:
         call = asyncio.create_task(
             mcp_server._mcp.call_tool("llmdebug_git_context", {"out_dir": ".llmdebug"})
         )
         started = time.perf_counter()
         await asyncio.sleep(0.05)  # a heartbeat; the tool starts while it waits
         heartbeat = time.perf_counter() - started
-        await call
-        return heartbeat
+        return heartbeat, await call
 
-    assert asyncio.run(scenario()) < 0.3
+    heartbeat, response = asyncio.run(scenario())
+
+    assert ran.is_set(), "the slow operation never ran, so the heartbeat proves nothing"
+    assert "RATE_LIMITED" not in str(response)
+    assert heartbeat < 0.3
 
 
 def test_tools_are_registered_as_async() -> None:

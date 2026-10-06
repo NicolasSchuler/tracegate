@@ -534,6 +534,26 @@ class TestClean:
         assert (snapshot_dir / "llmdebug_state.sqlite3").exists()  # RCA history is kept
         assert count_rca_records(str(snapshot_dir)) == 0
 
+    def test_clean_all_reports_deletions_when_the_index_is_corrupt(
+        self, snapshot_dir: Path
+    ) -> None:
+        """RCA-03: a corrupt database must not swallow a completed deletion."""
+        db = snapshot_dir / "llmdebug_state.sqlite3"
+        assert db.exists()
+        db.write_bytes(b"this is not a sqlite database")
+
+        result = CliRunner(mix_stderr=False).invoke(
+            main, ["clean", "--all", "--yes", "--dir", str(snapshot_dir)]
+        )
+
+        assert result.exit_code == 0
+        assert "Deleted" in result.output
+        assert "snapshot index cleanup failed" in result.stderr
+        remaining = [
+            p for p in snapshot_dir.iterdir() if p.is_file() and p.suffix in {".json", ".toon"}
+        ]
+        assert remaining == []
+
     def test_clean_purge_state_deletes_the_database(self, snapshot_dir: Path) -> None:
         (snapshot_dir / "rca_attempts.jsonl").write_text("{}\n", encoding="utf-8")
 
