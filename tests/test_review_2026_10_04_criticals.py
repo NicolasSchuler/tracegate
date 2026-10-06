@@ -237,14 +237,26 @@ def test_pol01_default_decay_is_one_and_decay_is_per_arm() -> None:
     controller = AdaptiveOnlinePolicyController(OnlinePolicyConfig.normalize(mode="on", decay=0.5))
     features = {"bias": 1.0, "x": 0.5}
     controller._ensure_feature_state(cleaned_features=features)
+    # An arm still at its ``A = l2 * I``, ``b = 0`` prior is a fixed point of the decay, so
+    # train another arm first: only a learned arm can show decay leaking across arms.
+    assert controller._update_model(action="invoke_helper", reward=1.0, feature_values=features)
     before = controller.state
+    trained_a = before.A["invoke_helper"].copy()
+    trained_b = before.b["invoke_helper"].copy()
+    prior = np.eye(len(before.feature_names), dtype=float) * float(controller.config.l2)
+    assert not np.allclose(trained_a, prior)
+    assert np.any(trained_b != 0.0)
+
     assert controller._update_model(action="frame_only", reward=1.0, feature_values=features)
     after = controller.state
     untouched = [a for a in before.A if a != "frame_only"]
-    assert untouched
+    assert "invoke_helper" in untouched
     for action in untouched:
         np.testing.assert_allclose(after.A[action], before.A[action])
         np.testing.assert_allclose(after.b[action], before.b[action])
+    # The trained arm keeps its learned evidence; only the updated arm decays.
+    np.testing.assert_allclose(after.A["invoke_helper"], trained_a)
+    np.testing.assert_allclose(after.b["invoke_helper"], trained_b)
 
 
 # ---------------------------------------------------------------------------
@@ -299,9 +311,79 @@ def test_sta02_repeated_runs_do_not_inflate_significance() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path) -> None:
+_DAT03_DIFF = (
+    "diff --git a/buggy.py b/buggy.py\n"
+    "--- a/buggy.py\n"
+    "+++ b/buggy.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " def f() -> int:\n"
+    "-    return 1\n"
+    "+    return 2\n"
+)
+_DAT03_ROW = {
+    "instance_id": "demo__demo-1",
+    "repo": "demo/demo",
+    "base_commit": "0" * 40,
+    "problem_statement": "f() returns 1 but should return 2",
+    "patch": "",
+    "test_patch": "",
+    "hints_text": "",
+    "FAIL_TO_PASS": "[]",
+    "PASS_TO_PASS": "[]",
+    "version": "1.0",
+}
+
+
+@dataclass
+class _StubGenerationPatcher:
+    """Deterministic stand-in for ``OpenAICompatPatcher``; records every call."""
+
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def __call__(self, **kwargs: Any) -> _StubGenerationPatcher:
+        self.calls.append(dict(kwargs))
+        return self
+
+    def propose_patch(self, **kwargs: Any) -> Any:
+        from evals.patchers.base import PatchResult
+
+        self.calls.append(dict(kwargs))
+        return PatchResult(diff=_DAT03_DIFF, meta={})
+
+
+def _bound_dat03_generation(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, *, runs_root: Path | None = None
+) -> _StubGenerationPatcher:
+    """Replace dataset loading and the model client so only the guard can fail the call.
+
+    DAT-03 is about the missing-snapshot-dir guard, so the test must not depend on the
+    optional ``datasets`` package, the real SWE-Bench corpus, or a reachable model
+    endpoint: removing the guard has to fail as "DID NOT RAISE", not as a download.
+    """
+    import importlib
+
+    module = importlib.import_module(module_name)
+    stub = _StubGenerationPatcher()
+    monkeypatch.setattr(
+        module,
+        "_load_dataset_rows",
+        lambda **_kwargs: {str(_DAT03_ROW["instance_id"]): dict(_DAT03_ROW)},
+    )
+    monkeypatch.setattr(module, "OpenAICompatPatcher", stub)
+    if runs_root is not None:
+        # Keep the CLI paths, which take no --root, out of the repo's generated run trees.
+        from evals.swebench_common import io as swebench_common_io
+
+        monkeypatch.setattr(swebench_common_io, "repo_root", lambda: runs_root)
+    return stub
+
+
+def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from evals.swebench.generate import generate_lite_predictions
 
+    stub = _bound_dat03_generation(monkeypatch, "evals.swebench.generate")
     with pytest.raises(ValueError, match="snapshot"):
         generate_lite_predictions(
             run_id="dat03",
@@ -311,16 +393,46 @@ def test_dat03_llmdebug_condition_without_snapshot_dir_fails_fast(tmp_path: Path
             openai_api_key=None,
             root=tmp_path,
         )
+    # The guard runs before anything loads a dataset or builds a client.
+    assert stub.calls == []
+
+    # With a snapshot dir the same call gets past the guard, so the guard is what raised.
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir()
+    from evals.swebench.prompt_policy import PromptInputs
+
+    summary = generate_lite_predictions(
+        run_id="dat03-ok",
+        conditions="baseline,llmdebug",
+        openai_base_url="http://127.0.0.1:9",
+        openai_model="stub",
+        openai_api_key=None,
+        prompt_inputs=PromptInputs(snapshot_dir=snapshot_dir),
+        root=tmp_path,
+    )
+    assert summary is not None
+    assert stub.calls
 
 
-@pytest.mark.parametrize("cli_module", ["evals.swebench.cli", "evals.swebench_pro.cli"])
+@pytest.mark.parametrize(
+    ("cli_module", "generate_module", "command"),
+    [
+        ("evals.swebench.cli", "evals.swebench.generate", "generate-lite"),
+        ("evals.swebench_pro.cli", "evals.swebench_pro.generate", "generate-pro"),
+    ],
+)
 def test_dat03_cli_rejects_llmdebug_without_snapshot_dir(
-    cli_module: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    cli_module: str,
+    generate_module: str,
+    command: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     import importlib
 
+    stub = _bound_dat03_generation(monkeypatch, generate_module, runs_root=tmp_path)
     cli = importlib.import_module(cli_module)
-    command = "generate-lite" if cli_module == "evals.swebench.cli" else "generate-pro"
     exit_code = cli.main(
         [
             command,
@@ -336,6 +448,7 @@ def test_dat03_cli_rejects_llmdebug_without_snapshot_dir(
     )
     assert exit_code == 1
     assert "--snapshot-dir" in capsys.readouterr().out
+    assert stub.calls == []
 
 
 # ---------------------------------------------------------------------------
