@@ -1586,3 +1586,52 @@ def test_resume_rejects_a_run_from_an_earlier_policy_defaults_version(
     patcher_config = recorded_metadata[0]["patcher_config"]
     assert isinstance(patcher_config, dict)
     assert patcher_config["policy_defaults_version"] == eval_types.POLICY_DEFAULTS_VERSION - 1
+
+
+def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """A v6-or-older run carries no settings fingerprint, so it cannot be resumed into a
+    v7 run — not even with `--allow-settings-drift` (codex 3-1#4)."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
+
+    case = _make_case(repo_root, "legacy_case")
+    monkeypatch.setattr(run_eval, "load_cases", lambda _cases_dir: [case])
+    monkeypatch.setattr(run_eval, "make_patcher", lambda _args: SimpleNamespace(name="stub"))
+
+    results_dir = repo_root / "evals" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    legacy_record = {
+        "schema_version": 6,
+        "run_id": "legacy-run",
+        "case_id": case.case_id,
+        "condition": "base_repair",
+        "attempt": 1,
+        "success": False,
+        "run_metadata": {"run_id": "legacy-run"},
+    }
+    (results_dir / "legacy-run.jsonl").write_text(
+        f"{json.dumps(legacy_record)}\n", encoding="utf-8"
+    )
+
+    def _unexpected_run(**_kwargs):
+        raise AssertionError("the legacy run must not be resumed")
+
+    monkeypatch.setattr(run_eval, "run_one_condition", _unexpected_run)
+    argv = [
+        "--run-id",
+        "legacy-run",
+        "--patcher",
+        "null",
+        "--conditions",
+        "base_repair",
+        "--k",
+        "1",
+    ]
+
+    assert _run_eval_main(argv) != 0
+    assert "missing run_settings_fingerprint" in capsys.readouterr().out
+    assert _run_eval_main(["--allow-settings-drift", *argv]) != 0
+    assert "missing run_settings_fingerprint" in capsys.readouterr().out
