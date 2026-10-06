@@ -7,11 +7,10 @@ import copy
 import functools
 import heapq
 import inspect
-import itertools
 import re
 from dataclasses import dataclass
 from re import Pattern
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from .config import SnapshotConfig
 from .redaction_policy import SENSITIVE_NAMES
@@ -698,30 +697,48 @@ def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 _SET_FULL_SORT_LIMIT = 1000
 
 
-def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> list[Any]:
-    """The first ``max_items + 1`` elements of a set, in a process-independent order."""
-    count = cfg.max_items + 1
+class _SetPreview(NamedTuple):
+    """Up to ``max_items`` preview elements, plus whether the set held more."""
+
+    items: list[Any]
+    truncated: bool
+
+
+def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> _SetPreview:
+    """The lowest ``max_items`` elements of a set, in a process-independent order.
+
+    Truncation comes from the set's own size: inferring it from the preview length
+    reported a 3,000-element set as complete whenever the preview hit an internal
+    sampling cap first.
+    """
+    limit = cfg.max_items
+    total = len(x)
 
     def by_repr(item: Any) -> tuple[str, str, str]:
         return (type(item).__module__, type(item).__name__, safe_repr(item, cfg))
 
-    if len(x) <= _SET_FULL_SORT_LIMIT:
-        return sorted(x, key=by_repr)[:count]
+    if total <= _SET_FULL_SORT_LIMIT:
+        return _SetPreview(sorted(x, key=by_repr)[:limit], total > limit)
     try:
-        return heapq.nsmallest(count, x)  # natural order, no repr per element
-    except TypeError:  # element types that don't compare: sort a bounded sample
-        return sorted(itertools.islice(x, _SET_FULL_SORT_LIMIT), key=by_repr)[:count]
+        return _SetPreview(heapq.nsmallest(limit, x), total > limit)
+    except Exception:
+        # Ordering the elements failed -- incomparable types, but also e.g. a
+        # `Decimal("NaN")` raising `InvalidOperation`, which used to escape and turn the
+        # whole local into a `<serialization failed>` marker. Falling back to canonical
+        # repr order over the whole set costs one repr per element, but a sample taken in
+        # set-iteration order changed contents (not just order) with the hash seed.
+        return _SetPreview(heapq.nsmallest(limit, x, key=by_repr), total > limit)
 
 
 def _jsonlike_collection(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     """Serialize list/tuple/set/frozenset to JSON-like form."""
     if isinstance(x, (list, tuple)):
         items: list[Any] = list(cast(list[Any], x)[: cfg.max_items + 1])
+        truncated = len(items) > cfg.max_items
+        if truncated:
+            items = items[: cfg.max_items]
     else:
-        items = _set_preview(cast(set[Any] | frozenset[Any], x), cfg)
-    truncated = len(items) > cfg.max_items
-    if truncated:
-        items = items[: cfg.max_items]
+        items, truncated = _set_preview(cast(set[Any] | frozenset[Any], x), cfg)
     result: list[Any] = [to_jsonlike(i, cfg, depth + 1) for i in items]
     if truncated:
         result.append("...[TRUNC]")
@@ -952,7 +969,7 @@ def _local_type_name(value: Any) -> str:
 
 # Types whose len() is known to be cheap and side-effect free. Calling len() on arbitrary
 # objects ran user code: a lazy ORM query set executes its query (CAP-21).
-_SAFE_LEN_TYPES = (
+_SAFE_LEN_TYPES: tuple[type, ...] = (
     str,
     bytes,
     bytearray,
@@ -966,16 +983,36 @@ _SAFE_LEN_TYPES = (
 )
 
 
+def _has_builtin_len(value: Any) -> bool:
+    """Whether ``value`` is a safe container that has not overridden ``__len__``.
+
+    An ``isinstance`` check alone still ran user code: a ``list`` subclass that
+    overrides ``__len__`` passed it, which is exactly the arbitrary call CAP-21 removed
+    from metadata-only mode.
+    """
+    value_type = cast("type[Any]", type(value))
+    if value_type in _SAFE_LEN_TYPES:
+        return True
+    if not isinstance(value, _SAFE_LEN_TYPES):
+        return False
+    own_len = cast(object, getattr(value_type, "__len__", None))
+    return any(
+        own_len is cast(object, getattr(base, "__len__", None))
+        for base in _SAFE_LEN_TYPES
+        if isinstance(value, base)
+    )
+
+
 def _safe_len(value: Any) -> int | None:
     """``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
     try:
         if (
-            isinstance(value, _SAFE_LEN_TYPES)
+            _has_builtin_len(value)
             or is_array_like(value)
             or is_dataframe(value)
             or is_series(value)
         ):
-            return len(cast(Any, value))
+            return len(value)
     except Exception:  # nosec B110 — safe serialization fallback
         pass
     return None

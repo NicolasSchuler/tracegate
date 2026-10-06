@@ -839,6 +839,25 @@ class TestWalAndSchemaVersion:
         with open_state_db(tmp_path) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
+    def test_database_replaced_by_another_process_is_switched_to_wal_again(
+        self, tmp_path: Path
+    ) -> None:
+        """RCA-16: the cache keyed only on the path, so a replacement was never re-checked."""
+        with open_state_db(tmp_path):
+            pass
+        db = state_db_path(tmp_path)
+        for db_file in tmp_path.glob("llmdebug_state.sqlite3-*"):
+            db_file.unlink()
+        db.unlink()
+        # Another process recreates it in rollback mode; this process never saw it go.
+        with closing(sqlite3.connect(db)) as foreign:
+            foreign.execute("PRAGMA journal_mode=DELETE")
+            state_db._create_schema_v1(foreign)
+            foreign.commit()
+
+        with open_state_db(tmp_path) as conn:
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
     def test_journal_mode_is_not_queried_on_every_open(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

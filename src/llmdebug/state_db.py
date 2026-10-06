@@ -56,24 +56,35 @@ def _journal_mode(conn: sqlite3.Connection) -> str:
     return str(row[0]).lower() if row else ""
 
 
+def _file_identity(db_path: Path) -> str:
+    """A key that changes when the file at *db_path* is replaced, not just renamed."""
+    try:
+        stat = db_path.stat()
+    except OSError:
+        return str(db_path)
+    return f"{db_path}:{stat.st_dev}:{stat.st_ino}"
+
+
 def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path, created: bool) -> None:
     """Switch the database to WAL unless it already is, and check that it worked (RCA-16).
 
     The journal mode is stored in the database, so it is checked when this process first
-    opens the path and whenever the file was just created: the per-path "done" cache used
-    to survive the database being deleted and recreated in rollback mode. Reading the mode
-    on every open costs about 0.2 ms, three times per capture. The result of the switch is
-    checked (filesystems without shared memory stay in rollback mode).
+    opens the file and whenever the file was just created: the "done" cache used to
+    survive the database being deleted and recreated in rollback mode. It is keyed by
+    device and inode, so a replacement this process did not create is re-verified too.
+    Reading the mode on every open costs about 0.2 ms, three times per capture. The
+    result of the switch is checked (filesystems without shared memory stay in rollback
+    mode).
     """
-    key = str(db_path)
+    key = _file_identity(db_path)
     if key in _WAL_VERIFIED_PATHS and not created:
         return
     if _journal_mode(conn) != "wal":
         _enable_wal_mode(conn)
         mode = _journal_mode(conn)
         if mode != "wal":
-            if key not in _WAL_WARNED_PATHS:
-                _WAL_WARNED_PATHS.add(key)
+            if str(db_path) not in _WAL_WARNED_PATHS:
+                _WAL_WARNED_PATHS.add(str(db_path))
                 emit_warning(
                     f"could not enable WAL mode for {db_path} (journal_mode={mode or '?'}); "
                     "concurrent llmdebug processes may block each other"

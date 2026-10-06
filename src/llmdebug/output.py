@@ -175,14 +175,20 @@ def _cleanup_indexed_snapshots(
 
 
 def _is_own_snapshot_file(out_dir: Path, path: Path) -> bool:
-    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink)."""
+    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink).
+
+    The index is data in a shared directory, so a row can name anything: an embedded
+    NUL raises ``ValueError`` and a symlink loop ``RuntimeError`` on some supported
+    Python versions. Either one used to propagate out of retention and abort the
+    capture; such a row is simply not ours.
+    """
     try:
         return (
             is_snapshot_name(path.name)
             and not path.is_symlink()
             and path.resolve().parent == out_dir.resolve()
         )
-    except OSError:
+    except (OSError, ValueError, RuntimeError):
         return False
 
 

@@ -226,6 +226,16 @@ class _Lazy:
         return 3
 
 
+class _LazyList(list[Any]):
+    """A container subclass whose ``__len__`` does work, like a lazy result list."""
+
+    len_calls = 0
+
+    def __len__(self) -> int:
+        type(self).len_calls += 1
+        return super().__len__()
+
+
 _HOSTILE_FACTORIES: dict[str, Callable[[], Any]] = {
     "no_repr": _NoRepr,
     "no_len": lambda: _NoLen([1, 2]),
@@ -330,3 +340,21 @@ def test_capture_does_not_call_len_on_arbitrary_objects(tmp_path: Path, locals_m
     assert lazy.len_calls == 0
     assert "len" not in meta["query"]
     assert meta["rows"]["len"] == 3
+
+
+@pytest.mark.parametrize("locals_mode", ["safe", "meta"])
+def test_capture_does_not_call_an_overridden_container_len(
+    tmp_path: Path, locals_mode: str
+) -> None:
+    """CAP-21: a list subclass passed the isinstance whitelist and still ran user code."""
+    _LazyList.len_calls = 0
+    rows = _LazyList([1, 2, 3])
+
+    def boom() -> None:
+        query = rows  # noqa: F841 - captured local
+        raise ValueError("lazy list")
+
+    snapshot = _capture(tmp_path, boom, locals_mode=locals_mode)
+
+    assert _LazyList.len_calls == 0
+    assert "len" not in snapshot["frames"][0]["locals_meta"]["query"]

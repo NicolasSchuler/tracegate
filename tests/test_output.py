@@ -609,6 +609,19 @@ def test_retention_never_deletes_paths_a_poisoned_index_names(tmp_path, kind):
     assert str(target) not in {row["path"] for row in list_snapshot_records(str(out_dir))}
 
 
+def test_capture_survives_an_index_row_with_a_malformed_path(tmp_path):
+    """CAP-15: a NUL in an index path raised ValueError straight out of write_bundle."""
+    from llmdebug.state_db import upsert_snapshot_record
+
+    cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=1)
+    write_bundle({"name": "first", "frames": []}, cfg)
+    upsert_snapshot_record(str(tmp_path), {"path": "poison\x00.json", "mtime": 0.0, "name": "evil"})
+
+    write_bundle({"name": "second", "frames": []}, cfg)
+
+    assert "poison\x00.json" not in {row["path"] for row in list_snapshot_records(str(tmp_path))}
+
+
 def test_traceback_sidecars_of_dotted_names_are_cleaned_up(tmp_path):
     """CAP-05: six pytest-style captures with max_snapshots=2 left six orphaned sidecars."""
     cfg = SnapshotConfig(out_dir=str(tmp_path), max_snapshots=2)
