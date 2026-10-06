@@ -120,18 +120,11 @@ def test_generate_for_condition_threaded_handles_mixed_errors(tmp_path: Path) ->
     assert summary.generated == 6
     assert summary.request_error_count == 1
 
-    # Errors still produce empty-patch records in the predictions file.
+    # DAT-08: the errored instance is not persisted, so --resume retries it.
     records = read_predictions(summary.predictions_path)
-    assert len(records) == 6
-    assert {r.instance_id for r in records} == set(instance_ids)
-
-    # pro-inst-4 should have an empty patch due to the error.
-    by_id = {r.instance_id: r for r in records}
-    assert by_id["pro-inst-4"].model_patch == ""
-    # The other instances should have non-empty patches.
-    for iid in instance_ids:
-        if iid != "pro-inst-4":
-            assert by_id[iid].model_patch, f"expected non-empty patch for {iid}"
+    assert len(records) == 5
+    assert {r.instance_id for r in records} == set(instance_ids) - {"pro-inst-4"}
+    assert all(r.model_patch for r in records)
 
 
 def test_generate_for_condition_threaded_stops_submitting_after_health_abort(

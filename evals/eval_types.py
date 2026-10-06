@@ -40,6 +40,7 @@ from evals.lambda_rlm_backend import (
     DEFAULT_LAMBDA_RLM_CONTEXT_WINDOW_CHARS,
     DEFAULT_LAMBDA_RLM_TIMEOUT_SEC,
 )
+from evals.oracle_integrity import PytestCounts
 from evals.policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     POLICY_FEATURE_SCALING_PROFILES,
@@ -523,7 +524,12 @@ class CaseSpec:
 
 @dataclass(frozen=True)
 class RunResult:
-    """Frozen result of a single pytest execution."""
+    """Frozen result of a single pytest execution.
+
+    ``junit_requested`` is set by ``run_pytest`` when the arguments asked for the
+    harness JUnit report; ``junit_counts`` then holds its counts, or ``None`` when no
+    report was written (ATT-01).
+    """
 
     returncode: int
     duration_sec: float
@@ -531,6 +537,8 @@ class RunResult:
     stderr: str
     timed_out: bool = False
     timeout_sec: int | None = None
+    junit_requested: bool = False
+    junit_counts: PytestCounts | None = None
 
 
 @dataclass(frozen=True)
@@ -698,7 +706,7 @@ class VerificationConfig:
     syntax_preflight_max_cycles: int = DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES
     syntax_preflight_fallthrough: bool = True
     patch_sanitize_enabled: bool = True
-    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ALL
     patch_verifier_min_score: int = PATCH_VERIFIER_MIN_SCORE
     patch_verifier_infer_test_source_scope: bool = True
 
@@ -794,7 +802,7 @@ class RunConditionInputs:
     syntax_preflight_max_cycles: int = DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES
     syntax_preflight_fallthrough: bool = True
     patch_sanitize_enabled: bool = True
-    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+    patch_verifier_scope: str = PATCH_VERIFIER_SCOPE_ALL
     patch_verifier_min_score: int = PATCH_VERIFIER_MIN_SCORE
     patch_verifier_infer_test_source_scope: bool = True
     adaptive_online_policy_controller: Any | None = None

@@ -237,6 +237,11 @@ from evals.eval_types import (  # noqa: E402
     baseline_condition_for_name,
     is_baseline_condition,
 )
+from evals.oracle_integrity import (  # noqa: E402
+    clear_junit_reports,
+    consume_junit_counts,
+    junit_report_name,
+)
 from llmdebug._hashing import xxh64_hexdigest_text  # noqa: E402
 
 _ACTIVE_RUN_SETTINGS = _ActiveRunSettings()
@@ -1862,8 +1867,11 @@ def main(argv: list[str] | None = None) -> int:
         "--force-patch-attempt",
         dest="force_patch_attempt",
         action="store_true",
-        default=True,
-        help="Force a deterministic runner-side patch attempt when patcher returns no diff (default: enabled).",
+        default=False,
+        help=(
+            "Try a runner-side marker patch when the model's diff is missing or fails to apply "
+            "(default: off). The attempt is still recorded as patch_apply_failed (ATT-07)."
+        ),
     )
     parser.add_argument(
         "--no-force-patch-attempt",
@@ -2617,9 +2625,10 @@ def main(argv: list[str] | None = None) -> int:
             PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
             PATCH_VERIFIER_SCOPE_ALL,
         ],
-        default=PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
+        default=PATCH_VERIFIER_SCOPE_ALL,
         help=(
-            "Patch verifier execution scope: disabled|adaptive_only|all (default: adaptive_only)."
+            "Patch verifier execution scope: disabled|adaptive_only|all (default: all, so every "
+            "condition faces the same verifier; adaptive_only is an ablation)."
         ),
     )
     parser.add_argument(
@@ -5617,9 +5626,13 @@ def run_pytest(
     Delegates to ``_run_pytest_local`` or ``_run_pytest_testcontainers``
     depending on the ``ExecutionConfig.executor`` setting.
     """
+    report_name = junit_report_name(python_args)
+    if report_name is not None:
+        # ATT-01: nothing planted under a report name may survive into the verdict.
+        clear_junit_reports(cwd)
     active_execution = execution if execution is not None else get_active_execution_config()
     if active_execution.executor == "local":
-        return _run_pytest_local(
+        result = _run_pytest_local(
             cwd=cwd,
             python_args=python_args,
             condition=condition,
@@ -5628,10 +5641,10 @@ def run_pytest(
             progress_update=progress_update,
             progress_phase_label=progress_phase_label,
         )
-    if active_execution.executor == "testcontainers":
+    elif active_execution.executor == "testcontainers":
         pool = _ACTIVE_CONTAINER_POOL
         if pool is not None:
-            return _run_pytest_pooled(
+            result = _run_pytest_pooled(
                 cwd=cwd,
                 python_args=python_args,
                 condition=condition,
@@ -5640,15 +5653,23 @@ def run_pytest(
                 execution=active_execution,
                 pool=pool,
             )
-        return _run_pytest_testcontainers(
-            cwd=cwd,
-            python_args=python_args,
-            condition=condition,
-            timeout_sec=timeout_sec,
-            output_format=output_format,
-            execution=active_execution,
-        )
-    raise RuntimeError(f"unsupported executor: {active_execution.executor!r}")
+        else:
+            result = _run_pytest_testcontainers(
+                cwd=cwd,
+                python_args=python_args,
+                condition=condition,
+                timeout_sec=timeout_sec,
+                output_format=output_format,
+                execution=active_execution,
+            )
+    else:
+        raise RuntimeError(f"unsupported executor: {active_execution.executor!r}")
+    if report_name is None:
+        return result
+    # The verdict comes from the report, read on the host after any executor.
+    return replace(
+        result, junit_requested=True, junit_counts=consume_junit_counts(cwd, report_name)
+    )
 
 
 def _build_pytest_args(

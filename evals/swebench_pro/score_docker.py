@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import concurrent.futures
+import hashlib
 import re
+import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,6 +70,17 @@ def strip_binary_hunks(patch: str) -> str:
     return "".join(kept)
 
 
+APPLY_FAILED_EXIT_CODE = 3
+"""Entry-script exit code when every patch-apply command failed (a model failure, DAT-09)."""
+
+# Mirrors the official SWE-bench harness apply sequence (DAT-19).
+_APPLY_COMMANDS = (
+    "git apply --verbose /workspace/patch.diff",
+    "git apply --verbose --reject /workspace/patch.diff",
+    "patch --batch --fuzz=5 -p1 -i /workspace/patch.diff",
+)
+
+
 def build_entry_script(
     *,
     instance_id: str,
@@ -77,6 +90,11 @@ def build_entry_script(
     env_commands: list[str],
 ) -> str:
     """Build the entry script that runs inside the Docker container.
+
+    Dataset values are shell-quoted (DAT-11); ``before_repo_set_cmd`` is a command by
+    contract and runs as written. Each stage records its status under ``/workspace``
+    so the scorer can tell a patch that didn't apply (exit
+    :data:`APPLY_FAILED_EXIT_CODE`) from an infrastructure failure (DAT-09).
 
     Args:
         instance_id: Instance identifier (for logging).
@@ -89,27 +107,37 @@ def build_entry_script(
     Returns:
         Shell script content as a string.
     """
+    del instance_id
     env_block = "\n".join(env_commands)
     # Use only the last line of before_repo_set_cmd (matching Pro eval
     # behavior)
     setup_cmd = before_repo_set_cmd.strip().split("\n")[-1] if before_repo_set_cmd.strip() else ""
+    commit = shlex.quote(base_commit)
+    apply_chain = " || ".join(_APPLY_COMMANDS)
 
     return f"""#!/bin/bash
 set -e
 {env_block}
 # Apply patch when present
 cd /app
-git reset --hard {base_commit}
-git checkout {base_commit}
+git reset --hard {commit}
+git checkout {commit}
 if [[ -s /workspace/patch.diff ]]; then
-git apply -v /workspace/patch.diff
+  if {apply_chain}; then
+    echo applied > /workspace/apply_status
+  else
+    echo failed > /workspace/apply_status
+    exit {APPLY_FAILED_EXIT_CODE}
+  fi
 else
-echo "Patch is empty after cleanup; evaluating base commit."
+  echo "Patch is empty after cleanup; evaluating base commit."
+  echo empty > /workspace/apply_status
 fi
 {setup_cmd}
-# Run tests and save output
-bash /workspace/run_script.sh {selected_test_files} > /workspace/stdout.log 2> /workspace/stderr.log
-# Parse results
+# Run tests and parse results; failing tests are an outcome, not a script error
+set +e
+bash /workspace/run_script.sh {shlex.quote(selected_test_files)} > /workspace/stdout.log 2> /workspace/stderr.log
+echo $? > /workspace/run_status
 python /workspace/parser.py /workspace/stdout.log /workspace/stderr.log /workspace/output.json
 """
 
@@ -209,8 +237,19 @@ def evaluate_instance_docker(
     uid_dir = output_dir / uid
     uid_dir.mkdir(parents=True, exist_ok=True)
 
+    if not ctx.fail_to_pass:
+        # DAT-04: an empty FAIL_TO_PASS set would pass trivially.
+        return _infrastructure_failure(uid, "empty fail_to_pass test list")
+
+    # Clean patch
+    cleaned_patch = strip_binary_hunks(ctx.patch)
+    patch_digest = hashlib.sha256(cleaned_patch.encode("utf-8")).hexdigest()
+
     output_path = uid_dir / f"{prefix}_output.json"
-    if not redo and output_path.exists():
+    digest_path = uid_dir / f"{prefix}_output.patch_sha256"
+    cached_digest = digest_path.read_text(encoding="utf-8").strip() if digest_path.exists() else ""
+    # DAT-13: reuse a cached result only for the identical patch.
+    if not redo and output_path.exists() and cached_digest == patch_digest:
         try:
             output = json.loads(output_path.read_text(encoding="utf-8"))
             return _score_output(ctx, output)
@@ -238,9 +277,6 @@ def evaluate_instance_docker(
     env_cmds: list[str] = []
     if dockerfiles_dir is not None:
         env_cmds = extract_env_commands(dockerfiles_dir, uid)
-
-    # Clean patch
-    cleaned_patch = strip_binary_hunks(ctx.patch)
 
     # Build entry script
     entry_script = build_entry_script(
@@ -303,7 +339,13 @@ def evaluate_instance_docker(
             run_kwargs["platform"] = docker_platform
 
         container = client.containers.run(image_uri, **run_kwargs)
-        result = container.wait(timeout=timeout)
+        try:
+            result = container.wait(timeout=timeout)
+        except Exception as wait_exc:
+            _cleanup_container(container)
+            return _infrastructure_failure(
+                uid, f"container wait failed or timed out after {timeout}s: {wait_exc}"
+            )
         status_code = result.get("StatusCode", 1) if isinstance(result, dict) else 1
 
         # Collect logs
@@ -316,25 +358,23 @@ def evaluate_instance_docker(
             uid_dir / f"{prefix}_stderr.log",
         )
 
-        if status_code != 0:
+        apply_status = _read_status(workspace_dir / "apply_status")
+        if status_code == APPLY_FAILED_EXIT_CODE or apply_status == "failed":
+            # The model's patch did not apply: a genuine failure, not infrastructure.
             return ScoreInstanceResult(
                 instance_id=uid,
                 passed=False,
                 fail_to_pass_met=False,
                 pass_to_pass_met=False,
-                error=f"Container exited with code {status_code}",
+                error="patch_apply_failed",
             )
+        if status_code != 0:
+            return _infrastructure_failure(uid, f"Container exited with code {status_code}")
 
         # Parse output
         output_json_path = workspace_dir / "output.json"
         if not output_json_path.exists():
-            return ScoreInstanceResult(
-                instance_id=uid,
-                passed=False,
-                fail_to_pass_met=False,
-                pass_to_pass_met=False,
-                error="output.json not found after container execution",
-            )
+            return _infrastructure_failure(uid, "output.json not found after container execution")
 
         output = json.loads(output_json_path.read_text(encoding="utf-8"))
         # Save output
@@ -342,6 +382,7 @@ def evaluate_instance_docker(
             json.dumps(output, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        digest_path.write_text(patch_digest + "\n", encoding="utf-8")
 
         return _score_output(ctx, output)
 
@@ -359,6 +400,24 @@ def evaluate_instance_docker(
     finally:
         if client is not None:
             _close_docker_client(client)
+
+
+def _infrastructure_failure(instance_id: str, error: str) -> ScoreInstanceResult:
+    return ScoreInstanceResult(
+        instance_id=instance_id,
+        passed=False,
+        fail_to_pass_met=False,
+        pass_to_pass_met=False,
+        error=error,
+        infrastructure_error=True,
+    )
+
+
+def _read_status(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _score_output(ctx: _EvalContext, output: dict[str, Any]) -> ScoreInstanceResult:
@@ -557,15 +616,28 @@ def run_docker_scoring(
                     )
                 results.append(result)
 
-        _raise_if_scoring_errors(condition=condition, results=results)
-
-        # Save results
+        # Save results before failing loudly, so the reasons survive (DAT-09).
         results_payload = {r.instance_id: r.passed for r in results}
         results_path = condition_output_dir / "eval_results.json"
         results_path.write_text(
             json.dumps(results_payload, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        details_payload = {
+            r.instance_id: {
+                "passed": r.passed,
+                "fail_to_pass_met": r.fail_to_pass_met,
+                "pass_to_pass_met": r.pass_to_pass_met,
+                "error": r.error,
+                "infrastructure_error": r.infrastructure_error,
+            }
+            for r in sorted(results, key=lambda item: item.instance_id)
+        }
+        (condition_output_dir / "eval_results_detail.json").write_text(
+            json.dumps(details_payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        _raise_if_scoring_errors(condition=condition, results=results)
 
         passed_count = sum(1 for r in results if r.passed)
         error_count = sum(1 for r in results if r.error is not None)

@@ -102,7 +102,9 @@ generation fails fast without it (DAT-03). `run_metadata.json` records
 `prompt_policy` and `snapshot_coverage` (hits, misses, missing instance IDs).
 Prompts carry only the issue text by default; `--include-hints` (Lite) and
 `--include-test-ids` add `hints_text` and the FAIL_TO_PASS/PASS_TO_PASS test IDs,
-which are not part of the official task (DAT-01, DAT-02).
+which are not part of the official task (DAT-01, DAT-02). A request that fails is not saved
+as an empty patch: the instance stays missing, `prepare-handoff` refuses the unequal paired
+sets, and `--resume` retries it (DAT-08).
 
 Local Docker convenience wrapper:
 
@@ -209,7 +211,15 @@ Available subcommands:
 - `generate-pro` — Produce paired predictions for each condition
 - `prepare-handoff` — Validate predictions and write handoff metadata
 - `score-docker` — Score predictions using pre-built DockerHub images and fail
-  the command when Docker/scorer infrastructure errors occur
+  the command when Docker/scorer infrastructure errors occur. A container that exits
+  non-zero for any reason other than a patch that doesn't apply, a missing `output.json`,
+  a wait timeout and an empty `fail_to_pass` list are infrastructure errors (DAT-04,
+  DAT-09); a patch that doesn't apply under the official sequence (`git apply --verbose`,
+  then `--reject`, then `patch --fuzz=5`, DAT-19) is a model failure.
+  `docker_eval/<condition>/eval_results_detail.json` keeps `error` and
+  `infrastructure_error` per instance and is written before the command fails. Cached
+  outputs are reused only for the identical patch (`*_output.patch_sha256`, DAT-13), and
+  dataset values are shell-quoted in the container entry script (DAT-11).
 - `prepare-scoring-smoke` — Build a tiny paired subset for quick scoring checks
 - `fetch-run-scripts` — Retrieve run/test scripts for a specific instance
 
@@ -266,6 +276,23 @@ and used by imported cases for traceability.
 At execution time, eval-only artifacts such as `case.json`/`meta.json` metadata and
 `oracle.patch` are stripped from the copied workdir before prompting, so patchers do
 not receive benchmark metadata or oracle diffs through the filesystem or prompt context.
+
+`description`, `category`, `difficulty` and `snapshot_dependency` are analysis-only: no
+condition, native or baseline, sees them (`case_info_policy = neutral_v1`, see
+`docs/baseline_contracts.md`).
+
+**Oracle integrity (ATT-01).** Before every post-patch verification run the harness restores
+the case's pristine test surface: `test_*.py`, `*_test.py`, pytest config and hook files
+(`conftest.py`, `pytest.ini`, `.pytest.ini`, `pytest.toml`, `pyproject.toml`, `setup.cfg`,
+`tox.ini`), modules that would shadow pytest or run at interpreter start (`pytest.py`,
+`pytest/`, `_pytest/`, `py.py`, `sitecustomize.py`, `usercustomize.py`, `*.pth`) and any
+symlink. Edited files are reverted, added ones deleted, links removed without being followed.
+Success then requires exit code 0 **and** a fresh per-run JUnit report (stale or planted
+reports are deleted first) with at least one executed test and no failures or errors. The
+patched code still runs inside the pytest process, so a deliberately adversarial patch could
+forge a verdict; the guard targets reward hacking, not a hostile model. Records carry `patch_meta.test_surface_modified`,
+`test_surface_restored_paths`, `pytest_verdict_source` (`junit`) and
+`pytest_verdict_counts`; `attempt_metadata.test_surface_modified` mirrors the flag.
 
 ### Categories
 
@@ -824,8 +851,10 @@ uv run python -m evals.run_eval \
 falls back internally to `diff` when the copied case workdir contains more than one
 non-test `.py` file.
 `--no-files-context` is useful when prompts are too long.
-Runner-level forced patch attempts are enabled by default to reduce `no_patch_proposed`
-and `patch_apply_failed` records; disable with `--no-force-patch-attempt`.
+Runner-level forced patch attempts are off by default (`--force-patch-attempt` enables them).
+They never change an outcome: a marker-only patch is recorded as `forced_noop_patch`, and a
+marker applied after the model's diff failed keeps the attempt `patch_apply_failed` with
+`runner_forced_patch_recovery*` modifiers, then is reverted (ATT-07, D8).
 `no_patch_proposed` and `forced_noop_patch` are runner-level notes, not baseline-native
 root causes. For external baselines, the underlying cause may instead live in
 `patch_meta.baseline_meta.error` (for example `timeout`, `learner_empty_response`)
@@ -1197,7 +1226,7 @@ Key flags:
 - `--syntax-preflight-max-cycles <int>`: max internal syntax-repair cycles per logical attempt (default `2`); these cycles do not consume extra retry attempts.
 - `--syntax-preflight-fallthrough` / `--no-syntax-preflight-fallthrough`: when enabled (default), preflight exhaustion falls through to test execution instead of terminating the attempt. Normalizes comparison with baselines that self-validate internally.
 - `--patch-sanitize-enabled` / `--no-patch-sanitize`: enable/disable malformed patch-text sanitation guard before patch apply/syntax preflight (default enabled).
-- `--patch-verifier-scope disabled|adaptive_only|all`: patch-verifier execution scope (default `adaptive_only`).
+- `--patch-verifier-scope disabled|adaptive_only|all`: patch-verifier execution scope (default `all`; `adaptive_only` is an ablation, ATT-14/D7).
 - `--patch-verifier-min-score <int>`: minimum relevance score required to pass patch verifier (default `2`).
 - `--patch-verifier-infer-test-source-scope` / `--no-patch-verifier-infer-test-source-scope`: enable/disable patch-verifier source-scope inference from failing/crash test imports (default enabled).
 
@@ -1322,8 +1351,12 @@ unsupported and should be regenerated with the current harness before analysis.
 - **7** (2026-10-04 code review remediation; see
   `docs/2026-10-04-code-review-findings.md`). Records written after the review fixes. Changes
   in record meaning versus v6: baselines no longer receive case descriptions or labels
-  (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07). Later review fixes extend
-  this list.
+  (`patch_meta.case_info_policy = "neutral_v1"`, ATT-02/BAS-07); success is judged against
+  the pristine test surface and pytest's JUnit counts, so patches that edit tests or add
+  `conftest.py` hooks no longer count (ATT-01); the patch verifier runs for every condition by
+  default (ATT-14); `--force-patch-attempt` defaults to off and a forced marker recovery stays
+  `patch_apply_failed` (ATT-07); `patch_apply_mode` distinguishes strict from relaxed patch
+  application (ATT-10). Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.
 Current runs may also contain non-scoring telemetry rows with
@@ -1457,8 +1490,10 @@ uv run python -m evals.decision_model.probe --executor local --dry-run --limit 2
   report (AUROC against `snapshot_dependency`, Spearman of `fix_confidence` vs difficulty,
   action mix per category, calibration bins, latency).
 
-By default (`--patch-verifier-scope adaptive_only`), adaptive conditions run a pre-apply patch
-verifier. Low-relevance adaptive patches are rejected before apply with note
+By default (`--patch-verifier-scope all`), every condition runs the same pre-apply patch
+verifier, so it can't favour one condition family (ATT-14, D7); `adaptive_only` restricts it to
+the adaptive conditions and is reported as an ablation. Low-relevance patches are rejected
+before apply with note
 `patch_verifier_rejected` and corresponding
 `patch_verifier_*` telemetry in `attempt_metadata` / `patch_meta`. When the rejected patch is
 still substantive, adaptive runs now make one cheap same-attempt verifier-repair proposal before

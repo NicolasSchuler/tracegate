@@ -82,6 +82,7 @@ from baselines.openai_compat import (
 )
 
 from .. import _json as json
+from ..eval_patch_constants import FORCED_PATCH_MARKER
 from ..eval_patches import _is_test_file_path
 from ..stage_a_contract import (
     STAGE_A_REQUEST_SCHEMA_COMPACT,
@@ -5984,9 +5985,9 @@ def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | N
         return None
 
     before = target_path.read_text(encoding="utf-8")
-    marker = "# llmdebug-force-attempt"
+    marker = FORCED_PATCH_MARKER
     if marker in before:
-        marker = "# llmdebug-force-attempt-2"
+        marker = f"{FORCED_PATCH_MARKER}-2"
     sep = "" if before.endswith("\n") else "\n"
     after = before + f"{sep}{marker}\n"
     if after == before:

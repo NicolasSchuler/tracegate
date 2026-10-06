@@ -189,22 +189,22 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
   - A CLI test covers the missing `--snapshot-dir` failure.
 
 ### 1B. Oracle and scoring integrity (D7, D8, D10)
-- [ ] **ATT-01:** apply D10 before every "after" pytest run.
+- [x] **ATT-01:** apply D10 before every "after" pytest run.
   - Restore or protect `test_*.py`, `conftest.py`, `pytest.ini`, `pyproject.toml`, `setup.cfg` and `tox.ini`.
   - Determine success from pytest's counts (for example `--junitxml` into the attempt directory): require at least one test collected and zero failed or errored.
   - Record `test_surface_modified`.
-- [ ] **ATT-14:** set the patch-verifier scope per D7.
-- [ ] **ATT-07:** apply D8, and re-sync the diff metadata to the diff actually applied.
-- [ ] **LLM-13:** use one shared constant for the forced-patch marker.
-- [ ] **ATT-10:** record `patch_apply_mode`.
-- [ ] **ATT-16:** remove `.rej` and `.orig` files.
-- [ ] **DAT-04, DAT-09, DAT-13, DAT-11, DAT-19:** SWE-Bench Pro scoring:
+- [x] **ATT-14:** set the patch-verifier scope per D7.
+- [x] **ATT-07:** apply D8, and re-sync the diff metadata to the diff actually applied.
+- [x] **LLM-13:** use one shared constant for the forced-patch marker.
+- [x] **ATT-10:** record `patch_apply_mode`.
+- [x] **ATT-16:** remove `.rej` and `.orig` files.
+- [x] **DAT-04, DAT-09, DAT-13, DAT-11, DAT-19:** SWE-Bench Pro scoring *(infrastructure errors still fail the command loudly after details are persisted; an opt-in exclusion flag was not added because `run_docker_scoring` is at its signature-arity budget, revisit with the Phase 5 config object)*:
   - An empty `fail_to_pass` list becomes an infrastructure error.
   - Timeouts and non-test exits become infrastructure errors, persisted per instance in `eval_results.json`.
   - The cached-result reuse checks the patch hash.
   - Use quoted argv in the entry script.
   - Mirror the official apply sequence.
-- [ ] **DAT-08:** don't persist predictions whose request failed; re-queue them on `--resume`.
+- [x] **DAT-08:** don't persist predictions whose request failed; re-queue them on `--resume`.
 - **Acceptance:**
   - The `conftest.py` exit-status hack is recorded as a failure (end-to-end through `apply_diff` and `run_pytest` with the local executor).
   - Unit tests cover Pro scoring with empty lists, timeouts and non-zero exits.

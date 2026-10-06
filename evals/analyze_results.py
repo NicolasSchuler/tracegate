@@ -634,6 +634,12 @@ def _derive_case_condition_rows(
         stage_a_attempts, stage_a_successes = _stage_a_request_counts(ordered)
         retry_gate_attempts, retry_gate_blocks = _retry_gate_counts(ordered)
         patch_attempts, test_touch_attempts = _test_touch_attempt_metrics(ordered)
+        relaxed_apply_attempts = _patch_meta_flag_count(
+            ordered, "patch_apply_mode", "relaxed_fallback"
+        )
+        test_surface_modified_attempts = _patch_meta_flag_count(
+            ordered, "test_surface_modified", True
+        )
         adaptive_metrics = _adaptive_helper_attempt_metrics(ordered)
         adaptive_online_metrics = _adaptive_online_attempt_metrics(ordered)
         adaptive_budget_policy_metrics = _adaptive_budget_policy_attempt_metrics(ordered)
@@ -817,6 +823,8 @@ def _derive_case_condition_rows(
                 "test_touch_attempt_rate": (
                     (test_touch_attempts / patch_attempts) if patch_attempts > 0 else None
                 ),
+                "relaxed_apply_attempts": relaxed_apply_attempts,
+                "test_surface_modified_attempts": test_surface_modified_attempts,
                 "baseline_teacher_duration_sec_total": baseline_teacher_duration_sec_total,
                 "baseline_learner_duration_sec_total": baseline_learner_duration_sec_total,
                 "baseline_postcheck_duration_sec_total": baseline_postcheck_duration_sec_total,
@@ -1703,6 +1711,12 @@ def _summarize_bucket(
                 if total_patch_attempts > 0
                 else None
             ),
+            "relaxed_apply_attempts": sum(
+                int(row.get("relaxed_apply_attempts") or 0) for row in condition_rows
+            ),
+            "test_surface_modified_attempts": sum(
+                int(row.get("test_surface_modified_attempts") or 0) for row in condition_rows
+            ),
             **_adaptive_rollup_metrics(
                 condition_rows,
                 records_by_case_condition=records_by_case_condition,
@@ -1772,6 +1786,10 @@ def _summarize_bucket(
     total_test_touch_attempts = sum(int(row.get("test_touch_attempts") or 0) for row in rows)
     out["patch_attempts"] = total_patch_attempts
     out["test_touch_attempts"] = total_test_touch_attempts
+    out["relaxed_apply_attempts"] = sum(int(row.get("relaxed_apply_attempts") or 0) for row in rows)
+    out["test_surface_modified_attempts"] = sum(
+        int(row.get("test_surface_modified_attempts") or 0) for row in rows
+    )
     out["test_touch_attempt_rate"] = (
         (total_test_touch_attempts / total_patch_attempts) if total_patch_attempts > 0 else None
     )
@@ -5120,6 +5138,15 @@ def _looks_like_test_path(path: str) -> bool:
     if file_name.startswith("test_"):
         return True
     return bool(file_name.endswith("_test.py"))
+
+
+def _patch_meta_flag_count(records: list[dict[str, Any]], key: str, value: Any) -> int:
+    """Count attempts whose ``patch_meta[key]`` equals *value*."""
+    return sum(
+        1
+        for record in records
+        if isinstance(record.get("patch_meta"), dict) and record["patch_meta"].get(key) == value
+    )
 
 
 def _test_touch_attempt_metrics(records: list[dict[str, Any]]) -> tuple[int, int]:

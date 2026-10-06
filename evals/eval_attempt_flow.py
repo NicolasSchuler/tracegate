@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -174,6 +174,8 @@ from evals.eval_patches import (
     _build_runner_forced_attempt_diff,
     _is_forced_noop_marker_diff,
     _render_patch_verifier_recovery_feedback,
+    _restore_diff_target_files,
+    patch_apply_mode,
 )
 from evals.eval_policy_budget import (
     AdaptiveBudgetMetadataUpdate,
@@ -294,6 +296,7 @@ from evals.native_stage_b_flow import (
 from evals.native_stage_b_flow import (
     _tep_jaccard_similarity as _tep_jaccard_similarity,
 )
+from evals.oracle_integrity import restore_test_surface, run_succeeded, with_junit_report
 from evals.patchers.base import Patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import normalize_feature_scaling_profile, scale_feature_mapping
@@ -1933,7 +1936,7 @@ def run_one_condition_impl(
             PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY,
             PATCH_VERIFIER_SCOPE_ALL,
         }
-        else PATCH_VERIFIER_SCOPE_ADAPTIVE_ONLY
+        else PATCH_VERIFIER_SCOPE_ALL
     )
     normalized_patch_verifier_min_score = max(0, int(patch_verifier_min_score))
     normalized_patch_verifier_infer_test_source_scope = bool(patch_verifier_infer_test_source_scope)
@@ -5938,6 +5941,8 @@ def run_one_condition_impl(
         attempt_terminated_early = False
         should_break_after_attempt = False
         patch_applied_and_ready = False
+        runner_forced_recovery_applied = False
+        runner_forced_recovery_backups: dict[str, bytes] = {}
 
         def _accumulate_timing_metadata_field(
             field: str,
@@ -7431,6 +7436,20 @@ def run_one_condition_impl(
             applied_diff_for_preflight = patch_application.applied_diff_for_preflight
             apply_ok = patch_application.apply_ok
             apply_msg = patch_application.apply_msg
+            runner_forced_recovery_applied = bool(apply_ok and patch_application.recovery_applied)
+            patch_meta["patch_apply_mode"] = (
+                "runner_marker"
+                if runner_forced_recovery_applied
+                else patch_apply_mode(apply_ok=apply_ok, apply_msg=apply_msg)
+            )
+            if runner_forced_recovery_applied:
+                # ATT-07 / D8: describe the diff that was applied; keep the model's diff hash.
+                runner_forced_recovery_backups = dict(file_backups)
+                patch_meta["model_patch_diff_xxh3_128"] = patch_meta.get("patch_diff_xxh3_128")
+                patch_meta["model_patch_file_paths"] = list(
+                    patch_meta.get("patch_file_paths") or []
+                )
+                _sync_patch_diff_metadata(patch_meta=patch_meta, diff=applied_diff_for_preflight)
             if not apply_ok:
                 _refresh_adaptive_progress_for_note(
                     note="patch_apply_failed",
@@ -7701,8 +7720,12 @@ def run_one_condition_impl(
         if not patch_applied_and_ready:
             continue
 
-        # Re-run after patch.
+        # Re-run after patch, against the pristine test surface (ATT-01, D10).
         shutil.rmtree(llmdebug_dir, ignore_errors=True)
+        test_surface_restored = restore_test_surface(workdir=workdir, pristine_dir=case.path)
+        patch_meta["test_surface_modified"] = bool(test_surface_restored)
+        patch_meta["test_surface_restored_paths"] = list(test_surface_restored)
+        attempt_metadata["test_surface_modified"] = bool(test_surface_restored)
         _emit_progress(
             "attempt_pytest_after",
             _progress_payload(
@@ -7715,7 +7738,7 @@ def run_one_condition_impl(
         )
         after = _call_run_pytest_compat(
             workdir,
-            case.python_args,
+            with_junit_report(case.python_args),
             condition,
             case.timeout_sec,
             output_format,
@@ -7728,8 +7751,26 @@ def run_one_condition_impl(
             prefix="pytest_after",
             tail_lines=normalized_pytest_output_tail_lines,
         )
-        success = after.returncode == 0
+        after_junit_requested = bool(getattr(after, "junit_requested", False))
+        after_junit_counts = getattr(after, "junit_counts", None)
+        success = run_succeeded(
+            returncode=after.returncode,
+            junit_requested=after_junit_requested,
+            counts=after_junit_counts,
+        )
+        patch_meta["pytest_verdict_source"] = "junit" if after_junit_requested else "exit_code"
+        patch_meta["pytest_verdict_counts"] = (
+            asdict(after_junit_counts) if after_junit_counts is not None else None
+        )
         note = "success" if success else "tests_still_failing"
+        if runner_forced_recovery_applied:
+            # ATT-07 / D8: only a runner marker was applied, so this stays an apply failure,
+            # and the marker is reverted instead of leaking into later prompts.
+            patch_meta["runner_forced_patch_recovery_tests_passed"] = success
+            success = False
+            note = "patch_apply_failed"
+            _restore_diff_target_files(cwd=workdir, backups=runner_forced_recovery_backups)
+            patch_meta["runner_forced_patch_recovery_reverted"] = True
         adaptive_progress_stop_candidate_for_note = adaptive_progress_stop_candidate
         adaptive_progress_stop_reason_for_note = adaptive_progress_stop_reason
         after_failure_signature = ""

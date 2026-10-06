@@ -338,11 +338,13 @@ def _generate_for_condition(
                     model_label=model_label,
                     workspace_root=tmp_root,
                 )
-                if outcome.is_empty:
-                    empty_patch_count += 1
                 if outcome.request_error is not None:
+                    # DAT-08: a failed request is not a prediction; --resume retries it.
                     request_error_count += 1
-                existing_map[instance_id] = outcome.record
+                else:
+                    if outcome.is_empty:
+                        empty_patch_count += 1
+                    existing_map[instance_id] = outcome.record
                 generated += 1
                 _write_prediction_map(
                     path=path,
@@ -398,11 +400,13 @@ def _generate_for_condition(
                     instance_id = future_map[future]
                     del future_map[future]
                     outcome = future.result()
-                    if outcome.is_empty:
-                        empty_patch_count += 1
                     if outcome.request_error is not None:
+                        # DAT-08: a failed request is not a prediction; --resume retries it.
                         request_error_count += 1
-                    existing_map[instance_id] = outcome.record
+                    else:
+                        if outcome.is_empty:
+                            empty_patch_count += 1
+                        existing_map[instance_id] = outcome.record
                     generated += 1
                     _write_prediction_map(
                         path=path,
@@ -612,11 +616,13 @@ async def _generate_for_condition_async(
     try:
         for task in asyncio.as_completed(tasks):
             instance_id, outcome = await task
-            if outcome.is_empty:
-                empty_patch_count += 1
             if outcome.request_error is not None:
+                # DAT-08: a failed request is not a prediction; --resume retries it.
                 request_error_count += 1
-            existing_map[instance_id] = outcome.record
+            else:
+                if outcome.is_empty:
+                    empty_patch_count += 1
+                existing_map[instance_id] = outcome.record
             generated += 1
             _write_prediction_map(
                 path=prediction_path_value,
