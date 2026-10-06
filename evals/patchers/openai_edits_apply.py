@@ -236,6 +236,16 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
 _FUZZY_BLOCK_TIME_BUDGET_SEC = 2.0
 """Wall-time cap on one fuzzy block search (LLM-12)."""
 
+_FUZZY_BLOCK_MAX_CHARS = 4000
+"""Largest find block or candidate window compared character by character (LLM-12).
+
+``SequenceMatcher.ratio`` is quadratic and cannot be interrupted, so the wall-time cap
+only bounds the search *between* candidates: one 16,000-character line with
+adjacent-character transpositions passes both cheap bounds and then spends seconds
+inside a single call. Bounding the compared sizes keeps every comparison far below the
+budget; a targeted single replacement is never this large.
+"""
+
 
 def _apply_fuzzy_block_replacement(
     *,
@@ -248,6 +258,8 @@ def _apply_fuzzy_block_replacement(
         return None
     # Keep fuzzy replacement conservative to avoid accidental rewrites.
     if len(find_block) < 16:
+        return None
+    if len(find_block) > _FUZZY_BLOCK_MAX_CHARS:
         return None
 
     line_chunks = before_nl.splitlines(keepends=True)
@@ -278,8 +290,9 @@ def _apply_fuzzy_block_replacement(
     # LLM-12: a window whose ratio can't reach min_ratio - margin can be neither the
     # accepted match nor within the ambiguity margin of one, so the cheap upper bounds
     # (real_quick_ratio, quick_ratio) skip it without changing the outcome. The matcher
-    # caches the find block as its second sequence, and a wall-time cap makes a
-    # pathological file fail closed instead of burning CPU outside any deadline.
+    # caches the find block as its second sequence, and a wall-time cap plus the
+    # per-comparison size bound make a pathological file fail closed instead of burning
+    # CPU outside any deadline.
     ambiguity_margin = 0.03
     prune_below = min_ratio - ambiguity_margin
     matcher = difflib.SequenceMatcher(None, "", find_block)
@@ -291,7 +304,7 @@ def _apply_fuzzy_block_replacement(
             if time.monotonic() > deadline:
                 return None
             raw_window = "".join(line_chunks[start : start + window_len]).strip()
-            if not raw_window:
+            if not raw_window or len(raw_window) > _FUZZY_BLOCK_MAX_CHARS:
                 continue
             matcher.set_seq1(raw_window)
             if matcher.real_quick_ratio() < prune_below or matcher.quick_ratio() < prune_below:
