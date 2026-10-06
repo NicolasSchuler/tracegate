@@ -144,6 +144,53 @@ def test_llm02_truncated_context_request_and_compaction_payloads_are_rejected() 
     assert openai_mod._normalize_context_compaction_payload(response)[0] is None
 
 
+def _stub_patcher(server: OpenAIStubServer) -> openai_mod.OpenAICompatPatcher:
+    return openai_mod.OpenAICompatPatcher(
+        base_url=server.base_url, model="dummy", api_key="local", http2=False
+    )
+
+
+def test_llm02_truncated_stage_a_answer_is_terminal_in_request_context(tmp_path: Path) -> None:
+    truncated = _response('{"need_more_context": true, "requests": [{"kind": "file"', "length")
+    with OpenAIStubServer() as server:
+        server.enqueue_json(method="POST", path="/v1/chat/completions", body=truncated)
+
+        result = _stub_patcher(server).request_context(
+            prompt="need context?", context_dir=tmp_path, cwd=tmp_path
+        )
+
+        calls = server.requests_for(method="POST", path="/v1/chat/completions")
+
+    assert result is not None
+    assert result.request_json is None
+    # Was invalid_request_context_payload after a pointless strict-JSON retry.
+    assert result.meta["error"] == "truncated_response"
+    assert len(calls) == 1
+    assert result.meta["request_context_strict_retry_count"] == 0
+
+
+def test_llm02_truncated_compaction_answer_is_terminal_in_compact_context(tmp_path: Path) -> None:
+    truncated = _response('{"compacted_context": "half of the', "length")
+    with OpenAIStubServer() as server:
+        server.enqueue_json(method="POST", path="/v1/chat/completions", body=truncated)
+
+        result = _stub_patcher(server).compact_context(
+            prompt="compact this",
+            context_text="a" * 200,
+            target_chars=50,
+            context_dir=tmp_path,
+            cwd=tmp_path,
+        )
+
+        calls = server.requests_for(method="POST", path="/v1/chat/completions")
+
+    assert result is not None
+    assert result.compacted_text is None
+    # Was invalid_context_compaction_payload.
+    assert result.meta["error"] == "truncated_response"
+    assert len(calls) == 1
+
+
 def _chat_completion_through_transport(body: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     """Run one completion through the real HTTP transport and its normalization."""
     with OpenAIStubServer() as server:

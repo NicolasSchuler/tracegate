@@ -478,6 +478,14 @@ class OpenAICompatPatcher(Patcher):
             totals = _accumulate_llm_totals(totals=totals, meta=attempt_meta, default_calls=0)
             meta = cast(PatcherMeta, dict(attempt_meta or {}))
             request_json, raw_response = _normalize_context_request_payload(raw)
+            # A cut-off helper answer is terminal (LLM-02): without the reason the
+            # caller below would record invalid_request_context_payload instead, after
+            # a pointless strict-JSON retry under the same token budget.
+            response_truncated = (
+                request_json is None and raw is not None and _is_truncated_response(raw)
+            )
+            if response_truncated:
+                meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
             failure_kind = _request_context_failure_kind(
                 meta=meta,
                 request_json=request_json,
@@ -507,6 +515,8 @@ class OpenAICompatPatcher(Patcher):
                 }
             )
             if request_json is not None:
+                break
+            if response_truncated:
                 break
             if _is_openai_compat_reasoning_only(meta):
                 break
@@ -935,6 +945,14 @@ class OpenAICompatPatcher(Patcher):
             totals = _accumulate_llm_totals(totals=totals, meta=attempt_meta, default_calls=0)
             meta = cast(PatcherMeta, dict(attempt_meta or {}))
             request_json, raw_response = _normalize_context_request_payload(raw)
+            # A cut-off helper answer is terminal (LLM-02): without the reason the
+            # caller below would record invalid_request_context_payload instead, after
+            # a pointless strict-JSON retry under the same token budget.
+            response_truncated = (
+                request_json is None and raw is not None and _is_truncated_response(raw)
+            )
+            if response_truncated:
+                meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
             failure_kind = _request_context_failure_kind(
                 meta=meta,
                 request_json=request_json,
@@ -964,6 +982,8 @@ class OpenAICompatPatcher(Patcher):
                 }
             )
             if request_json is not None:
+                break
+            if response_truncated:
                 break
             if _is_openai_compat_reasoning_only(meta):
                 break
@@ -2014,6 +2034,9 @@ def _compact_context_via_json(
 
     meta = _meta_with_llm_totals(meta=cast(PatcherMeta, dict(meta)), totals=totals)
     compacted_context, raw_response = _normalize_context_compaction_payload(raw)
+    if compacted_context is None and raw is not None and _is_truncated_response(raw):
+        # Terminal truncation, not an invalid compaction payload (LLM-02).
+        meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
     return compacted_context, raw_response, meta
 
 
@@ -2110,6 +2133,9 @@ async def _compact_context_via_json_async(
 
     meta = _meta_with_llm_totals(meta=cast(PatcherMeta, dict(meta)), totals=totals)
     compacted_context, raw_response = _normalize_context_compaction_payload(raw)
+    if compacted_context is None and raw is not None and _is_truncated_response(raw):
+        # Terminal truncation, not an invalid compaction payload (LLM-02).
+        meta = _error_meta(meta, TRUNCATED_RESPONSE_ERROR)
     return compacted_context, raw_response, meta
 
 
@@ -2120,10 +2146,11 @@ def _normalize_context_compaction_payload(
         return None, None
 
     content = _get_first_choice_content(response)
+    # Truncation is terminal and decided before the content check (LLM-02).
+    if _is_truncated_response(response):
+        return None, content if content is not None else _safe_trunc(response)
     if content is None:
         return None, _safe_trunc(response)
-    if _is_truncated_response(response):
-        return None, content
     payload = _extract_json_object(content)
     if payload is None:
         return None, content
@@ -2147,10 +2174,11 @@ def _normalize_context_request_payload(
         return None, None
 
     content = _get_first_choice_content(response)
+    # Truncation is terminal and decided before the content check (LLM-02).
+    if _is_truncated_response(response):
+        return None, content if content is not None else _safe_trunc(response)
     if content is None:
         return None, _safe_trunc(response)
-    if _is_truncated_response(response):
-        return None, content
     raw_payload = _extract_json_object(content)
     if raw_payload is None:
         return None, content
