@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,8 +22,12 @@ from baselines.ldb.case_converter import (
     _extract_entry_point,
     convert_case,
 )
-from baselines.ldb.result_extractor import make_diff
 from baselines.subprocess_monitor import MonitoredSubprocessResult
+
+
+def _extract_diff(adapter: Any, case_dir: Path, repaired_code: str) -> str | None:
+    """BAS-18: the adapters diff repaired code via ``BaselineAdapter.extract_diff``."""
+    return adapter.extract_diff(case_dir, BaselineResult(repaired_code=repaired_code, success=True))
 
 
 @pytest.fixture()
@@ -273,7 +278,7 @@ class TestCaseConverter:
 class TestResultExtractor:
     def test_make_diff_produces_valid_diff(self, simple_case: Path) -> None:
         repaired = 'def add(a, b):\n    """Add two numbers."""\n    return a + b\n'
-        diff = make_diff(simple_case / "buggy.py", repaired)
+        diff = _extract_diff(LDBAdapter(), simple_case, repaired)
 
         assert diff is not None
         assert "diff --git" in diff
@@ -282,7 +287,7 @@ class TestResultExtractor:
 
     def test_make_diff_identical_returns_none(self, simple_case: Path) -> None:
         same_code = (simple_case / "buggy.py").read_text(encoding="utf-8")
-        assert make_diff(simple_case / "buggy.py", same_code) is None
+        assert _extract_diff(LDBAdapter(), simple_case, same_code) is None
 
 
 class TestLDBAdapter:

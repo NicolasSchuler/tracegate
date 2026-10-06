@@ -16,11 +16,17 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
+from baselines._runtime import (
+    _coerce_subprocess_output,
+    _CommandOutcome,
+    _resolve_repo_commit,
+    _RuntimeFeedbackMixin,
+)
 from baselines.adapter_base import (
     BaselineAdapter,
     BaselineCaseContext,
@@ -51,30 +57,6 @@ from baselines.pins import get_pinned_repo_commit
 from .case_converter import convert_case
 
 _ENV_CLIENT_SCRIPT = Path(__file__).with_name("env_client.py")
-
-
-@dataclass(frozen=True)
-class _CommandOutcome:
-    returncode: int
-    stdout: str
-    stderr: str
-    duration_sec: float = 0.0
-    timed_out: bool = False
-    timeout_sec: int | None = None
-
-
-def _resolve_repo_commit(repo: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
-        return ""
-    return result.stdout.strip()
 
 
 _FENCED_CODE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
@@ -186,12 +168,6 @@ def _accumulate_usage(total: dict[str, int], delta: dict[str, int]) -> dict[str,
     for key, value in delta.items():
         merged[key] = merged.get(key, 0) + value
     return merged
-
-
-def _coerce_subprocess_output(value: str | bytes | None) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value or ""
 
 
 def _truncate_guidance_text(text: str, *, max_chars: int) -> str:
@@ -363,7 +339,7 @@ def _generation_seed_kwargs(config: BaselineConfig | None) -> dict[str, Any]:
     return {"seed": int(config.generation.seed)}
 
 
-class IntervenorAdapter(BaselineAdapter):
+class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
     """Adapter for the INTERVENOR teacher-learner debugging baseline."""
 
     retry_context_prompt_field = "prompt"
@@ -482,33 +458,6 @@ class IntervenorAdapter(BaselineAdapter):
         )
         metrics.update(_attempt_metrics(attempt_summaries))
         return metrics
-
-    def _emit_runtime_progress(
-        self,
-        *,
-        phase_label: str,
-        note: str = "",
-        attempts_completed: int | None = None,
-        llm_calls_observed: int | None = None,
-        eval_duration_sec_observed: float | None = None,
-        source: str = "phase",
-    ) -> None:
-        payload: dict[str, Any] = {
-            "owner": "baseline",
-            "source": source,
-            "phase_label": phase_label,
-            "external_operation": "baseline_repair",
-            "external_provider": self.name,
-        }
-        if note:
-            payload["note"] = note
-        if isinstance(attempts_completed, int):
-            payload["attempts_completed"] = max(0, attempts_completed)
-        if isinstance(llm_calls_observed, int):
-            payload["llm_calls_observed"] = max(0, llm_calls_observed)
-        if isinstance(eval_duration_sec_observed, (int, float)):
-            payload["eval_duration_sec_observed"] = max(0.0, float(eval_duration_sec_observed))
-        self._emit_progress("baseline_progress", payload)
 
     def run_repair(
         self,
@@ -1368,12 +1317,6 @@ class IntervenorAdapter(BaselineAdapter):
             resolved_max_chars = 4_000 if focus == "teacher" else 6_000
         return _truncate_guidance_text("\n".join(lines), max_chars=resolved_max_chars)
 
-    def _case_timeout(self, *, case_input: dict[str, Any], config: BaselineConfig) -> int:
-        raw_timeout = case_input.get("timeout_sec")
-        if isinstance(raw_timeout, int) and raw_timeout > 0:
-            return raw_timeout
-        return max(1, int(config.process_timeout_sec or 1.0))
-
     def _materialize_workspace(
         self,
         *,
@@ -1428,19 +1371,6 @@ class IntervenorAdapter(BaselineAdapter):
             stderr=result.stderr,
             duration_sec=time.perf_counter() - started_at,
         )
-
-    def _format_failure_feedback(self, outcome: _CommandOutcome) -> str:
-        parts: list[str] = []
-        if outcome.timed_out:
-            parts.append(f"Command timed out after {outcome.timeout_sec} seconds.")
-        parts.append(f"Exit code: {outcome.returncode}")
-        stdout_tail = outcome.stdout[-4000:].strip()
-        stderr_tail = outcome.stderr[-4000:].strip()
-        if stdout_tail:
-            parts.append(f"stdout:\n{stdout_tail}")
-        if stderr_tail:
-            parts.append(f"stderr:\n{stderr_tail}")
-        return "\n\n".join(parts)
 
     def extract_diff(self, case_dir: Path, result: BaselineResult) -> str | None:
         """Produce unified diff from INTERVENOR's repaired code."""

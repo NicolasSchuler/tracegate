@@ -21,10 +21,11 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import math
 from pathlib import Path
 from typing import Any
+
+from evals.coerce import expand_paths as _expand_paths
 
 from .adaptive_online_policy import EVENT_SCHEMA_VERSION as ONLINE_EVENT_SCHEMA_VERSION
 from .policy_event_log import event_key, load_policy_events
@@ -122,14 +123,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Exported {len(rows)} policy events to {output_path}")
     _print_input_errors(input_errors)
     return 0
-
-
-def _expand_paths(items: list[str]) -> list[str]:
-    out: list[str] = []
-    for item in items:
-        matches = sorted(glob.glob(str(item)))
-        out.extend(matches if matches else [str(item)])
-    return out
 
 
 def _load_events(

@@ -9,12 +9,13 @@ modifying the controller classes themselves.
 from __future__ import annotations
 
 import argparse
-import glob
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+
+from evals.coerce import expand_paths as _expand_paths
 
 from . import _json as json
 from . import linucb_core as core
@@ -549,14 +550,6 @@ def _bootstrap_budget_state(
         "bootstrap_generated_at_utc": _utc_now(),
     }
     return payload, {"events_replayed": len(events), "warnings": sorted(set(warnings))}
-
-
-def _expand_paths(items: list[str]) -> list[str]:
-    expanded: list[str] = []
-    for item in items:
-        matches = sorted(glob.glob(str(item)))
-        expanded.extend(matches if matches else [str(item)])
-    return expanded
 
 
 def _load_policy_events(

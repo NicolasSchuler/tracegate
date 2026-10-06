@@ -206,36 +206,6 @@ class TestTokenUsageBreakdown:
 
 
 # ---------------------------------------------------------------------------
-# _tokens_used wraps _token_usage_breakdown
-# ---------------------------------------------------------------------------
-
-
-class TestTokensUsed:
-    """_tokens_used returns total or None."""
-
-    def test_returns_total(self) -> None:
-        records = [
-            {
-                "attempt_metadata": {
-                    "tokens_prompt": 10,
-                    "tokens_completion": 20,
-                    "tokens_total": 30,
-                },
-            },
-        ]
-        assert ar._tokens_used(records) == 30.0
-
-    def test_fallback_to_patch_meta(self) -> None:
-        records = [
-            {
-                "attempt_metadata": {},
-                "patch_meta": {"usage": {"total_tokens": 42}},
-            },
-        ]
-        assert ar._tokens_used(records) == 42.0
-
-
-# ---------------------------------------------------------------------------
 # _print_summary - by_bug_source and by_contamination_risk
 # ---------------------------------------------------------------------------
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -13,8 +14,12 @@ from baselines.controller_packet import parse_controller_packet
 from baselines.intervenor import env_client
 from baselines.intervenor.adapter import IntervenorAdapter
 from baselines.intervenor.case_converter import _build_prompt, _extract_entry_point, convert_case
-from baselines.intervenor.result_extractor import make_diff
 from baselines.openai_compat import OpenAICompatResponseError
+
+
+def _extract_diff(adapter: Any, case_dir: Path, repaired_code: str) -> str | None:
+    """BAS-18: the adapters diff repaired code via ``BaselineAdapter.extract_diff``."""
+    return adapter.extract_diff(case_dir, BaselineResult(repaired_code=repaired_code, success=True))
 
 
 @pytest.fixture()
@@ -171,14 +176,16 @@ class TestCaseConverter:
 
 class TestResultExtractor:
     def test_make_diff_produces_valid_diff(self, simple_case: Path) -> None:
-        diff = make_diff(simple_case / "buggy.py", "def multiply(a, b):\n    return a * b\n")
+        diff = _extract_diff(
+            IntervenorAdapter(), simple_case, "def multiply(a, b):\n    return a * b\n"
+        )
         assert diff is not None
         assert "-    return a + b" in diff
         assert "+    return a * b" in diff
 
     def test_make_diff_identical_returns_none(self, simple_case: Path) -> None:
         same = (simple_case / "buggy.py").read_text(encoding="utf-8")
-        assert make_diff(simple_case / "buggy.py", same) is None
+        assert _extract_diff(IntervenorAdapter(), simple_case, same) is None
 
 
 class TestIntervenorAdapter:

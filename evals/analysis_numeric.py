@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import glob
 import math
 from typing import Any
 
 import numpy as np
+
+from evals.coerce import (
+    expand_paths as _expand_paths,  # noqa: F401 (shared by the analysis modules)
+)
 
 
 def _increment_string_count(target: dict[str, int], value: Any) -> None:
@@ -116,12 +119,3 @@ def _median(xs: list[int]) -> float | None:
     if n % 2 == 1:
         return float(ys[mid])
     return (ys[mid - 1] + ys[mid]) / 2.0
-
-
-def _expand_paths(items: list[str]) -> list[str]:
-    """Expand shell globs in a list of path strings."""
-    out: list[str] = []
-    for item in items:
-        matches = sorted(glob.glob(item))
-        out.extend(matches if matches else [item])
-    return out

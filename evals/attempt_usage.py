@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _nonnegative_int(value: Any, *, default: int = 0) -> int:
-    try:
-        coerced = int(value)
-    except (TypeError, ValueError):
-        return int(default)
-    return max(0, coerced)
+from evals.coerce import nonnegative_int as _nonnegative_int
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:

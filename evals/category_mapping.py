@@ -1,6 +1,6 @@
 """Maps external dataset bug types to the llmdebug eval taxonomy.
 
-Provides mappings for DebugBench, HumanEvalPack, ConDefects, mutmut
+Provides mappings for DebugBench, HumanEvalPack, ConDefects
 mutation operators, PyResBugs fault types, and QuixBugs, plus a heuristic
 for inferring snapshot dependency from category.
 """
@@ -41,23 +41,6 @@ CONDEFECTS_MAP: dict[str, str] = {
     "wrong answer": "logic_error",
     "runtime error": "reference_error",
     "time limit exceeded": "logic_error",
-}
-
-
-# ---------------------------------------------------------------------------
-# mutmut mutation operator types -> llmdebug categories
-# ---------------------------------------------------------------------------
-
-MUTMUT_OPERATOR_MAP: dict[str, str] = {
-    "arithmetic": "logic_error",
-    "comparison": "logic_error",
-    "boolean": "logic_error",
-    "number": "logic_error",
-    "string": "parse_value",
-    "keyword": "logic_error",
-    "removed_call": "cross_file_contract",
-    "changed_return": "hidden_state",
-    "changed_default": "mutability_aliasing",
 }
 
 
@@ -130,11 +113,6 @@ def map_humanevalpack_type(bug_type: str) -> str:
 def map_condefects_type(verdict: str) -> str:
     """Map a ConDefects verdict to llmdebug category."""
     return CONDEFECTS_MAP.get(verdict.lower().strip(), _FALLBACK_CATEGORY)
-
-
-def map_mutmut_operator(operator: str) -> str:
-    """Map a mutmut mutation operator type to llmdebug category."""
-    return MUTMUT_OPERATOR_MAP.get(operator.lower().strip(), _FALLBACK_CATEGORY)
 
 
 def map_pyresbugs_type(fault_acronym: str) -> str:

@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from evals.coerce import nonnegative_int as _nonnegative_int
+
 from .adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -41,14 +43,6 @@ from .policy_feature_scaling import (
     interaction_features,
     normalize_feature_scaling_profile,
 )
-
-
-def _nonnegative_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return max(0, int(default))
-
 
 # Dataset labels from case.json (not observable at deployment time); masked by default.
 CASE_LABEL_FEATURE_NAMES = (

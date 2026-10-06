@@ -502,13 +502,8 @@ def _doubly_robust_terms(
             feature_names=feature_names,
             beta=models[target_action],
         )
-        behavior_hat = target_hat
-        if action in models:
-            behavior_hat = _predict_action_reward(
-                features=features,
-                feature_names=feature_names,
-                beta=models[action],
-            )
-        correction = (reward - behavior_hat) / propensity if action == target_action else 0.0
+        # Only the target action gets a correction, and for it the behaviour model's
+        # prediction is target_hat (STA-26: the other actions' predictions were unused).
+        correction = (reward - target_hat) / propensity if action == target_action else 0.0
         terms.append(target_hat + correction)
     return terms

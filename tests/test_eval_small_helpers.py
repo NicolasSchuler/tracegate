@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from evals.importers import fixup_expected_exceptions as fixup
-from evals.importers import mutmut_generator as mutmut
 from evals.importers import native_repro_helpers as native
 from evals.patchers.heuristic_patcher import HeuristicSnapshotPatcher
 from evals.run_eval import CaseSpec, Condition, RunResult
@@ -246,83 +245,6 @@ def test_fixup_expected_exception_helpers_and_flow(
     assert results["case_ok"] == "ok: already correct"
     updated = json.loads((case_fixed / "case.json").read_text(encoding="utf-8"))
     assert updated["expected_exception"] == "ValueError"
-
-
-def test_mutmut_generator_helpers_and_import_flow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert mutmut._parse_mutmut_results("1 killed\n2 survived\nignored") == [
-        {"id": "1", "status": "killed"},
-        {"id": "2", "status": "survived"},
-    ]
-    assert mutmut._infer_operator_type("diff --git a/x.py b/x.py\n- a + b\n") == "arithmetic"
-    assert mutmut._infer_operator_type("diff --git a/x.py b/x.py\n- x == y\n") == "comparison"
-    assert (
-        mutmut._infer_operator_type("diff --git a/x.py b/x.py\n- return value\n")
-        == "changed_return"
-    )
-    assert mutmut._infer_operator_type("") == "keyword"
-
-    original = "def f():\n    return 1\n"
-    diff = "--- a/demo.py\n+++ b/demo.py\n@@ -1,2 +1,2 @@\n-def f():\n+def f():\n"
-
-    original_run = mutmut.subprocess.run
-
-    def _fake_patch_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        del kwargs
-        src_path = Path(cmd[2])
-        src_path.write_text("def f():\n    return 2\n", encoding="utf-8")
-        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-
-    monkeypatch.setattr(mutmut.subprocess, "run", _fake_patch_run)
-    mutated = mutmut._apply_diff_to_source(original, diff)
-    monkeypatch.setattr(mutmut.subprocess, "run", original_run)
-    assert mutated is not None
-    assert "def f():" in mutated
-
-    target = tmp_path / "src" / "demo.py"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(original, encoding="utf-8")
-    test_file = tmp_path / "src" / "test_demo.py"
-    test_file.write_text("def test_demo():\n    assert True\n", encoding="utf-8")
-    assert mutmut._find_test_file(str(target)) == test_file
-
-    dry_run = mutmut.import_mutmut(tmp_path / "cases", target=str(target), dry_run=True)
-    assert dry_run[0]["case_id"] == "mut_demo_preview"
-
-    monkeypatch.setattr(mutmut, "_run_mutmut", lambda target: (True, ""))
-    monkeypatch.setattr(
-        mutmut,
-        "_get_mutmut_results",
-        lambda: ([{"id": "1", "status": "killed"}, {"id": "2", "status": "survived"}], ""),
-    )
-    monkeypatch.setattr(mutmut, "_find_test_file", lambda target: test_file)
-    monkeypatch.setattr(
-        mutmut,
-        "_get_mutant_diff",
-        lambda mutant_id: diff if mutant_id == "1" else None,
-    )
-    monkeypatch.setattr(
-        mutmut,
-        "_apply_diff_to_source",
-        lambda original, diff: "def f():\n    return 2\n" if diff else original,
-    )
-    monkeypatch.setattr(mutmut, "generate_oracle_patch", lambda buggy, fixed: "oracle patch")
-    monkeypatch.setattr(mutmut, "write_case_files", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        mutmut, "validate_generated_case", lambda case_dir, schema_only=True: (True, "ok")
-    )
-    monkeypatch.setattr(mutmut, "map_mutmut_operator", lambda operator: f"mapped:{operator}")
-    monkeypatch.setattr(mutmut, "infer_snapshot_dependency", lambda category: f"dep:{category}")
-
-    imported = mutmut.import_mutmut(
-        tmp_path / "cases",
-        target=str(target),
-        max_cases=5,
-        validate=True,
-        dry_run=False,
-    )
-    assert imported and imported[0]["case_id"] == "mut_demo_1"
 
 
 def test_native_repro_helpers_cover_command_and_git_paths(

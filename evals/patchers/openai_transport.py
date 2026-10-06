@@ -1078,12 +1078,12 @@ async def _chat_completion_async(
                     "error": str(error_meta.get("error", "")),
                     "backoff_sec": backoff_sec,
                 }
-                status_code = error_meta.get("status")
-                if isinstance(status_code, int):
-                    retry_meta["status"] = status_code
+                status = error_meta.get("status")
+                if isinstance(status, int):
+                    retry_meta["status"] = status
                 retry_attempts.append(retry_meta)
                 retry_count = len(retry_attempts)
-                status_suffix = f" status={status_code}" if isinstance(status_code, int) else ""
+                status_suffix = f" status={status}" if isinstance(status, int) else ""
                 _emit_openai_transport_progress(
                     "openai_transport",
                     note=(
@@ -1095,7 +1095,7 @@ async def _chat_completion_async(
                     next_transport_attempt=call_count + 1,
                     transport_retry_count=retry_count,
                     error=str(error_meta.get("error", "")),
-                    status=status_code if isinstance(status_code, int) else None,
+                    status=status if isinstance(status, int) else None,
                     backoff_sec=backoff_sec,
                 )
                 if backoff_sec > 0:

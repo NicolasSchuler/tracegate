@@ -14,8 +14,6 @@ from evals.swebench_pro.types import (
     SWEBENCH_PRO_GITHUB_REPO,
     ConditionGenerationSummary,
     GenerationRunSummary,
-    ProInstanceRow,
-    ProPredictionRecord,
     ScoreConditionSummary,
     ScoreInstanceResult,
     ScoreRunSummary,
@@ -41,90 +39,6 @@ def test_dockerhub_repo() -> None:
 
 def test_github_repo() -> None:
     assert SWEBENCH_PRO_GITHUB_REPO == "scaleapi/SWE-bench_Pro-os"
-
-
-# ---------------------------------------------------------------------------
-# ProPredictionRecord
-# ---------------------------------------------------------------------------
-
-
-def test_pro_prediction_record_is_frozen() -> None:
-    record = ProPredictionRecord(instance_id="a/1", patch="diff", prefix="/tmp")
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        record.instance_id = "changed"  # type: ignore[misc]
-
-
-def test_pro_prediction_record_fields() -> None:
-    field_names = [f.name for f in dataclasses.fields(ProPredictionRecord)]
-    assert field_names == ["instance_id", "patch", "prefix"]
-
-
-def test_pro_prediction_record_as_json() -> None:
-    record = ProPredictionRecord(
-        instance_id="django__django-12345",
-        patch="diff --git a/f.py b/f.py\n+fix\n",
-        prefix="/workspace",
-    )
-    result = record.as_json()
-    assert result == {
-        "instance_id": "django__django-12345",
-        "patch": "diff --git a/f.py b/f.py\n+fix\n",
-        "prefix": "/workspace",
-    }
-
-
-def test_pro_prediction_record_as_json_returns_dict() -> None:
-    record = ProPredictionRecord(instance_id="x", patch="p", prefix="pfx")
-    assert isinstance(record.as_json(), dict)
-
-
-def test_pro_prediction_record_equality() -> None:
-    a = ProPredictionRecord(instance_id="a", patch="p", prefix="x")
-    b = ProPredictionRecord(instance_id="a", patch="p", prefix="x")
-    assert a == b
-
-
-def test_pro_prediction_record_inequality() -> None:
-    a = ProPredictionRecord(instance_id="a", patch="p1", prefix="x")
-    b = ProPredictionRecord(instance_id="a", patch="p2", prefix="x")
-    assert a != b
-
-
-# ---------------------------------------------------------------------------
-# ProInstanceRow (TypedDict)
-# ---------------------------------------------------------------------------
-
-
-def test_pro_instance_row_has_expected_keys() -> None:
-    expected_keys = {
-        "instance_id",
-        "repo",
-        "base_commit",
-        "patch",
-        "test_patch",
-        "problem_statement",
-        "requirements",
-        "interface",
-        "repo_language",
-        "fail_to_pass",
-        "pass_to_pass",
-        "issue_specificity",
-        "issue_categories",
-        "before_repo_set_cmd",
-        "selected_test_files_to_run",
-        "dockerhub_tag",
-    }
-    assert set(ProInstanceRow.__annotations__) == expected_keys
-
-
-def test_pro_instance_row_is_total_false() -> None:
-    # total=False means all keys are optional
-    assert ProInstanceRow.__total__ is False  # type: ignore[attr-defined]
-
-
-def test_pro_instance_row_can_be_constructed_with_partial_keys() -> None:
-    row: ProInstanceRow = {"instance_id": "test__test-1"}  # type: ignore[typeddict-item]
-    assert row["instance_id"] == "test__test-1"
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +288,6 @@ def test_init_all_contains_expected_symbols() -> None:
         "ConditionGenerationSummary",
         "GenerationRunSummary",
         "PredictionRecord",
-        "ProPredictionRecord",
         "ScoreRunSummary",
         "ScoringSmokeSubsetSummary",
     }

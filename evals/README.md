@@ -344,7 +344,7 @@ bug-fix pair appears in LLM training data:
 
 | Level | Description | Example sources |
 |-------|-------------|-----------------|
-| `none` | Freshly generated, impossible to memorize | hand-crafted, mutmut mutations |
+| `none` | Freshly generated, impossible to memorize | hand-crafted (the `mut_*` cases are hand-crafted mutations) |
 | `low` | Post-training-cutoff or GPT-4-generated bugs | DebugBench, ConDefects |
 | `medium` | Pre-cutoff but not widely published | PyResBugs, BugsInPy, PyBugHive |
 | `high` | Extremely well-known benchmark | HumanEvalPack, TrickyBugs |
@@ -455,17 +455,6 @@ Requires cloning the ConDefects repo and downloading test data separately.
 git clone https://github.com/appmlk/ConDefects.git
 # Download Test.zip from OneDrive and extract into ConDefects/
 uv run python -m evals.importers.cli condefects --repo-path ./ConDefects --validate
-```
-
-### mutmut mutations (contamination: none)
-
-Generates zero-contamination cases by mutating llmdebug source code itself.
-Only keeps killed mutants (where tests actually detect the bug).
-
-```bash
-pip install mutmut
-uv run python -m evals.importers.cli mutmut --target src/llmdebug/capture.py --max-cases 10
-uv run python -m evals.importers.cli mutmut --target src/llmdebug/serialize.py --max-cases 10
 ```
 
 ### QuixBugs (~40 cases, contamination: high)

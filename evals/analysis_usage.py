@@ -328,12 +328,6 @@ def _reasoning_token_usage_breakdown(
     return fallback_total, True, fallback_total
 
 
-def _tokens_used(records: list[dict[str, Any]]) -> float | None:
-    """Total tokens used across all attempt records."""
-    _prompt, _completion, total = _token_usage_breakdown(records)
-    return total
-
-
 def _retry_history_attempt_metrics(records: list[dict[str, Any]]) -> dict[str, int]:
     """Aggregate retry-history character, turn, and truncation metrics."""
     attempts = 0

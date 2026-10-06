@@ -12,7 +12,6 @@ from .types import (
     SWEBENCH_PRO_DATASET_NAME,
     ConditionGenerationSummary,
     GenerationRunSummary,
-    ProPredictionRecord,
     ScoreRunSummary,
     ScoringSmokeSubsetSummary,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "ConditionGenerationSummary",
     "GenerationRunSummary",
     "PredictionRecord",
-    "ProPredictionRecord",
     "ScoreRunSummary",
     "ScoringSmokeSubsetSummary",
 ]

@@ -524,28 +524,6 @@ def _aggregate_case_runs(
     return decided
 
 
-def analyze_condition_matrix(
-    rows: list[dict[str, Any]],
-    *,
-    n_bootstrap: int = 10000,
-    seed: int | None = None,
-) -> list[dict[str, Any]]:
-    """Run pairwise A/B analysis across all discovered conditions."""
-    conditions = sorted({str(row.get("condition", "")) for row in rows if row.get("condition")})
-    out: list[dict[str, Any]] = []
-    for idx, condition_a in enumerate(conditions):
-        for condition_b in conditions[idx + 1 :]:
-            result = analyze_paired_results(
-                rows,
-                n_bootstrap=n_bootstrap,
-                seed=seed,
-                condition_a=condition_a,
-                condition_b=condition_b,
-            )
-            out.append(result)
-    return out
-
-
 def _case_run_pairs(
     rows: list[dict[str, Any]],
     *,

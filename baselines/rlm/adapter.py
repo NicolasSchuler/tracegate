@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import base64
 import os
 import re
 import subprocess
@@ -14,6 +13,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from baselines._runtime import (
+    _CandidateWorkspaceMixin,
+    _char_totals,
+    _CommandOutcome,
+    _env_failure_error,
+    _nonnegative_int,
+    _normalize_file_rows,
+    _resolve_repo_commit,
+    _RuntimeFeedbackMixin,
+    _truncate,
+    _usage_totals,
+)
 from baselines.adapter_base import (
     BaselineAdapter,
     BaselineCaseContext,
@@ -49,16 +60,6 @@ _GUARD_STOP_REASONS = frozenset(
 
 
 @dataclass(frozen=True)
-class _CommandOutcome:
-    returncode: int
-    stdout: str
-    stderr: str
-    duration_sec: float = 0.0
-    timed_out: bool = False
-    timeout_sec: int | None = None
-
-
-@dataclass(frozen=True)
 class _UnchangedWorkspaceFeedbackInputs:
     stop_reason: str
     env_error: str
@@ -71,55 +72,6 @@ class _UnchangedWorkspaceFeedbackInputs:
     last_write_rejection: dict[str, Any] | None = None
 
 
-def _resolve_repo_commit(repo: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
-        return ""
-    return result.stdout.strip()
-
-
-def _coerce_subprocess_output(value: str | bytes | None) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value or ""
-
-
-def _truncate(text: str, *, max_chars: int) -> str:
-    value = str(text or "").strip()
-    if len(value) <= max(0, int(max_chars)):
-        return value
-    if max_chars <= 3:
-        return value[: max(0, int(max_chars))]
-    return value[: max(0, int(max_chars)) - 3].rstrip() + "..."
-
-
-def _nonnegative_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and value >= 0 else None
-
-
-def _usage_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
-    total_calls = _nonnegative_int(payload.get("total_calls")) or 0
-    input_tokens = _nonnegative_int(payload.get("total_input_tokens")) or 0
-    output_tokens = _nonnegative_int(payload.get("total_output_tokens")) or 0
-    total_tokens = input_tokens + output_tokens
-    return total_calls, input_tokens, output_tokens, total_tokens
-
-
-def _char_totals(payload: dict[str, Any]) -> tuple[int, int, int, int]:
-    total_calls = _nonnegative_int(payload.get("total_calls")) or 0
-    input_chars = _nonnegative_int(payload.get("total_input_chars")) or 0
-    output_chars = _nonnegative_int(payload.get("total_output_chars")) or 0
-    total_chars = input_chars + output_chars
-    return total_calls, input_chars, output_chars, total_chars
-
-
 def _is_guard_stop_reason(stop_reason: str) -> bool:
     return str(stop_reason or "").strip() in _GUARD_STOP_REASONS
 
@@ -127,11 +79,7 @@ def _is_guard_stop_reason(stop_reason: str) -> bool:
 _TERMINAL_ENV_ERRORS = frozenset({"openai_compat_reasoning_only", "timeout", "env_client_failed"})
 
 
-def _env_failure_error(exc: BaseException) -> str:
-    return "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "env_client_failed"
-
-
-class RLMAdapter(BaselineAdapter):
+class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapter):
     """Adapter for the standalone upstream RLM baseline."""
 
     retry_context_prompt_field = "prompt_context"
@@ -240,33 +188,6 @@ class RLMAdapter(BaselineAdapter):
         case_context: BaselineCaseContext | None = None,
     ) -> LambdaRLMCaseInput:
         return convert_case(case_dir, case_context=case_context)
-
-    def _emit_runtime_progress(
-        self,
-        *,
-        phase_label: str,
-        note: str = "",
-        attempts_completed: int | None = None,
-        llm_calls_observed: int | None = None,
-        eval_duration_sec_observed: float | None = None,
-        source: str = "phase",
-    ) -> None:
-        payload: dict[str, Any] = {
-            "owner": "baseline",
-            "source": source,
-            "phase_label": phase_label,
-            "external_operation": "baseline_repair",
-            "external_provider": self.name,
-        }
-        if note:
-            payload["note"] = note
-        if isinstance(attempts_completed, int):
-            payload["attempts_completed"] = max(0, attempts_completed)
-        if isinstance(llm_calls_observed, int):
-            payload["llm_calls_observed"] = max(0, llm_calls_observed)
-        if isinstance(eval_duration_sec_observed, (int, float)):
-            payload["eval_duration_sec_observed"] = max(0.0, float(eval_duration_sec_observed))
-        self._emit_progress("baseline_progress", payload)
 
     def run_repair(self, case_input: dict[str, Any], config: BaselineConfig) -> BaselineResult:
         python_args = [str(arg) for arg in case_input.get("python_args", []) if str(arg)]
@@ -1085,77 +1006,6 @@ class RLMAdapter(BaselineAdapter):
             return min(max(1, int(float(raw_timeout))), process_timeout)
         return process_timeout
 
-    def _case_timeout(self, *, case_input: dict[str, Any], config: BaselineConfig) -> int:
-        raw_timeout = case_input.get("timeout_sec")
-        if isinstance(raw_timeout, int) and raw_timeout > 0:
-            return raw_timeout
-        return max(1, int(config.process_timeout_sec or 1.0))
-
-    def _materialize_workspace(
-        self,
-        *,
-        work_dir: Path,
-        file_rows: list[dict[str, object]],
-    ) -> None:
-        for row in file_rows:
-            relative_path = Path(str(row.get("path", "")))
-            if not relative_path.parts:
-                continue
-            target = work_dir / relative_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            encoding = str(row.get("encoding", "utf-8"))
-            content = row.get("content", "")
-            if encoding == "base64":
-                target.write_bytes(base64.b64decode(str(content)))
-            else:
-                target.write_text(str(content), encoding="utf-8")
-
-    def _run_case_tests(
-        self,
-        *,
-        work_dir: Path,
-        python_args: list[str],
-        timeout_sec: int,
-    ) -> _CommandOutcome:
-        started_at = time.perf_counter()
-        try:
-            result = subprocess.run(
-                [sys.executable, *python_args],
-                capture_output=True,
-                text=True,
-                cwd=str(work_dir),
-                timeout=timeout_sec,
-                env=os.environ.copy(),
-            )
-        except subprocess.TimeoutExpired as exc:
-            return _CommandOutcome(
-                returncode=124,
-                stdout=_coerce_subprocess_output(exc.stdout),
-                stderr=_coerce_subprocess_output(exc.stderr),
-                duration_sec=time.perf_counter() - started_at,
-                timed_out=True,
-                timeout_sec=timeout_sec,
-            )
-        return _CommandOutcome(
-            returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            duration_sec=time.perf_counter() - started_at,
-        )
-
-    def _format_failure_feedback(self, outcome: _CommandOutcome) -> str:
-        parts: list[str] = []
-        if outcome.timed_out:
-            parts.append(f"Command timed out after {outcome.timeout_sec} seconds.")
-        parts.append(f"Exit code: {outcome.returncode}")
-        stdout_tail = outcome.stdout[-4000:].strip()
-        stderr_tail = outcome.stderr[-4000:].strip()
-        if stdout_tail:
-            parts.append(f"stdout:\n{stdout_tail}")
-        if stderr_tail:
-            parts.append(f"stderr:\n{stderr_tail}")
-        return "\n\n".join(parts)
-
     def _format_internal_test_feedback(self, payload: dict[str, Any]) -> str:
         return self._format_failure_feedback(
             _CommandOutcome(
@@ -1221,21 +1071,6 @@ class RLMAdapter(BaselineAdapter):
             parts.append("Most recent internal test feedback:")
             parts.append(self._format_internal_test_feedback(inputs.last_test_result))
         return "\n\n".join(part for part in parts if part)
-
-    def _is_valid_python(self, candidate: str) -> bool:
-        try:
-            ast.parse(candidate)
-        except SyntaxError:
-            return False
-        return True
-
-    def _syntax_feedback(self, candidate: str) -> str:
-        try:
-            ast.parse(candidate)
-        except SyntaxError as exc:
-            line = exc.text.strip() if exc.text else ""
-            return f"{exc.msg} at line {exc.lineno}, column {exc.offset}.\n{line}"
-        return ""
 
     def _salvage_candidate_from_response(
         self,
@@ -1395,18 +1230,3 @@ class RLMAdapter(BaselineAdapter):
             and isinstance(expr.func, ast.Name)
             and expr.func.id in {"FINAL", "FINAL_VAR"}
         )
-
-
-def _normalize_file_rows(raw: Any) -> list[dict[str, object]]:
-    file_rows: list[dict[str, object]] = []
-    if not isinstance(raw, list):
-        return file_rows
-    for row in cast(list[object], raw):
-        if not isinstance(row, dict):
-            continue
-        row_mapping = cast(dict[object, object], row)
-        normalized_row: dict[str, object] = {}
-        for key, value in row_mapping.items():
-            normalized_row[str(key)] = value
-        file_rows.append(normalized_row)
-    return file_rows

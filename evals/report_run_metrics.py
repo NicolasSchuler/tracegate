@@ -9,7 +9,6 @@ bootstrap confidence intervals and paired significance tests (McNemar / Wilcoxon
 from __future__ import annotations
 
 import argparse
-import glob
 import math
 import re
 from pathlib import Path
@@ -28,7 +27,9 @@ from evals.analysis_api import (
     records_by_case_condition,
     summarize_bucket,
 )
+from evals.analysis_numeric import _mean, _ratio
 from evals.case_outcome import case_outcomes
+from evals.coerce import expand_paths as _expand_paths
 from evals.eval_types import normalize_condition_name
 from evals.stats import (
     analyze_paired_results,
@@ -316,14 +317,6 @@ def _label_slice_family(
         holm = adjusted.get(name)
         effect["holm_adjusted_p"] = holm["adjusted_p"] if holm else None
         effect["holm_rejected"] = bool(holm["rejected"]) if holm else None
-
-
-def _expand_paths(items: list[str]) -> list[str]:
-    out: list[str] = []
-    for item in items:
-        matches = sorted(glob.glob(item))
-        out.extend(matches if matches else [item])
-    return out
 
 
 def _flatten_grouped_records(
@@ -1229,18 +1222,6 @@ def _compute_token_estimate_diagnostics(
     return {"per_condition": per_condition}
 
 
-def _failure_reason(*, error: str, status: str, note: str, overflow: bool) -> str:
-    if overflow:
-        return "http_error:context_exceeded"
-    if error and status:
-        return f"{error}:{status}"
-    if error:
-        return error
-    if note:
-        return f"note:{note}"
-    return "unknown"
-
-
 def _baseline_meta_from_record(record: dict[str, Any]) -> dict[str, Any]:
     patch_meta = record.get("patch_meta")
     if not isinstance(patch_meta, dict):
@@ -1347,12 +1328,6 @@ def _annotate_runner_note(reason: str, *, note: str) -> str:
     if not note_clean or note_clean in {"success", "tests_still_failing"}:
         return reason
     return f"{reason} [runner_note={note_clean}]"
-
-
-def _ratio(numer: int, denom: int) -> float | None:
-    if denom <= 0:
-        return None
-    return float(numer) / float(denom)
 
 
 # One list of timing fields drives both accumulation and display (STA-17): three baseline
@@ -2173,12 +2148,6 @@ def _as_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
-
-
-def _mean(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return sum(values) / len(values)
 
 
 def _median(values: list[float]) -> float | None:

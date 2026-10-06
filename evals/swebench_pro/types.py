@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
 
 # Reuse condition constants from the Lite module
 
@@ -16,48 +15,6 @@ SWEBENCH_PRO_DOCKERHUB_REPO = "jefzda/sweap-images"
 
 # SWE-bench Pro GitHub repository for run_scripts and Dockerfiles
 SWEBENCH_PRO_GITHUB_REPO = "scaleapi/SWE-bench_Pro-os"
-
-
-class ProInstanceRow(TypedDict, total=False):
-    """Schema for a single SWE-bench Pro dataset row.
-
-    All fields are optional to allow partial loading; the dataset itself
-    guarantees ``instance_id`` is always present.
-    """
-
-    instance_id: str
-    repo: str
-    base_commit: str
-    patch: str
-    test_patch: str
-    problem_statement: str
-    requirements: str
-    interface: str
-    repo_language: str
-    fail_to_pass: str
-    pass_to_pass: str
-    issue_specificity: str
-    issue_categories: str
-    before_repo_set_cmd: str
-    selected_test_files_to_run: str
-    dockerhub_tag: str
-
-
-@dataclass(frozen=True)
-class ProPredictionRecord:
-    """One SWE-Bench Pro prediction line (patch format for the eval script)."""
-
-    instance_id: str
-    patch: str
-    prefix: str
-
-    def as_json(self) -> dict[str, str]:
-        """Serialise to the flat dict format expected by swe_bench_pro_eval.py."""
-        return {
-            "instance_id": self.instance_id,
-            "patch": self.patch,
-            "prefix": self.prefix,
-        }
 
 
 @dataclass(frozen=True)
