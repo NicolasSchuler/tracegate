@@ -69,7 +69,7 @@ from evals.adaptive_online_policy import (
     OnlinePolicyConfig,
     PolicyDecision,
 )
-from evals.eval_patch_constants import PATCH_APPLY_TIMEOUT_SEC
+from evals.eval_patch_constants import PATCH_APPLY_TIMEOUT_SEC, TRUNCATED_RESPONSE_ERROR
 from evals.eval_prompts import (
     _apply_prompt_budget,
     _build_retry_history_section,
@@ -5231,7 +5231,12 @@ def _adaptive_pipeline_stage_for_outcome(*, note: str, success: bool) -> tuple[s
     if bool(success) or str(note or "") == "success":
         return "success", 4
     note_norm = str(note or "").strip()
-    if note_norm in {"patcher_request_failed", "no_patch_proposed", "retry_gate_no_new_evidence"}:
+    if note_norm in {
+        "patcher_request_failed",
+        "no_patch_proposed",
+        TRUNCATED_RESPONSE_ERROR,
+        "retry_gate_no_new_evidence",
+    }:
         return "request_or_no_patch", 0
     if note_norm in {"forced_noop_patch", "patch_apply_failed", "syntax_preflight_failed"}:
         return "pretest_patch_failure", 1
@@ -5370,6 +5375,7 @@ def _mark_adaptive_progress_stop(
         in {
             "hard_stop_no_progress",
             "no_patch_proposed",
+            TRUNCATED_RESPONSE_ERROR,
             "patcher_request_failed",
             "forced_noop_patch",
             "patch_verifier_rejected",

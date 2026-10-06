@@ -174,6 +174,7 @@ from evals.eval_evidence import (
     evidence_chars_by_type,
     execute_context_requests,
 )
+from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR, patcher_meta_truncated
 from evals.eval_patches import (
     _build_runner_forced_attempt_diff,
     _is_forced_noop_marker_diff,
@@ -261,7 +262,6 @@ from evals.eval_types import (
     HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
-    OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
     PATCH_VERIFIER_RECOVERY_RESULT_NO_DIFF,
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
@@ -305,6 +305,7 @@ from evals.native_openai_attempt_flow import (
 from evals.native_stage_b_flow import (
     StageBPromptInputs,
     build_stage_b_prompt_sections,
+    openai_usable_prompt_tokens,
 )
 from evals.native_stage_b_flow import (
     _tep_jaccard_similarity as _tep_jaccard_similarity,
@@ -679,17 +680,9 @@ def _openai_preflight_prompt_cap_tokens(
     *, context_window_tokens: int, max_tokens: int
 ) -> int | None:
     """Return the preflight prompt token cap used by the char-cap fallback."""
-    normalized_window = max(0, int(context_window_tokens))
-    if normalized_window <= 0:
-        return None
-    usable_tokens = (
-        normalized_window
-        - max(0, int(max_tokens))
-        - max(0, int(OPENAI_CONTEXT_WINDOW_RESERVE_TOKENS))
+    return openai_usable_prompt_tokens(
+        context_window_tokens=context_window_tokens, max_tokens=max_tokens
     )
-    if usable_tokens <= 0:
-        return 1
-    return usable_tokens
 
 
 def _resolve_stage_b_reveal_policy(
@@ -3727,6 +3720,7 @@ def _run_one_condition_attempts(
             )
             previous_stagnation_signal = previous_note_for_override in {
                 "no_patch_proposed",
+                TRUNCATED_RESPONSE_ERROR,
                 "patcher_request_failed",
                 "forced_noop_patch",
                 "patch_verifier_rejected",
@@ -7035,11 +7029,14 @@ def _run_one_condition_attempts(
                 diff_to_apply = None
                 no_diff_note_override = "forced_noop_patch"
             if diff_to_apply is None:
-                no_diff_note = (
-                    no_diff_note_override
-                    if no_diff_note_override
-                    else ("patcher_request_failed" if request_failed else "no_patch_proposed")
-                )
+                if no_diff_note_override:
+                    no_diff_note = no_diff_note_override
+                elif request_failed:
+                    no_diff_note = "patcher_request_failed"
+                elif patcher_meta_truncated(patch_meta):
+                    no_diff_note = TRUNCATED_RESPONSE_ERROR  # LLM-02
+                else:
+                    no_diff_note = "no_patch_proposed"
                 fail_fast_on_budget_exceeded = bool(
                     normalized_case_fail_fast_on_request_budget_exceeded
                     and request_failed

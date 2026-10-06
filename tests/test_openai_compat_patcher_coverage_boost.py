@@ -79,15 +79,22 @@ class TestApplyFindReplaceWithRecovery:
         assert result is not None or mode in ("none", "normalized_newlines")
 
     def test_empty_find_string_returns_none(self) -> None:
-        # find="" is in every string via `str.__contains__` → exact branch
-        # but replace="" → same → exact_noop
-        _result, mode = mod._apply_find_replace_with_recovery(
+        # LLM-05: an empty find used to match everywhere and insert `replace` between
+        # every character; it is now rejected.
+        result, mode = mod._apply_find_replace_with_recovery(
             before="hello",
             find="",
-            replace="",
-            count=1,
+            replace="# ",
+            count=0,
         )
-        assert mode == "exact_noop"
+        assert (result, mode) == (None, "none")
+
+    def test_count_zero_replaces_once(self) -> None:
+        # LLM-05: `count or -1` made 0 mean "replace all".
+        result, mode = mod._apply_find_replace_with_recovery(
+            before="a a a", find="a", replace="b", count=0
+        )
+        assert (result, mode) == ("b a a", "exact")
 
     def test_whitespace_normalized_match(self) -> None:
         before = "if  x  ==  1:\n    pass\n"
@@ -833,11 +840,21 @@ class TestFixHunkCounts:
         fixed = mod._fix_hunk_counts(diff)
         assert "def foo():" in fixed
 
-    def test_empty_body_lines_skipped(self) -> None:
-        # Empty lines in body should not affect count
+    def test_interior_empty_body_line_is_context(self) -> None:
+        # LLM-03: an interior empty line is a context line that lost its leading space.
         diff = "@@ -1,99 +1,99 @@\n-old\n\n+new\n"
         fixed = mod._fix_hunk_counts(diff)
-        assert "@@ -1,1 +1,1 @@" in fixed
+        assert fixed == "@@ -1,2 +1,2 @@\n-old\n \n+new\n"
+
+    def test_trailing_empty_body_lines_are_not_counted(self) -> None:
+        diff = "@@ -1,99 +1,99 @@\n-old\n+new\n\n\n"
+        fixed = mod._fix_hunk_counts(diff)
+        assert fixed == "@@ -1,1 +1,1 @@\n-old\n+new\n"
+
+    def test_empty_side_keeps_zero_start(self) -> None:
+        # LLM-10: file creation is "-0,0"; a 1-based start would break `patch`.
+        fixed = mod._fix_hunk_counts("@@ -0,0 +1,9 @@\n+a\n+b\n")
+        assert fixed.startswith("@@ -0,0 +1,2 @@\n")
 
 
 # ---------------------------------------------------------------------------

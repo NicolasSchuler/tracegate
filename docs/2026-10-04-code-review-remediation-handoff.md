@@ -252,15 +252,15 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 - **Acceptance:** using the stub server's request log, the summed usage of every LLM call in a fixture attempt equals the recorded attempt total.
 
 ### 1G. LLM output handling that changes outcomes
-- [ ] First, add an end-to-end diff corpus test. About 15 realistic model outputs go through `_extract_unified_diff`, then `_fix_hunk_counts`, then `apply_diff`, and the test asserts the final file contents. Cover:
+- [x] First, add an end-to-end diff corpus test. About 15 realistic model outputs go through `_extract_unified_diff`, then `_fix_hunk_counts`, then `apply_diff`, and the test asserts the final file contents. Cover:
   - one fence, two fences, prose between diffs, trailing markdown bullets
   - a CRLF file, blank context lines without the leading space
   - a response truncated with `finish_reason=length`
   - an orphan `</think>` and an unclosed `<think>`
   - a new file created via `---`/`+++` headers
-- [ ] Diff pipeline: **LLM-01, LLM-02, LLM-03, LLM-04, LLM-07, LLM-09, LLM-10, LLM-15.**
-- [ ] **LLM-05:** edits schema and application. **LLM-06:** a degenerate prompt cap raises a configuration error. **LLM-08:** heuristic patcher. **LLM-14:** error-reason ordering. **LLM-19:** consistent recovery paths.
-- [ ] **DAT-18:** record `finish_reason` per SWE-Bench prediction, and raise the default completion cap.
+- [x] Diff pipeline: **LLM-01, LLM-02, LLM-03, LLM-04, LLM-07, LLM-09, LLM-10, LLM-15.**
+- [x] **LLM-05:** edits schema and application. **LLM-06:** a degenerate prompt cap raises a configuration error. **LLM-08:** heuristic patcher. **LLM-14:** error-reason ordering. **LLM-19:** consistent recovery paths.
+- [x] **DAT-18:** record `finish_reason` per SWE-Bench prediction, and raise the default completion cap.
 - **Acceptance:** the corpus test passes, and the failure taxonomy has a distinct `truncated_response` reason.
 
 ### 1H. Case-suite validity (D12)

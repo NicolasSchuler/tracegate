@@ -281,7 +281,7 @@ def test_openai_payload_and_diff_helpers_cover_parser_branches() -> None:
     assert openai_mod._clean_path_token("/dev/null") == "/dev/null"
     assert openai_mod._clean_path_token("a/") is None
 
-    normalized = openai_mod._normalize_unified_blocks(
+    [(path, normalized)] = openai_mod._iter_file_diffs(
         [
             "--- a/foo.py",
             "+++ b/bar.py",
@@ -291,10 +291,10 @@ def test_openai_payload_and_diff_helpers_cover_parser_branches() -> None:
             "narration starts here",
         ]
     )
-    assert normalized is not None
+    assert path == "foo.py"
     assert "diff --git a/foo.py b/foo.py" in normalized
     assert "narration" not in normalized
-    git_block = openai_mod._extract_git_diff_blocks(
+    [(_, git_block)] = openai_mod._iter_file_diffs(
         [
             "intro",
             "diff --git a/foo.py b/foo.py",
@@ -306,7 +306,6 @@ def test_openai_payload_and_diff_helpers_cover_parser_branches() -> None:
             "extra prose",
         ]
     )
-    assert git_block is not None
     assert "extra prose" not in git_block
 
     assert openai_mod._get_first_choice_content(
@@ -551,13 +550,13 @@ def test_openai_helper_edge_branches_cover_missing_env_and_parser_fallbacks(
     assert openai_mod._default_api_key() == "local"
     assert openai_mod._clean_path_token(None) is None
     assert openai_mod._clean_path_token("   ") is None
-    assert openai_mod._normalize_unified_blocks(["--- a/foo.py", "narration starts here"]) is None
-    assert openai_mod._normalize_unified_blocks(["--- a/", "+++ b/"]) is None
+    assert openai_mod._iter_file_diffs(["--- a/foo.py", "narration starts here"]) == []
+    assert openai_mod._iter_file_diffs(["--- a/", "+++ b/"]) == []
     assert (
-        openai_mod._extract_git_diff_blocks(
+        openai_mod._iter_file_diffs(
             ["diff --git a/foo.py b/foo.py", "index 123..456 100644", "explanation starts"]
         )
-        is None
+        == []
     )
 
     monkeypatch.setattr(openai_mod._THREAD_HTTP_CLIENTS, "clients", [], raising=False)

@@ -121,6 +121,9 @@ Run directory contract:
 
 - `baseline/predictions.jsonl`
 - `llmdebug/predictions.jsonl`
+- `<condition>/generation_meta.jsonl`: one line per proposal with `finish_reason`,
+  `truncated`, `patcher_error` and `request_error`; on resume the last line for an instance
+  describes its prediction (DAT-18)
 - `instance_ids.txt`
 - `run_metadata.json`
 - `run_index.json` (written by `prepare-handoff`)
@@ -141,6 +144,10 @@ Each prediction row in `predictions.jsonl`:
 - `instance_id` (string)
 - `model_patch` (string, unified diff)
 - `model_name_or_path` (string)
+
+Lite and Pro generation default to `--openai-max-tokens 4096` (it was 2048, which cut off
+multi-file patches; DAT-18). A truncated answer yields an empty patch and
+`truncated: true` in `generation_meta.jsonl`.
 
 Detailed operational guide:
 - `docs/local_docker_eval_runbook.md`
@@ -860,8 +867,10 @@ Runner-level forced patch attempts are off by default (`--force-patch-attempt` e
 They never change an outcome: a marker-only patch is recorded as `forced_noop_patch`, and a
 marker applied after the model's diff failed keeps the attempt `patch_apply_failed` with
 `runner_forced_patch_recovery*` modifiers, then is reverted (ATT-07, D8).
-`no_patch_proposed` and `forced_noop_patch` are runner-level notes, not baseline-native
-root causes. For external baselines, the underlying cause may instead live in
+`no_patch_proposed`, `truncated_response` and `forced_noop_patch` are runner-level notes, not
+baseline-native root causes. `truncated_response` means the model's answer stopped at
+`--openai-max-tokens` (`finish_reason="length"`); it is never parsed into a patch (LLM-02).
+For external baselines, the underlying cause may instead live in
 `patch_meta.baseline_meta.error` (for example `timeout`, `learner_empty_response`)
 or `patch_meta.compatibility_reason` (for example `subprocess_task_unsupported`).
 For TraceCoder specifically, `patch_meta.baseline_meta.candidate_status=unchanged_original_code`
@@ -1131,6 +1140,7 @@ Key flags:
 - `--openai-auto-context-window`: opt-in model metadata probe for context window tokens before execution starts (falls back to disabled guard on probe failure).
 - probe adapter order is LM Studio REST (`/api/v1/models`, then `/api/v0/models`) followed by generic OpenAI-compatible `/models`.
 - manual `--openai-context-window-tokens` always takes precedence over `--openai-auto-context-window`.
+- with a known window, the run refuses to start when `window - --openai-max-tokens - 1024` (the reserve) is below 1,024 prompt tokens (`OpenAIPromptBudgetError`, LLM-06); previously the prompt cap collapsed to one character and every case looked like a model failure.
 - `--openai-response-mode edits|diff|full_file`: Stage-B patch contract for the OpenAI patcher. `full_file` asks for the complete repaired contents of one target source file and diffs locally; in v1 it only applies when the copied case workdir has exactly one non-test `.py` file, otherwise it falls back internally to `diff`.
 - `--openai-compat-profile auto|qwen_openai_raw|qwen_dashscope|lmstudio_model_yaml|off`: request-shaping profile for the internal OpenAI patcher. Use `qwen_openai_raw` for raw Qwen endpoints that return reasoning without final `message.content`; it sends `chat_template_kwargs.enable_thinking=false` on each request.
 - `--openai-response-mode-autoswitch off|retry_to_diff`: opt-in retry policy for OpenAI patcher internal syntax/sanitize cycles (`retry_to_diff` switches `edits` → `diff` after retry-triggering failures).
@@ -1375,7 +1385,11 @@ unsupported and should be regenerated with the current harness before analysis.
   controllers with derived seeds (POL-05, POL-23); baseline rows with
   `baseline_supported=False` are excluded from that baseline's rates and paired tests (BAS-01).
   A unit that raises writes a terminal `unit_runtime_error` failure record (ATT-08); a retry-gate
-  block is a non-scored `infra_event` and the attempt is retried once (ATT-05).
+  block is a non-scored `infra_event` and the attempt is retried once (ATT-05). A completion
+  cut off at `max_tokens` is recorded as `note="truncated_response"` (patcher error
+  `truncated_response`) instead of being repaired into a patch or recorded as
+  `no_patch_proposed` (LLM-02), and model diffs are taken from every fenced block with
+  reasoning stripped, the last diff per file winning (LLM-01, LLM-04).
   Later review fixes extend this list.
 - **6**: xxh3_128 prompt/evidence hash fields.
 - **5**: legacy digest fields; still readable.

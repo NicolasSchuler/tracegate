@@ -18,7 +18,11 @@ from .io import (
 from .prompt_policy import PromptInputs
 from .score_official import run_official_scoring
 from .smoke import prepare_scoring_smoke_subset
-from .types import SWEBENCH_LITE_DATASET_NAME, SWEBENCH_LITE_DEFAULT_SPLIT
+from .types import (
+    SWEBENCH_LITE_DATASET_NAME,
+    SWEBENCH_LITE_DEFAULT_SPLIT,
+    SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT,
+)
 
 
 def _resolve_path(raw: str) -> Path:
@@ -100,8 +104,11 @@ def _add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--openai-max-tokens",
         type=int,
-        default=2048,
-        help="Maximum completion tokens requested from the model.",
+        default=SWEBENCH_OPENAI_MAX_TOKENS_DEFAULT,
+        help=(
+            "Maximum completion tokens requested from the model. Truncated answers are "
+            "marked in <condition>/generation_meta.jsonl."
+        ),
     )
     parser.add_argument(
         "--openai-temperature",

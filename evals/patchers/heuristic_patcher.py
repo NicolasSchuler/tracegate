@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import _json as json
+from ..eval_patches import _build_diff_from_changes
 from .base import Patcher, PatchResult
 
 
@@ -112,11 +113,9 @@ class HeuristicSnapshotPatcher(Patcher):
         updated = "".join([new if line == old else line for line in src])
         before = "".join(src)
 
-        diff = _unified_diff(
-            path_rel=_relpath_from_cwd(target, cwd),
-            before=before,
-            after=updated,
-        )
+        # LLM-08: the private builder joined keepends lines with "\n", so every body line was
+        # followed by a blank line and the diff never applied.
+        diff = _build_diff_from_changes([(_relpath_from_cwd(target, cwd), before, updated)])
         return PatchResult(diff=diff, meta={"reason": "patched"})
 
 
@@ -125,18 +124,3 @@ def _relpath_from_cwd(path: Path, cwd: Path) -> str:
         return str(path.relative_to(cwd))
     except Exception:
         return str(path)
-
-
-def _unified_diff(*, path_rel: str, before: str, after: str) -> str:
-    import difflib
-
-    a_lines = before.splitlines(True)
-    b_lines = after.splitlines(True)
-    diff_lines = difflib.unified_diff(
-        a_lines,
-        b_lines,
-        fromfile=f"a/{path_rel}",
-        tofile=f"b/{path_rel}",
-        lineterm="",
-    )
-    return "\n".join(diff_lines) + "\n"

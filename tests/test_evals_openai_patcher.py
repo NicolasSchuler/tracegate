@@ -1126,7 +1126,7 @@ def test_probe_server_ready_reports_failure(monkeypatch) -> None:
     assert "health:request_failed" in str(meta["server_ready_probe_error"])
 
 
-def test_normalize_unified_blocks_preserves_paths_with_spaces() -> None:
+def test_iter_file_diffs_preserves_paths_with_spaces() -> None:
     """Verifies that tab-delimited timestamp suffixes on --- / +++ headers are stripped and a correct git-style diff --git header is produced, even when file paths contain spaces."""
     lines = [
         "--- a/buggy file.py\t2026-02-23 20:00:00 +0000",
@@ -1136,9 +1136,9 @@ def test_normalize_unified_blocks_preserves_paths_with_spaces() -> None:
         "+return 2",
     ]
 
-    normalized = openai_mod._normalize_unified_blocks(lines)
+    [(path, normalized)] = openai_mod._iter_file_diffs(lines)
 
-    assert normalized is not None
+    assert path == "buggy file.py"
     assert "diff --git a/buggy file.py b/buggy file.py" in normalized
     assert "--- a/buggy file.py" in normalized
     assert "+++ b/buggy file.py" in normalized
@@ -2393,7 +2393,12 @@ def test_openai_edits_find_recovery_fuzzy_block(tmp_path, monkeypatch) -> None:
     assert "return res // (n * (n + 1))" in (tmp_path / "buggy.py").read_text(encoding="utf-8")
 
 
-def test_openai_edits_fuzzy_recovery_skips_replace_all_count(tmp_path, monkeypatch) -> None:
+def test_openai_edits_count_zero_is_one_targeted_replacement(tmp_path, monkeypatch) -> None:
+    """LLM-05: ``count=0`` used to mean replace-all, which also disabled fuzzy recovery.
+
+    It now means one replacement, so the near-miss ``find`` is recovered in edits mode
+    instead of falling back to diff mode.
+    """
     (tmp_path / "buggy.py").write_text(
         "def f(res, n):\n    return res // (n * (n - 1))\n",
         encoding="utf-8",
@@ -2459,7 +2464,8 @@ def test_openai_edits_fuzzy_recovery_skips_replace_all_count(tmp_path, monkeypat
 
     assert result.diff is not None
     assert result.meta is not None
-    assert result.meta.get("fallback_reason") == "find_not_found"
+    assert "fallback_reason" not in result.meta
+    assert result.meta["find_recovery_applied"] is True
     applied, message = run_eval.apply_diff(tmp_path, result.diff)
     assert applied, message
     assert "return res // (n * (n + 1))" in (tmp_path / "buggy.py").read_text(encoding="utf-8")
