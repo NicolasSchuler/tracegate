@@ -207,7 +207,7 @@ def extract_coverage_from_plugin(
         cov = cov_controller.cov
         if cov is None:
             return None
-    except (AttributeError, Exception) as e:
+    except Exception as e:  # third-party plugin internals
         warnings.append(f"coverage extraction failed: {type(e).__name__}: {e}")
         return None
 

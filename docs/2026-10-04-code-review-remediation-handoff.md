@@ -391,7 +391,7 @@ This phase is independent of Phases 1–3 and can run in parallel. Run `just ben
 - [x] **RCA-03:** index consistency check, and one `snapshot_index` module. **RCA-21:** `clean`. *(`llmdebug.snapshot_index` holds the shared snapshot-file rule, the index-row builder and `index_matches_disk` (row count vs. files on disk). The loader's private index/scan helpers stay in `_snapshot_loader`, because 55 tests reach into them. RCA-21 adds an opt-in `--purge-state`; `--all` keeps the RCA history.)*
 
 ### 4.5. Interfaces
-- [ ] **RCA-07, RCA-08:** Jupyter. **RCA-13:** dead Rich branch. **RCA-14:** git output encoding. **RCA-15:** exit codes. **RCA-19, RCA-20.**
+- [x] **RCA-07, RCA-08:** Jupyter. **RCA-13:** dead Rich branch. **RCA-14:** git output encoding. **RCA-15:** exit codes. **RCA-19, RCA-20.** *(RCA-13: `tests/test_cli.py:1909` (`test_show_rich_frame_without_source`) goes through `show --full` into `_print_frame_rich` and was kept with a corrected docstring; only the edge-case test that drove the dead branch was deleted. RCA-15: `git-context` "unavailable" also moves to stderr with exit 1, for `--json` consumers; "No frames in snapshot." stays exit 0.)*
 
 ### 4.6. Hot-path performance
 - [ ] **CAP-09, CAP-10, CAP-12, CAP-13, CAP-08** (use `linecache`), **CAP-15, CAP-21.**

@@ -390,27 +390,6 @@ def test_print_frame_rich_with_and_without_source(monkeypatch: pytest.MonkeyPatc
     assert len(console.items) >= 2
 
 
-def test_print_frame_console_branch_with_locals_and_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(_cli_display, "HAS_RICH", True)
-    console = _FakeConsole()
-    frame = {
-        "file": "app.py",
-        "line": 42,
-        "function": "run",
-        "source": {"start": 41, "end": 43, "snippet": [{"lineno": 42, "code": "x = 1"}]},
-        "locals": {"value": 1, "@py_internal": "skip"},
-        "locals_meta": {"value": {"type": "builtins.int"}},
-    }
-    cli._print_frame(frame, 0, True, console, show_locals=True)
-
-    frame_no_parts = {"file": "app.py", "line": 43, "function": "run", "code": "return x"}
-    cli._print_frame(frame_no_parts, 1, False, console, show_locals=True)
-
-    assert len(console.items) >= 2
-
-
 def test_print_diff_rich_covers_change_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli_display, "HAS_RICH", True)
     console = _FakeConsole()
@@ -480,12 +459,14 @@ def test_perform_deletions_counts_success_and_failures(
 ) -> None:
     ok_file = tmp_path / "ok.json"
     ok_file.write_text("{}", encoding="utf-8")
-    missing = tmp_path / "missing.json"
+    missing = tmp_path / "missing.json"  # deleted by someone else: counts as done
+    undeletable = tmp_path / "a_directory.json"
+    undeletable.mkdir()
 
-    deleted, failed = cli._perform_deletions([ok_file, missing])
-    assert deleted == 1
+    deleted, failed = cli._perform_deletions([ok_file, missing, undeletable])
+    assert deleted == 2
     assert failed == 1
-    assert "could not delete" in capsys.readouterr().err
+    assert "could not delete a_directory.json" in capsys.readouterr().err
 
 
 def test_list_command_rich_branch(monkeypatch: pytest.MonkeyPatch) -> None:

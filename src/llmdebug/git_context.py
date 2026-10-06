@@ -61,7 +61,10 @@ def _run_git_command(
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            # Not the locale encoding with strict errors: a non-UTF-8 author name or
+            # file path in git output raised UnicodeDecodeError past these handlers (RCA-14).
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -90,7 +93,8 @@ def _run_git_command_rc(
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
