@@ -132,23 +132,20 @@ LEGACY_REVERSE_KEY_MAP: dict[str, str] = {
     "_mx": "max",
 }
 
-_CURRENT_REVERSE_KEY_MAP: dict[str, str] = {v: k for k, v in KEY_MAP.items()}
-
-if len(_CURRENT_REVERSE_KEY_MAP) != len(KEY_MAP):
-    raise ValueError(
-        f"KEY_MAP has duplicate short-key values: "
-        f"{len(KEY_MAP)} keys but only {len(_CURRENT_REVERSE_KEY_MAP)} unique values"
-    )
-
-_REUSED_LEGACY_KEYS = sorted(set(LEGACY_REVERSE_KEY_MAP) & set(_CURRENT_REVERSE_KEY_MAP))
-if _REUSED_LEGACY_KEYS:
-    raise ValueError(
-        f"KEY_MAP reuses retired short keys, which would decode old snapshots wrongly: "
-        f"{_REUSED_LEGACY_KEYS}"
-    )
-
 # Reverse mapping for decoding: current keys plus the retired ones old files still carry.
-REVERSE_KEY_MAP: dict[str, str] = {**LEGACY_REVERSE_KEY_MAP, **_CURRENT_REVERSE_KEY_MAP}
+REVERSE_KEY_MAP: dict[str, str] = {
+    **LEGACY_REVERSE_KEY_MAP,
+    **{v: k for k, v in KEY_MAP.items()},
+}
+
+# One guard for both failure modes: a short key used twice in KEY_MAP, and a KEY_MAP entry
+# that reuses a retired one (which would decode old snapshots to the wrong key).
+if len(REVERSE_KEY_MAP) != len(KEY_MAP) + len(LEGACY_REVERSE_KEY_MAP):
+    raise ValueError(
+        f"KEY_MAP has duplicate short-key values, or reuses a retired one: "
+        f"{len(KEY_MAP)} current and {len(LEGACY_REVERSE_KEY_MAP)} retired keys map to "
+        f"only {len(REVERSE_KEY_MAP)} unique values"
+    )
 
 # Keys that contain user data (locals, args) - don't transform their contents
 USER_DATA_KEYS = {

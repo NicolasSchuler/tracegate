@@ -95,7 +95,7 @@ class TestDuplicateShortKeyGuard:
         assert spec.loader is not None
 
         module = importlib.util.module_from_spec(spec)
-        with pytest.raises(ValueError, match="reuses retired short keys"):
+        with pytest.raises(ValueError, match="reuses a retired one"):
             spec.loader.exec_module(module)
 
     def test_actual_key_map_passes_guard(self) -> None:
