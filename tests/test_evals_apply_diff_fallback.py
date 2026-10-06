@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from evals import run_eval
 
@@ -221,3 +225,68 @@ def test_apply_diff_fallback_rejects_lossy_malformed_multiline_hunk(tmp_path, mo
     assert target.read_text(encoding="utf-8") == (
         "fH) ZM9TB(rKr\nG+s\nmjQ8mT3OA\n94:HhblZa_QFPiyCE\n-5lk\n) nMLpQ-AK\nlXOELxyxeH8ilq"
     )
+
+
+def test_apply_diff_patches_a_crlf_target_and_keeps_its_endings(tmp_path) -> None:
+    """LLM-09: an LF model diff applies to a CRLF file, which keeps CRLF endings."""
+    target = tmp_path / "buggy.py"
+    target.write_bytes(b"a = 1\r\nb = 2\r\n")
+    diff = "--- a/buggy.py\n+++ b/buggy.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+
+    ok, msg = run_eval.apply_diff(tmp_path, diff)
+
+    assert ok, msg
+    assert target.read_bytes() == b"a = 1\r\nb = 3\r\n"
+
+
+def test_apply_diff_rolls_back_crlf_targets_when_one_cannot_be_prepared(tmp_path) -> None:
+    """LLM-09 (codex 1g#5): a read-only second CRLF target leaves the first unchanged."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores the read-only bit")
+    first, second = tmp_path / "a.py", tmp_path / "b.py"
+    first.write_bytes(b"x = 1\r\n")
+    second.write_bytes(b"y = 1\r\n")
+    second.chmod(stat.S_IRUSR)
+    diff = (
+        "--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,1 @@\n-x = 1\n+x = 2\n"
+        "--- a/b.py\n+++ b/b.py\n@@ -1,1 +1,1 @@\n-y = 1\n+y = 2\n"
+    )
+    try:
+        ok, msg = run_eval.apply_diff(tmp_path, diff)
+    finally:
+        second.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    assert not ok
+    assert msg.startswith("could not prepare CRLF diff targets")
+    assert first.read_bytes() == b"x = 1\r\n"
+    assert second.read_bytes() == b"y = 1\r\n"
+
+
+def test_apply_diff_cleanup_keeps_named_orig_targets_and_drops_tool_leftovers(
+    tmp_path, monkeypatch
+) -> None:
+    """ATT-16 (codex 1b#8): only ``.orig``/``.rej`` files the diff doesn't name are removed."""
+    monkeypatch.setattr(
+        run_eval.shutil, "which", lambda name: "/usr/bin/patch" if name == "patch" else None
+    )
+
+    def _patch_leaving_a_backup(*args, **kwargs):
+        (tmp_path / "fixture.orig").write_text("expected = 1\n", encoding="utf-8")
+        (tmp_path / "buggy.py.orig").write_text("backup\n", encoding="utf-8")
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(run_eval.subprocess, "run", _patch_leaving_a_backup)
+    (tmp_path / "buggy.py").write_text("value = 1\n", encoding="utf-8")
+    diff = "--- /dev/null\n+++ b/fixture.orig\n@@ -0,0 +1,1 @@\n+expected = 1\n"
+
+    ok, msg = run_eval.apply_diff(tmp_path, diff)
+
+    assert ok, msg
+    assert (tmp_path / "fixture.orig").read_text(encoding="utf-8") == "expected = 1\n"
+    assert not (tmp_path / "buggy.py.orig").exists()
