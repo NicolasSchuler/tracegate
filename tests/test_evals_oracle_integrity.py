@@ -164,6 +164,37 @@ def test_restore_test_surface_removes_symlinks_without_following(tmp_path: Path)
     assert not (work / "linked_dir").exists()
 
 
+def test_restore_test_surface_replaces_a_directory_planted_over_a_test_file(
+    tmp_path: Path,
+) -> None:
+    """ATT-01: a patch can delete test_buggy.py and create test_buggy.py/ in its place."""
+    pristine = tmp_path / "case"
+    work = tmp_path / "work"
+    _write(pristine / "test_buggy.py", "def test_x():\n    assert False\n")
+    _write(work / "test_buggy.py" / "__init__.py", "# shadowing package\n")
+
+    changed = restore_test_surface(workdir=work, pristine_dir=pristine)
+
+    assert changed == ("test_buggy.py",)
+    assert (work / "test_buggy.py").is_file()
+    assert (work / "test_buggy.py").read_text(encoding="utf-8").startswith("def test_x")
+
+
+def test_restore_test_surface_clears_a_file_planted_over_a_test_directory(
+    tmp_path: Path,
+) -> None:
+    """ATT-01: the parent of a pristine test file can be replaced by a regular file."""
+    pristine = tmp_path / "case"
+    work = tmp_path / "work"
+    _write(pristine / "pkg" / "test_pkg.py", "def test_pkg():\n    assert False\n")
+    _write(work / "pkg", "not a directory\n")
+
+    changed = restore_test_surface(workdir=work, pristine_dir=pristine)
+
+    assert changed == ("pkg/test_pkg.py",)
+    assert (work / "pkg" / "test_pkg.py").read_text(encoding="utf-8").startswith("def test_pkg")
+
+
 def test_run_succeeded_requires_report_only_when_requested() -> None:
     counts = PytestCounts(1, 0, 0, 0)
     assert run_succeeded(returncode=0, junit_requested=True, counts=counts) is True

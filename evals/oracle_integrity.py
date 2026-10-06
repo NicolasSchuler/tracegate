@@ -95,17 +95,40 @@ def _is_hostile_entry(path: Path) -> bool:
     return not (stat.S_ISREG(mode) or stat.S_ISDIR(mode))
 
 
+def _is_directory(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
 def _remove_entry(path: Path) -> None:
+    """Clear *path* whatever it is: a file, a symlink, a special file or a directory.
+
+    A patch can delete a pristine test file and create a directory in its place
+    (``test_buggy.py/__init__.py``), so restoring the oracle has to be able to remove a
+    directory too. Symlinks count as hostile entries and are unlinked, never followed, so
+    nothing outside the workdir is reachable from here.
+    """
     if _is_hostile_entry(path) or _is_regular_file(path):
         path.unlink()
+    elif _is_directory(path):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _clear_parent_obstructions(workdir: Path, relative: Path) -> None:
+    """Remove the workdir parents of *relative* that are not plain directories."""
+    for parent in reversed(relative.parents):
+        candidate = workdir / parent
+        if candidate == workdir or _is_directory(candidate):
+            continue
+        if candidate.is_symlink() or candidate.exists():
+            candidate.unlink()
 
 
 def _write_inside(workdir: Path, relative: Path, source: Path) -> None:
     target = workdir / relative
-    for parent in reversed(target.relative_to(workdir).parents):
-        candidate = workdir / parent
-        if candidate.is_symlink():
-            candidate.unlink()
+    _clear_parent_obstructions(workdir, target.relative_to(workdir))
     _remove_entry(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.parent.resolve().is_relative_to(workdir.resolve()):
