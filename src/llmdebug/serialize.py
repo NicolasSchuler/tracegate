@@ -736,8 +736,18 @@ def _jsonlike_dict(x: dict[Any, Any], cfg: SnapshotConfig, depth: int) -> JsonLi
             break
         # str keys stay plain (str.__str__ also unwraps str subclasses); others use repr.
         # A collision such as {1: ..., "1": ...} keeps both entries as "1" and "1#2".
-        key = truncate_str(str.__str__(k), cfg.max_str) if isinstance(k, str) else safe_repr(k, cfg)
-        _insert_redacted_key(out, key, to_jsonlike(v, cfg, depth + 1))
+        if isinstance(k, str):
+            name = str.__str__(k)
+            key = truncate_str(name, cfg.max_str)
+        else:
+            name = key = safe_repr(k, cfg)
+        # Sensitivity is decided on the untruncated name: a key longer than ``max_str``
+        # loses its secret suffix, and the name-aware redaction that runs afterwards only
+        # ever sees the truncated key (CAP-03).
+        value: JsonLike = (
+            REDACTED if cfg.redact and is_sensitive_name(name) else to_jsonlike(v, cfg, depth + 1)
+        )
+        _insert_redacted_key(out, key, value)
     return out
 
 
@@ -758,6 +768,53 @@ def _jsonlike_object(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
 
 def _serialization_failed(error: Exception) -> str:
     return f"<serialization failed: {type(error).__name__}>"
+
+
+# Past the depth limit a container becomes a single repr string, which only the text patterns
+# can inspect afterwards. Composite values survived them: the repr of
+# {'password': ['alpha', 'beta']} kept "beta", and a nested ['Authorization', '<creds>'] pair
+# has no "name: value" shape at all (CAP-03). Replacing those values structurally first keeps
+# the surrounding shape of the repr readable without the secrets.
+_REPR_REDACTION_MAX_DEPTH = 6
+
+
+def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
+    """A copy of *x* with the values under sensitive names replaced, for repr rendering."""
+    if depth >= _REPR_REDACTION_MAX_DEPTH:
+        return x
+    if isinstance(x, dict):
+        mapping = cast(dict[Any, Any], x)
+        out: dict[Any, Any] = {}
+        for i, (key, item) in enumerate(mapping.items()):
+            if i >= cfg.max_items:
+                out["...[TRUNC]"] = f"+{len(mapping) - cfg.max_items} more keys"
+                break
+            if isinstance(key, str) and is_sensitive_name(key):
+                out[key] = REDACTED
+            else:
+                out[key] = _redact_for_repr(item, cfg, depth + 1)
+        return out
+    if isinstance(x, (list, tuple)):
+        sequence = cast(list[Any] | tuple[Any, ...], x)
+        items = [_redact_for_repr(item, cfg, depth + 1) for item in sequence[: cfg.max_items]]
+        if len(sequence) == 2 and _is_sensitive_pair_name(sequence[0]):
+            items[1] = REDACTED
+        elif len(sequence) > cfg.max_items:
+            items.append("...[TRUNC]")
+        return tuple(items) if isinstance(x, tuple) else items
+    return x
+
+
+def _depth_limit_repr(x: Any, cfg: SnapshotConfig) -> str:
+    """``safe_repr`` for a value past the depth limit, with secrets removed first."""
+    if not cfg.redact:
+        return safe_repr(x, cfg)
+    try:
+        reduced = _redact_for_repr(x, cfg, 0)
+    except Exception as e:
+        # Fail closed: a container that cannot be walked is not repr'd either.
+        return _serialization_failed(e)
+    return safe_repr(reduced, cfg)
 
 
 def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
@@ -781,7 +838,7 @@ def _to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
     if isinstance(x, str):
         return truncate_str(x, cfg.max_str)
     if depth >= 2:
-        return safe_repr(x, cfg)
+        return _depth_limit_repr(x, cfg)
     if is_array_like(x):
         return summarize_array(x, cfg)
     if is_dataframe(x):

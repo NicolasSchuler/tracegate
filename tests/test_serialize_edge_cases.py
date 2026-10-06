@@ -900,3 +900,52 @@ def test_cupy_arrays_get_anomaly_counts() -> None:
     arr = _FakeCupy([1.0, float("nan"), float("inf")])
     assert count_anomalies(arr) == {"nan": 1, "inf": 1}
     assert _compute_array_stats_and_anomalies(arr)[1] == {"nan": 1, "inf": 1}
+
+
+def _past_depth_limit(value: Any, cfg: SnapshotConfig) -> Any:
+    """Serialize *value* where ``to_jsonlike`` has to fall back to a repr (CAP-03)."""
+    rendered = to_jsonlike({"a": {"b": value}}, cfg)
+    assert isinstance(rendered, dict)
+    return rendered["a"]["b"]
+
+
+def test_depth_limit_repr_keeps_the_plain_repr_without_redaction() -> None:
+    cfg = SnapshotConfig(redaction_profile="dev")
+    assert _past_depth_limit({"password": "hunter2"}, cfg) == "{'password': 'hunter2'}"
+
+
+def test_depth_limit_repr_elides_oversized_containers() -> None:
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=2, max_str=200)
+    wide = {"k0": 0, "k1": 1, "k2": 2, "k3": 3}
+
+    assert _past_depth_limit(wide, cfg) == "{'k0': 0, 'k1': 1, '...[TRUNC]': '+2 more keys'}"
+    assert _past_depth_limit([0, 1, 2, 3], cfg) == "[0, 1, '...[TRUNC]']"
+
+
+def test_depth_limit_repr_preserves_tuples_and_redacts_pairs() -> None:
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=5, max_str=200)
+
+    assert _past_depth_limit((1, {"api_key": "abc"}), cfg) == "(1, {'api_key': '[REDACTED]'})"
+    assert _past_depth_limit(["api_key", "abc"], cfg) == "['api_key', '[REDACTED]']"
+
+
+def test_depth_limit_repr_stops_at_its_own_depth_bound() -> None:
+    """Below the bound the repr is handed to the text patterns unchanged."""
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=500)
+    deep: Any = {"password": "hunter2"}
+    for _ in range(7):
+        deep = {"wrap": deep}
+
+    assert "'password': 'hunter2'" in _past_depth_limit(deep, cfg)
+
+
+def test_depth_limit_repr_fails_closed_on_an_unwalkable_container() -> None:
+    class _Hostile(dict):  # type: ignore[type-arg]
+        def items(self) -> Any:
+            raise RuntimeError("no items")
+
+    cfg = SnapshotConfig(redaction_profile="prod")
+
+    assert _past_depth_limit(_Hostile(password="hunter2"), cfg) == (
+        "<serialization failed: RuntimeError>"
+    )

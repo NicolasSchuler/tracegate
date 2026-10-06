@@ -228,7 +228,12 @@ optional) has its whole value replaced by `"[REDACTED]"`, whatever its type. Its
 `locals_meta` entry keeps the type but not the length. Bare `key` and `token` are not
 treated as secrets, because they are too common in ordinary code. A two-item list or tuple
 whose first item is such a name (a header or form field like `("password", value)`) has its
-second item replaced.
+second item replaced. Name matching uses the original key, before any `max_str`
+truncation, so a long key such as `database_connection_password` cannot lose its secret
+suffix first. Containers past the nesting limit become one `repr` string; the values under
+secret names inside them are replaced before that `repr` is taken, so a composite value
+(`{'password': ['alpha', 'beta']}`) or a nested header pair does not survive it. That
+`repr` also elides beyond `max_items` per container.
 
 `llmdebug.PII_PATTERNS` additionally covers, inside text such as a log line, an exception
 message or a `repr`: URL userinfo (`postgres://user:pw@host` and `https://TOKEN@host`

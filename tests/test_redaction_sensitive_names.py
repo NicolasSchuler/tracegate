@@ -30,12 +30,14 @@ _S = {
     "session": "tok-0123",
     "header": "k1",
     "ctx": "ctx-secret",
-    # Values used by the truncated-URL and header-field regressions.
+    # Values used by the nested-container, truncated-URL and header-field regressions.
+    "deep_list": "beta-pw",
     "basic": "dXNlcjpwYXNz",
     "cookie": "sid-0ead",
     "at_dsn": "postgres://admin:p@ssword-0123456789abcdef@db:5432/app",
     "hyphen": "hunter-9",
     "quoted": "alpha beta gamma",
+    "long_key": "hunter-long",
 }
 
 
@@ -320,6 +322,26 @@ def _capture_locals(
     return snapshot["frames"][0]["locals"], path.read_text(encoding="utf-8")
 
 
+def test_nested_container_secret_values_past_the_depth_limit(tmp_path: Path) -> None:
+    """A composite value under a secret name used to survive the depth-to-repr fallback."""
+
+    def boom() -> None:
+        config = {"a": {"b": {"password": ["alpha", _S["deep_list"]], "host": "h"}}}  # noqa: F841
+        headers = {"a": {"b": [["Authorization", "Basic " + _S["basic"]], ["Accept", "json"]]}}  # noqa: F841
+        jar = {"a": {"b": {"Cookie": f"sid={_S['cookie']}; theme=dark"}}}  # noqa: F841
+        raise ValueError("deep")
+
+    local_vars, raw = _capture_locals(tmp_path, boom)
+
+    for name in ("deep_list", "basic", "cookie"):
+        assert _S[name] not in raw, name
+    config_repr = local_vars["config"]["a"]["b"]
+    assert isinstance(config_repr, str)
+    assert "alpha" not in config_repr
+    assert "'host': 'h'" in config_repr
+    assert "'Accept', 'json'" in local_vars["headers"]["a"]["b"]
+
+
 def test_truncated_url_authority_with_at_sign_in_password(tmp_path: Path) -> None:
     """Truncation can remove the host separator, leaving an "@" inside the password."""
 
@@ -375,3 +397,27 @@ def test_quoted_and_header_field_values_in_an_exception_message(tmp_path: Path) 
     for name in ("quoted", "basic", "cookie"):
         assert _S[name] not in raw, name
     assert "beta gamma" not in raw
+
+
+def test_sensitive_dict_key_longer_than_max_str(tmp_path: Path) -> None:
+    """Name-aware redaction ran after key truncation, so the secret suffix was lost."""
+
+    def boom() -> None:
+        creds = {"database_connection_password": _S["long_key"]}  # noqa: F841
+        raise ValueError("long key")
+
+    local_vars, raw = _capture_locals(tmp_path, boom, max_str=20)
+
+    assert _S["long_key"] not in raw
+    assert local_vars["creds"] == {"database...[TRUNC]": "[REDACTED]"}
+
+
+def test_bytes_dict_key_is_sensitive_through_its_repr(tmp_path: Path) -> None:
+    def boom() -> None:
+        creds = {b"password": _S["long_key"]}  # noqa: F841
+        raise ValueError("bytes key")
+
+    local_vars, raw = _capture_locals(tmp_path, boom)
+
+    assert _S["long_key"] not in raw
+    assert local_vars["creds"] == {"b'password'": "[REDACTED]"}
