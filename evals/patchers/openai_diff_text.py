@@ -11,11 +11,11 @@ from evals.eval_patches import _diff_lines
 def _extract_unified_diff(text: str) -> str | None:
     """Extract every file diff from a model response as one git-style patch.
 
-    Review findings LLM-01/03/04/07/10: fenced and unfenced sections are scanned in
-    response order and all file sections are
-    collected (a later diff for the same file replaces an earlier draft), hunks are read
-    with their declared counts so trailing prose isn't absorbed, blank context lines are
-    normalized to ``" "``, and ``/dev/null`` headers create or delete files.
+    Review findings LLM-01/03/04/07/10/23: fenced and unfenced sections are scanned in
+    response order and every file section is collected (a later diff for the same file
+    replaces an earlier draft), hunks are read with their declared counts so trailing
+    prose isn't absorbed, blank context lines are normalized to ``" "``, and
+    ``/dev/null`` headers create or delete files.
     """
     s = _strip_think(text).strip("\n")
     if not s.strip():
