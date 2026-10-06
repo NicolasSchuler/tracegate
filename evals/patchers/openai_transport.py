@@ -815,8 +815,13 @@ def _chat_completion(
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             if retry_delay_exceeds_deadline:
+                # The deadline, not the server, ends the request here, so it keeps the
+                # budget classification the trimmed-sleep-then-retry path produced
+                # before, with the refused call's own error alongside it (LLM-22).
                 final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
                 final_error_meta["transport_retry_delay_sec"] = backoff_sec
+                final_error_meta["transport_error"] = str(error_meta.get("error") or "")
+                final_error_meta["error"] = "request_budget_exceeded"
             return None, final_error_meta
 
         meta: PatcherMeta = {
@@ -1181,8 +1186,13 @@ async def _chat_completion_async(
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             if retry_delay_exceeds_deadline:
+                # The deadline, not the server, ends the request here, so it keeps the
+                # budget classification the trimmed-sleep-then-retry path produced
+                # before, with the refused call's own error alongside it (LLM-22).
                 final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
                 final_error_meta["transport_retry_delay_sec"] = backoff_sec
+                final_error_meta["transport_error"] = str(error_meta.get("error") or "")
+                final_error_meta["error"] = "request_budget_exceeded"
             return None, final_error_meta
 
         meta: PatcherMeta = {

@@ -79,6 +79,11 @@ def test_retry_after_beyond_the_deadline_stops_the_loop_without_waiting() -> Non
     assert meta["status"] == 429
     assert meta["retry_after_sec"] == 60.0
     assert meta["transport_retry_stop_reason"] == "retry_delay_exceeds_deadline"
+    assert meta["transport_retry_delay_sec"] == 60.0
     assert meta["transport_retry_count"] == 0
+    # The deadline ends the request, as it did before via a trimmed sleep plus one more
+    # loop pass; the refused call's own error stays visible next to it.
+    assert meta["error"] == "request_budget_exceeded"
+    assert meta["transport_error"] == "http_error"
     assert len(calls) == 1  # no retry inside a window the server already refused
-    assert elapsed < 5.0
+    assert elapsed < 2.0  # and no sleep until the deadline either
