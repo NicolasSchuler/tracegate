@@ -44,6 +44,12 @@ DEFAULT_DECISION_MODEL_PRIOR_BETA = 0.5
 DEFAULT_DECISION_MODEL_PRIOR_ANNEAL_UPDATES = 50
 DEFAULT_DECISION_MODEL_WARMUP_MIX = 0.3
 
+# Run-configuration key for the serving identity the preflight resolves from the sidecar's
+# ``/health`` (model id, revision, device, dtype, quantization, context limit). It cannot come
+# from the CLI flags, so it is stamped into the run metadata's patcher config after the
+# preflight, like the resolved OpenAI context window.
+DECISION_MODEL_SERVING_CONFIG_KEY = "adaptive_decision_model_serving"
+
 
 @dataclass(frozen=True)
 class DecisionModelPolicyConfig:

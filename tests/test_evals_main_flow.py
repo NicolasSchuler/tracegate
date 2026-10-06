@@ -86,6 +86,7 @@ class _FakeResume:
     resumed_completed_units: set[tuple[str, str]] = field(default_factory=set)
     skipped_units: int = 0
     remaining_units: int = 0
+    decision_model_serving: dict[str, Any] = field(default_factory=dict)
 
 
 def _make_parser() -> argparse.ArgumentParser:

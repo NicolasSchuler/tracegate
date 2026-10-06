@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals.decision_model.config import decision_model_settings_from_args
-from evals.decision_model.runtime import check_decision_model_health
+from evals.decision_model.config import (
+    DECISION_MODEL_SERVING_CONFIG_KEY,
+    decision_model_settings_from_args,
+)
+from evals.decision_model.runtime import decision_model_preflight
 from evals.eval_main_setup import MainFlowCliError, MainSetupState
 from evals.eval_seams import EvalSeams, default_eval_seams
 from evals.eval_types import (
@@ -29,6 +32,7 @@ class MainResumeState:
     resumed_completed_units: set[tuple[str, str]]
     skipped_units: int
     remaining_units: int
+    decision_model_serving: dict[str, Any]
 
 
 def _release_lock(lock: Any) -> None:
@@ -134,11 +138,27 @@ def prepare_main_resume(
     skipped_units = len(resumed_completed_units)
     remaining_units = total_units - skipped_units
 
+    decision_model_serving: dict[str, Any] = {}
     if remaining_units > 0:
-        decision_model_error = check_decision_model_health(decision_model_settings_from_args(args))
-        if decision_model_error:
+        preflight = decision_model_preflight(decision_model_settings_from_args(args))
+        if preflight.error:
             _release_lock(run_results_lock)
-            raise MainFlowCliError(f"Environment check failed: {decision_model_error}")
+            raise MainFlowCliError(f"Environment check failed: {preflight.error}")
+        decision_model_serving = dict(preflight.identity)
+        serving_drift = _decision_model_serving_drift(
+            existing_run_metadata=existing_run_metadata,
+            resolved=decision_model_serving,
+        )
+        if serving_drift and existing_records_count > 0:
+            if not bool(getattr(args, "allow_settings_drift", False)):
+                _release_lock(run_results_lock)
+                raise MainFlowCliError(
+                    "Resume aborted: the decision-model sidecar serves a different release than "
+                    f"the existing records claim ({serving_drift}). Records written now would "
+                    "claim the old serving identity; restore it, use a new --run-id, or pass "
+                    "--allow-settings-drift."
+                )
+            print(f"Resume warning: decision-model serving identity changed ({serving_drift}).")
 
     if remaining_units > 0 and setup.execution_config.executor == "testcontainers":
         ok, message = seams.check_testcontainers_runtime_available()
@@ -165,4 +185,36 @@ def prepare_main_resume(
         resumed_completed_units=resumed_completed_units,
         skipped_units=skipped_units,
         remaining_units=remaining_units,
+        decision_model_serving=decision_model_serving,
+    )
+
+
+def _decision_model_serving_drift(
+    *,
+    existing_run_metadata: dict[str, Any] | None,
+    resolved: dict[str, Any],
+) -> str:
+    """Describe a changed serving identity versus the existing run metadata (empty when equal).
+
+    The settings fingerprint cannot cover this: it is computed from the flags before the
+    sidecar is contacted, and the request alias stays ``clef-flash`` across revisions and
+    quantizations. Records of one run must still describe one configuration, so a changed
+    identity is treated like settings drift. Runs whose metadata predates this field (or whose
+    endpoint reports no identity) are not treated as drift.
+    """
+    patcher_config = (existing_run_metadata or {}).get("patcher_config")
+    existing = (
+        patcher_config.get(DECISION_MODEL_SERVING_CONFIG_KEY)
+        if isinstance(patcher_config, dict)
+        else None
+    )
+    if not isinstance(existing, dict) or not existing or not resolved:
+        return ""
+    if existing == resolved:
+        return ""
+    changed = sorted(set(existing) | set(resolved))
+    return ", ".join(
+        f"{name}: {existing.get(name)!r} -> {resolved.get(name)!r}"
+        for name in changed
+        if existing.get(name) != resolved.get(name)
     )

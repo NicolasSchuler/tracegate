@@ -283,6 +283,7 @@ def run_main_flow(
             args=args,
             conditions=conditions,
             config_state=config_state,
+            decision_model_serving=resume.decision_model_serving,
             existing_run_metadata=existing_run_metadata,
             openai_context_window_probe_error=openai_context_window_probe_error,
             openai_context_window_probe_provider=openai_context_window_probe_provider,
