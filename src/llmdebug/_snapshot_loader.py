@@ -15,7 +15,7 @@ from ._formatting import frame_file_label
 from ._warnings import emit_warning
 from .compact_keys import expand_keys, is_compact_snapshot
 from .output import get_latest_snapshot
-from .snapshot_index import index_matches_disk, snapshot_files
+from .snapshot_index import index_matches_disk, is_confined_to, snapshot_files
 from .snapshot_types import SnapshotDict
 from .state_db import (
     list_snapshot_records,
@@ -143,16 +143,6 @@ def _normalize_mtime_value(value: Any) -> float | None:
     return mtime
 
 
-def _is_within_out_dir(path: Path, out_dir: str) -> bool:
-    try:
-        path.resolve().relative_to(Path(out_dir).resolve())
-    except ValueError:
-        return False
-    except OSError:
-        return False
-    return True
-
-
 def _latest_pointer_path(out_dir: str) -> Path | None:
     out_path = Path(out_dir)
     latest_json = out_path / "latest.json"
@@ -160,6 +150,9 @@ def _latest_pointer_path(out_dir: str) -> Path | None:
     candidates: list[tuple[float, Path]] = []
     for path in (latest_json, latest_toon):
         if not path.exists() or not path.is_file():
+            continue
+        # A pointer that resolves outside the directory is not a snapshot of it (RCA-02).
+        if not is_confined_to(path, out_dir):
             continue
         try:
             candidates.append((path.stat().st_mtime, path))
@@ -197,7 +190,7 @@ def _entries_from_index(
         if not path_value:
             continue
         path = Path(path_value)
-        if not _is_within_out_dir(path, out_dir) or not path.exists() or not path.is_file():
+        if not is_confined_to(path, out_dir) or not path.exists() or not path.is_file():
             stale_paths.append(path_value)
             continue
         mtime = _normalize_mtime_value(row.get("mtime", 0.0))

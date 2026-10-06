@@ -36,17 +36,34 @@ def traceback_sidecar(snapshot_path: Path) -> Path:
     return snapshot_path.with_name(f"{snapshot_path.stem}.traceback.txt")
 
 
+def is_confined_to(path: Path, out_dir: str | Path) -> bool:
+    """Whether *path* still sits inside *out_dir* after following symlinks (RCA-02).
+
+    MCP callers only get to name a directory, so everything read from inside it -- the
+    ``latest.*`` pointer and the files a scan finds -- has to be checked too, or a
+    symlink planted in an allowed directory reads an arbitrary file.
+    """
+    try:
+        return path.resolve().is_relative_to(Path(out_dir).resolve())
+    except OSError:
+        return False
+
+
 def snapshot_files(out_dir: str | Path) -> list[Path]:
     """Snapshot files directly in *out_dir*; empty if it can't be listed.
 
-    Uses one directory scan, so no file is opened or parsed.
+    Uses one directory scan, so no file is opened or parsed. Symlinks are resolved
+    (and dropped when they leave *out_dir*); plain entries cannot escape, so the
+    capture-path callers pay nothing extra for the check.
     """
     try:
         with os.scandir(out_dir) as entries:
             return [
                 Path(entry.path)
                 for entry in entries
-                if is_snapshot_name(entry.name) and entry.is_file()
+                if is_snapshot_name(entry.name)
+                and entry.is_file()
+                and (not entry.is_symlink() or is_confined_to(Path(entry.path), out_dir))
             ]
     except OSError:
         return []

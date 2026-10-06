@@ -22,6 +22,7 @@ from ._warnings import emit_warning
 from .config import SnapshotConfig
 from .snapshot_index import (
     index_entry_from_payload,
+    is_confined_to,
     is_snapshot_name,
     snapshot_files,
     traceback_sidecar,
@@ -350,6 +351,11 @@ def get_latest_snapshot(
     candidates: list[tuple[str, Path, float]] = []
     for kind, path in (("json", latest_json), ("toon", latest_toon)):
         if not path.exists():
+            continue
+        # The pointer is a file inside an untrusted directory, so a symlink out of it
+        # must not turn an implicit "latest" read into an arbitrary file read (RCA-02).
+        if not is_confined_to(path, out_path):
+            emit_warning(f"ignoring {path.name}: it resolves outside {out_path}")
             continue
         try:
             candidates.append((kind, path, path.stat().st_mtime))

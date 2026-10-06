@@ -10,7 +10,6 @@ import pytest
 import llmdebug._snapshot_loader as snapshot_loader
 from llmdebug._snapshot_loader import (
     _has_snapshot_files,
-    _is_within_out_dir,
     _latest_pointer_path,
     _normalize_line_value,
     _normalize_mtime_value,
@@ -20,6 +19,7 @@ from llmdebug._snapshot_loader import (
     load_snapshot_raw,
     resolve_snapshot_ref_path,
 )
+from llmdebug.snapshot_index import is_confined_to
 
 
 def test_find_all_snapshots_skips_invalid_index_mtime(
@@ -329,15 +329,15 @@ def test_normalize_mtime_value_valid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _is_within_out_dir: OSError path
+# is_confined_to: OSError path
 # ---------------------------------------------------------------------------
 
 
 def test_is_within_out_dir_oserror_returns_false(tmp_path: Path) -> None:
-    """_is_within_out_dir returns False on OSError from resolve()."""
+    """is_confined_to returns False on OSError from resolve()."""
     fake_path = MagicMock(spec=Path)
     fake_path.resolve.side_effect = OSError("cannot resolve")
-    result = _is_within_out_dir(fake_path, str(tmp_path))
+    result = is_confined_to(fake_path, str(tmp_path))
     assert result is False
 
 
@@ -345,14 +345,14 @@ def test_is_within_out_dir_outside_returns_false(tmp_path: Path) -> None:
     other = tmp_path.parent
     subdir = tmp_path / "sub"
     subdir.mkdir()
-    result = _is_within_out_dir(other, str(subdir))
+    result = is_confined_to(other, str(subdir))
     assert result is False
 
 
 def test_is_within_out_dir_inside_returns_true(tmp_path: Path) -> None:
     child = tmp_path / "snap.json"
     child.write_text("{}", encoding="utf-8")
-    result = _is_within_out_dir(child, str(tmp_path))
+    result = is_confined_to(child, str(tmp_path))
     assert result is True
 
 
@@ -779,3 +779,43 @@ def test_partially_populated_index_does_not_hide_snapshots(tmp_path: Path) -> No
     assert [entry["name"] for entry in newest] == ["newest"]
     assert len(everything) == 3
     assert count_snapshot_records(str(tmp_path)) == 3  # the rescan repaired the index
+
+
+# ---------------------------------------------------------------------------
+# RCA-02: confining the directory must also confine what is read from inside it
+# ---------------------------------------------------------------------------
+
+
+def _external_snapshot(tmp_path: Path) -> Path:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "secret.json"
+    target.write_text('{"name": "secret", "exception": {"type": "Secret"}}', encoding="utf-8")
+    return target
+
+
+def test_latest_pointer_symlink_out_of_out_dir_is_not_loaded(tmp_path: Path) -> None:
+    target = _external_snapshot(tmp_path)
+    out_dir = tmp_path / "snaps"
+    out_dir.mkdir()
+    (out_dir / "latest.json").symlink_to(target)
+
+    assert _latest_pointer_path(str(out_dir)) is None
+    with pytest.raises(FileNotFoundError):
+        load_snapshot(None, str(out_dir))
+    with pytest.raises(FileNotFoundError):
+        load_snapshot_raw(None, str(out_dir))
+    with pytest.raises(FileNotFoundError):
+        resolve_snapshot_ref_path("latest", str(out_dir))
+
+
+def test_snapshot_symlink_out_of_out_dir_is_not_listed(tmp_path: Path) -> None:
+    target = _external_snapshot(tmp_path)
+    out_dir = tmp_path / "snaps"
+    out_dir.mkdir()
+    (out_dir / "escape.json").symlink_to(target)
+    inside = out_dir / "real.json"
+    inside.write_text('{"name": "real", "exception": {"type": "ValueError"}}', encoding="utf-8")
+
+    names = {str(entry["name"]) for entry in find_all_snapshots(str(out_dir))}
+    assert names == {"real"}

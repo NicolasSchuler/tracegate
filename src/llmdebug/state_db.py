@@ -158,6 +158,16 @@ def _schema_version(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+def _require_known_schema(conn: sqlite3.Connection) -> None:
+    """Refuse a database written by a newer llmdebug (RCA-11). Reads check this too."""
+    version = _schema_version(conn)
+    if version > STATE_DB_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"state database schema version {version} is newer than this llmdebug "
+            f"supports ({STATE_DB_SCHEMA_VERSION}); upgrade llmdebug"
+        )
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Bring the schema to ``STATE_DB_SCHEMA_VERSION`` via ``PRAGMA user_version`` (RCA-11).
 
@@ -173,12 +183,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         return
     conn.execute("BEGIN IMMEDIATE")
     try:
+        _require_known_schema(conn)
         version = _schema_version(conn)
-        if version > STATE_DB_SCHEMA_VERSION:
-            raise RuntimeError(
-                f"state database schema version {version} is newer than this llmdebug "
-                f"supports ({STATE_DB_SCHEMA_VERSION}); upgrade llmdebug"
-            )
         for migrate in _SCHEMA_MIGRATIONS[version:]:
             migrate(conn)
         conn.execute(f"PRAGMA user_version = {STATE_DB_SCHEMA_VERSION:d}")
@@ -204,13 +210,52 @@ def open_state_db(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def open_state_db_readonly(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
+    """Open an existing state DB for reading only.
+
+    Read helpers must not create or change files (RCA-02, decision D11), and
+    ``open_state_db`` does both even when the database is already there: the WAL switch
+    and ``PRAGMA user_version`` write to the database and its ``-wal``/``-shm`` sidecars,
+    which also makes reading a legacy (unversioned) database in a non-writable directory
+    fail instead of returning the records it holds.
+    """
+    path = state_db_path(out_dir)
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=30.0)
+    try:
+        busy_timeout = read_env_int("LLMDEBUG_DB_BUSY_TIMEOUT_MS", _BUSY_TIMEOUT_MS, minimum=0)
+        conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
+        yield conn
+    finally:
+        conn.close()
+
+
+def _read_rows(
+    out_dir: str | Path,
+    statements: tuple[tuple[str, tuple[Any, ...]], ...],
+) -> tuple[list[Any], ...]:
+    """Run read-only statements on one connection, with empty results for no database.
+
+    A database that exists but predates a table reports the same "nothing stored yet"
+    as a missing one; running migrations to create the table would be a write.
+    """
+    empty = tuple([] for _ in statements)
+    if not state_db_exists(out_dir):
+        return empty
+    try:
+        with open_state_db_readonly(out_dir) as conn:
+            _require_known_schema(conn)
+            return tuple(conn.execute(sql, params).fetchall() for sql, params in statements)
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+        return empty
+
+
 def count_rca_records(out_dir: str | Path) -> int:
     """Return the number of persisted RCA attempt records for ``out_dir``."""
-    if not state_db_exists(out_dir):
-        return 0
-    with open_state_db(out_dir) as conn:
-        row = conn.execute("SELECT COUNT(*) FROM rca_attempts").fetchone()
-    return int(row[0]) if row else 0
+    (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM rca_attempts", ()),))
+    return int(rows[0][0]) if rows else 0
 
 
 def _require_text_field(record: Mapping[str, Any], key: str) -> str:
@@ -328,10 +373,7 @@ def fetch_latest_rca_record(
         sql += " WHERE session_id = ?"
         params = (session_id,)
     sql += " ORDER BY updated_at DESC, rowid DESC LIMIT 1"
-    if not state_db_exists(out_dir):
-        return None
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, params).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, params),))
     decoded = _decode_payload_rows(rows)
     return decoded[0] if decoded else None
 
@@ -356,10 +398,7 @@ def fetch_rca_history_records(
     if limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
-    if not state_db_exists(out_dir):
-        return []
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, tuple(params)),))
     return _decode_payload_rows(rows)
 
 
@@ -393,11 +432,8 @@ def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
 
 def count_snapshot_records(out_dir: str | Path) -> int:
     """Return the number of snapshot index rows (0 without a database)."""
-    if not state_db_exists(out_dir):
-        return 0
-    with open_state_db(out_dir) as conn:
-        row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
-    return int(row[0]) if row else 0
+    (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM snapshots", ()),))
+    return int(rows[0][0]) if rows else 0
 
 
 def list_snapshot_records(
@@ -431,10 +467,7 @@ def list_snapshot_records(
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
-    if not state_db_exists(out_dir):
-        return []
-    with open_state_db(out_dir) as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
+    (rows,) = _read_rows(out_dir, ((sql, tuple(params)),))
     return _snapshot_rows(rows)
 
 
@@ -459,16 +492,18 @@ def snapshot_index_window(out_dir: str | Path, *, limit: int) -> tuple[int, list
     Retention runs on every capture; one connection instead of two keeps the healthy-index
     check cheaper than the filesystem scan it replaces (CAP-15).
     """
-    if not state_db_exists(out_dir):
-        return 0, []
-    with open_state_db(out_dir) as conn:
-        count_row = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
-        rows = conn.execute(
-            "SELECT path, mtime, name, exc_type, exc_message, file, line FROM snapshots "
-            "ORDER BY mtime DESC, path DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return (int(count_row[0]) if count_row else 0), _snapshot_rows(rows)
+    count_rows, rows = _read_rows(
+        out_dir,
+        (
+            ("SELECT COUNT(*) FROM snapshots", ()),
+            (
+                "SELECT path, mtime, name, exc_type, exc_message, file, line FROM snapshots "
+                "ORDER BY mtime DESC, path DESC LIMIT ?",
+                (limit,),
+            ),
+        ),
+    )
+    return (int(count_rows[0][0]) if count_rows else 0), _snapshot_rows(rows)
 
 
 def replace_snapshot_records(out_dir: str | Path, records: list[dict[str, Any]]) -> None:

@@ -175,7 +175,8 @@ def test_stall_fires_when_only_the_tmp_path_changes(tmp_path: Path) -> None:
     from llmdebug.rca_types import RCAAttemptRequest, RCASnapshotAdvanceRequest
 
     record = None
-    for run in range(3):
+    # The first advance binds new evidence; the next three repeat it without progress.
+    for run in range(4):
         snapshot = _snapshot_with_message(f"missing /tmp/pytest-{run}/test_parse0/data.json")
         record = advance_rca(
             request=RCASnapshotAdvanceRequest(
@@ -192,5 +193,6 @@ def test_stall_fires_when_only_the_tmp_path_changes(tmp_path: Path) -> None:
         )
 
     assert record is not None
-    assert record["repeat_count"] == 3
+    assert record["repeat_count"] == 4
+    assert record["repair_streak"] == 3
     assert record["state"] == "stalled"

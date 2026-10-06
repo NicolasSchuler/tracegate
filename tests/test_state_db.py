@@ -871,8 +871,8 @@ class TestWalAndSchemaVersion:
 
         assert version == state_db.STATE_DB_SCHEMA_VERSION == 1
 
-    def test_unversioned_database_from_an_earlier_release_is_upgraded(self, tmp_path: Path) -> None:
-        """RCA-11: databases created before versioning have user_version 0 and keep their rows."""
+    def _legacy_database(self, tmp_path: Path) -> Path:
+        """A database as an earlier release left it: schema v1 rows, user_version 0."""
         db = state_db_path(tmp_path)
         conn = sqlite3.connect(db)
         state_db._create_schema_v1(conn)
@@ -883,12 +883,41 @@ class TestWalAndSchemaVersion:
         conn.commit()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
         conn.close()
+        return db
+
+    def test_unversioned_database_from_an_earlier_release_is_upgraded(self, tmp_path: Path) -> None:
+        """RCA-11: databases created before versioning have user_version 0 and keep their rows."""
+        self._legacy_database(tmp_path)
+
+        with open_state_db(tmp_path):
+            pass
+
+        with closing(sqlite3.connect(state_db_path(tmp_path))) as check:
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert check.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == 1
+
+    def test_reading_a_legacy_database_writes_nothing(self, tmp_path: Path) -> None:
+        """RCA-02: reads must not migrate the schema or add WAL/SHM sidecars."""
+        db = self._legacy_database(tmp_path)
+        before = sorted(path.name for path in tmp_path.iterdir())
 
         rows = list_snapshot_records(tmp_path)
 
         assert [row["path"] for row in rows] == ["/s.json"]
+        assert sorted(path.name for path in tmp_path.iterdir()) == before
         with closing(sqlite3.connect(db)) as check:
-            assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 0
+            assert check.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
+
+    def test_reading_from_a_non_writable_directory_returns_records(self, tmp_path: Path) -> None:
+        """RCA-02: a read-only directory must not turn a read into a failure."""
+        self._legacy_database(tmp_path)
+        tmp_path.chmod(0o500)
+        try:
+            assert [row["path"] for row in list_snapshot_records(tmp_path)] == ["/s.json"]
+            assert count_rca_records(tmp_path) == 0
+        finally:
+            tmp_path.chmod(0o700)
 
     def test_newer_schema_is_refused(self, tmp_path: Path) -> None:
         with open_state_db(tmp_path):
