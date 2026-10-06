@@ -358,7 +358,18 @@ output to `.golden-diff/`. Prompts contain the checkout and interpreter paths, a
 pytest's output depends on `uv.lock`, so golden files only compare in the environment
 recorded in `tests/golden/eval_runs/environment.json`; elsewhere `just golden-evals`
 exits 2 and the integration test skips. To use them on another machine, run
-`just golden-evals-update` on a commit whose behaviour you trust first.
+`just golden-evals-update` on a commit whose behaviour you trust first and commit the
+regenerated `environment.json` with the fixtures.
+
+Each scenario subprocess gets a pinned environment (`scenario_env()`): proxies off, so
+the loopback stub cannot be routed to a real host, and `LLMDEBUG_*`, `PYTEST_ADDOPTS`,
+`TZ` and the locale set by the harness rather than inherited, because they reach the
+records without changing the environment fingerprint. `TIKTOKEN_CACHE_DIR` points at
+`~/.cache/tracegate-golden-eval-tokenizer`, and `ensure_offline_tokenizer()` resolves
+the tokenizer once up front, so the recorded token estimates come from local data
+instead of a per-run download. Each scenario holds an exclusive lock on its run root
+under `~/.cache/tracegate-golden-eval` for the whole run, so a second invocation of the
+same scenario fails instead of deleting the first one's live work tree.
 
 ## Coverage Requirements
 

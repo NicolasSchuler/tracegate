@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import fcntl
 import gzip
 import hashlib
 import io
@@ -33,6 +34,7 @@ import sys
 import tempfile
 import zlib
 from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -416,23 +418,79 @@ def _collect(root: Path, normalizer: Normalizer, requests: list[dict[str, Any]])
     return output
 
 
-def _fresh_run_root(name: str) -> Path:
-    """Create an empty run root, refusing paths another user could have planted."""
+def _check_owned(directory: Path) -> os.stat_result:
+    """Return *directory*'s lstat, refusing a symlink or another user's directory."""
+    info = directory.lstat()
+    if stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError(f"refusing to use {directory}: a symlink or not owned by this user")
+    return info
+
+
+def prepare_run_root() -> Path:
+    """Create the run root with private permissions, refusing an exposed parent.
+
+    Ownership alone is not enough: in a group- or world-writable parent another account
+    can replace a scenario directory or plant fixture content between the check and the
+    run, and ``mkdir(exist_ok=True)`` does not tighten an existing permissive directory.
+    """
     RUN_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for directory in (RUN_ROOT.parent, RUN_ROOT):
-        info = directory.lstat()
-        if stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
-            raise RuntimeError(f"refusing to use {directory}: a symlink or not owned by this user")
+    parent_info = _check_owned(RUN_ROOT.parent)
+    exposed = parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    if exposed and not parent_info.st_mode & stat.S_ISVTX:
+        raise RuntimeError(
+            f"refusing to use {RUN_ROOT.parent}: it is group- or world-writable; "
+            "tighten it or point RUN_ROOT elsewhere"
+        )
+    # Owned, so tighten rather than refuse.
+    if _check_owned(RUN_ROOT).st_mode & 0o077:
+        RUN_ROOT.chmod(0o700)
+    return RUN_ROOT
+
+
+@contextlib.contextmanager
+def scenario_lock(name: str) -> Iterator[None]:
+    """Hold an exclusive cross-process lock on one scenario's run root and port.
+
+    Two invocations of the same scenario share the directory and the stub port, so
+    without the lock the second deletes the first's live work tree before failing on the
+    occupied port, and its cleanup deletes it again.
+    """
+    prepare_run_root()
+    lock_path = RUN_ROOT / f"{name}.lock"
+    handle = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RuntimeError(
+                f"scenario {name!r} is already running in {RUN_ROOT}; "
+                "wait for it to finish instead of resetting its run root"
+            ) from exc
+        yield
+    finally:
+        os.close(handle)
+
+
+def _fresh_run_root(name: str) -> Path:
+    """Create an empty scenario root; call under :func:`scenario_lock`."""
+    prepare_run_root()
     root = RUN_ROOT / name
     if root.is_symlink():
         raise RuntimeError(f"refusing to use {root}: it is a symlink")
     if root.exists():
         shutil.rmtree(root)
-    root.mkdir()
+    root.mkdir(mode=0o700)
     return root
 
 
 def run_scenario(name: str, keep_root: Path | None = None) -> dict[str, Any]:
+    """Run one scenario under its cross-process lock and return its normalized output."""
+    ensure_offline_tokenizer()
+    with scenario_lock(name):
+        return _run_scenario_locked(name, keep_root=keep_root)
+
+
+def _run_scenario_locked(name: str, *, keep_root: Path | None = None) -> dict[str, Any]:
     from evals import run_eval
     from tests._openai_stub_server import OpenAIStubServer, StubbedResponse
 
@@ -544,6 +602,67 @@ def interpreter() -> str:
     return str(venv_python) if venv_python.is_file() else sys.executable
 
 
+# Only these are inherited by a scenario subprocess; everything else the caller exports
+# (proxies, LLMDEBUG_*, PYTEST_ADDOPTS, ...) would change the recorded output without
+# changing the recorded environment fingerprint.
+_INHERITED_ENV_KEYS = ("HOME", "PATH", "TMPDIR", "USER", "LOGNAME")
+# tiktoken caches its vocabulary in $TMPDIR by default, which is wiped; with a cold cache
+# the token estimates in the records come from a download instead of local data.
+TOKENIZER_CACHE = Path.home() / ".cache" / "tracegate-golden-eval-tokenizer"
+
+
+def scenario_env() -> dict[str, str]:
+    """The pinned environment of a scenario subprocess.
+
+    Proxies are off so the loopback stub cannot be routed to a real host, and the capture
+    and pytest settings that reach the prompts are pinned instead of inherited.
+    """
+    env = {key: os.environ[key] for key in _INHERITED_ENV_KEYS if key in os.environ}
+    env.update(
+        {
+            "no_proxy": "*",
+            "NO_PROXY": "*",
+            "PYTEST_ADDOPTS": "",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "TZ": "UTC",
+            "COLUMNS": "80",
+            "TIKTOKEN_CACHE_DIR": str(TOKENIZER_CACHE),
+        }
+    )
+    return env
+
+
+def ensure_offline_tokenizer() -> None:
+    """Point tiktoken at a persistent cache and fail loudly if it is not usable.
+
+    ``estimate_text_token_count`` records a token count per request, and its tokenizer
+    downloads its vocabulary when the cache is cold. Resolving it once here keeps the
+    scenario runs offline and turns a missing tokenizer into one explicit error instead
+    of silently different telemetry in every record.
+    """
+    from evals.token_counting import estimate_text_token_count
+
+    TOKENIZER_CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(TOKENIZER_CACHE))
+    default_cache = Path(tempfile.gettempdir()) / "data-gym-cache"
+    if default_cache.is_dir():
+        # Reuse vocabulary already on this machine rather than fetching it again.
+        for blob in default_cache.iterdir():
+            target = TOKENIZER_CACHE / blob.name
+            if blob.is_file() and not target.exists():
+                shutil.copy2(blob, target)
+    probe = estimate_text_token_count("golden", model="golden-model")
+    if not probe.get("available"):
+        raise RuntimeError(
+            "golden runs need a local tokenizer: "
+            f"{probe.get('error') or 'unavailable'}. Warm {TOKENIZER_CACHE} once with "
+            "network access (python -c \"import tiktoken; tiktoken.get_encoding('o200k_base')\")"
+        )
+
+
 def environment() -> dict[str, str]:
     """What the golden files depend on besides the code under test.
 
@@ -597,14 +716,18 @@ def run_in_subprocess(name: str, out: Path) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        env=scenario_env(),
     )
 
 
 def run_scenarios(names: list[str], out_dir: Path) -> dict[str, str]:
     """Run scenarios in parallel subprocesses; return the error output of failed runs."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(names) or 1) as pool:
+    # Two subprocesses for one scenario would fight over its run root and stub port.
+    unique = sorted(set(names))
+    ensure_offline_tokenizer()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(unique) or 1) as pool:
         futures = {
-            name: pool.submit(run_in_subprocess, name, out_dir / f"{name}.json") for name in names
+            name: pool.submit(run_in_subprocess, name, out_dir / f"{name}.json") for name in unique
         }
         results = {name: future.result() for name, future in futures.items()}
     return {
@@ -649,12 +772,14 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(_dump(output), encoding="utf-8")
         return 0
 
-    names = sorted(args.scenario or SCENARIOS)
+    names = sorted(set(args.scenario or SCENARIOS))
     if not args.update:
         mismatch = golden_environment_mismatch()
         if mismatch is not None:
-            print(f"cannot compare: {mismatch}. Regenerate the golden files on the base commit")
-            print("first: uv run python -m tests.golden_eval.runner --update")
+            print(f"cannot compare: {mismatch}.")
+            print("The golden files lock behaviour in the environment that recorded them;")
+            print("compare there, or regenerate on a commit whose behaviour you trust with")
+            print("`just golden-evals-update` and commit the new environment.json with them.")
             return 2
     with tempfile.TemporaryDirectory(prefix="golden-out-") as tmp:
         errors = run_scenarios(names, Path(tmp))

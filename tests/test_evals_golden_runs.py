@@ -10,6 +10,7 @@ there with ``just golden-evals-update`` on a commit whose behaviour you trust.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,14 @@ def test_every_scenario_has_a_golden_file() -> None:
     expected = {f"{name}.json.gz" for name in runner.SCENARIOS}
     present = {path.name for path in runner.GOLDEN_DIR.glob("*.json.gz")}
     assert present == expected
+
+
+def test_the_golden_environment_file_is_committed() -> None:
+    """Without it every comparison exits 2 and this suite skips, so the lock is unused."""
+    environment_path = runner.environment_path()
+    assert environment_path.is_file(), (
+        f"{environment_path} is missing: regenerate the golden files with "
+        "`just golden-evals-update` and commit it alongside them"
+    )
+    recorded = json.loads(environment_path.read_text(encoding="utf-8"))
+    assert set(recorded) == set(runner.environment())
