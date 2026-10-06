@@ -739,7 +739,9 @@ class TestRunStateRepair:
         )
         assert reseeded != fingerprint
         # CAP-20: a snapshot-format change is settings drift for resume.
-        monkeypatch.setattr(run_state, "_resolve_llmdebug_snapshot_schema_version", lambda: "9.9")
+        monkeypatch.setattr(
+            run_state, "_resolve_llmdebug_snapshot_schema_version", lambda **_kwargs: "9.9"
+        )
         assert (
             run_eval._build_run_settings_fingerprint(args=args, cases=cases, conditions=conditions)
             != reseeded

@@ -61,6 +61,7 @@ from .eval_types import (
     DEFAULT_SYNTAX_PREFLIGHT_MAX_CYCLES,
     DEFAULT_TRANSPORT_FAIL_FAST_STREAK,
     EVAL_RECORD_SCHEMA_VERSION,
+    EVIDENCE_POLICY_REVISION,
     PATCH_VERIFIER_MIN_SCORE,
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
     PATCH_VERIFIER_SCOPE_ALL,
@@ -281,7 +282,7 @@ def _build_run_metadata(
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "llmdebug_version": _resolve_llmdebug_version(),
-        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
         "patcher_name": patcher_name,
         "patcher_config": patcher_config,
         "patcher_config_fingerprint": _xxh3_128_jsonlike(patcher_config),
@@ -312,6 +313,10 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         # resuming across a bump is refused instead of mixing the two.
         "policy_defaults_version": POLICY_DEFAULTS_VERSION,
         "k": int(args.k),
+        # CAP-20 / ATT-03: the snapshot format and the evidence-delivery contract are both
+        # part of what the patcher sees, so two runs that differ in either are not comparable.
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
+        "evidence_policy_revision": EVIDENCE_POLICY_REVISION,
         "transport_fail_fast_streak": int(
             getattr(args, "transport_fail_fast_streak", DEFAULT_TRANSPORT_FAIL_FAST_STREAK)
         ),
@@ -636,8 +641,22 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
     return config
 
 
-def _resolve_llmdebug_snapshot_schema_version() -> str:
-    """Debug-session schema the pytest plugin writes; its locals reach snapshot prompts."""
+def _resolve_llmdebug_snapshot_schema_version(*, args: argparse.Namespace | None = None) -> str:
+    """Debug-session schema the pytest plugin writes; its locals reach snapshot prompts.
+
+    CAP-20: the schema must describe the environment that *runs* pytest. Under
+    ``--executor testcontainers`` without ``--container-mount-repo-src`` the container's own
+    llmdebug install writes the snapshots, so the parent process's version says nothing about
+    them; record the image instead of a number the run never produced.
+    """
+    container_provides_plugin = (
+        args is not None
+        and str(getattr(args, "executor", "local")) == "testcontainers"
+        and not bool(getattr(args, "container_mount_repo_src", True))
+    )
+    if container_provides_plugin:
+        image = str(getattr(args, "container_image", "") or "unknown")
+        return f"container:{image}"
     try:
         from llmdebug.capture import SCHEMA_VERSION
     except Exception:

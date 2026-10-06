@@ -35,6 +35,7 @@ from evals.attempt_metadata import (
     SyntaxPreflightMetadata,
     build_attempt_metadata_request_from_legacy_kwargs,
 )
+from evals.eval_evidence import _xxh3_128_jsonlike
 from evals.eval_recording import (
     _build_base_record,
     _build_model_metadata,
@@ -382,7 +383,8 @@ class TestResolveLlmdebugSnapshotSchemaVersion:
 
     def test_recorded_in_both_metadata_builders(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "evals.eval_recording._resolve_llmdebug_snapshot_schema_version", lambda: "9.9"
+            "evals.eval_recording._resolve_llmdebug_snapshot_schema_version",
+            lambda **_kwargs: "9.9",
         )
         monkeypatch.setattr("evals.eval_recording._collect_dependency_versions", lambda mode: {})
         built = _build_run_metadata(
@@ -396,6 +398,65 @@ class TestResolveLlmdebugSnapshotSchemaVersion:
 
         assert built["llmdebug_snapshot_schema_version"] == "9.9"
         assert default["llmdebug_snapshot_schema_version"] == "9.9"
+
+    def test_container_executor_without_mounted_src_records_the_image(self) -> None:
+        """4-2#8: the container's llmdebug writes the snapshots, not the parent's."""
+        from llmdebug.capture import SCHEMA_VERSION
+
+        args = _minimal_patcher_args(
+            executor="testcontainers",
+            container_mount_repo_src=False,
+            container_image="ghcr.io/example/evals:pinned",
+        )
+        resolved = _resolve_llmdebug_snapshot_schema_version(args=args)
+        assert resolved == "container:ghcr.io/example/evals:pinned"
+        assert resolved != SCHEMA_VERSION
+        # A different image is a different snapshot format for bookkeeping purposes.
+        other = _resolve_llmdebug_snapshot_schema_version(
+            args=_minimal_patcher_args(
+                executor="testcontainers",
+                container_mount_repo_src=False,
+                container_image="ghcr.io/example/evals:other",
+            )
+        )
+        assert other != resolved
+
+    def test_mounted_src_and_local_executor_use_the_parent_package(self) -> None:
+        from llmdebug.capture import SCHEMA_VERSION
+
+        mounted = _minimal_patcher_args(
+            executor="testcontainers",
+            container_mount_repo_src=True,
+            container_image="ghcr.io/example/evals:pinned",
+        )
+        assert _resolve_llmdebug_snapshot_schema_version(args=mounted) == SCHEMA_VERSION
+        local = _minimal_patcher_args(executor="local", container_mount_repo_src=False)
+        assert _resolve_llmdebug_snapshot_schema_version(args=local) == SCHEMA_VERSION
+
+
+class TestPatcherConfigEvidenceProvenance:
+    """1c#4 / 4-2#7: two v7 runs with different evidence contracts must not look identical."""
+
+    def test_patcher_config_carries_the_snapshot_schema_and_evidence_revision(self) -> None:
+        from evals.eval_types import EVIDENCE_POLICY_REVISION
+
+        config = _build_patcher_config(args=_minimal_patcher_args(), patcher_name="openai")
+        assert config["evidence_policy_revision"] == EVIDENCE_POLICY_REVISION
+        assert config["llmdebug_snapshot_schema_version"]
+
+    def test_container_snapshot_schema_changes_the_patcher_config_fingerprint(self) -> None:
+        local = _build_patcher_config(
+            args=_minimal_patcher_args(executor="local"), patcher_name="openai"
+        )
+        containerized = _build_patcher_config(
+            args=_minimal_patcher_args(
+                executor="testcontainers",
+                container_mount_repo_src=False,
+                container_image="ghcr.io/example/evals:pinned",
+            ),
+            patcher_name="openai",
+        )
+        assert _xxh3_128_jsonlike(local) != _xxh3_128_jsonlike(containerized)
 
 
 # ── _collect_dependency_versions ─────────────────────────────────────────

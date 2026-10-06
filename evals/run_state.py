@@ -41,8 +41,9 @@ def _build_run_settings_fingerprint(
         "retry_context_mode": str(args.retry_context_mode),
         "retry_history_max_chars": int(args.retry_history_max_chars),
         "prompt_budget_retry_history_chars": int(args.prompt_budget_retry_history_chars),
-        # CAP-20: the snapshot format (e.g. dict-key rendering) is part of the prompt evidence.
-        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(),
+        # CAP-20: the snapshot format (e.g. dict-key rendering) is part of the prompt evidence,
+        # and the executor decides which llmdebug install writes it (4-2#8).
+        "llmdebug_snapshot_schema_version": _resolve_llmdebug_snapshot_schema_version(args=args),
     }
     return _xxh3_128_jsonlike(payload)
 
