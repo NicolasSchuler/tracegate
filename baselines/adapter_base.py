@@ -31,7 +31,9 @@ from __future__ import annotations
 import difflib
 import hashlib
 import logging
+import math
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
@@ -221,6 +223,61 @@ def observed_repo_state(repo: Path) -> dict[str, Any]:
         "dirty": bool(diff.strip() or untracked.strip()),
         "tree_patch_sha256": hashlib.sha256(diff + b"\0" + untracked_digest).hexdigest(),
     }
+
+
+@dataclass(frozen=True)
+class RepairDeadline:
+    """One wall-clock deadline for a whole ``run_repair`` call (BAS-08, decision D4).
+
+    ``BaselineConfig.process_timeout_sec`` is the budget for everything an adapter does for
+    one case, so every blocking operation — an LLM request, an env-client subprocess, a
+    pytest run — is clamped to what is left of it instead of starting with its own full
+    timeout. A budget of ``0`` means "no deadline" (ORC-18).
+    """
+
+    started_at: float
+    budget_sec: float
+
+    @classmethod
+    def from_config(
+        cls, config: BaselineConfig, *, started_at: float | None = None
+    ) -> RepairDeadline:
+        """The deadline for one ``run_repair`` call, measured from *started_at*."""
+        return cls(
+            started_at=time.perf_counter() if started_at is None else float(started_at),
+            budget_sec=max(0.0, float(config.process_timeout_sec or 0.0)),
+        )
+
+    @property
+    def bounded(self) -> bool:
+        """Whether a deadline applies at all."""
+        return self.budget_sec > 0.0
+
+    def remaining_sec(self) -> float:
+        """Seconds left in the budget; ``inf`` when unbounded."""
+        if not self.bounded:
+            return math.inf
+        return max(0.0, self.budget_sec - (time.perf_counter() - self.started_at))
+
+    @property
+    def expired(self) -> bool:
+        """Whether the budget is used up, so no further operation may start."""
+        return self.bounded and self.remaining_sec() <= 0.0
+
+    def clamp_sec(self, requested: float | None) -> float:
+        """*requested* seconds, never more than the remaining budget (never below 0.1)."""
+        candidate = float(requested or 0.0)
+        if candidate <= 0.0:
+            candidate = self.remaining_sec()
+        return max(0.1, min(candidate, self.remaining_sec()))
+
+    def clamp_int_sec(self, requested: int | float | None) -> int:
+        """Like :meth:`clamp_sec` for subprocess timeouts, in whole seconds (minimum 1).
+
+        Rounded up, so a call that starts with the full budget still gets the timeout it
+        asked for rather than one second less.
+        """
+        return max(1, math.ceil(self.clamp_sec(requested)))
 
 
 def require_pinned_commit(*, name: str, observed_commit: str, pinned_commit: str) -> None:

@@ -7,6 +7,7 @@ High/Medium Phase 1 findings that need a run through ``run_one_condition``.
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -902,3 +903,69 @@ def test_bas14_tree_hash_covers_untracked_file_contents(tmp_path: Path) -> None:
     assert first["dirty"] is True
     assert first["tree_patch_sha256"] != second["tree_patch_sha256"]
     assert observed_repo_state(repo)["tree_patch_sha256"] == second["tree_patch_sha256"]
+
+
+def test_bas08_intervenor_stops_at_the_deadline_between_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1e#3: a deadline that expires during the teacher call stops the attempt."""
+    from baselines.adapter_base import BaselineCaseContext, BaselineConfig
+    from baselines.intervenor.adapter import IntervenorAdapter, _CommandOutcome
+
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def multiply(a, b):\n    return a + b\n", encoding="utf-8")
+    (case_dir / "test_buggy.py").write_text(
+        "from buggy import multiply\n\n\ndef test_multiply():\n    assert multiply(2, 3) == 6\n",
+        encoding="utf-8",
+    )
+    repo = tmp_path / "fake_intervenor"
+    (repo / "prompt").mkdir(parents=True)
+    (repo / "prompt" / "code_teacher.txt").write_text(
+        "Teacher prompt\n%%%buggy_code%%%\n%%%error_message%%%\nModification method:\n",
+        encoding="utf-8",
+    )
+    (repo / "prompt" / "code_learner.txt").write_text(
+        "Learner prompt\n%%%buggy_code%%%\n%%%error_message%%%\n%%%repair_method%%%\n",
+        encoding="utf-8",
+    )
+    adapter = IntervenorAdapter()
+    config = BaselineConfig(
+        repo_dir=repo,
+        model="test-model",
+        max_attempts=3,
+        process_timeout_sec=1,
+    )
+    adapter.setup(config)
+    case_input = adapter.convert_case(
+        case_dir,
+        case_context=BaselineCaseContext(
+            case_id="case", python_args=("-m", "pytest", "-q"), timeout_sec=30
+        ),
+    ).to_dict()
+    calls: list[str] = []
+    test_timeouts: list[int] = []
+
+    def _fake_tests(*, work_dir: Path, python_args: list[str], timeout_sec: int) -> _CommandOutcome:
+        del work_dir, python_args
+        test_timeouts.append(timeout_sec)
+        return _CommandOutcome(returncode=1, stdout="", stderr="boom", duration_sec=0.0)
+
+    def _slow_teacher(*, prompt: str, **_kwargs: Any) -> tuple[str, dict[str, int], float]:
+        del prompt
+        calls.append(f"call_{len(calls) + 1}")
+        time.sleep(1.1)  # burn the whole deadline inside the first (teacher) call
+        return "do the thing", {"prompt_tokens": 1, "completion_tokens": 1}, 1.1
+
+    monkeypatch.setattr(adapter, "_build_client", lambda config: object())
+    monkeypatch.setattr(adapter, "_run_case_tests", _fake_tests)
+    monkeypatch.setattr(adapter, "_generate_text", _slow_teacher)
+
+    result = adapter.run_repair(case_input, config)
+
+    assert result.success is False
+    assert result.meta["error"] == "deadline_exceeded"
+    # One teacher call, then the deadline stops the learner and the postcheck.
+    assert calls == ["call_1"]
+    # The precheck was clamped to the remaining budget, not given its own 30s.
+    assert test_timeouts == [1]

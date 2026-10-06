@@ -32,6 +32,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    RepairDeadline,
     observed_repo_state,
     require_pinned_commit,
 )
@@ -495,6 +496,8 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
         extra_config = self._validated_extra_config(config)
         test_timeout_sec = self._case_timeout(case_input=case_input, config=config)
         started_at = time.perf_counter()
+        # BAS-08: one deadline for the whole call; every blocking step is clamped to it.
+        deadline = RepairDeadline.from_config(config, started_at=started_at)
         controller_packet = parse_controller_packet(case_input.get("llmdebug_controller_packet"))
         if extra_config.baseline_hybrid_guidance_mode == HYBRID_GUIDANCE_MODE_FAIR_V1:
             canonical_guidance = render_hybrid_controller_guidance(
@@ -554,7 +557,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
             precheck = self._run_case_tests(
                 work_dir=work_dir,
                 python_args=python_args,
-                timeout_sec=test_timeout_sec,
+                timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
             )
             eval_duration_sec += precheck.duration_sec
             if precheck.returncode == 0:
@@ -585,9 +588,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
 
             deadline_exceeded = False
             for attempt_idx in range(1, config.max_attempts + 1):
-                deadline_sec = float(config.process_timeout_sec or 0.0)
-                if deadline_sec > 0 and time.perf_counter() - started_at >= deadline_sec:
-                    # BAS-08: one wall-clock deadline for the whole run_repair call.
+                if deadline.expired:
                     deadline_exceeded = True
                     break
                 failure_summary = self._format_failure_feedback(precheck)
@@ -612,6 +613,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                                 prompt=teacher_prompt,
                                 max_tokens=extra_config.baseline_intervenor_teacher_max_tokens,
                                 config=config,
+                                timeout_sec=deadline.clamp_sec(config.api_timeout_sec),
                             )
                         )
                     )
@@ -648,6 +650,10 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                     usage_available = False
                     usage_missing_call_count += 1
 
+                if deadline.expired:
+                    # The teacher call used the remaining budget: don't start the learner.
+                    deadline_exceeded = True
+                    break
                 self._emit_runtime_progress(
                     phase_label="baseline: intervenor learner",
                     note=f"attempt {attempt_idx}/{config.max_attempts} learner",
@@ -672,6 +678,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                                 prompt=learner_prompt,
                                 max_tokens=extra_config.baseline_intervenor_learner_max_tokens,
                                 config=config,
+                                timeout_sec=deadline.clamp_sec(config.api_timeout_sec),
                             )
                         )
                     )
@@ -777,10 +784,14 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                     llm_calls_observed=llm_call_count,
                     eval_duration_sec_observed=eval_duration_sec,
                 )
+                if deadline.expired:
+                    # No budget left to verify this candidate; keep it and stop.
+                    deadline_exceeded = True
+                    break
                 postcheck = self._run_case_tests(
                     work_dir=work_dir,
                     python_args=python_args,
-                    timeout_sec=test_timeout_sec,
+                    timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
                 )
                 eval_duration_sec += postcheck.duration_sec
                 attempt_meta["postcheck_returncode"] = postcheck.returncode
@@ -891,6 +902,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
         prompt: str,
         max_tokens: int,
         config: BaselineConfig | None = None,
+        timeout_sec: float | None = None,
     ) -> tuple[str, dict[str, int], float, dict[str, Any]]:
         if config and config.python_executable is not None:
             return self._generate_text_via_env_python(
@@ -899,6 +911,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                 prompt=prompt,
                 max_tokens=max_tokens,
                 config=config,
+                timeout_sec=timeout_sec,
             )
         compat_config = compat_config_from_extra((config.extra if config else {}) or {})
         started_at = time.perf_counter()
@@ -914,6 +927,9 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
             compat_config=compat_config,
             base_url=str(config.api_base_url if config else ""),
         )
+        if timeout_sec is not None:
+            # BAS-08: never wait past the single run_repair deadline.
+            request_kwargs["timeout"] = float(timeout_sec)
         response = client.chat.completions.create(
             **request_kwargs,
         )
@@ -943,6 +959,7 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
         prompt: str,
         max_tokens: int,
         config: BaselineConfig,
+        timeout_sec: float | None = None,
     ) -> tuple[str, dict[str, int], float, dict[str, Any]]:
         payload = {
             "model": model,
@@ -953,7 +970,9 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
             "max_retries": int(config.generation.transport_max_retries),
             "base_url": config.api_base_url,
             "api_key": config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
-            "timeout_sec": config.api_timeout_sec,
+            "timeout_sec": (
+                float(timeout_sec) if timeout_sec is not None else config.api_timeout_sec
+            ),
             # BAS-19: the resolved shared defaults, so the env client behaves like
             # the in-process path for the same config.
             **compat_payload_fields(compat_config_from_extra(config.extra)),
@@ -973,7 +992,12 @@ class IntervenorAdapter(_RuntimeFeedbackMixin, BaselineAdapter):
                 ],
                 capture_output=True,
                 text=True,
-                timeout=max(1, int(config.api_timeout_sec or 1.0)),
+                timeout=max(
+                    1,
+                    int(
+                        timeout_sec if timeout_sec is not None else (config.api_timeout_sec or 1.0)
+                    ),
+                ),
                 cwd=str(config.repo_dir),
                 env=os.environ.copy(),
             )

@@ -75,9 +75,13 @@ Each record's `patch_meta.baseline_generation` holds the effective values and `e
 the run-settings fingerprint and resume refuses to append incomparable records. The seed
 follows `--deterministic` exactly like native generation: `--seed` alone drives policy
 exploration and leaves baseline sampling unseeded.
-`process_timeout_sec` is one wall-clock deadline per `run_repair` call: INTERVENOR stops
-iterating when it is reached (`error="deadline_exceeded"`), and every record carries
-`baseline_deadline_sec`, `baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
+`process_timeout_sec` is one wall-clock deadline per `run_repair` call, computed once at entry
+(`RepairDeadline`). Every blocking step is clamped to what is left of it — the pytest
+precheck/postcheck, the generation request (in-process and through the env client) and the
+env-client subprocess — and no new step starts once it has expired: INTERVENOR stops before the
+learner call and before the postcheck, lambda-RLM and RLM stop before the next attempt, all with
+`error="deadline_exceeded"`. Every record carries `baseline_deadline_sec`,
+`baseline_run_repair_wall_sec` and `baseline_deadline_exceeded`.
 TraceCoder's per-case test timeout falls back to the process timeout like the other adapters
 (BAS-12).
 

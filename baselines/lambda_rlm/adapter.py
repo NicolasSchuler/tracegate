@@ -29,6 +29,7 @@ from baselines.adapter_base import (
     BaselineCaseContext,
     BaselineConfig,
     BaselineResult,
+    RepairDeadline,
     observed_repo_state,
 )
 from baselines.case_schemas import LambdaRLMCaseInput
@@ -228,6 +229,8 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
         last_plan_metadata: dict[str, Any] | None = None
         last_error: str | None = None
         started_at = time.perf_counter()
+        # BAS-08: one deadline for the whole call; each inner call gets what is left of it.
+        deadline = RepairDeadline.from_config(config, started_at=started_at)
 
         with tempfile.TemporaryDirectory(prefix="lambda_rlm_") as tmpdir:
             work_dir = Path(tmpdir)
@@ -245,7 +248,7 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
             precheck = self._run_case_tests(
                 work_dir=work_dir,
                 python_args=python_args,
-                timeout_sec=test_timeout_sec,
+                timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
             )
             eval_duration_sec += precheck.duration_sec
             if precheck.returncode == 0:
@@ -285,6 +288,9 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
 
             retry_feedback = self._format_failure_feedback(precheck)
             for attempt_idx in range(1, config.max_attempts + 1):
+                if deadline.expired:
+                    last_error = "deadline_exceeded"
+                    break
                 self._emit_runtime_progress(
                     phase_label="baseline: lambda_rlm generation",
                     note=f"attempt {attempt_idx}/{config.max_attempts} generating",
@@ -305,7 +311,7 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
                     env_result = self._invoke_lambda(
                         prompt=prompt,
                         config=config,
-                        timeout_sec=generation_timeout_sec,
+                        timeout_sec=deadline.clamp_int_sec(generation_timeout_sec),
                     )
                 except (subprocess.TimeoutExpired, RuntimeError) as exc:
                     # BAS-10: keep earlier attempts' candidate, usage and metrics.
@@ -496,7 +502,7 @@ class LambdaRLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, Baseline
                 test_outcome = self._run_case_tests(
                     work_dir=work_dir,
                     python_args=python_args,
-                    timeout_sec=test_timeout_sec,
+                    timeout_sec=deadline.clamp_int_sec(test_timeout_sec),
                 )
                 eval_duration_sec += test_outcome.duration_sec
                 attempt_summary["test_returncode"] = test_outcome.returncode
