@@ -960,8 +960,8 @@ def test_depth_limit_repr_fails_closed_on_an_unwalkable_container() -> None:
     )
 
 
-def test_depth_limit_repr_leaves_container_subclasses_to_the_text_patterns() -> None:
-    """A plain rebuild would drop the type name and field names their repr carries."""
+def test_depth_limit_repr_rebuilds_container_subclasses() -> None:
+    """A subclass keeps its own repr, which the text patterns need not understand."""
 
     class _Config(dict):  # type: ignore[type-arg]
         def __repr__(self) -> str:
@@ -970,8 +970,42 @@ def test_depth_limit_repr_leaves_container_subclasses_to_the_text_patterns() -> 
     cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
 
     assert _past_depth_limit(_Config(password="hunter2"), cfg) == (
-        "_Config({'password': 'hunter2'})"
+        "_Config({'password': '[REDACTED]'})"
     )
+
+
+def test_depth_limit_repr_rebuilds_a_subclass_with_a_hostile_constructor() -> None:
+    """``copy`` and the constructor can both fail; the type name is then rendered instead."""
+
+    class _Frozen(tuple):  # type: ignore[type-arg]
+        def __new__(cls, *_args: Any) -> Any:
+            raise TypeError("no construction")
+
+        def __copy__(self) -> Any:
+            raise TypeError("no copy")
+
+    frozen = tuple.__new__(_Frozen, ({"password": "hunter2"},))
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(frozen, cfg) == ("\"_Frozen([{'password': '[REDACTED]'}])\"")
+
+
+def test_depth_limit_repr_redacts_a_namedtuple_name_value_pair() -> None:
+    """The same pair rule as for a plain tuple: ("password", value) is a field."""
+    field = namedtuple("field", ["name", "value"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    rendered = _past_depth_limit(field("Authorization", "Basic dXNlcjpwYXNz"), cfg)
+
+    assert rendered == "field(name='Authorization', value='[REDACTED]')"
+
+
+def test_depth_limit_repr_elides_namedtuple_fields_beyond_max_items() -> None:
+    """``max_items`` cannot drop fields, so the extra values are elided in place."""
+    wide = namedtuple("wide", ["a", "b", "c"])
+    cfg = SnapshotConfig(redaction_profile="prod", max_items=2, max_str=200)
+
+    assert _past_depth_limit(wide(1, 2, 3), cfg) == "wide(a=1, b=2, c='...[TRUNC]')"
 
 
 def test_depth_limit_repr_redacts_namedtuple_fields_by_name() -> None:
@@ -983,7 +1017,9 @@ def test_depth_limit_repr_redacts_namedtuple_fields_by_name() -> None:
     assert rendered == "creds(user='bob', password='[REDACTED]', extra={'api_key': '[REDACTED]'})"
 
 
-def test_depth_limit_repr_keeps_a_namedtuple_that_cannot_be_replaced() -> None:
+def test_depth_limit_repr_fails_closed_on_a_broken_namedtuple() -> None:
+    """A type that looks like a namedtuple but cannot be rebuilt is never repr'd as-is."""
+
     class _Broken(tuple):  # type: ignore[type-arg]
         _fields = ("password",)
 
@@ -995,4 +1031,41 @@ def test_depth_limit_repr_keeps_a_namedtuple_that_cannot_be_replaced() -> None:
 
     cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
 
-    assert _past_depth_limit(_Broken(), cfg) == "_Broken(password='hunter2')"
+    assert _past_depth_limit(_Broken(("hunter2",)), cfg) == "<serialization failed: TypeError>"
+
+
+def test_depth_limit_repr_rebuilds_list_and_tuple_subclasses() -> None:
+    class _Row(list[Any]):
+        def __repr__(self) -> str:
+            return f"_Row({list.__repr__(self)})"
+
+    class _Pair(tuple[Any, ...]):
+        def __repr__(self) -> str:
+            return f"_Pair({tuple.__repr__(self)})"
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Row([{"password": "hunter2"}]), cfg) == (
+        "_Row([{'password': '[REDACTED]'}])"
+    )
+    assert _past_depth_limit(_Pair(("api_key", "abc")), cfg) == ("_Pair(('api_key', '[REDACTED]'))")
+
+
+def test_depth_limit_repr_falls_back_to_redacted_when_nothing_can_be_rendered() -> None:
+    """Neither a copy, a rebuild nor a type-name rendering works: nothing is shown."""
+
+    class _Unreprable:
+        def __repr__(self) -> str:
+            raise RuntimeError("no repr")
+
+    class _Weird(dict[str, Any]):
+        def __init__(self, marker: str, data: dict[str, Any]) -> None:
+            super().__init__(data)
+            self.marker = marker
+
+        def __copy__(self) -> Any:
+            raise TypeError("no copy")
+
+    cfg = SnapshotConfig(redaction_profile="prod", max_str=200)
+
+    assert _past_depth_limit(_Weird("m", {"v": _Unreprable()}), cfg) == "'[REDACTED]'"

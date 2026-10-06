@@ -233,9 +233,13 @@ truncation, so a long key such as `database_connection_password` cannot lose its
 suffix first. Containers past the nesting limit become one `repr` string; the values under
 secret names inside them are replaced before that `repr` is taken, so a composite value
 (`{'password': ['alpha', 'beta']}`) or a nested header pair does not survive it. That
-`repr` also elides beyond `max_items` per container. Only exact `dict`/`list`/`tuple`
-instances and namedtuples are rebuilt that way; any other subclass keeps its own `repr`,
-whose type and field names the text patterns below still need to see.
+`repr` also elides beyond `max_items` per container. A namedtuple keeps its type and field
+names (its values are replaced by field name, and the `max_items` limit elides the extra
+values in place rather than dropping fields); any other `dict`/`list`/`tuple` subclass is
+rebuilt with the redacted contents so that its own `__repr__` cannot print them, and a
+subclass that cannot be rebuilt is rendered as its type name around the redacted contents.
+This structural pass never relies on the text patterns below, because a custom `redact`
+tuple need not contain them.
 
 `llmdebug.PII_PATTERNS` additionally covers, inside text such as a log line, an exception
 message or a `repr`: URL userinfo (`postgres://user:pw@host` and `https://TOKEN@host`
@@ -243,14 +247,16 @@ become `…://[REDACTED]@host`; an over-long or truncation-cut authority is reda
 even when the password contains `@`), secret-named assignments including quoted multi-word
 values, hyphenated names (`secret-key`), escaped, `b''`-prefixed and truncated values,
 quoted name/value pairs (`['Authorization', 'Basic …']`), and the complete value of an
-`authorization`/`cookie` field (`Cookie: a=1; b=2`). An unquoted value runs to the next
-whitespace; where the name was quoted — so the text is a structured rendering whose shape
-should survive — it runs to the next structural delimiter instead. A container value is
+`authorization`/`cookie` field (`Cookie: a=1; b=2`, `Authorization: "Bearer" abc123`). An
+unquoted value runs to the next whitespace; where the name was quoted — so the text is a
+structured rendering whose shape should survive — it runs to the next structural delimiter
+instead; and a value that merely starts with a string literal keeps nothing glued to it.
+No value is length-capped, so a long token cannot keep a tail. A container value is
 consumed whole, with quoted items taken as units so a bracket inside a string does not end
 it; a nested, unterminated or very long container is redacted to the end of its line rather
-than matched in part. The patterns are bounded so redacting megabytes of captured output
-stays linear. Source snippets and the frame `code` line are source code and are not
-redacted.
+than matched in part. Every repeat is either bounded or a single greedy character class, so
+redacting megabytes of captured output stays linear. Source snippets and the frame `code`
+line are source code and are not redacted.
 `dev`, no profile, or `redact=()` turn all of this off.
 
 `SnapshotConfig` is frozen. Use `config.with_updates(...)` when changing a

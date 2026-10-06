@@ -42,27 +42,41 @@ _CONTAINER_VALUE = (
 )
 
 # A value that opens a container but is nested, unterminated or longer than the bound above:
-# matching part of it would leak the rest, so it is redacted to the end of its line.
-_OPEN_CONTAINER_VALUE = r"[\[{(][^\r\n]{0,4096}"
+# matching part of it would leak the rest, so it is redacted to the end of its line. The
+# repeat is unbounded on purpose - a cap would leak the tail of a long value - and a single
+# greedy class stays linear.
+_OPEN_CONTAINER_VALUE = r"[\[{(][^\r\n]*"
+
+# A quoted literal together with anything glued to it, so a value that merely *starts* with a
+# string literal (`password="abc"def`) does not keep its tail.
+_QUOTED_STRUCTURED_VALUE = _QUOTED_VALUE + r"[^\s,;}\])]*"
+_QUOTED_TEXT_VALUE = _QUOTED_VALUE + r"\S*"
 
 # A bare value up to the delimiter that ends it in a repr or JSON rendering. Only used where
 # the name was quoted, i.e. the text really is a structured rendering whose shape should
-# survive; elsewhere an unquoted value runs to the next whitespace.
+# survive; elsewhere an unquoted value runs to the next whitespace. Both are unbounded for
+# the same fail-closed reason as above.
 _BARE_STRUCTURED_VALUE = r"[^\s,;}\])]+"
-_BARE_TEXT_VALUE = r"\S{1,4096}"
+_BARE_TEXT_VALUE = r"\S+"
 
 _STRUCTURED_SECRET_VALUE = (
-    f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_STRUCTURED_VALUE})"
+    f"(?:{_QUOTED_STRUCTURED_VALUE}|{_CONTAINER_VALUE}"
+    f"|{_OPEN_CONTAINER_VALUE}|{_BARE_STRUCTURED_VALUE})"
 )
 _TEXT_SECRET_VALUE = (
-    f"(?:{_QUOTED_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_TEXT_VALUE})"
+    f"(?:{_QUOTED_TEXT_VALUE}|{_CONTAINER_VALUE}|{_OPEN_CONTAINER_VALUE}|{_BARE_TEXT_VALUE})"
 )
 
 # Header fields whose value is whitespace- or ";"-separated, so one token is not the whole
-# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". A quoted value is taken
-# whole; an unquoted one is consumed up to the structural delimiters of a surrounding
-# repr/JSON object, which stay readable.
+# secret: "Authorization: Basic dXNlcjpwYXNz", "Cookie: a=1; b=2". An optional leading string
+# literal is consumed first - so a quoted value keeps commas and brackets of its own - and
+# then everything up to the structural delimiters of a surrounding repr/JSON object, which
+# stay readable. The literal is only a prefix, not an alternative, because in
+# `Authorization: "Bearer" abc123` the quoted word is just the scheme; and because a quoted
+# alternative with a lookahead behind it can backtrack into a partial literal, which would
+# leak the rest.
 _AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
+_AUTH_FIELD_VALUE = r"(?:" + _QUOTED_VALUE + r")?[^\r\n,}\])]*"
 
 # Built-in PII-focused patterns used by safer profiles and production paths. Every repeat
 # that can follow a match start is bounded, so redacting long text (captured stdout, big
@@ -71,8 +85,7 @@ _AUTH_FIELD_NAMES = r"(?:proxy-)?authorization|(?:set-)?cookie"
 PII_PATTERNS: tuple[str, ...] = (
     # Authorization/Cookie fields first: the generic assignment patterns below would stop at
     # the space in "Basic dXNlcjpwYXNz" and leave the credential behind.
-    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*"
-    r"(?:" + _QUOTED_VALUE + r"|[^\r\n,}\])]{0,4096})",
+    r"(?i)\b(?:" + _AUTH_FIELD_NAMES + r")\b['\"]?\s*[:=]\s*" + _AUTH_FIELD_VALUE,
     # A quoted secret name assigned a value, i.e. the repr of a dict or a JSON object:
     # {'secret-key': 'hunter2'}, {"api_key": ["a", "b"]}. The name's quotes are matched with a
     # lookbehind so the rendering keeps its shape around the replacement.

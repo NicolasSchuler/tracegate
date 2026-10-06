@@ -41,6 +41,8 @@ _S = {
     "long_key": "hunter-long",
     "tuple_field": "nt-secret",
     "bare": "ab,cd;ef)gh",
+    "long_bare": "Z" * 5000,
+    "subclass": "subclass-secret",
 }
 
 
@@ -237,7 +239,16 @@ def test_ordinary_names(name: str) -> None:
         ("password: hunter2;next rest", "[REDACTED] rest"),
         # A quoted header value is taken whole, commas and brackets included.
         ("{'Authorization': 'Basic a,b', 'Accept': 'json'}", "{'[REDACTED], 'Accept': 'json'}"),
-        ('Cookie: "a=1, b=2" rest', "[REDACTED] rest"),
+        ('Cookie: "a=1, b=2" rest', "[REDACTED]"),
+        # A quoted word can be just the scheme, so it does not end the field value.
+        ('Authorization: "Bearer" abc123', "[REDACTED]"),
+        ("Authorization: 'Basic' dXNlcjpwYXNz", "[REDACTED]"),
+        # A value that only starts with a string literal keeps nothing glued to it.
+        ('password="abc"def ghi', "[REDACTED] ghi"),
+        ("{'password': \"abc\"def, 'host': 'h'}", "{'[REDACTED], 'host': 'h'}"),
+        # No cap on the value length: a long token must not keep its tail.
+        ("password=" + "x" * 5000, "[REDACTED]"),
+        ("{'api_key': [" + "9, " * 2000 + "0]}", "{'[REDACTED]"),
         # Brackets inside a string do not end a container value.
         ("{'password': ['a]b', 'c'], 'host': 'h'}", "{'[REDACTED], 'host': 'h'}"),
         # A nested, unterminated or over-long container fails closed to the end of the line.
@@ -313,6 +324,13 @@ def test_secret_name_value_pairs(tmp_path: Path) -> None:
         "password=" + "x" * 100_000,
         "Authorization: '" + "x" * 100_000,
         "{'password': '" + "a\\'" * 50_000,
+        # Unbounded (fail-closed) value classes must still be single greedy classes.
+        "Authorization: " + "a b " * 50_000,
+        'Cookie: "a=1" ' + "z" * 100_000,
+        'password="a" ' + "q" * 100_000,
+        'password="a"' + "q" * 100_000,
+        "password=x " * 20_000,
+        "Cookie: a=1\n" * 20_000,
     ],
 )
 def test_new_patterns_stay_linear_on_adversarial_input(text: str) -> None:
@@ -459,7 +477,7 @@ def test_namedtuple_fields_keep_their_names_past_the_depth_limit(tmp_path: Path)
 
     assert _S["tuple_field"] not in raw
     # The type and the non-secret field names survive, so the text patterns still apply.
-    assert local_vars["deep"]["a"]["b"] == "creds(user='bob', [REDACTED])"
+    assert local_vars["deep"]["a"]["b"] == "creds(user='bob', [REDACTED]"
 
 
 def test_unquoted_secret_value_with_structural_delimiters(tmp_path: Path) -> None:
@@ -483,3 +501,55 @@ def test_unquoted_secret_value_with_structural_delimiters(tmp_path: Path) -> Non
 
     assert _S["bare"] not in raw
     assert "cd;ef" not in raw
+
+
+def test_long_unquoted_secret_value_is_not_capped(tmp_path: Path) -> None:
+    """A value longer than any pattern bound must not keep its tail (5000 characters)."""
+
+    def boom() -> None:
+        raise ValueError("auth failed: api_key=" + _S["long_bare"] + " host=db")
+
+    try:
+        boom()
+    except ValueError as exc:
+        cfg = SnapshotConfig(
+            out_dir=str(tmp_path),
+            redaction_profile="prod",
+            include_git=False,
+            source_mode="none",
+            max_str=20_000,
+            output_format="json",
+        )
+        path = capture_exception("long", exc, exc.__traceback__, cfg)
+    raw = path.read_text(encoding="utf-8")
+
+    assert "ZZZ" not in raw
+    assert "host=db" in raw
+
+
+def test_container_subclass_secrets_do_not_rely_on_the_text_patterns(tmp_path: Path) -> None:
+    """Custom `redact` patterns need not match a repr at all, so the rebuild must fail closed."""
+
+    class _Config(dict[str, Any]):
+        def __repr__(self) -> str:
+            return f"_Config(len={len(self)})"
+
+    def boom() -> None:
+        deep = {"a": {"b": _Config(password=_S["subclass"], host="h")}}  # noqa: F841
+        raise ValueError("subclass")
+
+    try:
+        boom()
+    except ValueError as exc:
+        cfg = SnapshotConfig(
+            out_dir=str(tmp_path),
+            # A pattern that matches nothing: only the structural redaction can help here.
+            redact=(r"(?!x)x",),
+            include_git=False,
+            source_mode="none",
+            output_format="json",
+        )
+        path = capture_exception("subclass", exc, exc.__traceback__, cfg)
+    raw = path.read_text(encoding="utf-8")
+
+    assert _S["subclass"] not in raw
