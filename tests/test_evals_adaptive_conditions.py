@@ -1602,6 +1602,7 @@ def _run_adaptive_action_case(
     extra_run_kwargs: dict[str, object] | None = None,
     decision_model: DecisionModelBinding | None = None,
     fallback_action: str | None = None,
+    include_files_context: bool = False,
 ) -> tuple[list[dict[str, object]], Path]:
     case = _make_case(tmp_path)
     workdir = tmp_path / f"{run_id}_workdir"
@@ -1648,7 +1649,7 @@ def _run_adaptive_action_case(
         k=k,
         output_format="json_compact",
         run_id=run_id,
-        include_files_context=False,
+        include_files_context=include_files_context,
         force_patch_attempt=False,
         adaptive_online_policy_controller=controller,
         adaptive_online_policy_mode="on",
@@ -7067,6 +7068,69 @@ def test_no_restricted_action_delivers_more_evidence_than_invoke_helper(
         totals[action] = sum(chars.values())
     assert totals["invoke_helper"] > 0
     assert all(totals[action] <= totals["invoke_helper"] for action in totals), totals
+
+
+@pytest.mark.parametrize(
+    ("action", "denied_request"),
+    [
+        (ACTION_SEARCH_ONLY, {"type": "file", "path": "buggy.py"}),
+        (ACTION_FILE_ONLY, {"type": "search", "path": "helper.py", "pattern": "return"}),
+        (ACTION_FRAME_ONLY, {"type": "file", "path": "helper.py"}),
+    ],
+)
+def test_att03_fully_filtered_restricted_action_gets_no_monolithic_file_context(
+    tmp_path, monkeypatch, action: str, denied_request: dict[str, object]
+) -> None:
+    """ATT-03: an emptied restricted request must not restore whole-project file context.
+
+    With ``include_files_context=True`` the Stage-B prompt used to fall back to the
+    monolithic ``Project files:`` block once layer-3 filtering removed every request,
+    handing back exactly the evidence the policy denied.
+    """
+    patcher = _AdaptiveActionCapturePatcher(
+        request_payload={
+            "need_more_context": True,
+            "requests": [dict(denied_request)],
+            "sufficiency_rationale": "need the denied evidence type",
+        }
+    )
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=action,
+        run_id=f"run-att03-{action}",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+
+    patch_meta = records[0]["patch_meta"]
+    assert isinstance(patch_meta, dict)
+    assert patch_meta["stage_a_requests_count"] == 0
+    assert patch_meta["stage_a_reason"] == "restricted_action_no_valid_requests"
+    assert patch_meta["context_protocol"] == "staged"
+
+    prompt = patcher.patch_prompts[0]
+    assert "Project files:" not in prompt
+    assert "def value() -> int:" not in prompt
+
+
+def test_att03_unrestricted_action_keeps_monolithic_file_context(tmp_path, monkeypatch) -> None:
+    """The monolithic fallback stays for actions that never restricted the evidence types."""
+    patcher = _AdaptiveActionCapturePatcher(request_payload=None)
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-att03-skip",
+        include_snapshot=False,
+        include_files_context=True,
+    )
+    patch_meta = records[0]["patch_meta"]
+    assert isinstance(patch_meta, dict)
+    assert patch_meta["context_protocol"] == "monolithic"
+    assert "Project files:" in patcher.patch_prompts[0]
 
 
 def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(

@@ -224,6 +224,7 @@ from evals.eval_types import (
     EVAL_RECORD_TYPE_ATTEMPT,
     EVAL_RECORD_TYPE_INFRA_EVENT,
     HELPER_FULL_SNAPSHOT_ACTIONS,
+    HELPER_RESTRICTED_STAGE_A_ACTIONS,
     HELPER_SEED_BUNDLE_ACTIONS,
     HELPER_STAGE_A_ACTIONS,
     OPENAI_RESPONSE_MODE_AUTOSWITCH_MODES,
@@ -3989,7 +3990,17 @@ def _run_one_condition_attempts(
                 helper_reason_override = helper_reason_overrides.get(helper_outcome)
                 if helper_reason_override:
                     stage_a_data = replace(stage_a_data, reason=helper_reason_override)
-            attempt_context_protocol = "staged" if helper_materialized_context else "monolithic"
+            # ATT-03: a restricted action stays restricted even when layer-3 filtering
+            # emptied its request list. Falling back to the monolithic protocol would put
+            # the whole project back in the Stage-B prompt -- the evidence the policy denied.
+            adaptive_restricted_evidence_action = (
+                helper_action_executed in HELPER_RESTRICTED_STAGE_A_ACTIONS
+            )
+            attempt_context_protocol = (
+                "staged"
+                if (helper_materialized_context or adaptive_restricted_evidence_action)
+                else "monolithic"
+            )
             snapshot_for_prompt = stage_b_snapshot if adaptive_snapshot_included else None
             if (
                 is_adaptive_llm_discretion
