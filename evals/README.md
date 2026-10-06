@@ -157,6 +157,25 @@ The suite is signal-focused:
 - `snapshot_dependency=helpful`: snapshots may help, but traceback may still suffice
 - `snapshot_dependency=none`: traceback-control cases
 
+**Known limits of the case suite (DAT-17, DAT-21; decision D12).** Two properties of the
+current 1,828-case corpus limit what results can show. Changing them is a research decision
+(D12), so this section only documents them:
+
+- *ConDefects grading is weak and visible (DAT-17).* The 1,267 ConDefects cases (69%) are
+  graded by at most five sample input/output pairs (`MAX_TEST_PAIRS = 5`, examples first;
+  1,096 cases have five, 171 have fewer), and `test_buggy.py` is in the workspace the model
+  sees. A patch that special-cases the visible inputs passes. Read ConDefects success as
+  "passes the samples", not as a verified repair.
+- *`snapshot_dependency` is derived, not labelled (DAT-21).* Importers set it from the
+  heuristic bug category (`evals/category_mapping.py:infer_snapshot_dependency`); only the
+  hand-crafted cases are labelled by hand, and all 46 `required` cases are hand-crafted. The
+  distribution is helpful 1,650 (90.3%), none 132, required 46. Per-stratum results
+  therefore restate per-category results and are not independent evidence that snapshots
+  help where they "should".
+- *Run-to-run variance.* `python -m evals.importers.determinism` flags cases whose code uses
+  clocks, unseeded randomness, entropy sources, network modules or set iteration (DAT-14);
+  it flags 14 committed cases, which are kept until D12 decides.
+
 ## SWE-Bench Pro (Contamination-free, multi-language, Docker-scored)
 
 SWE-Bench Pro is a contamination-free, multi-language benchmark with 731
@@ -413,6 +432,12 @@ uv run python -m evals.importers.cli debugbench --validate
 uv run python -m evals.importers.cli debugbench --max-cases 5 --dry-run
 ```
 
+Every importer checks each generated case's schema. `--validate` additionally runs the case:
+the baseline must fail with the expected exception and `oracle.patch` must fix it. Before
+DAT-05, seven importers only checked the schema under `--validate`, and the schema check
+rejected every native-repro case (BugsInPy, PyBugHive, TrickyBugs), which keep the source at
+its repository path instead of `buggy.py`; native cases now need the files the oracle patch
+changes.
 When using `--validate`, importers honor the same execution flags as `run_eval`
 and `validate_cases` (`--executor`, container resource/network flags, and `--container-env`).
 

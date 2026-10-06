@@ -254,3 +254,61 @@ def test_make_file_diff_renders_new_empty_file_header() -> None:
         "--- /dev/null\n"
         "+++ b/new_empty.py\n"
     )
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def test_observed_repo_state_reports_commit_dirtiness_and_patch_hash(tmp_path: Path) -> None:
+    """BAS-05/BAS-14: what is checked out, not just the pin."""
+    from baselines.adapter_base import observed_repo_state
+
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+
+    clean = observed_repo_state(tmp_path)
+    assert len(clean["observed_commit"]) == 40
+    assert clean["dirty"] is False
+
+    (tmp_path / "a.py").write_text("x = 2\n", encoding="utf-8")  # an applied upstream patch
+    patched = observed_repo_state(tmp_path)
+    assert patched["dirty"] is True
+    assert patched["observed_commit"] == clean["observed_commit"]
+    assert patched["tree_patch_sha256"] != clean["tree_patch_sha256"]
+
+
+def test_observed_repo_state_without_a_git_checkout(tmp_path: Path) -> None:
+    from baselines.adapter_base import observed_repo_state
+
+    assert observed_repo_state(tmp_path / "missing") == {
+        "observed_commit": "",
+        "dirty": None,
+        "tree_patch_sha256": None,
+    }
+
+
+def test_require_pinned_commit_rejects_another_checkout() -> None:
+    from baselines.adapter_base import require_pinned_commit
+
+    require_pinned_commit(name="ldb", observed_commit="abc", pinned_commit="abc")
+    require_pinned_commit(name="ldb", observed_commit="", pinned_commit="abc")  # unknown: skip
+    with pytest.raises(RuntimeError, match="ldb repo is at def, not the pinned commit abc"):
+        require_pinned_commit(name="ldb", observed_commit="def", pinned_commit="abc")
+
+
+def test_generation_settings_env_carries_only_set_values() -> None:
+    from baselines.adapter_base import BaselineGenerationSettings
+
+    assert BaselineGenerationSettings().to_env() == {}
+    assert BaselineGenerationSettings(
+        temperature=0.2, seed=7, max_completion_tokens=512
+    ).to_env() == {
+        "TRACEGATE_BASELINE_TEMPERATURE": "0.2",
+        "TRACEGATE_BASELINE_SEED": "7",
+        "TRACEGATE_BASELINE_MAX_TOKENS": "512",
+    }

@@ -17,9 +17,11 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from evals import _json as json
 from evals.category_mapping import infer_snapshot_dependency, map_debugbench_type
 from evals.importers.base import (
     count_patch_lines,
+    existing_source_ids,
     generate_oracle_patch,
     has_external_deps,
     is_deterministic,
@@ -123,6 +125,29 @@ def _method_accepts_call_without_args(code: str, method_name: str) -> bool:
     return False
 
 
+def _python_literal(text: str) -> str | None:
+    """Return Python source for a dataset value, or ``None`` if it isn't a plain literal.
+
+    DAT-20: example values used to be pasted into ``test_buggy.py`` verbatim, so dataset
+    text became code that ran locally. Values are parsed as JSON (LeetCode writes
+    ``true``/``null``) or a Python literal and emitted with ``repr``; anything that doesn't
+    round-trip is rejected.
+    """
+    stripped = text.strip()
+    for parse in (json.loads, ast.literal_eval):
+        try:
+            value = parse(stripped)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            continue
+        source = repr(value)
+        try:
+            round_trips = bool(ast.literal_eval(source) == value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            round_trips = False
+        return source if round_trips else None
+    return None
+
+
 def _generate_test(fixed_code: str, examples: list[str] | None, category: str) -> str | None:
     """Generate test_buggy.py for a DebugBench LeetCode-style case.
 
@@ -147,11 +172,15 @@ def _generate_test(fixed_code: str, examples: list[str] | None, category: str) -
             args = _parse_input_args(input_str)
             if not args:
                 continue
-            arg_values = ", ".join(v for _, v in args)
+            arg_sources = [_python_literal(v) for _, v in args]
+            expected_source = _python_literal(expected)
+            if expected_source is None or None in arg_sources:
+                continue
+            arg_values = ", ".join(source for source in arg_sources if source is not None)
             lines.append(f"def test_case_{i}():")
             lines.append("    sol = Solution()")
             lines.append(f"    result = sol.{method_name}({arg_values})")
-            lines.append(f"    assert result == {expected}")
+            lines.append(f"    assert result == {expected_source}")
             lines.append("")
             lines.append("")
 
@@ -208,7 +237,7 @@ def import_debugbench(
     output_dir: Path,
     *,
     max_cases: int = 0,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Import cases from DebugBench dataset.
@@ -227,6 +256,7 @@ def import_debugbench(
 
     imported: list[dict[str, Any]] = []
     skipped = 0
+    seen_source_ids = existing_source_ids(output_dir)
 
     for idx, row in enumerate(ds):
         if max_cases > 0 and len(imported) >= max_cases:
@@ -261,10 +291,11 @@ def import_debugbench(
         category = map_debugbench_type(bug_type)
         mapped_difficulty = difficulty if difficulty in _VALID_DIFFICULTIES else "medium"
         case_id = f"db_{idx:04d}_{mapped_difficulty}"
+        source_id = f"debugbench_{idx}"
 
-        # Skip if case already exists (don't overwrite).
+        # Skip if the bug was already imported, under any difficulty (DAT-16).
         case_dir = output_dir / case_id
-        if not dry_run and case_dir.exists():
+        if not dry_run and (case_dir.exists() or source_id in seen_source_ids):
             skipped += 1
             continue
 
@@ -333,7 +364,7 @@ def import_debugbench(
             "bug_source": "debugbench",
             "contamination_risk": "low",
             "expected_fix_lines": fix_lines,
-            "source_id": f"debugbench_{idx}",
+            "source_id": source_id,
         }
 
         case_info = {"case_id": case_id, "metadata": metadata, "fix_lines": fix_lines}
@@ -350,15 +381,16 @@ def import_debugbench(
             metadata=metadata,
         )
 
-        if validate:
-            ok, msg = validate_generated_case(case_dir, schema_only=False)
-            if not ok:
-                print(f"  [skip] {case_id}: validation failed: {msg}")
-                skipped += 1
-                import shutil
+        # DAT-05: the schema is always checked; --validate also runs the case
+        # (the baseline must fail and the oracle must fix it).
+        ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+        if not ok:
+            print(f"  [skip] {case_id}: validation failed: {msg}")
+            skipped += 1
+            import shutil
 
-                shutil.rmtree(case_dir, ignore_errors=True)
-                continue
+            shutil.rmtree(case_dir, ignore_errors=True)
+            continue
 
         imported.append(case_info)
 

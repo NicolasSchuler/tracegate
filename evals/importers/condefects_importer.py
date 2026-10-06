@@ -35,6 +35,7 @@ from typing import Any
 from evals.category_mapping import infer_snapshot_dependency
 from evals.importers.base import (
     count_patch_lines,
+    existing_source_ids,
     generate_oracle_patch,
     has_external_deps,
     is_deterministic,
@@ -274,7 +275,7 @@ def import_condefects(
     repo_path: Path | None = None,
     test_zip: Path | None = None,
     max_cases: int = 0,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Import cases from ConDefects repository.
@@ -321,6 +322,7 @@ def import_condefects(
 
         imported: list[dict[str, Any]] = []
         skipped = 0
+        seen_source_ids = existing_source_ids(output_dir)
         tasks_processed = 0
         no_python = 0
         no_tests = 0
@@ -426,12 +428,14 @@ def import_condefects(
                 )
 
                 case_id = f"cd_{task_name}_{submission_id}_{difficulty}"
+                source_id = f"condefects_{task_name}_{submission_id}"
 
-                # Skip if case already exists (idempotent re-runs)
+                # Skip if the bug was already imported, under any difficulty (DAT-16).
                 case_dir = output_dir / case_id
-                if case_dir.exists():
+                if case_dir.exists() or source_id in seen_source_ids:
                     skipped += 1
                     continue
+                seen_source_ids.add(source_id)
 
                 test_code = _generate_test(test_pairs)
 
@@ -447,7 +451,7 @@ def import_condefects(
                     "bug_source": "condefects",
                     "contamination_risk": "low",
                     "expected_fix_lines": fix_lines,
-                    "source_id": f"condefects_{task_name}_{submission_id}",
+                    "source_id": source_id,
                 }
 
                 case_info = {"case_id": case_id, "metadata": metadata, "fix_lines": fix_lines}
@@ -464,13 +468,14 @@ def import_condefects(
                     metadata=metadata,
                 )
 
-                if validate:
-                    ok, msg = validate_generated_case(case_dir, schema_only=True)
-                    if not ok:
-                        print(f"  [skip] {case_id}: validation failed: {msg}")
-                        skipped += 1
-                        shutil.rmtree(case_dir, ignore_errors=True)
-                        continue
+                # DAT-05: the schema is always checked; --validate also runs the case
+                # (the baseline must fail and the oracle must fix it).
+                ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+                if not ok:
+                    print(f"  [skip] {case_id}: validation failed: {msg}")
+                    skipped += 1
+                    shutil.rmtree(case_dir, ignore_errors=True)
+                    continue
 
                 imported.append(case_info)
 

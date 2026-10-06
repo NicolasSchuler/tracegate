@@ -13,6 +13,7 @@ import pytest
 
 from evals.importers import debugbench_importer, fixup_expected_exceptions, pyresbugs_importer
 from evals.importers.base import (
+    RuffFormatError,
     _extract_import_roots_fallback,
     _extract_import_roots_from_ast,
     count_patch_lines,
@@ -453,7 +454,7 @@ class TestQuixBugsImportIntegration:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         assert len(results) == 1
 
         case_dir = output / "qb_gcd_easy"
@@ -528,7 +529,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         assert len(results) == 1
         assert results[0]["case_id"] == "qb_reverse_linked_list_easy"
         assert "graph_algorithm" in results[0]["metadata"]["tags"]
@@ -540,7 +541,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         buggy_code = (output / "qb_reverse_linked_list_easy" / "buggy.py").read_text()
         assert "class Node:" in buggy_code
@@ -553,7 +554,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         test_code = (output / "qb_reverse_linked_list_easy" / "test_buggy.py").read_text()
         assert "from buggy import" in test_code
@@ -568,7 +569,7 @@ class TestQuixBugsIntegrationGraphProgram:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         diff_patch = (output / "qb_reverse_linked_list_easy" / "oracle.patch").read_text()
         assert "--- a/buggy.py" in diff_patch
@@ -649,7 +650,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         case_ids = sorted(r["case_id"] for r in results)
         assert "qb_bitcount_easy" in case_ids
         assert "qb_detect_cycle_easy" in case_ids
@@ -663,7 +664,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         gcd_buggy = (output / "qb_gcd_easy" / "buggy.py").read_text()
         detect_buggy = (output / "qb_detect_cycle_easy" / "buggy.py").read_text()
@@ -677,7 +678,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, max_cases=2, validate=True)
+        results = import_quixbugs(output, repo_path=repo, max_cases=2, validate=False)
         assert len(results) == 2
 
     def test_dry_run_writes_no_files(self, tmp_path) -> None:
@@ -699,7 +700,7 @@ class TestQuixBugsIntegrationMixedRepo:
         output = tmp_path / "output"
         output.mkdir()
 
-        results = import_quixbugs(output, repo_path=repo, validate=True)
+        results = import_quixbugs(output, repo_path=repo, validate=False)
         required_keys = {
             "description",
             "category",
@@ -855,7 +856,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_json = json.loads((output / "qb_gcd_easy" / "case.json").read_text())
         assert case_json["category"] == "logic_error"
@@ -875,7 +876,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_dir = output / "qb_gcd_easy"
         oracle_patch = (case_dir / "oracle.patch").read_text()
@@ -922,7 +923,7 @@ class TestQuixBugsIntegrationEdgeCases:
         output = tmp_path / "output"
         output.mkdir()
 
-        import_quixbugs(output, repo_path=repo, validate=True)
+        import_quixbugs(output, repo_path=repo, validate=False)
 
         case_dir = output / "qb_gcd_easy"
 
@@ -1348,31 +1349,51 @@ class TestRuffFormat:
     """Lines 240-242: ruff_format failure paths."""
 
     def test_returns_formatted_code_on_success(self) -> None:
-        """Happy path: ruff formats correctly (if ruff available)."""
-        code = "x=1\n"
-        result = ruff_format(code)
-        # Either ruff formatted it or returned original (if ruff missing).
-        assert isinstance(result, str)
-        assert len(result) > 0
+        """Happy path: the ruff installed with this interpreter formats the code."""
+        assert ruff_format("x=1\n") == "x = 1\n"
 
-    def test_returns_original_on_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 240: FileNotFoundError when ruff is not installed."""
-
-        def fake_run(*args: Any, **kwargs: Any) -> None:
-            raise FileNotFoundError("ruff not found")
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        code = "x=1\n"
+    def test_formatting_ignores_the_working_directory_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DAT-15: a pyproject.toml in the cwd used to change imported case content."""
+        (tmp_path / "pyproject.toml").write_text(
+            "[tool.ruff]\nline-length = 20\n[tool.ruff.format]\nquote-style = 'single'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        code = 'value = call_something("a", "b", "c")\n'
         assert ruff_format(code) == code
 
-    def test_returns_original_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Line 240: TimeoutExpired when ruff hangs."""
+    def test_raises_when_ruff_cannot_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DAT-15: a missing ruff used to return unformatted code silently."""
 
         def fake_run(*args: Any, **kwargs: Any) -> None:
-            raise subprocess.TimeoutExpired(cmd="ruff", timeout=10)
+            raise FileNotFoundError("python not found")
 
         monkeypatch.setattr(subprocess, "run", fake_run)
-        code = "y = 2\n"
+        with pytest.raises(RuffFormatError):
+            ruff_format("x=1\n")
+
+    def test_raises_when_ruff_module_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=["python"], returncode=1, stdout="", stderr="No module named ruff"
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(RuffFormatError, match="not installed"):
+            ruff_format("x=1\n")
+
+    def test_raises_on_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_run(*args: Any, **kwargs: Any) -> None:
+            raise subprocess.TimeoutExpired(cmd="ruff", timeout=30)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        with pytest.raises(RuffFormatError):
+            ruff_format("y = 2\n")
+
+    def test_unparsable_code_is_returned_unchanged(self) -> None:
+        code = "def broken(:\n    pass\n"
         assert ruff_format(code) == code
 
     def test_returns_original_on_nonzero_returncode(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1435,3 +1456,234 @@ class TestWriteCaseFilesEdgeCases:
         assert (case_dir / "buggy.py").read_text() == "new"
         meta = json.loads((case_dir / "case.json").read_text())
         assert meta["v"] == 2
+
+
+@pytest.mark.parametrize(
+    ("code", "reasons"),
+    [
+        ("import time\nprint(time.time())\n", ["clock"]),
+        ("from datetime import datetime\nprint(datetime.now())\n", ["clock"]),
+        ("import random\nprint(random.randint(1, 3))\n", ["unseeded_random"]),
+        ("from random import choice, shuffle, sample\nshuffle([1])\n", ["unseeded_random"]),
+        ("import random\nrandom.seed(0)\nprint(random.choice([1, 2]))\n", []),
+        ("import uuid\nprint(uuid.uuid4())\n", ["entropy"]),
+        ("import os\nprint(os.urandom(4))\n", ["entropy"]),
+        ("import secrets\nprint(secrets.token_hex())\n", ["entropy"]),
+        ("for x in set('ab'):\n    print(x)\n", ["set_iteration"]),
+        ("print([x for x in {'a', 'b'}])\n", ["set_iteration"]),
+        ("print(sorted(set('ab')))\n", []),
+        ("import numpy as np\nprint(np.random.rand(3))\n", ["unseeded_random"]),
+        ("import numpy as np\nrng = np.random.default_rng(0)\nprint(rng.random())\n", []),
+        ("import numpy as np\nrng = np.random.default_rng()\n", ["unseeded_random"]),
+    ],
+    ids=[
+        "time-time",
+        "datetime-now",
+        "randint",
+        "shuffle-from-import",
+        "seeded-random",
+        "uuid4",
+        "urandom",
+        "secrets",
+        "set-loop",
+        "set-comprehension",
+        "sorted-set",
+        "numpy-random",
+        "numpy-seeded-generator",
+        "numpy-unseeded-generator",
+    ],
+)
+def test_dat14_nondeterminism_reasons(code: str, reasons: list[str]) -> None:
+    """DAT-14: the substring filter let all of these through."""
+    from evals.importers.base import nondeterminism_reasons
+
+    assert nondeterminism_reasons(code) == reasons
+
+
+def test_dat14_scan_cases_reports_flagged_files(tmp_path: Path, capsys) -> None:
+    from evals.importers import determinism
+
+    for case_id, buggy in (("clean", "x = 1\n"), ("flaky", "import time\nt = time.time()\n")):
+        case_dir = tmp_path / case_id
+        case_dir.mkdir()
+        (case_dir / "case.json").write_text("{}", encoding="utf-8")
+        (case_dir / "buggy.py").write_text(buggy, encoding="utf-8")
+        (case_dir / "test_buggy.py").write_text("def test():\n    pass\n", encoding="utf-8")
+
+    assert determinism.scan_cases(tmp_path) == {"flaky": ["buggy.py:clock"]}
+    assert determinism.main([str(tmp_path)]) == 1
+    assert "flaky: buggy.py:clock" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("buggy", "fixed"),
+    [
+        ("def f():\n    return 1", "def f():\n    return 2"),  # neither ends in a newline
+        ("x = 1\n", "x = 2"),
+        ("x = 1", "x = 1\ny = 2\n"),
+    ],
+    ids=["no-final-newline", "newline-removed", "newline-added"],
+)
+def test_dat10_oracle_patch_without_trailing_newline_applies(
+    tmp_path: Path, buggy: str, fixed: str
+) -> None:
+    """DAT-10: the last removed and added lines used to merge into one line."""
+    from evals.eval_patches import apply_diff
+
+    (tmp_path / "buggy.py").write_bytes(buggy.encode())
+    patch = generate_oracle_patch(buggy, fixed)
+
+    ok, message = apply_diff(tmp_path, patch)
+    assert ok, message
+    assert message == ""
+    assert (tmp_path / "buggy.py").read_bytes() == fixed.encode()
+
+
+def test_dat10_count_patch_lines_counts_the_no_newline_case() -> None:
+    patch = generate_oracle_patch("def f():\n    return 1", "def f():\n    return 2")
+    assert count_patch_lines(patch) == 2
+
+
+_IMPORTERS = (
+    "bugsinpy_importer",
+    "condefects_importer",
+    "debugbench_importer",
+    "humanevalpack_importer",
+    "mutmut_generator",
+    "pybughive_importer",
+    "pyresbugs_importer",
+    "quixbugs_importer",
+    "trickybugs_importer",
+)
+
+
+@pytest.mark.parametrize("module_name", _IMPORTERS)
+def test_dat05_importers_validate_by_execution_when_asked(module_name: str) -> None:
+    """DAT-05: seven importers hardcoded schema_only=True, so --validate never ran a case."""
+    import ast
+
+    source = (Path("evals/importers") / f"{module_name}.py").read_text(encoding="utf-8")
+    calls = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "validate_generated_case"
+    ]
+    assert calls, module_name
+    for call in calls:
+        schema_only = next(kw.value for kw in call.keywords if kw.arg == "schema_only")
+        assert ast.unparse(schema_only) == "not validate", module_name
+
+
+@pytest.mark.parametrize(("validate", "schema_only"), [(False, True), (True, False)])
+def test_dat05_quixbugs_schema_always_checked_execution_on_validate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validate: bool, schema_only: bool
+) -> None:
+    from evals.importers import quixbugs_importer
+
+    seen: list[bool] = []
+
+    def _spy(case_dir: Path, *, schema_only: bool = True) -> tuple[bool, str]:
+        del case_dir
+        seen.append(schema_only)
+        return True, "ok"
+
+    monkeypatch.setattr(quixbugs_importer, "validate_generated_case", _spy)
+    repo = TestQuixBugsImportIntegration()._build_fake_repo(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+
+    quixbugs_importer.import_quixbugs(output, repo_path=repo, validate=validate)
+
+    assert seen == [schema_only]
+
+
+def _native_case(tmp_path: Path, *, with_source: bool) -> Path:
+    case_dir = tmp_path / "native_case"
+    (case_dir / "src").mkdir(parents=True)
+    if with_source:
+        (case_dir / "src" / "demo.py").write_text("x = 1\n", encoding="utf-8")
+    (case_dir / "oracle.patch").write_text(
+        generate_oracle_patch("x = 1\n", "x = 2\n", filename="src/demo.py"), encoding="utf-8"
+    )
+    (case_dir / "case.json").write_text(
+        json.dumps(
+            {
+                "category": "logic_error",
+                "difficulty": "easy",
+                "snapshot_dependency": "helpful",
+                "expected_exception": "AssertionError",
+                "repro_mode": "native_dataset_test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return case_dir
+
+
+def test_dat05_native_repro_case_passes_schema_without_buggy_py(tmp_path: Path) -> None:
+    """The schema check required buggy.py, so --validate rejected every native case."""
+    assert validate_generated_case(_native_case(tmp_path, with_source=True)) == (
+        True,
+        "schema valid",
+    )
+
+
+def test_dat05_native_repro_case_needs_the_oracle_target(tmp_path: Path) -> None:
+    ok, message = validate_generated_case(_native_case(tmp_path, with_source=False))
+    assert not ok
+    assert message == "missing required file: src/demo.py"
+
+
+_DEBUGBENCH_FIXED = "class Solution:\n    def solve(self, nums, flag):\n        return nums\n"
+
+
+def test_dat20_debugbench_values_are_emitted_as_literals() -> None:
+    """DAT-20: LeetCode JSON values become Python literals instead of raw source."""
+    from evals.importers import debugbench_importer
+
+    generated = debugbench_importer._generate_test(
+        _DEBUGBENCH_FIXED,
+        ["Input: nums = [1,2], flag = true\nOutput: null"],
+        "logic error",
+    )
+
+    assert generated is not None
+    assert "sol.solve([1, 2], True)" in generated
+    assert "assert result == None" in generated
+    compile(generated, "test_buggy.py", "exec")
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "Input: nums = __import__('os').system('echo pwned'), flag = 1\nOutput: 1",
+        "Input: nums = [1], flag = 1\nOutput: open('/etc/passwd').read()",
+        "Input: nums = (lambda: 1)(), flag = 1\nOutput: 1",
+    ],
+    ids=["code-in-input", "code-in-output", "lambda"],
+)
+def test_dat20_debugbench_rejects_values_that_are_not_literals(example: str) -> None:
+    from evals.importers import debugbench_importer
+
+    assert debugbench_importer._generate_test(_DEBUGBENCH_FIXED, [example], "logic error") is None
+
+
+def test_dat20_condefects_embeds_stdin_and_expected_output_as_strings() -> None:
+    """ConDefects already used repr(); pin it so dataset text stays data."""
+    import ast
+
+    from evals.importers import condefects_importer
+
+    payload = "__import__('os').system('echo pwned')"
+    generated = condefects_importer._generate_test([(payload, payload)])
+
+    tree = ast.parse(generated)
+    calls = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert "system" not in calls
+    assert repr(payload) in generated

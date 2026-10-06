@@ -20,6 +20,7 @@ from typing import Any
 from evals.category_mapping import infer_snapshot_dependency, map_pyresbugs_type
 from evals.importers.base import (
     count_patch_lines,
+    existing_source_ids,
     generate_oracle_patch,
     has_external_deps,
     is_deterministic,
@@ -271,7 +272,7 @@ def import_pyresbugs(
     output_dir: Path,
     *,
     max_cases: int = 0,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Import cases from PyResBugs dataset.
@@ -290,6 +291,7 @@ def import_pyresbugs(
 
     imported: list[dict[str, Any]] = []
     skipped = 0
+    seen_source_ids = existing_source_ids(output_dir)
 
     for idx, row in enumerate(ds):
         if max_cases > 0 and len(imported) >= max_cases:
@@ -319,11 +321,10 @@ def import_pyresbugs(
 
         # Map metadata.
         category = map_pyresbugs_type(fault_acronym)
-        case_id = f"prb_{idx:04d}"
-
-        # Skip if case already exists.
-        case_dir = output_dir / case_id
-        if not dry_run and case_dir.exists():
+        # Skip if the bug was already imported, under any difficulty suffix (DAT-16); the
+        # old check looked for an ID without the suffix, which never exists.
+        source_id = f"pyresbugs_{idx}"
+        if not dry_run and source_id in seen_source_ids:
             skipped += 1
             continue
 
@@ -393,7 +394,7 @@ def import_pyresbugs(
             "bug_source": "pyresbugs",
             "contamination_risk": "low",
             "expected_fix_lines": fix_lines,
-            "source_id": f"pyresbugs_{idx}",
+            "source_id": source_id,
         }
 
         case_info = {"case_id": case_id, "metadata": metadata, "fix_lines": fix_lines}
@@ -418,15 +419,16 @@ def import_pyresbugs(
             shutil.rmtree(case_dir, ignore_errors=True)
             continue
 
-        if validate:
-            ok, msg = validate_generated_case(case_dir, schema_only=False)
-            if not ok:
-                print(f"  [skip] {case_id}: validation failed: {msg}")
-                skipped += 1
-                import shutil
+        # DAT-05: the schema is always checked; --validate also runs the case
+        # (the baseline must fail and the oracle must fix it).
+        ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+        if not ok:
+            print(f"  [skip] {case_id}: validation failed: {msg}")
+            skipped += 1
+            import shutil
 
-                shutil.rmtree(case_dir, ignore_errors=True)
-                continue
+            shutil.rmtree(case_dir, ignore_errors=True)
+            continue
 
         imported.append(case_info)
 

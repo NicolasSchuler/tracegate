@@ -1484,3 +1484,52 @@ def _make_import_blocker(blocked_module: str):
         return _original_import(name, *args, **kwargs)
 
     return _blocked_import
+
+
+def test_dat16_condefects_skips_a_bug_already_imported_under_another_difficulty(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """DAT-16: the difficulty suffix in the case ID let the same bug be imported twice."""
+    import zipfile
+
+    repo = tmp_path / "repo"
+    task_dir = repo / "Code" / "abc001_a" / "Python" / "1"
+    task_dir.mkdir(parents=True)
+    (task_dir / "faultyVersion.py").write_text("print(1)\n", encoding="utf-8")
+    (task_dir / "correctVersion.py").write_text("print(2)\n", encoding="utf-8")
+    (repo / "difficulty.txt").write_text("abc001_a 300\n", encoding="utf-8")
+    zp = tmp_path / "tests.zip"
+    with zipfile.ZipFile(zp, "w") as zf:
+        zf.writestr("Test/abc001/A/in/example_00.txt", "1\n")
+        zf.writestr("Test/abc001/A/out/example_00.txt", "2\n")
+    monkeypatch.setattr(condefects_importer, "ruff_format", lambda code: code)
+
+    out = tmp_path / "cases"
+    existing = out / "cd_abc001_a_1_hard"  # imported earlier with another difficulty
+    existing.mkdir(parents=True)
+    (existing / "case.json").write_text(
+        json.dumps({"source_id": "condefects_abc001_a_1"}), encoding="utf-8"
+    )
+
+    result = condefects_importer.import_condefects(out, repo_path=repo, test_zip=zp)
+
+    assert result == []
+    assert sorted(path.name for path in out.iterdir()) == ["cd_abc001_a_1_hard"]
+    # Control: the same candidate imports into an empty directory.
+    fresh = condefects_importer.import_condefects(tmp_path / "fresh", repo_path=repo, test_zip=zp)
+    assert [case["case_id"] for case in fresh] != []
+    assert all(not case["case_id"].endswith("_hard") for case in fresh)
+
+
+def test_dat16_existing_source_ids_reads_nested_cases(tmp_path: Path) -> None:
+    from evals.importers.base import existing_source_ids
+
+    for rel, source_id in (("a/c1", "s1"), ("b/nested/c2", "s2")):
+        case_dir = tmp_path / rel
+        case_dir.mkdir(parents=True)
+        (case_dir / "case.json").write_text(json.dumps({"source_id": source_id}), "utf-8")
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "case.json").write_text("{", encoding="utf-8")
+
+    assert existing_source_ids(tmp_path) == {"s1", "s2"}
+    assert existing_source_ids(tmp_path / "missing") == set()

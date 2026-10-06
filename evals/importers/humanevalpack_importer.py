@@ -85,7 +85,7 @@ def import_humanevalpack(
     output_dir: Path,
     *,
     max_cases: int = 20,
-    validate: bool = True,
+    validate: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Import cases from HumanEvalPack dataset.
@@ -184,15 +184,16 @@ def import_humanevalpack(
             metadata=metadata,
         )
 
-        if validate:
-            ok, msg = validate_generated_case(case_dir, schema_only=True)
-            if not ok:
-                print(f"  [skip] {case_id}: validation failed: {msg}")
-                skipped += 1
-                import shutil
+        # DAT-05: the schema is always checked; --validate also runs the case
+        # (the baseline must fail and the oracle must fix it).
+        ok, msg = validate_generated_case(case_dir, schema_only=not validate)
+        if not ok:
+            print(f"  [skip] {case_id}: validation failed: {msg}")
+            skipped += 1
+            import shutil
 
-                shutil.rmtree(case_dir, ignore_errors=True)
-                continue
+            shutil.rmtree(case_dir, ignore_errors=True)
+            continue
 
         imported.append(case_info)
 
