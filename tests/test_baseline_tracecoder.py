@@ -225,7 +225,8 @@ class TestCaseConverter:
         assert "Reference test summary:" in prompt
         assert "Reference tests (test_buggy.py):\n" + test_code.rstrip() in prompt
 
-    def test_build_prompt_compacts_large_test_buggy_inputs(self) -> None:
+    def test_build_prompt_compacts_the_summary_not_the_test_source(self) -> None:
+        """codex 1a#2, 1e#8: the budget clamps the summary; test_buggy.py stays whole (BAS-07)."""
         repeated_asserts = "\n".join(
             f"    assert multiply({idx}, {idx + 1}) == {idx * (idx + 1)}" for idx in range(2000)
         )
@@ -242,8 +243,10 @@ class TestCaseConverter:
 
         assert prompt.startswith("Repair the provided buggy.py implementation")
         assert "Reference test summary:" in prompt
-        assert huge_test not in prompt
-        assert len(prompt) <= 4000
+        # The recorded exposure is "full", so the whole test source has to survive.
+        assert huge_test.rstrip() in prompt
+        summary, _, _ = prompt.partition("Reference tests (test_buggy.py):")
+        assert len(summary) <= 4000
 
     def test_compact_problem_prompt_respects_explicit_max_chars(self) -> None:
         prompt = "A" * 500
@@ -2266,3 +2269,73 @@ class TestParseImplementationOutput:
         response = "Here is the fix:\n\n```\ndef multiply(a, b):\n    return a * b\n```\n"
         result = self._parse(response)
         assert "return a * b" in result
+
+
+def test_run_repair_prompt_keeps_late_assertions_and_retry_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 1a#2, 1e#8: through run_repair, neither the test tail nor the retry section is cut."""
+    from evals.patchers.baseline_patcher import _inject_retry_context
+
+    case_dir = tmp_path / "long_case"
+    case_dir.mkdir()
+    (case_dir / "buggy.py").write_text("def multiply(a, b):\n    return a + b\n", encoding="utf-8")
+    filler = "\n".join(
+        f"    assert multiply({idx}, {idx + 1}) == {idx * (idx + 1)}" for idx in range(400)
+    )
+    sentinel = "    assert multiply(777, 3) == 2331  # SENTINEL_LATE_ASSERTION"
+    (case_dir / "test_buggy.py").write_text(
+        f"from buggy import multiply\n\n\ndef test_many():\n{filler}\n{sentinel}\n",
+        encoding="utf-8",
+    )
+    repo = _make_tracecoder_repo(tmp_path)
+    adapter = TraceCoderAdapter()
+    config = BaselineConfig(
+        repo_dir=repo,
+        python_executable=tmp_path / "fake-python",
+        model="test-model",
+        max_attempts=1,
+        timeout_sec=25,
+        api_base_url="http://127.0.0.1:9999",
+        api_key="sk-test",
+    )
+    config.python_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    config.python_executable.chmod(0o755)
+    adapter.setup(config)
+    case_input = adapter.convert_case(
+        case_dir,
+        case_context=BaselineCaseContext(
+            case_id="long_case", python_args=("-m", "pytest", "-q"), timeout_sec=12
+        ),
+    ).to_dict()
+
+    # The harness appends the retry section on attempt 2+ (BAS-02).
+    attempt_dir = tmp_path / "attempt_2"
+    attempt_dir.mkdir()
+    (attempt_dir / "pytest_before_combined.txt").write_text(
+        "E       assert 5 == 6  # RETRY_FEEDBACK_MARKER\n", encoding="utf-8"
+    )
+    meta: dict[str, Any] = {}
+    _inject_retry_context(
+        case_input=case_input,
+        context_dir=attempt_dir,
+        prompt_field=adapter.retry_context_prompt_field,
+        meta=meta,
+    )
+    assert meta["baseline_retry_context_consumed"] is True
+
+    observed_row: dict[str, Any] = {}
+
+    def _fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        dataset_path = Path(cmd[cmd.index("--dataset-path") + 1])
+        observed_row.update(json.loads(dataset_path.read_text(encoding="utf-8").splitlines()[0]))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no results")
+
+    _patch_monitored_run(monkeypatch, _fake_run)
+
+    adapter.run_repair(case_input, config)
+
+    prompt = str(observed_row["complete_prompt"])
+    assert "SENTINEL_LATE_ASSERTION" in prompt
+    assert "RETRY_FEEDBACK_MARKER" in prompt
+    assert prompt.startswith("Repair the provided buggy.py implementation")

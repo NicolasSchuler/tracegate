@@ -57,6 +57,10 @@ def case_information_record(
     }
 
 
+REFERENCE_TESTS_HEADER = "Reference tests (test_buggy.py):"
+"""Header of the full-test-source prompt section; prompt compaction must not cut it off."""
+
+
 def render_reference_tests(test_code: str) -> str:
     """Render the full test source as a prompt section (``TEST_SOURCE_FULL``)."""
-    return "Reference tests (test_buggy.py):\n" + str(test_code).rstrip() + "\n"
+    return REFERENCE_TESTS_HEADER + "\n" + str(test_code).rstrip() + "\n"

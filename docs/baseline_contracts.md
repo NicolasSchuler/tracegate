@@ -47,7 +47,11 @@ decision D1). It fixes which case data any arm may see:
   INTERVENOR, TraceCoder, lambda-RLM and RLM see the full `test_buggy.py`
   (`test_source_exposure = "full"`). LDB's converter only accepts plain-assert
   test bodies and passes them as its visible tests, so LDB sees the assertions
-  (`test_source_exposure = "asserts"`).
+  (`test_source_exposure = "asserts"`). TraceCoder's
+  `--baseline-tracecoder-problem-summary-max-chars` budget applies to the generated task
+  summary only: `compact_problem_prompt` keeps the `Reference tests (test_buggy.py):`
+  section and anything appended after it (the retry context) intact, so the recorded
+  exposure stays true for long test files.
 - Each record's `patch_meta` carries `case_info_policy` and
   `case_information` (`case_info_policy`, `test_source_exposure`,
   `prompt_files`), and `run_metadata.patcher_config.case_info_policy` records
