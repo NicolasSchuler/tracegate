@@ -1645,15 +1645,22 @@ Results written before the 2026-10-04 review fixes can be checked without re-run
 ```bash
 uv run python -m evals.reanalysis_audit evals/results/<run>*.jsonl \
   --a base_repair --b layered_adaptive_llm \
-  [--swebench-run-dir evals/swebench_runs/<id>] [--json audit.json]
+  [--swebench-run-dir evals/swebench_runs/<id>] [--json audit.json] [--strict-input]
 ```
 
 It prints the headline metrics computed with the corrected analysis next to the same metrics
 under the pre-review semantics (unmatched uplift, missing tokens as 0, run-level pairing,
-chi-square McNemar, the old power formula, uncorrected pairwise significance), and the data
-audits from "Impact on existing results" in `docs/2026-10-04-code-review-findings.md`:
+chi-square McNemar, the old power formula, run-level pairwise significance). The corrected
+metrics exclude `baseline_supported=False` cases and audit the validated, deduplicated
+attempts the headline is computed from; the legacy metrics keep counting every raw row.
+Unreadable files, malformed lines, schema-invalid records and conflicting duplicate rows are
+reported as a partial-input warning, and `--strict-input` rejects such input instead of
+auditing the readable subset. For a pre-fix SWE-Bench run that recorded no `prompt_policy`,
+the snapshot-directory status is `unknown_legacy_run` and needs external configuration
+evidence rather than counting as a missing snapshot directory. The data audits come from
+"Impact on existing results" in `docs/2026-10-04-code-review-findings.md`:
 successes that touched tests or pytest config, whole-file fallbacks and seed bundles on
-restricted actions, full-reveal runs, policy decay below 1.0, OPE propensity problems,
+restricted actions, full-reveal runs with adaptive attempts, policy decay below 1.0, OPE propensity problems,
 pre-fix deterministic runs, repeated runs, unmatched case sets, missing token usage, LDB case
 counts, retry-gate blocks scored as attempts, forced patches recorded as test failures, record
 schema versions, and per SWE-Bench run: `--snapshot-dir`, hints/test IDs in prompts and empty

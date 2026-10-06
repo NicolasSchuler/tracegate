@@ -132,7 +132,10 @@ def test_cli_prints_report_and_writes_json(tmp_path: Path, capsys) -> None:
     assert "Headline metrics: corrected vs pre-review semantics" in text
     assert "successes_touching_tests_or_config: 1" in text
     swebench = json.loads(out.read_text(encoding="utf-8"))["swebench"][0]
-    assert swebench["llmdebug_without_snapshot_dir"] is True
+    # codex 2-4#3: a legacy run without prompt_policy says nothing about snapshot_dir.
+    assert swebench["llmdebug_snapshot_dir_status"] == "unknown_legacy_run"
+    assert swebench["llmdebug_without_snapshot_dir"] is False
+    assert swebench["llmdebug_snapshot_dir_needs_external_evidence"] is True
     assert swebench["hints_or_test_ids_in_prompt"] is True
     assert swebench["empty_patches"] == {"llmdebug": 1}
 
@@ -142,3 +145,114 @@ def test_cli_without_rows_returns_one(tmp_path: Path, capsys) -> None:
     empty.write_text("", encoding="utf-8")
     assert audit.main([str(empty)]) == 1
     assert "No case-condition rows" in capsys.readouterr().out
+
+
+def test_corrected_headline_excludes_unsupported_baseline_cases(tmp_path: Path) -> None:
+    """codex 2-4#1 / BAS-01: an unsupported LDB case was a corrected failure."""
+    records = [
+        _rec("c1", "base_repair", True),
+        _rec("c2", "base_repair", True),
+        _rec("c1", "ldb", True),
+        _rec("c2", "ldb", False, patch_meta={"baseline_supported": False}),
+    ]
+    report = audit.build_report(
+        [str(_write(tmp_path, records))],
+        condition_a="base_repair",
+        condition_b="ldb",
+        swebench_dirs=[],
+    )
+    ldb = report["headline"]["conditions"]["ldb"]
+
+    assert ldb["cases"] == 1
+    assert ldb["cases_legacy"] == 2
+    assert ldb["baseline_unsupported_cases"] == 1
+    assert ldb["success_rate"] == pytest.approx(1.0)  # the convertible subset
+    assert ldb["success_rate_legacy"] == pytest.approx(0.5)
+    # Corrected uplift over the convertible case only; legacy keeps the -0.5.
+    assert report["headline"]["uplift_corrected_matched"] == pytest.approx(0.0)
+    assert report["headline"]["uplift_legacy_unmatched"] == pytest.approx(-0.5)
+    assert report["audits"]["ldb_cases"]["unsupported"] == 1
+
+
+def test_legacy_pairwise_count_uses_run_level_chi_square(tmp_path: Path) -> None:
+    """codex 2-4#2: the "uncorrected" count came from the corrected case-level tests."""
+    records: list[dict[str, Any]] = []
+    for run_id in ("r1", "r2", "r3"):
+        for idx in range(7):  # B-only successes
+            records.append(_rec(f"b{idx}", "base_repair", False, run_id=run_id))
+            records.append(_rec(f"b{idx}", "layered_adaptive_llm", True, run_id=run_id))
+        for idx in range(3):  # A-only successes
+            records.append(_rec(f"a{idx}", "base_repair", True, run_id=run_id))
+            records.append(_rec(f"a{idx}", "layered_adaptive_llm", False, run_id=run_id))
+    report = audit.build_report(
+        [str(_write(tmp_path, records))],
+        condition_a="base_repair",
+        condition_b="layered_adaptive_llm",
+        swebench_dirs=[],
+    )
+    headline = report["headline"]
+
+    # 30 run-level discordant pairs: the legacy chi-square called this significant.
+    assert headline["mcnemar_p_legacy"] < 0.05
+    assert headline["pairwise_significant_uncorrected"] == 1
+    assert headline["pairwise_tests_legacy"] == 1
+    # The corrected case-level exact test does not.
+    assert headline["mcnemar_p_corrected"] > 0.05
+    assert headline["pairwise_significant_corrected"] == 0
+    assert headline["pairwise_significant_holm"] == 0
+
+
+def test_full_reveal_audit_skips_runs_without_adaptive_attempts(tmp_path: Path) -> None:
+    """codex 2-4#6: base_repair-only runs were flagged for ATT-06."""
+    base_only = _rec("c1", "base_repair", False)
+    adaptive = _rec("c2", "layered_adaptive_llm", False, run_id="r2")
+    for record in (base_only, adaptive):
+        record["run_metadata"]["patcher_config"] = {"adaptive_reveal_mode": "full"}
+    report = audit.build_report(
+        [str(_write(tmp_path, [base_only, adaptive]))],
+        condition_a="base_repair",
+        condition_b="layered_adaptive_llm",
+        swebench_dirs=[],
+    )
+    assert report["audits"]["full_reveal_runs"]["examples"] == ["r2"]
+
+
+def test_audits_count_deduplicated_attempts(tmp_path: Path) -> None:
+    """codex 2-4#5: resumed duplicate rows were flagged twice."""
+    touching = {"patch_touches_tests": True}
+    records = [
+        _rec("c1", "base_repair", True, patch_meta=dict(touching)),
+        _rec("c1", "base_repair", True, patch_meta=dict(touching)),  # the resumed rewrite
+        _rec("c1", "layered_adaptive_llm", False),
+    ]
+    report = audit.build_report(
+        [str(_write(tmp_path, records))],
+        condition_a="base_repair",
+        condition_b="layered_adaptive_llm",
+        swebench_dirs=[],
+    )
+
+    assert report["records"] == 3
+    assert report["records_audited"] == 2
+    assert report["audits"]["successes_touching_tests_or_config"]["count"] == 1
+    assert report["input_errors"]["duplicate_attempt_rows_seen"] == 1
+
+
+def test_audit_reports_partial_input(tmp_path: Path, capsys) -> None:
+    """codex 2-4#4: malformed rows and unreadable files made a partial audit look complete."""
+    path = tmp_path / "partial.jsonl"
+    path.write_text(
+        json.dumps(_rec("c1", "base_repair", True)) + "\n{not json}\n",
+        encoding="utf-8",
+    )
+    missing = tmp_path / "subdir"  # a directory cannot be read as JSONL
+    missing.mkdir()
+
+    assert audit.main([str(path), str(missing)]) == 0
+    text = capsys.readouterr().out
+    assert "WARNING: partial input" in text
+    assert "json_lines_invalid=1" in text
+    assert "files_unreadable=1" in text
+
+    assert audit.main([str(path), "--strict-input"]) == 2
+    assert "Input error" in capsys.readouterr().out
