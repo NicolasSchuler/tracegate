@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from evals.coerce import nonnegative_int as _nonnegative_int
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL
 
 
 def _optional_nonnegative_int(value: Any) -> int | None:
@@ -259,7 +260,7 @@ def _prompt_chars_from_patch_meta(patch_meta: dict[str, Any] | None) -> int:
     if not isinstance(patch_meta, dict):
         return 0
     for key in (
-        "prompt_chars_total",
+        KEY_PROMPT_CHARS_TOTAL,
         "response_input_chars_total",
         "response_input_chars",
         "chars_input",
@@ -542,12 +543,12 @@ def _sync_attempt_prompt_char_metadata(
     normalized_prompt = _nonnegative_int(prompt_chars_total, default=0)
     normalized_completion = _nonnegative_int(completion_chars_total, default=0)
     normalized_total = normalized_prompt + normalized_completion
-    attempt_metadata["prompt_chars_total"] = normalized_prompt
+    attempt_metadata[KEY_PROMPT_CHARS_TOTAL] = normalized_prompt
     attempt_metadata["completion_chars_total"] = normalized_completion
     attempt_metadata["chars_input"] = normalized_prompt
     attempt_metadata["chars_output"] = normalized_completion
     attempt_metadata["chars_total"] = normalized_total
-    patch_meta["prompt_chars_total"] = normalized_prompt
+    patch_meta[KEY_PROMPT_CHARS_TOTAL] = normalized_prompt
     patch_meta["completion_chars_total"] = normalized_completion
     patch_meta["chars_input"] = normalized_prompt
     patch_meta["chars_output"] = normalized_completion

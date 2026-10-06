@@ -14,6 +14,7 @@ from evals.attempt_usage import (
     _record_token_usage_state,
     _usage_token_counts_from_patch_meta,
 )
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL
 from evals.transport_failures import _filter_attempt_records
 
 
@@ -91,13 +92,13 @@ def extract_unit_progress_metrics(case_records: list[dict[str, Any]]) -> UnitPro
         total_test_sec += float(r.get("after_duration_sec", 0) or 0)
         prompt_chars = (
             _nonnegative_int(
-                attempt_meta.get("prompt_chars_total"),
-                default=_nonnegative_int(pm.get("prompt_chars_total"), default=0)
+                attempt_meta.get(KEY_PROMPT_CHARS_TOTAL),
+                default=_nonnegative_int(pm.get(KEY_PROMPT_CHARS_TOTAL), default=0)
                 if isinstance(pm, dict)
                 else 0,
             )
             if isinstance(attempt_meta, dict)
-            else _nonnegative_int(pm.get("prompt_chars_total"), default=0)
+            else _nonnegative_int(pm.get(KEY_PROMPT_CHARS_TOTAL), default=0)
             if isinstance(pm, dict)
             else 0
         )

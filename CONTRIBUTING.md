@@ -134,7 +134,8 @@ These checks are part of the normal review contract, not optional extras:
 
 The staged eval typing pass is tracked separately:
 
-- `just typecheck-evals` targets a bounded module set in `evals/`
+- `just typecheck-evals` checks all of `evals/` and `baselines/` except generated trees and a
+  short, shrink-only list of holdouts (see `pyrightconfig.evals.json`)
 - it uses `pyrightconfig.evals.json`
 - it is surfaced in CI as informational during the rollout
 

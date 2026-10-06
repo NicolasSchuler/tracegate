@@ -94,7 +94,7 @@ def _http_probe_ready(
     api_key: str,
     timeout_sec: float,
     http2: bool,
-) -> tuple[bool, PatcherMeta]:
+) -> tuple[bool | None, PatcherMeta]:
     headers = {
         "Accept": "application/json, text/plain;q=0.9, */*;q=0.1",
         "Authorization": f"Bearer {api_key}",
@@ -243,7 +243,7 @@ async def _http_probe_ready_async(
     api_key: str,
     timeout_sec: float,
     http2: bool,
-) -> tuple[bool, PatcherMeta]:
+) -> tuple[bool | None, PatcherMeta]:
     headers = {
         "Accept": "application/json, text/plain;q=0.9, */*;q=0.1",
         "Authorization": f"Bearer {api_key}",

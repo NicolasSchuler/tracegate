@@ -30,6 +30,18 @@ from evals.eval_types import (
     RunResult,
 )
 from evals.native_stage_b_flow import openai_preflight_total_char_cap
+from evals.record_keys import (
+    KEY_ADAPTIVE_PROGRESS_STOP_NOTE,
+    NOTE_FORCED_NOOP_PATCH,
+    NOTE_NO_PATCH_PROPOSED,
+    NOTE_PATCH_APPLY_FAILED,
+    NOTE_PATCH_VERIFIER_REJECTED,
+    NOTE_PATCHER_REQUEST_FAILED,
+    NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
+    NOTE_SUCCESS,
+    NOTE_SYNTAX_PREFLIGHT_FAILED,
+    NOTE_TESTS_STILL_FAILING,
+)
 from evals.transport_failures import _request_context_failure_kind_from_meta
 
 
@@ -280,19 +292,19 @@ def _pytest_failed_total_from_text(text: str) -> int | None:
 
 
 def _adaptive_pipeline_stage_for_outcome(*, note: str, success: bool) -> tuple[str, int]:
-    if bool(success) or str(note or "") == "success":
+    if bool(success) or str(note or "") == NOTE_SUCCESS:
         return "success", 4
     note_norm = str(note or "").strip()
     if note_norm in {
-        "patcher_request_failed",
-        "no_patch_proposed",
+        NOTE_PATCHER_REQUEST_FAILED,
+        NOTE_NO_PATCH_PROPOSED,
         TRUNCATED_RESPONSE_ERROR,
-        "retry_gate_no_new_evidence",
+        NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
     }:
         return "request_or_no_patch", 0
-    if note_norm in {"forced_noop_patch", "patch_apply_failed", "syntax_preflight_failed"}:
+    if note_norm in {NOTE_FORCED_NOOP_PATCH, NOTE_PATCH_APPLY_FAILED, NOTE_SYNTAX_PREFLIGHT_FAILED}:
         return "pretest_patch_failure", 1
-    if note_norm == "patch_verifier_rejected":
+    if note_norm == NOTE_PATCH_VERIFIER_REJECTED:
         return "verifier_rejected", 2
     return "tests_still_failing", 3
 
@@ -426,21 +438,21 @@ def _mark_adaptive_progress_stop(
         and note
         in {
             "hard_stop_no_progress",
-            "no_patch_proposed",
+            NOTE_NO_PATCH_PROPOSED,
             TRUNCATED_RESPONSE_ERROR,
-            "patcher_request_failed",
-            "forced_noop_patch",
-            "patch_verifier_rejected",
-            "syntax_preflight_failed",
-            "patch_apply_failed",
-            "tests_still_failing",
+            NOTE_PATCHER_REQUEST_FAILED,
+            NOTE_FORCED_NOOP_PATCH,
+            NOTE_PATCH_VERIFIER_REJECTED,
+            NOTE_SYNTAX_PREFLIGHT_FAILED,
+            NOTE_PATCH_APPLY_FAILED,
+            NOTE_TESTS_STILL_FAILING,
         }
     )
     attempt_metadata["adaptive_progress_stop_triggered"] = triggered
     patch_meta["adaptive_progress_stop_triggered"] = triggered
     patch_meta["adaptive_progress_stop_reason"] = adaptive_progress_stop_reason
     if triggered:
-        patch_meta["adaptive_progress_stop_note"] = note
+        patch_meta[KEY_ADAPTIVE_PROGRESS_STOP_NOTE] = note
     return triggered
 
 

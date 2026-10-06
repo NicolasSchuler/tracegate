@@ -64,6 +64,7 @@ from evals.progress_output import (
     build_progress_palette,
     classify_failure_reason,
 )
+from evals.record_keys import KEY_ADAPTIVE_PROGRESS_STOP_NOTE
 from evals.run_condition_builder import build_run_condition_inputs
 from evals.run_context import RunContext
 from evals.transport_failures import (
@@ -490,7 +491,7 @@ def run_main_flow(
                 elif terminal_pm.get("adaptive_progress_stop_triggered"):
                     early_reason = str(
                         terminal_pm.get(
-                            "adaptive_progress_stop_note",
+                            KEY_ADAPTIVE_PROGRESS_STOP_NOTE,
                             terminal_pm.get("adaptive_progress_stop_reason", "adaptive_stop"),
                         )
                     )

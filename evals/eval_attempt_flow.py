@@ -3,7 +3,6 @@
 Extracted from ``evals.run_eval`` to keep the public facade module focused on
 stable compatibility exports.
 """
-# ruff: noqa: F821
 
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from baselines.case_information import build_baseline_case_context_payload
 from baselines.controller_packet import HYBRID_GUIDANCE_MODE_FIXED_V1
@@ -141,7 +140,7 @@ from evals.eval_evidence import (
     collect_text_context,
     evidence_chars_by_type,
 )
-from evals.eval_patch_constants import TRUNCATED_RESPONSE_ERROR, patcher_meta_truncated
+from evals.eval_patch_constants import patcher_meta_truncated
 from evals.eval_patches import (
     _build_runner_forced_attempt_diff,
     _is_forced_noop_marker_diff,
@@ -306,6 +305,23 @@ from evals.pytest_runner import (
     read_latest_snapshot,
     run_pytest,
 )
+from evals.record_keys import (
+    KEY_INFRA_RESUME_ELIGIBLE,
+    KEY_PROMPT_CHARS_TOTAL,
+    NOTE_FORCED_NOOP_PATCH,
+    NOTE_NO_PATCH_NEEDED,
+    NOTE_NO_PATCH_PROPOSED,
+    NOTE_PATCH_APPLY_FAILED,
+    NOTE_PATCH_VERIFIER_REJECTED,
+    NOTE_PATCHER_REQUEST_FAILED,
+    NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
+    NOTE_SUCCESS,
+    NOTE_SYNTAX_PREFLIGHT_FAILED,
+    NOTE_TESTS_STILL_FAILING,
+    NOTE_TRUNCATED_RESPONSE,
+    NOTE_UNIT_RUNTIME_ERROR,
+    AttemptNote,
+)
 from evals.run_condition_builder import (
     _resolve_run_condition_inputs,
 )
@@ -328,6 +344,12 @@ from evals.transport_failures import (
     _sync_patcher_request_failure_metadata,
     _transport_recovery_failure_kind_from_meta,
 )
+
+if TYPE_CHECKING:
+    from evals.adaptive_budget_online_policy import BudgetPolicyDecision
+    from evals.adaptive_policy_records import PolicyDecision
+    from evals.eval_types import AdaptiveBudgetControlProfile
+    from evals.patchers.payload_types import ContextRequestPayload
 
 # Preserve the historical eval_attempt_flow helper surface for downstream imports.
 _COMPAT_HELPER_EXPORTS = (
@@ -384,9 +406,9 @@ def _decide_adaptive_helper_recovery_topup(
             "recovery_force_invoke_helper",
         )
     if previous_note in {
-        "patch_verifier_rejected",
-        "syntax_preflight_failed",
-        "retry_gate_no_new_evidence",
+        NOTE_PATCH_VERIFIER_REJECTED,
+        NOTE_SYNTAX_PREFLIGHT_FAILED,
+        NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
     }:
         return (
             "repair_failure_recovery_once",
@@ -1001,13 +1023,13 @@ def execute_eval_unit_impl(
             )
             prompt_chars_total = (
                 _nonnegative_int(
-                    attempt_meta.get("prompt_chars_total"),
-                    default=_nonnegative_int(patch_meta.get("prompt_chars_total"), default=0)
+                    attempt_meta.get(KEY_PROMPT_CHARS_TOTAL),
+                    default=_nonnegative_int(patch_meta.get(KEY_PROMPT_CHARS_TOTAL), default=0)
                     if isinstance(patch_meta, dict)
                     else 0,
                 )
                 if isinstance(attempt_meta, dict)
-                else _nonnegative_int(patch_meta.get("prompt_chars_total"), default=0)
+                else _nonnegative_int(patch_meta.get(KEY_PROMPT_CHARS_TOTAL), default=0)
                 if isinstance(patch_meta, dict)
                 else 0
             )
@@ -1281,9 +1303,9 @@ def _unit_runtime_error_record(
         model_metadata=_build_model_metadata(patcher=patcher, patch_meta=None),
     )
     record["success"] = False
-    record["note"] = "unit_runtime_error"
+    record["note"] = NOTE_UNIT_RUNTIME_ERROR
     # Resume still retries the unit: the record doesn't mark it complete.
-    record["patch_meta"] = {"unit_runtime_error": runtime_error, "infra_resume_eligible": True}
+    record["patch_meta"] = {"unit_runtime_error": runtime_error, KEY_INFRA_RESUME_ELIGIBLE: True}
     if attempt > k:
         record["record_type"] = EVAL_RECORD_TYPE_INFRA_EVENT
     else:
@@ -1663,7 +1685,7 @@ def _run_one_condition_attempts(
             and str(result_meta.get("error") or "") == "repair_failed"
         ):
             infra_patch_meta["infra_failure_kind"] = failure_kind
-            infra_patch_meta["infra_resume_eligible"] = True
+            infra_patch_meta[KEY_INFRA_RESUME_ELIGIBLE] = True
             infra_patch_meta["infra_source"] = "baseline_repair"
         probe_meta = recovery_outcome.get("probe_meta")
         if isinstance(probe_meta, dict) and probe_meta:
@@ -1697,7 +1719,7 @@ def _run_one_condition_attempts(
                 and str(result_meta.get("error") or "") == "repair_failed"
             ):
                 failed_meta["infra_failure_kind"] = failure_kind
-                failed_meta["infra_resume_eligible"] = True
+                failed_meta[KEY_INFRA_RESUME_ELIGIBLE] = True
                 failed_meta["infra_source"] = "baseline_repair"
             probe_meta = recovery_outcome.get("probe_meta")
             if isinstance(probe_meta, dict) and probe_meta:
@@ -1730,7 +1752,7 @@ def _run_one_condition_attempts(
             and str(replay_meta.get("error") or "") == "repair_failed"
         ):
             replay_meta["infra_failure_kind"] = replay_failure_kind
-            replay_meta["infra_resume_eligible"] = True
+            replay_meta[KEY_INFRA_RESUME_ELIGIBLE] = True
             replay_meta["infra_source"] = "baseline_repair"
             replay_meta["transport_recovery_replayed_failure_kind"] = replay_failure_kind
         return _result_with_meta(replay_result, replay_meta)
@@ -1967,7 +1989,7 @@ def _run_one_condition_attempts(
         return adaptive_progress_stop_candidate, adaptive_progress_stop_reason
 
     def _record_terminal_attempt(
-        note: str, *, sync_syntax_preflight: bool = False, apply_error: str | None = None
+        note: AttemptNote, *, sync_syntax_preflight: bool = False, apply_error: str | None = None
     ) -> bool:
         """Score an attempt that ended before the test re-run; return whether to stop early.
 
@@ -2734,7 +2756,7 @@ def _run_one_condition_attempts(
                 "before_duration_sec": current.duration_sec,
                 "cumulative_runtime_sec": cumulative_runtime_sec,
                 "attempt_wall_clock_sec": float(current.duration_sec),
-                "note": "no_patch_needed",
+                "note": NOTE_NO_PATCH_NEEDED,
             }
         )
         record.update(_timeout_fields(current))
@@ -5013,7 +5035,7 @@ def _run_one_condition_attempts(
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
         patch_meta["stage_a_prompt_chars"] = stage_a_prompt_chars
         patch_meta["stage_b_prompt_chars"] = len(prompt)
-        patch_meta["prompt_chars_total"] = initial_prompt_chars_total
+        patch_meta[KEY_PROMPT_CHARS_TOTAL] = initial_prompt_chars_total
         patch_meta["completion_chars_total"] = initial_completion_chars_total
         patch_meta["chars_input"] = initial_prompt_chars_total
         patch_meta["chars_output"] = initial_completion_chars_total
@@ -5796,7 +5818,7 @@ def _run_one_condition_attempts(
                 attempt_wall_sec = _measure_attempt_wall_clock_sec(attempt_start)
                 cumulative_runtime_sec += attempt_wall_sec
                 pending_credit = _finalize_adaptive_policy_attempt(
-                    note="retry_gate_no_new_evidence",
+                    note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     success=False,
                     attempt_wall_sec=attempt_wall_sec,
                     online_finalize_kwargs=online_finalize_kwargs,
@@ -5814,7 +5836,7 @@ def _run_one_condition_attempts(
                     patch_meta=patch_meta,
                     context_protocol=attempt_context_protocol,
                     success=False,
-                    note="retry_gate_no_new_evidence",
+                    note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     before=current,
                     cumulative_runtime_sec=cumulative_runtime_sec,
                     attempt_wall_clock_sec=attempt_wall_sec,
@@ -5827,7 +5849,7 @@ def _run_one_condition_attempts(
                 _append_record(record, defer_sink=pending_credit is not None)
                 _capture_attempt_history(
                     attempt=attempt,
-                    note="retry_gate_no_new_evidence",
+                    note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     failure_signature=failure_signature,
                     record=record,
                     patch_meta=patch_meta,
@@ -5836,7 +5858,7 @@ def _run_one_condition_attempts(
                 )
                 previous_failure_context = _enrich_failure_context(
                     base=current_failure_context,
-                    note="retry_gate_no_new_evidence",
+                    note=NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
                     patch_meta=patch_meta,
                     run=current,
                 )
@@ -5953,7 +5975,7 @@ def _run_one_condition_attempts(
             else True
         )
         attempt_prompt_chars_cumulative = _nonnegative_int(
-            attempt_metadata.get("prompt_chars_total"), default=0
+            attempt_metadata.get(KEY_PROMPT_CHARS_TOTAL), default=0
         )
         attempt_completion_chars_cumulative = _nonnegative_int(
             attempt_metadata.get("completion_chars_total"), default=0
@@ -6386,11 +6408,11 @@ def _run_one_condition_attempts(
                 invoked=False,
                 result=PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
             )
-            if bool(patch_meta.get("infra_resume_eligible")):
+            if bool(patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE)):
                 attempt_metadata["infra_failure_kind"] = str(
                     patch_meta.get("infra_failure_kind") or ""
                 )
-                attempt_metadata["infra_resume_eligible"] = True
+                attempt_metadata[KEY_INFRA_RESUME_ELIGIBLE] = True
                 attempt_metadata["infra_source"] = str(patch_meta.get("infra_source") or "")
                 attempt_terminated_early = True
                 should_break_after_attempt = True
@@ -6816,7 +6838,7 @@ def _run_one_condition_attempts(
                         patch_meta["runner_forced_patch_attempt"] = True
                         patch_meta["runner_forced_patch_target"] = forced_target
                         patch_meta["runner_forced_patch_reason"] = "no_patch_proposed"
-            no_diff_note_override = ""
+            no_diff_note_override: AttemptNote | None = None
             if diff_to_apply is not None and _is_forced_noop_marker_diff(diff_to_apply):
                 patch_meta["runner_forced_patch_marker_only"] = True
                 patch_meta["runner_forced_patch_disabled_after_noop"] = True
@@ -6824,16 +6846,16 @@ def _run_one_condition_attempts(
                 attempt_metadata["runner_forced_patch_disabled_after_noop"] = True
                 runner_force_patch_attempt_enabled = False
                 diff_to_apply = None
-                no_diff_note_override = "forced_noop_patch"
+                no_diff_note_override = NOTE_FORCED_NOOP_PATCH
             if diff_to_apply is None:
-                if no_diff_note_override:
-                    no_diff_note = no_diff_note_override
+                if no_diff_note_override is not None:
+                    no_diff_note: AttemptNote = no_diff_note_override
                 elif request_failed:
-                    no_diff_note = "patcher_request_failed"
+                    no_diff_note = NOTE_PATCHER_REQUEST_FAILED
                 elif patcher_meta_truncated(patch_meta):
-                    no_diff_note = TRUNCATED_RESPONSE_ERROR  # LLM-02
+                    no_diff_note = NOTE_TRUNCATED_RESPONSE  # LLM-02
                 else:
-                    no_diff_note = "no_patch_proposed"
+                    no_diff_note = NOTE_NO_PATCH_PROPOSED
                 fail_fast_on_budget_exceeded = bool(
                     normalized_case_fail_fast_on_request_budget_exceeded
                     and request_failed
@@ -7204,7 +7226,7 @@ def _run_one_condition_attempts(
                 events=syntax_preflight_events,
             )
             if patch_verifier_enabled and patch_verifier_passed is False:
-                should_break_after_attempt = _record_terminal_attempt("patch_verifier_rejected")
+                should_break_after_attempt = _record_terminal_attempt(NOTE_PATCH_VERIFIER_REJECTED)
                 attempt_terminated_early = True
                 break
 
@@ -7251,7 +7273,9 @@ def _run_one_condition_attempts(
                             )
                         continue
 
-                    should_break_after_attempt = _record_terminal_attempt("syntax_preflight_failed")
+                    should_break_after_attempt = _record_terminal_attempt(
+                        NOTE_SYNTAX_PREFLIGHT_FAILED
+                    )
                     attempt_terminated_early = True
                     break
 
@@ -7297,7 +7321,7 @@ def _run_one_condition_attempts(
                 _sync_patch_diff_metadata(patch_meta=patch_meta, diff=applied_diff_for_preflight)
             if not apply_ok:
                 should_break_after_attempt = _record_terminal_attempt(
-                    "patch_apply_failed", apply_error=apply_msg
+                    NOTE_PATCH_APPLY_FAILED, apply_error=apply_msg
                 )
                 attempt_terminated_early = True
                 break
@@ -7358,7 +7382,7 @@ def _run_one_condition_attempts(
                 syntax_state.apply_to_metadata(
                     attempt_metadata=attempt_metadata, patch_meta=patch_meta
                 )
-                should_break_after_attempt = _record_terminal_attempt("syntax_preflight_failed")
+                should_break_after_attempt = _record_terminal_attempt(NOTE_SYNTAX_PREFLIGHT_FAILED)
                 attempt_terminated_early = True
                 break
 
@@ -7446,13 +7470,13 @@ def _run_one_condition_attempts(
         patch_meta["pytest_verdict_counts"] = (
             asdict(after_junit_counts) if after_junit_counts is not None else None
         )
-        note = "success" if success else "tests_still_failing"
+        note: AttemptNote = NOTE_SUCCESS if success else NOTE_TESTS_STILL_FAILING
         if runner_forced_recovery_applied:
             # ATT-07 / D8: only a runner marker was applied, so this stays an apply failure,
             # and the marker is reverted instead of leaking into later prompts.
             patch_meta["runner_forced_patch_recovery_tests_passed"] = success
             success = False
-            note = "patch_apply_failed"
+            note = NOTE_PATCH_APPLY_FAILED
             _restore_diff_target_files(cwd=workdir, backups=runner_forced_recovery_backups)
             patch_meta["runner_forced_patch_recovery_reverted"] = True
         adaptive_progress_stop_candidate_for_note = adaptive_progress_stop_candidate

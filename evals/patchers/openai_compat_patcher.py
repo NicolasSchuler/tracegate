@@ -192,7 +192,12 @@ from .base import (
     PatchPlanResult,
     PatchResult,
 )
-from .payload_types import ContextRequestPayload, PatcherMeta
+from .payload_types import (
+    ContextRequestPayload,
+    PatcherMeta,
+    StructuredOutputAttempt,
+    copy_patcher_meta,
+)
 
 OPENAI_API_KEY_ENV_FALLBACKS = ("Z_API", "OPENAI_API_KEY", "LLMDEBUG_EVAL_OPENAI_API_KEY")
 _REQUEST_CONTEXT_MAX_TRANSPORT_REISSUES = 1
@@ -524,7 +529,7 @@ class OpenAICompatPatcher(Patcher):
             break
         duration_sec = time.perf_counter() - start
 
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -636,7 +641,7 @@ class OpenAICompatPatcher(Patcher):
             transport_retry_backoff_max_sec=self.transport_retry_backoff_max_sec,
         )
         duration_sec = time.perf_counter() - start
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -714,7 +719,7 @@ class OpenAICompatPatcher(Patcher):
             transport_retry_backoff_max_sec=self.transport_retry_backoff_max_sec,
         )
         duration_sec = time.perf_counter() - start
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", selected_temperature)
@@ -810,7 +815,7 @@ class OpenAICompatPatcher(Patcher):
                 totals = _accumulate_llm_totals(totals=totals, meta=meta, default_calls=1)
         duration_sec = time.perf_counter() - start
         result_meta: PatcherMeta = _meta_with_llm_totals(
-            meta=cast(PatcherMeta, dict(meta or {})),
+            meta=cast(PatcherMeta, copy_patcher_meta(meta)),
             totals=totals,
         )
         result_meta.setdefault("base_url", base_url)
@@ -967,7 +972,7 @@ class OpenAICompatPatcher(Patcher):
             break
         duration_sec = time.perf_counter() - start
 
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -1089,7 +1094,7 @@ class OpenAICompatPatcher(Patcher):
         )
         duration_sec = time.perf_counter() - start
 
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -1189,7 +1194,7 @@ class OpenAICompatPatcher(Patcher):
         )
         duration_sec = time.perf_counter() - start
 
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -1382,11 +1387,11 @@ class OpenAICompatPatcher(Patcher):
                     transport_retry_backoff_max_sec=self.transport_retry_backoff_max_sec,
                 )
                 totals = (0, 0, 0, 0, 0, False, True)
-                diff_meta = dict(diff_result.meta or {})
-                edits_meta = dict(edits_fallback.meta or {})
+                diff_meta = copy_patcher_meta(diff_result.meta)
+                edits_meta = copy_patcher_meta(edits_fallback.meta)
                 totals = _accumulate_llm_totals(totals=totals, meta=diff_meta, default_calls=0)
                 totals = _accumulate_llm_totals(totals=totals, meta=edits_meta, default_calls=0)
-                merged_meta = dict(edits_meta)
+                merged_meta = copy_patcher_meta(edits_meta)
                 merged_meta["fallback_from"] = "diff"
                 merged_meta["fallback_reason"] = "no_diff_found"
                 merged_meta["fallback_meta"] = diff_meta
@@ -1399,7 +1404,7 @@ class OpenAICompatPatcher(Patcher):
             else:
                 result = diff_result
 
-        result_meta = dict(result.meta or {})
+        result_meta = copy_patcher_meta(result.meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -1429,7 +1434,7 @@ class OpenAICompatPatcher(Patcher):
 
         skip_reason = _forced_patch_skip_reason(cast(PatcherMeta, result_meta))
         if skip_reason:
-            meta = dict(result.meta or {})
+            meta = copy_patcher_meta(result.meta)
             meta["forced_patch_skipped"] = True
             meta["forced_patch_skip_reason"] = _forced_patch_skip_category(skip_reason)
             meta["forced_patch_skip_detail"] = skip_reason
@@ -1439,7 +1444,7 @@ class OpenAICompatPatcher(Patcher):
         if forced is None:
             return result
 
-        meta = dict(result.meta or {})
+        meta = copy_patcher_meta(result.meta)
         meta["forced_patch_attempt"] = True
         meta["forced_patch_target"] = forced[0]
         meta["forced_patch_reason"] = "no_model_diff"
@@ -1564,11 +1569,11 @@ class OpenAICompatPatcher(Patcher):
                     transport_retry_backoff_max_sec=self.transport_retry_backoff_max_sec,
                 )
                 totals = (0, 0, 0, 0, 0, False, True)
-                diff_meta = dict(diff_result.meta or {})
-                edits_meta = dict(edits_fallback.meta or {})
+                diff_meta = copy_patcher_meta(diff_result.meta)
+                edits_meta = copy_patcher_meta(edits_fallback.meta)
                 totals = _accumulate_llm_totals(totals=totals, meta=diff_meta, default_calls=0)
                 totals = _accumulate_llm_totals(totals=totals, meta=edits_meta, default_calls=0)
-                merged_meta = dict(edits_meta)
+                merged_meta = copy_patcher_meta(edits_meta)
                 merged_meta["fallback_from"] = "diff"
                 merged_meta["fallback_reason"] = "no_diff_found"
                 merged_meta["fallback_meta"] = diff_meta
@@ -1581,7 +1586,7 @@ class OpenAICompatPatcher(Patcher):
             else:
                 result = diff_result
 
-        result_meta = dict(result.meta or {})
+        result_meta = copy_patcher_meta(result.meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta.setdefault("temperature", self.temperature)
@@ -1611,7 +1616,7 @@ class OpenAICompatPatcher(Patcher):
 
         skip_reason = _forced_patch_skip_reason(cast(PatcherMeta, result_meta))
         if skip_reason:
-            meta = dict(result.meta or {})
+            meta = copy_patcher_meta(result.meta)
             meta["forced_patch_skipped"] = True
             meta["forced_patch_skip_reason"] = _forced_patch_skip_category(skip_reason)
             meta["forced_patch_skip_detail"] = skip_reason
@@ -1621,7 +1626,7 @@ class OpenAICompatPatcher(Patcher):
         if forced is None:
             return result
 
-        meta = dict(result.meta or {})
+        meta = copy_patcher_meta(result.meta)
         meta["forced_patch_attempt"] = True
         meta["forced_patch_target"] = forced[0]
         meta["forced_patch_reason"] = "no_model_diff"
@@ -1666,7 +1671,7 @@ class OpenAICompatPatcher(Patcher):
             timeout_sec=self.timeout_sec,
             http2=self.http2,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta["context_window_probe_duration_sec"] = time.perf_counter() - started
@@ -1696,7 +1701,7 @@ class OpenAICompatPatcher(Patcher):
             timeout_sec=self.timeout_sec,
             http2=self.http2,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta["context_window_probe_duration_sec"] = time.perf_counter() - started
@@ -1723,7 +1728,7 @@ class OpenAICompatPatcher(Patcher):
             timeout_sec=self.timeout_sec,
             http2=self.http2,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta["server_ready_probe_duration_sec"] = time.perf_counter() - started
@@ -1742,7 +1747,7 @@ class OpenAICompatPatcher(Patcher):
             timeout_sec=self.timeout_sec,
             http2=self.http2,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta: PatcherMeta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault("model", self.model)
         result_meta["server_ready_probe_duration_sec"] = time.perf_counter() - started
@@ -2306,7 +2311,7 @@ def _propose_patch_via_edits(
         ("json_object", {"response_format": {"type": "json_object"}}),
         ("plain", None),
     ]
-    stage_attempts: list[PatcherMeta] = []
+    stage_attempts: list[StructuredOutputAttempt] = []
     fallback_reason: str | None = None
     fallback_raw_response: str | None = None
     fallback_payload: dict[str, Any] | None = None
@@ -2343,17 +2348,17 @@ def _propose_patch_via_edits(
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
         if diff_fallback.diff is not None:
-            fallback_meta = dict(diff_fallback.meta or {})
+            fallback_meta = copy_patcher_meta(diff_fallback.meta)
             totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
             fallback_meta["fallback_from"] = "edits"
             fallback_meta["fallback_reason"] = reason
             fallback_meta["edits_response_mode"] = str(meta.get("structured_output_mode") or "")
             fallback_meta["edits_response_attempts"] = stage_attempts
             if extra_error_meta:
-                fallback_meta["fallback_trigger"] = dict(extra_error_meta)
+                fallback_meta["fallback_trigger"] = copy_patcher_meta(extra_error_meta)
             return PatchResult(diff=diff_fallback.diff, meta=_with_totals(fallback_meta))
 
-        fallback_meta = dict(diff_fallback.meta or {})
+        fallback_meta = copy_patcher_meta(diff_fallback.meta)
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
         error_meta = _error_meta(meta, reason, fallback_meta=fallback_meta)
         if extra_error_meta:
@@ -2381,9 +2386,9 @@ def _propose_patch_via_edits(
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
         totals = _accumulate_llm_totals(totals=totals, meta=stage_meta, default_calls=1)
-        meta = dict(stage_meta)
+        meta = copy_patcher_meta(stage_meta)
         meta["structured_output_mode"] = stage_name
-        attempt: PatcherMeta = {
+        attempt: StructuredOutputAttempt = {
             "mode": stage_name,
             "ok": raw is not None,
             "error": str(meta.get("error", "")),
@@ -2458,11 +2463,11 @@ def _propose_patch_via_edits(
     if payload is None:
         # If prompt is already over context budget, a diff fallback call will also fail.
         if _is_context_exceeded_http_error(meta):
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
         if _is_openai_compat_reasoning_only(meta):
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
         if fallback_reason is None:
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
 
         error_meta: PatcherMeta = {}
         if fallback_reason == "missing_edits":
@@ -2474,7 +2479,7 @@ def _propose_patch_via_edits(
     edits = payload.get("edits")
     if not isinstance(edits, list) or not edits:
         # Defensive guard: schema/validation above should prevent this.
-        return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+        return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
 
     resolved = _resolve_edits(edits, cwd=cwd)
     if resolved.failure == "file_read_error":
@@ -2490,7 +2495,7 @@ def _propose_patch_via_edits(
 
     _record_find_recovery(meta, resolved.recovery_modes)
     diff = _build_diff_from_changes(resolved.changed)
-    return PatchResult(diff=diff, meta=_with_totals(dict(meta)))
+    return PatchResult(diff=diff, meta=_with_totals(copy_patcher_meta(meta)))
 
 
 def _propose_patch_via_full_file(
@@ -2552,14 +2557,14 @@ def _propose_patch_via_full_file(
             transport_retry_backoff_base_sec=transport_retry_backoff_base_sec,
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
-        fallback_meta = dict(diff_fallback.meta or {})
+        fallback_meta = copy_patcher_meta(diff_fallback.meta)
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
         if diff_fallback.diff is not None:
             fallback_meta.update(full_file_meta)
             fallback_meta["fallback_from"] = "full_file"
             fallback_meta["fallback_reason"] = reason
             if extra_error_meta:
-                fallback_meta["fallback_trigger"] = dict(extra_error_meta)
+                fallback_meta["fallback_trigger"] = copy_patcher_meta(extra_error_meta)
             return PatchResult(diff=diff_fallback.diff, meta=_with_totals(fallback_meta))
 
         error_meta: PatcherMeta = {
@@ -2702,15 +2707,17 @@ def _propose_patch_via_full_file(
     )
     if not fallback_reason:
         fallback_reason = "empty_full_file_response"
-    fallback_trigger = None
+    fallback_trigger: PatcherMeta | None = None
     if last_error_meta is not None and any(
         key in last_error_meta for key in ("raw_response", "attempt", "status", "finish_reason")
     ):
-        fallback_trigger = {
-            key: last_error_meta[key]
-            for key in ("attempt", "status", "finish_reason", "error", "raw_response")
-            if key in last_error_meta
-        }
+        fallback_trigger = copy_patcher_meta(
+            {
+                key: last_error_meta.get(key)
+                for key in ("attempt", "status", "finish_reason", "error", "raw_response")
+                if key in last_error_meta
+            }
+        )
     return _fallback_to_diff(reason=fallback_reason, extra_error_meta=fallback_trigger)
 
 
@@ -2877,7 +2884,7 @@ async def _propose_patch_via_edits_async(
         ("json_object", {"response_format": {"type": "json_object"}}),
         ("plain", None),
     ]
-    stage_attempts: list[PatcherMeta] = []
+    stage_attempts: list[StructuredOutputAttempt] = []
     fallback_reason: str | None = None
     fallback_raw_response: str | None = None
     fallback_payload: dict[str, Any] | None = None
@@ -2914,17 +2921,17 @@ async def _propose_patch_via_edits_async(
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
         if diff_fallback.diff is not None:
-            fallback_meta = dict(diff_fallback.meta or {})
+            fallback_meta = copy_patcher_meta(diff_fallback.meta)
             totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
             fallback_meta["fallback_from"] = "edits"
             fallback_meta["fallback_reason"] = reason
             fallback_meta["edits_response_mode"] = str(meta.get("structured_output_mode") or "")
             fallback_meta["edits_response_attempts"] = stage_attempts
             if extra_error_meta:
-                fallback_meta["fallback_trigger"] = dict(extra_error_meta)
+                fallback_meta["fallback_trigger"] = copy_patcher_meta(extra_error_meta)
             return PatchResult(diff=diff_fallback.diff, meta=_with_totals(fallback_meta))
 
-        fallback_meta = dict(diff_fallback.meta or {})
+        fallback_meta = copy_patcher_meta(diff_fallback.meta)
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
         error_meta = _error_meta(meta, reason, fallback_meta=fallback_meta)
         if extra_error_meta:
@@ -2952,9 +2959,9 @@ async def _propose_patch_via_edits_async(
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
         totals = _accumulate_llm_totals(totals=totals, meta=stage_meta, default_calls=1)
-        meta = dict(stage_meta)
+        meta = copy_patcher_meta(stage_meta)
         meta["structured_output_mode"] = stage_name
-        attempt: PatcherMeta = {
+        attempt: StructuredOutputAttempt = {
             "mode": stage_name,
             "ok": raw is not None,
             "error": str(meta.get("error", "")),
@@ -3027,11 +3034,11 @@ async def _propose_patch_via_edits_async(
 
     if payload is None:
         if _is_context_exceeded_http_error(meta):
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
         if _is_openai_compat_reasoning_only(meta):
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
         if fallback_reason is None:
-            return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+            return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
 
         error_meta: PatcherMeta = {}
         if fallback_reason == "missing_edits":
@@ -3042,7 +3049,7 @@ async def _propose_patch_via_edits_async(
 
     edits = payload.get("edits")
     if not isinstance(edits, list) or not edits:
-        return PatchResult(diff=None, meta=_with_totals(dict(meta)))
+        return PatchResult(diff=None, meta=_with_totals(copy_patcher_meta(meta)))
 
     resolved = _resolve_edits(edits, cwd=cwd)
     if resolved.failure == "file_read_error":
@@ -3060,7 +3067,7 @@ async def _propose_patch_via_edits_async(
 
     _record_find_recovery(meta, resolved.recovery_modes)
     diff = _build_diff_from_changes(resolved.changed)
-    return PatchResult(diff=diff, meta=_with_totals(dict(meta)))
+    return PatchResult(diff=diff, meta=_with_totals(copy_patcher_meta(meta)))
 
 
 async def _propose_patch_via_full_file_async(
@@ -3122,14 +3129,14 @@ async def _propose_patch_via_full_file_async(
             transport_retry_backoff_base_sec=transport_retry_backoff_base_sec,
             transport_retry_backoff_max_sec=transport_retry_backoff_max_sec,
         )
-        fallback_meta = dict(diff_fallback.meta or {})
+        fallback_meta = copy_patcher_meta(diff_fallback.meta)
         totals = _accumulate_llm_totals(totals=totals, meta=fallback_meta, default_calls=0)
         if diff_fallback.diff is not None:
             fallback_meta.update(full_file_meta)
             fallback_meta["fallback_from"] = "full_file"
             fallback_meta["fallback_reason"] = reason
             if extra_error_meta:
-                fallback_meta["fallback_trigger"] = dict(extra_error_meta)
+                fallback_meta["fallback_trigger"] = copy_patcher_meta(extra_error_meta)
             return PatchResult(diff=diff_fallback.diff, meta=_with_totals(fallback_meta))
 
         error_meta: PatcherMeta = {
@@ -3272,15 +3279,17 @@ async def _propose_patch_via_full_file_async(
     )
     if not fallback_reason:
         fallback_reason = "empty_full_file_response"
-    fallback_trigger = None
+    fallback_trigger: PatcherMeta | None = None
     if last_error_meta is not None and any(
         key in last_error_meta for key in ("raw_response", "attempt", "status", "finish_reason")
     ):
-        fallback_trigger = {
-            key: last_error_meta[key]
-            for key in ("attempt", "status", "finish_reason", "error", "raw_response")
-            if key in last_error_meta
-        }
+        fallback_trigger = copy_patcher_meta(
+            {
+                key: last_error_meta.get(key)
+                for key in ("attempt", "status", "finish_reason", "error", "raw_response")
+                if key in last_error_meta
+            }
+        )
     return await _fallback_to_diff(reason=fallback_reason, extra_error_meta=fallback_trigger)
 
 

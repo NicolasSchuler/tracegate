@@ -26,6 +26,7 @@ from evals.eval_types import (
     _ActiveRunSettings,
 )
 from evals.oracle_integrity import clear_junit_reports, consume_junit_counts, junit_report_name
+from evals.record_keys import TimeoutFields
 from evals.run_context import RunContext
 from llmdebug._hashing import xxh64_hexdigest_text
 
@@ -255,6 +256,8 @@ def _status_code_from_wait_result(result: Any) -> int:
         raw = result.get("StatusCode")
         if isinstance(raw, int):
             return raw
+        if raw is None:
+            return 1
         try:
             return int(raw)
         except Exception:
@@ -281,7 +284,9 @@ def _run_pytest_testcontainers(
 ) -> RunResult:
     """Run pytest inside a one-shot Docker container; *base_env* as for pooled runs."""
     try:
-        from testcontainers.core.container import DockerContainer
+        from testcontainers.core.container import (  # pyright: ignore[reportMissingImports]
+            DockerContainer,
+        )
     except Exception as exc:
         raise RuntimeError(
             "testcontainers execution requested but dependency is missing "
@@ -481,7 +486,7 @@ def _coerce_subprocess_output(value: str | bytes | None) -> str:
     return value
 
 
-def _timeout_fields(run: RunResult) -> dict[str, Any]:
+def _timeout_fields(run: RunResult) -> TimeoutFields:
     if run.timed_out:
         return {
             "timed_out": True,

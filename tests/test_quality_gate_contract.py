@@ -356,46 +356,35 @@ def test_pyrightconfig_evals_exists_with_documented_module_set() -> None:
     assert config["typeCheckingMode"] == "basic"
     assert config["pythonVersion"] == "3.10"
     assert config["reportMissingTypeStubs"] is False
-    assert config["include"] == [
-        "evals/eval_config.py",
-        "evals/eval_types.py",
-        "evals/eval_summary.py",
-        "evals/select_cases.py",
-        "evals/validate_cases.py",
-        "evals/stats.py",
-        "evals/report_run_metrics.py",
-        "evals/run_eval.py",
-        "evals/run_context.py",
-        "evals/eval_seams.py",
-        "evals/eval_main_flow.py",
-        "evals/eval_main_setup.py",
-        "evals/eval_main_resume.py",
-        "evals/case_loading.py",
-        "evals/run_state.py",
-        "evals/run_condition_builder.py",
-        "evals/baseline_runtime.py",
-        "evals/attempt_usage.py",
-        "evals/attempt_records.py",
-        "evals/attempt_verification.py",
-        "evals/adaptive_progress.py",
-        "evals/patch_relevance.py",
-        "evals/progress_display.py",
-        "evals/decision_model/__init__.py",
-        "evals/decision_model/config.py",
-        "evals/decision_model/schema.py",
-        "evals/decision_model/policy.py",
-        "evals/decision_model/state.py",
-        "evals/decision_model/client.py",
-        "evals/decision_model/runtime.py",
-        "evals/decision_model/probe.py",
-        "evals/swebench/__init__.py",
-        "evals/swebench/types.py",
-        "evals/swebench/io.py",
-        "evals/swebench/generate.py",
-        "evals/swebench/score_official.py",
-        "evals/swebench/smoke.py",
-        "evals/swebench/cli.py",
-    ]
+    # X-05: the whole harness is checked; new modules are in by default.
+    assert config["include"] == ["evals", "baselines"]
+    # Holdouts may only be removed. Each still has basic-mode errors to fix first.
+    holdouts = {
+        "evals/eval_attempt_flow.py",
+        "evals/analysis_summary.py",
+        "evals/analysis_adaptive_rollup.py",
+        "evals/analysis_ope_estimators.py",
+        "evals/analysis_paired_stats.py",
+        "baselines/rlm/adapter.py",
+        "baselines/lambda_rlm/adapter.py",
+    }
+    generated_or_external = {
+        ".venv",
+        "evals/artifacts",
+        "evals/cases",
+        "evals/results",
+        "evals/swebench_runs",
+        "evals/swebench_pro_runs",
+        "evals/swebench_pro_assets",
+        "evals/docker",
+        "baselines/envs",
+        "baselines/repos",
+        "baselines/stubs",
+        "tests",
+    }
+    excluded = set(config["exclude"])
+    assert excluded - generated_or_external <= holdouts
+    assert generated_or_external <= excluded
 
 
 def test_default_test_recipes_skip_integration_marker() -> None:

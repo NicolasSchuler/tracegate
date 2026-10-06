@@ -15,6 +15,8 @@ from evals.eval_types import (
     PATCHER_CONTEXT_LIMIT_ERROR_MARKERS,
     RETRYABLE_HTTP_STATUS_CODES,
 )
+from evals.patchers.payload_types import as_patcher_meta
+from evals.record_keys import KEY_INFRA_RESUME_ELIGIBLE
 
 
 def _single_line_error(raw: str, *, max_chars: int = 240) -> str:
@@ -158,24 +160,24 @@ def _result_with_meta(result: Any, meta: dict[str, Any]) -> Any:
     )
 
     if isinstance(result, PatchResult):
-        return PatchResult(diff=result.diff, meta=meta)
+        return PatchResult(diff=result.diff, meta=as_patcher_meta(meta))
     if isinstance(result, PatchPlanResult):
         return PatchPlanResult(
             plan_text=result.plan_text,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     if isinstance(result, ContextRequestResult):
         return ContextRequestResult(
             request_json=result.request_json,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     if isinstance(result, ContextCompactionResult):
         return ContextCompactionResult(
             compacted_text=result.compacted_text,
             raw_response=result.raw_response,
-            meta=meta,
+            meta=as_patcher_meta(meta),
         )
     return result
 
@@ -422,4 +424,4 @@ def _record_is_infra_resume_eligible(record: Mapping[str, Any]) -> bool:
     patch_meta = record.get("patch_meta")
     if not isinstance(patch_meta, Mapping):
         return False
-    return bool(patch_meta.get("infra_resume_eligible"))
+    return bool(patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE))

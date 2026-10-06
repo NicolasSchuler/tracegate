@@ -128,12 +128,11 @@ class Patcher:
         callback_var = getattr(self, "_llmdebug_progress_callback_var", None)
         if isinstance(callback_var, ContextVar):
             return callback_var
-        callback_var = ContextVar(
-            f"llmdebug_patcher_progress_callback_{id(self)}",
-            default=None,
+        new_var: ContextVar[Callable[[str, dict[str, Any] | None], None] | None] = ContextVar(
+            f"llmdebug_patcher_progress_callback_{id(self)}", default=None
         )
-        object.__setattr__(self, "_llmdebug_progress_callback_var", callback_var)
-        return callback_var
+        object.__setattr__(self, "_llmdebug_progress_callback_var", new_var)
+        return new_var
 
     def set_progress_callback(
         self,

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import MISSING, dataclass, fields
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ def _required_input_fields(cls: type[BaseCaseInput]) -> set[str]:
     return required | declared_required
 
 
+_CaseInputT = TypeVar("_CaseInputT", bound="BaseCaseInput")
+
+
 @dataclass(frozen=True)
 class BaseCaseInput:
     """Common fields shared across all baseline case inputs.
@@ -61,7 +64,7 @@ class BaseCaseInput:
     REQUIRED_INPUT_FIELDS: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BaseCaseInput:
+    def from_dict(cls: type[_CaseInputT], data: dict[str, Any]) -> _CaseInputT:
         """Validate and construct from a raw dict.
 
         Raises ``ValueError`` on missing required input fields or

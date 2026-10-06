@@ -300,7 +300,7 @@ def evaluate_instance_docker(
     # Run Docker container
     image_uri = get_dockerhub_image_uri(uid, dockerhub_username, ctx.dockerhub_tag)
     client: Any | None = None
-    container: Any | None = None
+    container: Any = None
     try:
         client = docker_sdk.from_env()
 

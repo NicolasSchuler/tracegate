@@ -7,6 +7,7 @@ import functools
 import threading
 import time
 import urllib.parse
+import urllib.request
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ from evals.patchers.openai_response import (
     _usage_counts_from_payload,
     _usage_payload_from_counts,
 )
-from evals.patchers.payload_types import PatcherMeta
+from evals.patchers.payload_types import PatcherMeta, copy_patcher_meta
 
 _THREAD_HTTP_CLIENTS = threading.local()
 
@@ -562,25 +563,29 @@ def _chat_completion(
     retry_attempts: list[dict[str, Any]] = []
     call_count = 0
 
-    base_meta: PatcherMeta = {
-        "model": model,
-        "base_url": compat_base_url,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "timeout_sec": timeout_sec,
-        "effective_timeout_sec": timeout_sec,
-        "remaining_budget_sec": _remaining_request_budget_sec(deadline_monotonic),
-        "llm_call_count": 0,
-        "usage": _usage_payload_from_counts(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-        **compat_request_meta.to_dict(),
-        "transport_retry_limit": max_retries,
-        "transport_retry_limit_effective": max_retries,
-        "transport_retry_backoff_base_sec": retry_backoff_base_sec,
-        "transport_retry_backoff_max_sec": retry_backoff_max_sec,
-        "api_compat_seed_requested": seed,
-        "api_compat_seed_acknowledged": False if seed is not None else None,
-        "api_compat_seed_response": None,
-    }
+    base_meta = copy_patcher_meta(
+        {
+            "model": model,
+            "base_url": compat_base_url,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout_sec": timeout_sec,
+            "effective_timeout_sec": timeout_sec,
+            "remaining_budget_sec": _remaining_request_budget_sec(deadline_monotonic),
+            "llm_call_count": 0,
+            "usage": _usage_payload_from_counts(
+                prompt_tokens=0, completion_tokens=0, total_tokens=0
+            ),
+            **compat_request_meta.to_dict(),
+            "transport_retry_limit": max_retries,
+            "transport_retry_limit_effective": max_retries,
+            "transport_retry_backoff_base_sec": retry_backoff_base_sec,
+            "transport_retry_backoff_max_sec": retry_backoff_max_sec,
+            "api_compat_seed_requested": seed,
+            "api_compat_seed_acknowledged": False if seed is not None else None,
+            "api_compat_seed_response": None,
+        }
+    )
 
     headers = {
         "Content-Type": "application/json",
@@ -777,10 +782,8 @@ def _chat_completion(
                     time.sleep(backoff_sec)
                 continue
 
-            final_error_meta: PatcherMeta = {
-                **error_meta,
-                "transport_retry_count": len(retry_attempts),
-            }
+            final_error_meta = copy_patcher_meta(error_meta)
+            final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             return None, final_error_meta
@@ -811,14 +814,16 @@ def _chat_completion(
             base_url=compat_base_url,
             request_meta=compat_request_meta,
         )
-        meta.update(normalized.meta())
+        meta.update(copy_patcher_meta(normalized.meta()))
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
-            compat_error_meta: PatcherMeta = {
-                **meta,
-                **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
-            }
+            compat_error_meta = copy_patcher_meta(
+                {
+                    **meta,
+                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                }
+            )
             if retry_attempts:
                 compat_error_meta["transport_retry_attempts"] = retry_attempts
             return None, compat_error_meta
@@ -894,25 +899,29 @@ async def _chat_completion_async(
     retry_attempts: list[dict[str, Any]] = []
     call_count = 0
 
-    base_meta: PatcherMeta = {
-        "model": model,
-        "base_url": compat_base_url,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "timeout_sec": timeout_sec,
-        "effective_timeout_sec": timeout_sec,
-        "remaining_budget_sec": _remaining_request_budget_sec(deadline_monotonic),
-        "llm_call_count": 0,
-        "usage": _usage_payload_from_counts(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-        **compat_request_meta.to_dict(),
-        "transport_retry_limit": max_retries,
-        "transport_retry_limit_effective": max_retries,
-        "transport_retry_backoff_base_sec": retry_backoff_base_sec,
-        "transport_retry_backoff_max_sec": retry_backoff_max_sec,
-        "api_compat_seed_requested": seed,
-        "api_compat_seed_acknowledged": False if seed is not None else None,
-        "api_compat_seed_response": None,
-    }
+    base_meta = copy_patcher_meta(
+        {
+            "model": model,
+            "base_url": compat_base_url,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout_sec": timeout_sec,
+            "effective_timeout_sec": timeout_sec,
+            "remaining_budget_sec": _remaining_request_budget_sec(deadline_monotonic),
+            "llm_call_count": 0,
+            "usage": _usage_payload_from_counts(
+                prompt_tokens=0, completion_tokens=0, total_tokens=0
+            ),
+            **compat_request_meta.to_dict(),
+            "transport_retry_limit": max_retries,
+            "transport_retry_limit_effective": max_retries,
+            "transport_retry_backoff_base_sec": retry_backoff_base_sec,
+            "transport_retry_backoff_max_sec": retry_backoff_max_sec,
+            "api_compat_seed_requested": seed,
+            "api_compat_seed_acknowledged": False if seed is not None else None,
+            "api_compat_seed_response": None,
+        }
+    )
 
     headers = {
         "Content-Type": "application/json",
@@ -1111,10 +1120,8 @@ async def _chat_completion_async(
                     await asyncio.sleep(backoff_sec)
                 continue
 
-            final_error_meta: PatcherMeta = {
-                **error_meta,
-                "transport_retry_count": len(retry_attempts),
-            }
+            final_error_meta = copy_patcher_meta(error_meta)
+            final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
             return None, final_error_meta
@@ -1145,14 +1152,16 @@ async def _chat_completion_async(
             base_url=compat_base_url,
             request_meta=compat_request_meta,
         )
-        meta.update(normalized.meta())
+        meta.update(copy_patcher_meta(normalized.meta()))
         try:
             require_final_content(normalized, base_url=compat_base_url)
         except OpenAICompatResponseError as exc:
-            compat_error_meta: PatcherMeta = {
-                **meta,
-                **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
-            }
+            compat_error_meta = copy_patcher_meta(
+                {
+                    **meta,
+                    **response_error_meta(exc, error=_OPENAI_COMPAT_REASONING_ONLY_ERROR),
+                }
+            )
             if retry_attempts:
                 compat_error_meta["transport_retry_attempts"] = retry_attempts
             return None, compat_error_meta

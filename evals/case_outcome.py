@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from evals.record_keys import KEY_INFRA_RESUME_ELIGIBLE
+
 from .eval_types import EVAL_RECORD_TYPE_INFRA_EVENT, normalize_condition_name
 
 CaseKey = tuple[str, str, str]
@@ -40,7 +42,7 @@ def is_infra_event(record: Mapping[str, Any]) -> bool:
 
 def is_resume_eligible(record: Mapping[str, Any]) -> bool:
     patch_meta = record.get("patch_meta")
-    return isinstance(patch_meta, Mapping) and bool(patch_meta.get("infra_resume_eligible"))
+    return isinstance(patch_meta, Mapping) and bool(patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE))
 
 
 def scored_attempts(records: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

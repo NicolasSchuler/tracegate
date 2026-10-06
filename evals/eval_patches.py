@@ -32,7 +32,7 @@ class _ParsedDiffEntry:
     def real_paths(self) -> list[str]:
         out: list[str] = []
         for path in (self.old_path, self.new_path, self.diff_old_path, self.diff_new_path):
-            if path in {None, "/dev/null"}:
+            if path is None or path == "/dev/null":
                 continue
             normalized = str(PurePosixPath(path.replace("\\", "/")))
             if normalized not in out:
@@ -281,7 +281,7 @@ def _backup_diff_target_files(*, cwd: Path, diff: str) -> dict[str, bytes]:
 def _deleted_diff_target_paths(diff: str) -> list[str]:
     deleted_paths: list[str] = []
     for entry in _parse_diff_entries(diff):
-        if entry.new_path != "/dev/null" or entry.old_path in {None, "/dev/null"}:
+        if entry.new_path != "/dev/null" or entry.old_path is None or entry.old_path == "/dev/null":
             continue
         normalized = str(PurePosixPath(entry.old_path.replace("\\", "/")))
         if normalized not in deleted_paths:

@@ -309,6 +309,8 @@ class TepNodeState:
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> TepNodeState:
         data = payload if isinstance(payload, dict) else {}
+        task_criteria_raw = data.get("task_criteria")
+        validation_buffer_raw = data.get("validation_buffer")
         state = cls(
             node_id=str(data.get("node_id") or ""),
             actor_blocks={
@@ -330,9 +332,7 @@ class TepNodeState:
             critic_prompt=str(data.get("critic_prompt") or ""),
             task_criteria=[
                 str(item)
-                for item in (
-                    data.get("task_criteria") if isinstance(data.get("task_criteria"), list) else []
-                )
+                for item in (task_criteria_raw if isinstance(task_criteria_raw, list) else [])
             ],
             temperature=float(data.get("temperature") or 0.6),
             update_count=int(data.get("update_count") or 0),
@@ -341,9 +341,7 @@ class TepNodeState:
             validation_buffer=[
                 TepNodeValidationEntry.from_dict(item)
                 for item in (
-                    data.get("validation_buffer")
-                    if isinstance(data.get("validation_buffer"), list)
-                    else []
+                    validation_buffer_raw if isinstance(validation_buffer_raw, list) else []
                 )
             ],
         )

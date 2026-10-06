@@ -16,6 +16,7 @@ from typing import Any
 
 from baselines.case_information import CASE_INFO_POLICY
 from baselines.openai_compat import normalize_compat_profile
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL, AttemptRecord
 
 from . import _json as json
 from .adaptive_online_policy import ACTION_INVOKE_HELPER, ACTION_SKIP_HELPER
@@ -627,7 +628,7 @@ def _collect_dependency_versions(*, mode: str) -> dict[str, str]:
         out: dict[str, str] = {}
         for dist in importlib_metadata.distributions():
             try:
-                name = dist.metadata.get("Name")
+                name = dist.name
                 version = dist.version
             except Exception:
                 continue
@@ -696,7 +697,7 @@ def _build_base_record(
     attempt_metadata: dict[str, Any],
     model_metadata: dict[str, Any],
     context_protocol: str = "monolithic",
-) -> dict[str, Any]:
+) -> AttemptRecord:
     """Construct the skeleton JSONL record shared by every attempt."""
     return {
         "schema_version": EVAL_RECORD_SCHEMA_VERSION,
@@ -735,7 +736,7 @@ def _empty_attempt_metadata(*, attempt: int) -> dict[str, Any]:
         "stage_a_chars_returned": 0,
         "stage_a_request_success": None,
         "stage_b_prompt_chars": None,
-        "prompt_chars_total": 0,
+        KEY_PROMPT_CHARS_TOTAL: 0,
         "completion_chars_total": 0,
         "chars_input": 0,
         "chars_output": 0,
@@ -1110,7 +1111,7 @@ def _materialize_attempt_metadata_request(
     metadata["stage_b_prompt_chars"] = len(request.prompt)
     normalized_prompt_chars = max(0, int(request.prompt_chars_total))
     normalized_completion_chars = max(0, int(request.completion_chars_total))
-    metadata["prompt_chars_total"] = normalized_prompt_chars
+    metadata[KEY_PROMPT_CHARS_TOTAL] = normalized_prompt_chars
     metadata["completion_chars_total"] = normalized_completion_chars
     metadata["chars_input"] = normalized_prompt_chars
     metadata["chars_output"] = normalized_completion_chars

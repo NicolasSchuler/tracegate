@@ -577,7 +577,7 @@ def evidence_chars_by_type(
     ``seed`` is the whole-file seed bundle; Stage-A blocks are split by request type.
     Lets analysis check that restricted actions really deliver less (ATT-03/04/06).
     """
-    out = dict.fromkeys(EVIDENCE_CHAR_TYPES, 0)
+    out: dict[str, int] = dict.fromkeys(EVIDENCE_CHAR_TYPES, 0)
     out["snapshot"] = len(snapshot_text or "")
     out["snapshot_lite"] = len(snapshot_lite_text or "")
     out["seed"] = int(seed.chars_returned) if seed is not None else 0

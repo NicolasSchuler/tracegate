@@ -7,7 +7,8 @@ per-run diagnostic metadata.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from collections.abc import Mapping
+from typing import Any, TypedDict, cast
 
 
 class UsagePayload(TypedDict, total=False):
@@ -80,75 +81,228 @@ class ContextRequestPayload(TypedDict, total=False):
     sufficiency_rationale: str
 
 
-class PatcherMeta(TypedDict, total=False):
-    """Diagnostic metadata emitted by a single patcher run.
+class StructuredOutputAttempt(TypedDict, total=False):
+    """One structured-output stage tried while proposing edits."""
 
-    Captures subprocess outcomes, LLM configuration, token usage, retry
-    state, fallback transitions, and forced-patch override details so that
-    every run can be fully reconstructed from its metadata alone.
+    mode: str
+    ok: bool
+    error: str
+    status: int | None
+    terminal: bool
+    parse_error: str
+    edits_shape: str
 
-    Attributes:
-        error (str): Human-readable error message if the run failed.
-        returncode (int): Process exit code from the patcher subprocess.
-        stdout (str): Captured standard output from the patcher subprocess.
-        stderr (str): Captured standard error from the patcher subprocess.
-        timed_out (bool): Whether the run exceeded its time limit.
-        timeout_sec (float): Time limit in seconds that was applied to the run.
-        llm_call_count (int): Number of LLM API calls made during the run.
-        usage (UsagePayload): Aggregated token-usage statistics for the run.
-        status (int): HTTP status code from the last LLM API response.
-        body (str): Raw response body from the last LLM API call.
-        exc (str): Serialised exception string if an unexpected error was raised.
-        attempt (int): Retry-attempt number (1-based) for this patcher invocation.
-        base_url (str): Base URL of the LLM API endpoint used.
-        model (str): Identifier of the LLM model used.
-        response_mode (str): Sampling or response strategy requested from the LLM.
-        temperature (float): Sampling temperature passed to the LLM.
-        max_tokens (int): Maximum token budget allowed for the LLM response.
-        max_propose_sec (float): Time limit in seconds for the patch-proposal phase.
-        request_context_duration_sec (float): Wall-clock time spent gathering context.
-        fallback_from (str): Strategy name from which execution fell back.
-        fallback_reason (str): Explanation of why the fallback was triggered.
-        forced_patch_attempt (bool): Whether a forced-patch override was attempted.
-        forced_patch_target (str): Path or identifier targeted by the forced patch.
-        forced_patch_reason (str): Reason the forced patch was applied.
-        forced_patch_skipped (bool): Whether the forced-patch attempt was skipped.
-        forced_patch_skip_reason (str): Short reason code for skipping the forced patch.
-        forced_patch_skip_detail (str): Detailed explanation for skipping the forced patch.
-        reason (str): General-purpose reason string describing the patcher outcome.
-    """
+
+class ProcessMeta(TypedDict, total=False):
+    """The outcome of a patcher run: error, subprocess result and HTTP status."""
 
     error: str
+    reason: str
+    exc: str
     returncode: int
     stdout: str
     stderr: str
     timed_out: bool
     timeout_sec: float
-    llm_call_count: int
-    usage: UsagePayload
     status: int
     body: str
-    exc: str
+    path: str
+    file: str
     attempt: int
+
+
+class ModelRequestMeta(TypedDict, total=False):
+    """The model call: endpoint, sampling settings, usage and API-compat seed."""
+
     base_url: str
     model: str
     response_mode: str
     temperature: float
     max_tokens: int
     max_propose_sec: float
+    llm_call_count: int
+    usage: UsagePayload
+    finish_reason: str
+    compat_profile_requested: str
+    compat_profile_applied: str
+    compat_message: str
+    direct_output_requested: bool
+    allow_reasoning_fallback: bool
+    enable_thinking: bool
+    content_present: bool
+    empty_content_with_reasoning: bool
+    used_reasoning_fallback: bool
+    final_text_chars: int
+    api_compat_seed_requested: int | None
+    api_compat_seed_acknowledged: bool | None
+    api_compat_seed_response: int | None
+
+
+class TransportMeta(TypedDict, total=False):
+    """HTTP transport: timeouts, retries and protocol version."""
+
+    effective_timeout_sec: float
+    remaining_budget_sec: float | None
+    transport_impl: str
+    transport_http2_requested: bool
+    transport_http2_effective: bool
+    transport_http2_fallback_used: bool
+    transport_http_version: str
+    transport_max_retries: int
+    transport_retry_limit: int
+    transport_retry_limit_effective: int
+    transport_retry_backoff_base_sec: float
+    transport_retry_backoff_max_sec: float
+    transport_retry_count: int
+    transport_retry_attempts: list[dict[str, Any]]
+    transport_error: str
+
+
+class ResponseMeta(TypedDict, total=False):
+    """What came back: raw text kept for diagnosis, parse errors and reasoning."""
+
+    response: str
+    raw_response: str
+    payload: str
+    parse_error: str
+    reasoning_content_present: bool
+    reasoning_content_chars: int
+    reasoning_present: bool
+    reasoning_chars: int
+    structured_output_mode: str
+    structured_output_attempts: list[StructuredOutputAttempt]
+    edits_payload_shape: str
+
+
+class RequestContextMeta(TypedDict, total=False):
+    """Stage A: the context request and its retries."""
+
     request_context_duration_sec: float
+    request_context_attempts: list[dict[str, Any]]
+    request_context_retry_count: int
+    request_context_transport_retry_count: int
+    request_context_strict_retry_count: int
+    request_context_strict_json: bool
+    request_context_strict_json_first: bool
+    request_context_response_format_fallback_used: bool
+    request_context_outcome: str
+    request_context_failure_kind: str
+    request_context_backend_unavailable: bool
+    request_context_effective_success: bool
+
+
+class GenerationMeta(TypedDict, total=False):
+    """Auxiliary generations: patch plan, free text, JSON and context compaction."""
+
+    plan_patch_max_tokens_requested: int
+    plan_patch_max_tokens: int
+    plan_patch_duration_sec: float
+    plan_patch_output_chars: int
+    text_generation_operation: str
+    text_generation_duration_sec: float
+    text_generation_max_tokens: int
+    json_generation_operation: str
+    json_generation_duration_sec: float
+    json_generation_max_tokens: int
+    compact_context_duration_sec: float
+    compact_context_target_chars: int
+    compact_context_input_chars: int
+    compact_context_output_chars: int
+    compact_context_output_truncated: bool
+
+
+class EditsMeta(TypedDict, total=False):
+    """Edit and full-file response handling."""
+
+    find_recovery_applied: bool
+    find_recovery_mode: str
+    find_recovery_modes: list[str]
+    full_file_supported: bool
+    full_file_support_reason: str
+    full_file_target_path: str
+    full_file_code_fence_stripped: bool
+    full_file_output_chars: int
+
+
+class FallbackMeta(TypedDict, total=False):
+    """A fallback to another response mode, or a runner-forced patch."""
+
     fallback_from: str
     fallback_reason: str
+    fallback_meta: PatcherMeta
+    fallback_trigger: PatcherMeta
+    edits_response_mode: str
+    edits_response_attempts: list[StructuredOutputAttempt]
     forced_patch_attempt: bool
     forced_patch_target: str
     forced_patch_reason: str
     forced_patch_skipped: bool
     forced_patch_skip_reason: str
     forced_patch_skip_detail: str
-    reason: str
+
+
+class ProbeMeta(TypedDict, total=False):
+    """Server-readiness and context-window probes."""
+
+    server_ready: bool
+    server_ready_probe_provider: str
+    server_ready_probe_url: str
+    server_ready_probe_attempts: list[dict[str, Any]]
+    server_ready_probe_error: str
+    server_ready_probe_duration_sec: float
+    context_window_source: str
+    context_window_probe_provider: str
+    context_window_probe_url: str
+    context_window_probe_attempts: list[dict[str, Any]]
+    context_window_probe_error: str
+    context_window_probe_duration_sec: float
+
+
+class InfraMeta(TypedDict, total=False):
+    """Infrastructure failures that make a unit eligible for resume."""
+
     infra_failure_kind: str
     infra_resume_eligible: bool
     infra_source: str
+
+
+class PatcherMeta(
+    ProcessMeta,
+    ModelRequestMeta,
+    TransportMeta,
+    ResponseMeta,
+    RequestContextMeta,
+    GenerationMeta,
+    EditsMeta,
+    FallbackMeta,
+    ProbeMeta,
+    InfraMeta,
+    total=False,
+):
+    """Diagnostic metadata emitted by a single patcher run (X-03).
+
+    Composed per concern so each part names the keys one stage writes. Callers
+    still add keys of their own (the harness merges patcher metadata into the
+    attempt's ``patch_meta``), so readers should use ``.get``.
+    """
+
+
+def copy_patcher_meta(meta: Mapping[str, Any] | None) -> PatcherMeta:
+    """A shallow copy of *meta* (empty for ``None``), typed as :class:`PatcherMeta`.
+
+    Patcher metadata also arrives as plain dicts (the baseline compat helpers can't
+    import this module), so the copy is where it takes on the declared type.
+    """
+    return cast(PatcherMeta, dict(meta or {}))
+
+
+def as_patcher_meta(meta: dict[str, Any]) -> PatcherMeta:
+    """*meta* itself (not a copy), typed as :class:`PatcherMeta`.
+
+    For metadata the harness builds with keys of its own and keeps updating after it
+    is attached to a result.
+    """
+    return cast(PatcherMeta, meta)
 
 
 JSONDict = dict[str, Any]
@@ -157,7 +311,20 @@ JSONDict = dict[str, Any]
 __all__ = [
     "ContextRequestEntry",
     "ContextRequestPayload",
+    "EditsMeta",
+    "FallbackMeta",
+    "GenerationMeta",
+    "InfraMeta",
     "JSONDict",
+    "ModelRequestMeta",
     "PatcherMeta",
+    "ProbeMeta",
+    "ProcessMeta",
+    "RequestContextMeta",
+    "ResponseMeta",
+    "StructuredOutputAttempt",
+    "TransportMeta",
     "UsagePayload",
+    "as_patcher_meta",
+    "copy_patcher_meta",
 ]

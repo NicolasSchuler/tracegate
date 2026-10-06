@@ -37,14 +37,16 @@ class FrameDict(TypedDict, total=False):
 
     Attributes:
         file: Absolute path to the source file.
-        file_rel: Repository-relative path to the source file.
+        file_rel: Path relative to the working directory, or ``None`` outside it.
         line: Line number (int) or a sentinel string for unavailable frames.
         function: Qualified function name at this frame.
-        module: Python module name containing the function.
-        code: Source line text at the frame's current line.
+        module: Python module name containing the function, when known.
+        code: Source line text at the frame's current line, when available.
         source: Surrounding source snippet with start/end line numbers.
         locals: Local variable values serialised to a JSON-compatible form.
         locals_meta: Per-variable metadata (type, shape, array stats, etc.).
+        locals_truncated: ``True`` when locals beyond ``max_items`` were dropped.
+        locals_truncated_keys: How many locals were dropped.
         args: Function argument values serialised to a JSON-compatible form.
         args_meta: Per-argument metadata mirroring ``locals_meta``.
         arg_names: Ordered list of positional argument names.
@@ -52,14 +54,16 @@ class FrameDict(TypedDict, total=False):
     """
 
     file: str
-    file_rel: str
+    file_rel: str | None
     line: int | str
     function: str
-    module: str
-    code: str
+    module: str | None
+    code: str | None
     source: SourceDict
     locals: dict[str, Any]
     locals_meta: dict[str, dict[str, Any]]
+    locals_truncated: bool
+    locals_truncated_keys: int
     args: dict[str, Any]
     args_meta: dict[str, dict[str, Any]]
     arg_names: list[str]

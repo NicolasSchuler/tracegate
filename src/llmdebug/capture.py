@@ -31,6 +31,7 @@ from .serialize import (
     serialize_locals_bundle,
     truncate_str,
 )
+from .snapshot_types import FrameDict, SourceDict, SourceLineDict
 
 SCHEMA_VERSION = DEBUG_SESSION_SCHEMA_VERSION
 
@@ -204,7 +205,7 @@ def get_source_snippet(
     lineno: int,
     ctx: int,
     module_globals: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> SourceDict:
     """Extract source code around a line.
 
     Reads through ``linecache``, the cache ``traceback`` already filled for this
@@ -218,7 +219,7 @@ def get_source_snippet(
             return {}
         start_line = max(lineno - ctx, 1)
         end_line = max(lineno + ctx, start_line)
-        snippet: list[dict[str, Any]] = [
+        snippet: list[SourceLineDict] = [
             {"lineno": line_no, "code": line.rstrip("\n")}
             for line_no, line in enumerate(lines[start_line - 1 : end_line], start=start_line)
         ]
@@ -321,7 +322,7 @@ def _extract_tb_pairs(tb: types.TracebackType, cfg: SnapshotConfig) -> list[tupl
 
 
 def _add_locals_safe(
-    frame_dict: dict[str, Any],
+    frame_dict: FrameDict,
     frame: types.FrameType,
     cfg: SnapshotConfig,
     effective_redactors: list[Pattern[str]],
@@ -369,7 +370,7 @@ def _serialized_args(
 
 
 def _add_locals_meta(
-    frame_dict: dict[str, Any],
+    frame_dict: FrameDict,
     frame: types.FrameType,
     cfg: SnapshotConfig,
     warnings: list[str],
@@ -401,7 +402,7 @@ def _serialize_frame(
     cfg: SnapshotConfig,
     warnings: list[str],
     effective_redactors: list[Pattern[str]],
-) -> dict[str, Any]:
+) -> FrameDict:
     """Serialize a single traceback frame to a dict."""
     frame = tb_item.tb_frame
     lineno = ex_item.lineno or 0
@@ -414,7 +415,7 @@ def _serialize_frame(
     except Exception as e:
         _warn(warnings, f"relative path failed: {type(e).__name__}: {e}")
 
-    frame_dict: dict[str, Any] = {
+    frame_dict: FrameDict = {
         "file": ex_item.filename,
         "file_rel": file_rel,
         "line": lineno,
@@ -451,7 +452,7 @@ def collect_frames(
     *,
     warnings: list[str],
     redactors: list[Pattern[str]] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[FrameDict]:
     """Collect stack frames from traceback."""
     effective_redactors = (
         redactors

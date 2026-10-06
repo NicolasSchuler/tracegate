@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, TextIO
 
 from evals.eval_types import PATCHER_CONTEXT_LIMIT_ERROR_MARKERS
+from evals.record_keys import KEY_ADAPTIVE_PROGRESS_STOP_NOTE, KEY_INFRA_RESUME_ELIGIBLE
 
 _ANSI_RESET = "\x1b[0m"
 _ANSI_GREEN = "\x1b[32m"
@@ -131,7 +132,7 @@ def _is_infra_interrupted_records(case_records: Sequence[Mapping[str, Any]]) -> 
     for record in case_records:
         patch_meta = record.get("patch_meta")
         resume_eligible = isinstance(patch_meta, Mapping) and bool(
-            patch_meta.get("infra_resume_eligible")
+            patch_meta.get(KEY_INFRA_RESUME_ELIGIBLE)
         )
         if str(record.get("record_type") or "attempt").strip() == "infra_event":
             saw_infra = saw_infra or resume_eligible
@@ -200,9 +201,9 @@ def normalize_failure_reason(
 
     adaptive_stop_reason = _first_reason(
         [
-            patch_meta.get("adaptive_progress_stop_note"),
+            patch_meta.get(KEY_ADAPTIVE_PROGRESS_STOP_NOTE),
             patch_meta.get("adaptive_progress_stop_reason"),
-            attempt_meta.get("adaptive_progress_stop_note"),
+            attempt_meta.get(KEY_ADAPTIVE_PROGRESS_STOP_NOTE),
             attempt_meta.get("adaptive_progress_stop_reason"),
         ]
     )

@@ -49,6 +49,7 @@ from baselines.openai_compat import (
     BASELINE_OPENAI_ALLOW_REASONING_FALLBACK_DEFAULT,
     BASELINE_OPENAI_ENABLE_THINKING_DEFAULT,
 )
+from evals.record_keys import KEY_PROMPT_CHARS_TOTAL
 
 from .base import ContextRequestResult, Patcher, PatchResult
 from .openai_compat_patcher import (
@@ -57,7 +58,7 @@ from .openai_compat_patcher import (
     _normalize_base_url,
     _probe_server_ready,
 )
-from .payload_types import PatcherMeta
+from .payload_types import PatcherMeta, copy_patcher_meta
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +368,7 @@ def _normalize_baseline_metrics(raw: Any) -> dict[str, Any] | None:
         "reported_tokens_completion",
         "reported_tokens_total",
         "reported_tokens_reasoning",
-        "prompt_chars_total",
+        KEY_PROMPT_CHARS_TOTAL,
         "completion_chars_total",
         "chars_input",
         "chars_output",
@@ -439,7 +440,7 @@ def _normalize_baseline_metrics(raw: Any) -> dict[str, Any] | None:
 def _exact_baseline_char_totals(metrics: dict[str, Any] | None) -> tuple[int, int] | None:
     if not isinstance(metrics, dict):
         return None
-    prompt_chars = metrics.get("prompt_chars_total")
+    prompt_chars = metrics.get(KEY_PROMPT_CHARS_TOTAL)
     if not isinstance(prompt_chars, int):
         prompt_chars = metrics.get("chars_input")
     if not isinstance(prompt_chars, int):
@@ -717,13 +718,15 @@ class BaselinePatcher(Patcher):
         """Probe the OpenAI-compatible backend used by the baseline adapter."""
         base_url = _normalize_base_url(self.config.api_base_url)
         api_key = self.config.api_key or _default_api_key()
+        api_timeout_sec = self.config.api_timeout_sec
+        assert api_timeout_sec is not None  # the config's __post_init__ resolves it
         ready, meta = _probe_server_ready(
             base_url=base_url,
             api_key=api_key,
-            timeout_sec=self.config.api_timeout_sec,
+            timeout_sec=api_timeout_sec,
             http2=False,
         )
-        result_meta: PatcherMeta = dict(meta or {})
+        result_meta = copy_patcher_meta(meta)
         result_meta.setdefault("base_url", base_url)
         result_meta.setdefault(
             "model",
@@ -915,7 +918,7 @@ class BaselinePatcher(Patcher):
             exact_char_totals = _exact_baseline_char_totals(baseline_metrics)
             if exact_char_totals is not None:
                 prompt_chars_total, completion_chars_total = exact_char_totals
-                meta["prompt_chars_total"] = prompt_chars_total
+                meta[KEY_PROMPT_CHARS_TOTAL] = prompt_chars_total
                 meta["completion_chars_total"] = completion_chars_total
                 meta["chars_input"] = prompt_chars_total
                 meta["chars_output"] = completion_chars_total
