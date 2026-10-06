@@ -32,6 +32,10 @@ analysis/figures/
 # Mutation testing
 .mutmut-cache/
 
+# Local quality assets and dated internal research/review notes
+/quality/
+/docs/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md
+
 # llmdebug output (for development)
 .llmdebug/
 
@@ -76,9 +80,6 @@ swebench-llama-server-*.log
 swebench-generate-launch-*.log
 .last
 *.json
-!quality/coverage_baseline.json
-!quality/coverage_evals_baseline.json
-!quality/type_coverage_baseline.json
 !evals/cases/**/case.json
 !pyrightconfig.evals.json
 !tests/golden/eval_runs/environment.json
