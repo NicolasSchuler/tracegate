@@ -128,6 +128,7 @@ from evals.eval_config import (
     _parse_adaptive_online_action_score_biases,
 )
 from evals.eval_evidence import (
+    DeliveredEvidence,
     _collect_file_index_lines,
     _compute_evidence_fingerprint,
     _evidence_ids_from_items,
@@ -185,8 +186,6 @@ from evals.eval_prompts import (
     _build_retry_history_section,
     _build_snapshot_prompt_text,
     _format_snapshot_index_section,
-    _format_snapshot_payload_section,
-    _format_snapshot_section,
     _is_generic_snapshot_justification,
     _render_retry_packet,
     prune_snapshot_for_prompt,
@@ -4976,19 +4975,31 @@ def _run_one_condition_attempts(
         attempt_metadata["seed_bundle_chars"] = (
             int(structured_seed_data.chars_returned) if structured_seed_active else 0
         )
-        stage_b_snapshot_section_text = ""
-        if stage_b_snapshot_in_prompt and not is_delta_retry:
-            # Same rendering as the Stage-B section builder (evals.eval_prompts).
-            stage_b_snapshot_section_text = (
-                _format_snapshot_payload_section(stage_b_snapshot_prompt_text)
-                if stage_b_snapshot_prompt_text.strip()
-                else _format_snapshot_section(stage_b_snapshot_for_prompt or {})
-            )
+        # ATT-03: audit the evidence that was delivered, not the bundles that were built.
+        # Sizes come from the final prompt's sections, items from the merged, delta-filtered
+        # set, so deduplicated and truncated evidence is not counted twice or in full.
+        delivered_section_chars = prompt_budget_result.section_chars
+        delivered_section_original_chars = prompt_budget_result.section_original_chars
+        stage_a_section_original_chars = int(
+            delivered_section_original_chars.get("stage_a_context", 0)
+        )
         attempt_metadata["evidence_chars_by_type"] = evidence_chars_by_type(
-            snapshot_text=stage_b_snapshot_section_text,
-            snapshot_lite_text=snapshot_lite_context if adaptive_snapshot_lite_included else "",
-            seed=structured_seed_data if structured_seed_active else None,
-            stage_a=stage_a_data,
+            DeliveredEvidence(
+                snapshot_chars=int(delivered_section_chars.get("snapshot", 0)),
+                snapshot_lite_chars=int(delivered_section_chars.get("snapshot_lite", 0)),
+                items=bookkeeping_evidence_items_for_prompt,
+                seed_item_ids=frozenset(
+                    _evidence_ids_from_items(structured_seed_data.evidence_items)
+                    if structured_seed_active
+                    else []
+                ),
+                stage_a_retained_fraction=(
+                    int(delivered_section_chars.get("stage_a_context", 0))
+                    / stage_a_section_original_chars
+                    if stage_a_section_original_chars > 0
+                    else 0.0
+                ),
+            )
         )
         attempt_metadata["prompt_order_mode"] = normalized_prompt_order_mode
         attempt_metadata["adaptive_tep_mode_requested"] = requested_adaptive_tep_mode

@@ -171,6 +171,15 @@ POLICY_DEFAULTS_VERSION = 2
 (2026-10-04 review): decay 1.0, decayed per arm (POL-01); random greedy tie-breaking
 (POL-24); no feature equal to a combination of ``bias`` and others (POL-06). Earlier runs
 are version 1."""
+EVIDENCE_POLICY_REVISION = 2
+"""Adaptive evidence-delivery contract, recorded in ``patcher_config`` so the settings and
+patcher fingerprints distinguish two runs that share ``EVAL_RECORD_SCHEMA_VERSION``.
+Revision 2 (2026-10-04 review, Phase 1C): restricted actions get no fallback bundle and no
+monolithic project-file context, the whole-file seed bundle is limited to the unrestricted
+Stage-A actions, the full snapshot reaches Stage-B only when the executed action grants it,
+and ``adaptive_snapshot_included`` / ``stage_b_snapshot_in_prompt`` /
+``evidence_chars_by_type`` describe the delivered prompt (ATT-03, ATT-04, ATT-06). Earlier
+runs are revision 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}
@@ -1506,3 +1515,7 @@ class PromptBudgetResult:
     overflow_chars: int
     dropped_sections: list[str]
     section_status: dict[str, str] = field(default_factory=dict)
+    section_chars: dict[str, int] = field(default_factory=dict)
+    """Characters each section retained in the final prompt, by section key (ATT-03)."""
+    section_original_chars: dict[str, int] = field(default_factory=dict)
+    """Characters each section had before per-section and total budgets applied (ATT-03)."""

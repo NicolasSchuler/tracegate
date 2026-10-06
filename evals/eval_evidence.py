@@ -10,7 +10,8 @@ import ast
 import os
 import re
 import shlex
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -580,26 +581,48 @@ def execute_context_requests(
 EVIDENCE_CHAR_TYPES = ("snapshot", "snapshot_lite", "seed", "file", "search", "frame", "local_var")
 
 
-def evidence_chars_by_type(
-    *,
-    snapshot_text: str,
-    snapshot_lite_text: str,
-    seed: StageAContextData | None,
-    stage_a: StageAContextData,
-) -> dict[str, int]:
+@dataclass(frozen=True)
+class DeliveredEvidence:
+    """The evidence a Stage-B prompt actually carried (ATT-03/04/06 audit input).
+
+    ``items`` are the merged, retry-filtered evidence items that fed the
+    ``items`` are the merged, retry-filtered evidence items that fed the
+    ``stage_a_context`` section, so a file supplied by both the seed bundle and a Stage-A
+    request is counted once. ``seed_item_ids`` attributes those single copies to the seed
+    bundle. ``snapshot_chars`` / ``snapshot_lite_chars`` and ``stage_a_retained_fraction``
+    come from the final prompt's per-section sizes, which is how compaction replacement,
+    prompt-budget truncation and section drops are reflected.
+    """
+
+    snapshot_chars: int
+    snapshot_lite_chars: int
+    items: Sequence[Mapping[str, Any]]
+    seed_item_ids: frozenset[str] = frozenset()
+    stage_a_retained_fraction: float = 1.0
+
+
+def evidence_chars_by_type(delivered: DeliveredEvidence) -> dict[str, int]:
     """Characters of evidence that reached the Stage-B prompt, per evidence type.
 
-    ``seed`` is the whole-file seed bundle; Stage-A blocks are split by request type.
+    Counts the evidence as delivered rather than as requested: deduplicated by
+    ``_merge_evidence_items``, filtered to the new items on a delta retry, and scaled by
+    how much of the ``stage_a_context`` section survived compaction and the prompt budget.
     Lets analysis check that restricted actions really deliver less (ATT-03/04/06).
     """
     out: dict[str, int] = dict.fromkeys(EVIDENCE_CHAR_TYPES, 0)
-    out["snapshot"] = len(snapshot_text or "")
-    out["snapshot_lite"] = len(snapshot_lite_text or "")
-    out["seed"] = int(seed.chars_returned) if seed is not None else 0
-    for block in stage_a.blocks:
-        kind = str(block.get("type") or "")
-        if kind in out:
-            out[kind] += int(block.get("chars") or 0)
+    out["snapshot"] = max(0, int(delivered.snapshot_chars))
+    out["snapshot_lite"] = max(0, int(delivered.snapshot_lite_chars))
+    retained_fraction = min(1.0, max(0.0, float(delivered.stage_a_retained_fraction)))
+    if retained_fraction <= 0.0:
+        return out
+    for item in delivered.items:
+        if not isinstance(item, Mapping):
+            continue
+        evidence_id = str(item.get("id") or "")
+        kind = "seed" if evidence_id in delivered.seed_item_ids else str(item.get("type") or "")
+        if kind not in out:
+            continue
+        out[kind] += round(int(item.get("chars") or 0) * retained_fraction)
     return out
 
 

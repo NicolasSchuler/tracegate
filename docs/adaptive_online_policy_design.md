@@ -271,8 +271,15 @@ historical runs can be reproduced, and all are recorded in the run configuration
   payload, those actions get an empty Stage-A context (reason
   `restricted_action_no_valid_requests`) instead of the whole-file fallback bundle, and the
   whole-file seed bundle is only added for `invoke_helper` and `retry_helper_strict_json`.
+  A restricted action also keeps the `staged` context protocol when its request list ends up
+  empty, so the Stage-B prompt never falls back to the monolithic project-file context (ATT-03).
   `attempt_metadata.seed_bundle_chars` and `evidence_chars_by_type` (snapshot, snapshot_lite,
   seed, file, search, frame, local_var) record what reached the Stage-B prompt.
+  `evidence_chars_by_type` counts evidence as delivered: deduplicated across the seed bundle
+  and the Stage-A requests, filtered to the new items on a delta retry, and scaled by how much
+  of each prompt section survived compaction and the prompt budget. `stage_b_snapshot_in_prompt`
+  and `adaptive_snapshot_included` are derived from the final prompt sections too, so a delta
+  retry or a snapshot-replacing compaction records them as false (ATT-06).
 - **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
   logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
   rows at read time.
