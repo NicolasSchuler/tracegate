@@ -752,6 +752,8 @@ def _chat_completion(
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
                 error_meta
             )
+            backoff_sec = 0.0
+            retry_delay_exceeds_deadline = False
             if should_retry:
                 backoff_sec = _jittered_retry_delay_sec(
                     _chat_completion_retry_backoff_sec(
@@ -760,11 +762,16 @@ def _chat_completion(
                         max_sec=retry_backoff_max_sec,
                     ),
                     retry_after_sec=error_meta.get("retry_after_sec"),
-                    max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
-                if remaining_retry_budget_sec is not None:
-                    backoff_sec = min(backoff_sec, max(0.0, remaining_retry_budget_sec - 1e-3))
+                # Waiting less than the server asked for only buys another rejection:
+                # if the required delay doesn't fit the deadline, stop here (LLM-22).
+                retry_delay_exceeds_deadline = (
+                    remaining_retry_budget_sec is not None
+                    and backoff_sec >= remaining_retry_budget_sec
+                )
+                should_retry = not retry_delay_exceeds_deadline
+            if should_retry:
                 retry_meta: dict[str, Any] = {
                     "attempt": call_count,
                     "error": str(error_meta.get("error", "")),
@@ -807,6 +814,9 @@ def _chat_completion(
             final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
+            if retry_delay_exceeds_deadline:
+                final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
+                final_error_meta["transport_retry_delay_sec"] = backoff_sec
             return None, final_error_meta
 
         meta: PatcherMeta = {
@@ -1108,6 +1118,8 @@ async def _chat_completion_async(
             should_retry = attempt_index < max_retries and _is_retryable_chat_completion_error(
                 error_meta
             )
+            backoff_sec = 0.0
+            retry_delay_exceeds_deadline = False
             if should_retry:
                 backoff_sec = _jittered_retry_delay_sec(
                     _chat_completion_retry_backoff_sec(
@@ -1116,11 +1128,16 @@ async def _chat_completion_async(
                         max_sec=retry_backoff_max_sec,
                     ),
                     retry_after_sec=error_meta.get("retry_after_sec"),
-                    max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
-                if remaining_retry_budget_sec is not None:
-                    backoff_sec = min(backoff_sec, max(0.0, remaining_retry_budget_sec - 1e-3))
+                # Waiting less than the server asked for only buys another rejection:
+                # if the required delay doesn't fit the deadline, stop here (LLM-22).
+                retry_delay_exceeds_deadline = (
+                    remaining_retry_budget_sec is not None
+                    and backoff_sec >= remaining_retry_budget_sec
+                )
+                should_retry = not retry_delay_exceeds_deadline
+            if should_retry:
                 retry_meta: dict[str, Any] = {
                     "attempt": call_count,
                     "error": str(error_meta.get("error", "")),
@@ -1163,6 +1180,9 @@ async def _chat_completion_async(
             final_error_meta["transport_retry_count"] = len(retry_attempts)
             if retry_attempts:
                 final_error_meta["transport_retry_attempts"] = retry_attempts
+            if retry_delay_exceeds_deadline:
+                final_error_meta["transport_retry_stop_reason"] = "retry_delay_exceeds_deadline"
+                final_error_meta["transport_retry_delay_sec"] = backoff_sec
             return None, final_error_meta
 
         meta: PatcherMeta = {
@@ -1270,23 +1290,29 @@ def _retry_after_meta(raw: str) -> PatcherMeta:
     return {"retry_after_sec": max(0.0, seconds)}
 
 
+_RETRY_AFTER_MAX_SEC = 120.0
+"""Sanity ceiling on an honoured ``Retry-After``, for runs without a deadline (LLM-22)."""
+
+
 def _jittered_retry_delay_sec(
     backoff_sec: float,
     *,
     retry_after_sec: object,
-    max_sec: float,
     rng: random.Random | None = None,
 ) -> float:
     """The delay before a retry: jittered backoff, but at least the server's Retry-After.
 
     Equal jitter (half the backoff plus a random share of the other half) keeps parallel
-    workers from retrying in lockstep after a shared outage. A ``Retry-After`` is
-    honoured up to the backoff cap, *max_sec* (LLM-22).
+    workers from retrying in lockstep after a shared outage. The exponential backoff is
+    capped by its own ``max_sec``; the server's retry floor is not, since clipping a
+    ``Retry-After: 60`` to an eight-second cap only buys another rejection (LLM-22).
+    The caller compares the result with the remaining deadline and stops instead of
+    retrying early; ``_RETRY_AFTER_MAX_SEC`` bounds a deadline-less run.
     """
     base = max(0.0, float(backoff_sec))
     delay = base / 2 + (rng or random).uniform(0.0, base / 2)
     if isinstance(retry_after_sec, (int, float)) and retry_after_sec > 0:
-        delay = max(delay, min(float(retry_after_sec), max(float(max_sec), base)))
+        delay = max(delay, min(float(retry_after_sec), _RETRY_AFTER_MAX_SEC))
     return delay
 
 

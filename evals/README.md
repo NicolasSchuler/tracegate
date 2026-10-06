@@ -1169,6 +1169,11 @@ Key flags:
 - `--openai-transport-retry-backoff-base-sec <float>` and
   `--openai-transport-retry-backoff-max-sec <float>`: exponential backoff profile for those
   transport retries (defaults `1.0` and `8.0` seconds).
+- a `Retry-After` response header is a retry floor and is honoured above that cap (bounded at
+  120 seconds for runs without a propose deadline). When the resulting wait no longer fits the
+  remaining `--openai-max-propose-sec` budget, the request fails instead of retrying inside a
+  window the server already refused (`transport_retry_stop_reason=retry_delay_exceeds_deadline`,
+  LLM-22).
 - `--openai-transport-recovery` / `--no-openai-transport-recovery`: runner-managed outage
   recovery for OpenAI-compatible backends (default: enabled). When a high-level OpenAI
   operation still ends in a terminal transport/backend-unavailable failure after its internal
