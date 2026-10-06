@@ -113,7 +113,8 @@ def test_stalled_state_after_repeated_signature_without_hypothesis_change(tmp_pa
     failure_signature = build_failure_signature(snapshot)
 
     record: dict[str, Any] | None = None
-    for _ in range(3):
+    # The first call binds new evidence; only the three that add nothing count as repairs.
+    for _ in range(4):
         record = advance_rca_attempt(
             out_dir=out_dir,
             request=RCAAttemptRequest(
@@ -269,7 +270,7 @@ def test_pass_carries_forward_for_the_same_failure(tmp_path: Path) -> None:
 def test_denied_action_keeps_a_stalled_session_stalled(tmp_path: Path) -> None:
     """RCA-04: "stalled" isn't an action target, and a denial used to reset it to captured."""
     out_dir = str(tmp_path)
-    for _ in range(3):
+    for _ in range(4):
         stalled = advance_rca_attempt(
             out_dir=out_dir,
             request=RCAAttemptRequest(
@@ -312,3 +313,120 @@ def test_strict_gate_enforces_the_transition_matrix(tmp_path: Path) -> None:
     assert record["gate_feedback"]["allowed"] is False
     assert record["gate_feedback"]["triggered_checks"] == ["illegal_transition"]
     assert record["state"] == "evidence_bound"
+
+
+_STRICT_WALK = (
+    ("capture", {}),
+    ("bind_evidence", {"evidence_refs": ("crash_frame:app.py:42:parse_input",)}),
+    ("hypothesize", {"hypothesis": "parse_input does not guard the empty string"}),
+    ("plan", {"experiment_plan": "return early for empty input and re-run the test"}),
+    ("change", {"proposed_change_summary": "added an empty-string guard"}),
+    ("verify", {"verification_result": {"status": "pass"}}),
+    ("resolve", {}),
+)
+
+
+def test_strict_workflow_walks_capture_to_resolved(tmp_path: Path) -> None:
+    """RCA-06: bookkeeping steps must not stall a first-time strict-mode walk."""
+    out_dir = str(tmp_path)
+    signature = "ValueError:AAA"
+    states: list[str] = []
+    for action, extra in _STRICT_WALK:
+        record = advance_rca_attempt(
+            out_dir=out_dir,
+            request=RCAAttemptRequest(
+                session_id="s",
+                action=action,
+                failure_signature=signature,
+                gate_mode="strict",
+                **extra,
+            ),
+        )
+        assert record["gate_feedback"]["allowed"] is True, (action, record["gate_warnings"])
+        assert "stalled" not in " ".join(record["gate_warnings"]).lower()
+        states.append(record["state"])
+
+    assert states == [
+        "captured",
+        "evidence_bound",
+        "hypothesized",
+        "planned",
+        "changed",
+        "verified",
+        "resolved",
+    ]
+
+
+def test_repeated_unproductive_repairs_still_stall(tmp_path: Path) -> None:
+    """RCA-06: the repair streak keeps counting change attempts that bring nothing new."""
+    out_dir = str(tmp_path)
+    signature = "ValueError:AAA"
+    for action, extra in _STRICT_WALK[:4]:
+        advance_rca_attempt(
+            out_dir=out_dir,
+            request=RCAAttemptRequest(
+                session_id="s",
+                action=action,
+                failure_signature=signature,
+                gate_mode="strict",
+                **extra,
+            ),
+        )
+
+    record: dict[str, Any] | None = None
+    for _ in range(3):
+        record = advance_rca_attempt(
+            out_dir=out_dir,
+            request=RCAAttemptRequest(
+                session_id="s",
+                action="change",
+                failure_signature=signature,
+                gate_mode="soft",
+                stall_threshold=3,
+            ),
+        )
+
+    assert record is not None
+    assert record["repair_streak"] == 3
+    assert record["state"] == "stalled"
+    assert any("stalled" in warning.lower() for warning in record["gate_warnings"])
+
+
+def test_denied_action_does_not_trip_stall_detection(tmp_path: Path) -> None:
+    """RCA-06: a rejected request must not change the state or the allowed actions."""
+    out_dir = str(tmp_path)
+    signature = "ValueError:AAA"
+    for _ in range(3):
+        before = advance_rca_attempt(
+            out_dir=out_dir,
+            request=RCAAttemptRequest(
+                session_id="s",
+                action="bind_evidence",
+                failure_signature=signature,
+                evidence_refs=("crash_frame:app.py:42:parse_input",),
+                hypothesis="parse_input does not guard the empty string",
+                gate_mode="soft",
+                stall_threshold=3,
+            ),
+        )
+    assert before["state"] == "evidence_bound"
+    assert before["repair_streak"] == 2
+
+    # "verify" is not an edge out of "evidence_bound", so strict mode denies it. Evaluating
+    # the stall rule anyway used to persist "stalled" for this rejected request.
+    denied = advance_rca_attempt(
+        out_dir=out_dir,
+        request=RCAAttemptRequest(
+            session_id="s",
+            action="verify",
+            failure_signature=signature,
+            gate_mode="strict",
+            stall_threshold=2,
+        ),
+    )
+
+    assert denied["gate_feedback"]["allowed"] is False
+    assert "illegal_transition" in denied["gate_feedback"]["triggered_checks"]
+    assert denied["state"] == "evidence_bound"
+    assert denied["repair_streak"] == 2
+    assert denied["allowed_actions"] == before["allowed_actions"]

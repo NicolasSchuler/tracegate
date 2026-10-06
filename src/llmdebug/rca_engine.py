@@ -17,11 +17,13 @@ from .rca_transitions import (
     carry_forward_verification,
     default_next_required,
     derive_attempt_progress,
+    derive_repair_streak,
     normalize_action,
     resolve_attempt_values,
     resolve_merged_evidence_refs,
     resolve_previous_values,
     resolve_target_state,
+    verification_passed,
 )
 from .rca_types import RCAAttemptRecord, RCAAttemptRequest
 
@@ -62,6 +64,8 @@ def build_rca_attempt_record(
         - **attempt_id** / **session_id**: Echo of the input identifiers.
         - **state**: The resolved target :data:`RCAState` after this action.
         - **failure_signature** / **repeat_count**: Signature tracking.
+        - **repair_streak**: Consecutive unproductive repair attempts on this
+          signature; drives stall detection.
         - **evidence_refs**: Merged list of all evidence references.
         - **hypothesis** / **hypothesis_delta**: Current hypothesis text
           and whether it changed from the previous attempt.
@@ -89,7 +93,9 @@ def build_rca_attempt_record(
         previous_change_summary,
     ) = resolve_previous_values(previous)
 
+    stored_refs = resolve_merged_evidence_refs(previous_refs, [])
     merged_refs = resolve_merged_evidence_refs(previous_refs, list(request.evidence_refs))
+    evidence_advanced = len(merged_refs) > len(stored_refs)
     hypothesis_value, plan_value, proposed_change_value = resolve_attempt_values(
         previous_hypothesis=previous_hypothesis,
         previous_plan=previous_plan,
@@ -154,9 +160,26 @@ def build_rca_attempt_record(
     )
 
     target_state = resolve_target_state(previous_state, normalized_action, gate.allowed)
+    previous_repair_streak = int(previous.get("repair_streak") or 0) if previous else 0
+    # A denied action never ran, so it neither consumes nor clears the repair streak.
+    repair_streak = (
+        derive_repair_streak(
+            previous_streak=previous_repair_streak,
+            action=normalized_action,
+            progress=progress,
+            evidence_advanced=evidence_advanced,
+            verification_is_passing=verification_passed(verification_value),
+        )
+        if gate.allowed
+        else previous_repair_streak
+    )
     target_state, gate_warnings = apply_stall_rule(
         TransitionInputs(
-            action=normalized_action, progress=progress, stall_threshold=request.stall_threshold
+            action=normalized_action,
+            progress=progress,
+            stall_threshold=request.stall_threshold,
+            repair_streak=repair_streak,
+            gate_allowed=gate.allowed,
         ),
         target_state=target_state,
         gate_warnings=list(gate.warnings),
@@ -183,6 +206,7 @@ def build_rca_attempt_record(
         "state": target_state,
         "failure_signature": request.failure_signature,
         "repeat_count": repeat_count,
+        "repair_streak": repair_streak,
         "evidence_refs": merged_refs,
         "hypothesis": hypothesis_value or None,
         "hypothesis_delta": hypothesis_delta,

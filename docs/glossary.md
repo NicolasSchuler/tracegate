@@ -84,7 +84,7 @@ Alphabetical reference of key terms used across `llmdebug` documentation.
 
 **SourceMode** — Controls which stack frames receive inline source-context lines: `all` (every frame), `crash_only` (only the crash frame), or `none` (no source context). Reduces snapshot size in production captures. See: [Configuration Reference](configuration.md#parameter-reference).
 
-**Stall Detection** — A safety rule that marks the RCA state as `stalled` when a failure signature repeats at or above the stall threshold without hypothesis or plan advancement. Forces the debugger to gather new evidence or revise the hypothesis before retrying. See: [`rca_transitions.py`](../src/llmdebug/rca_transitions.py).
+**Stall Detection** — A safety rule that marks the RCA state as `stalled` when the repair streak for one failure signature reaches the stall threshold. The streak counts consecutive `bind_evidence`/`change`/`verify` attempts that bring no new evidence, no advanced hypothesis or plan, and no passing verification, so ordinary workflow steps never trip it. Forces the debugger to gather new evidence or revise the hypothesis before retrying. See: [`rca_transitions.py`](../src/llmdebug/rca_transitions.py).
 
 **Token Budget** — Deterministic per-section caps (retry packet, pytest output, snapshot summary, evidence blocks) governing how much of each content type is included in a prompt. Sections are truncated or dropped in a fixed order when the total cap is exceeded. See: [Evidence-First Protocol § Prompt Budgeting](evidence_first_protocol.md#prompt-budgeting).
 

@@ -155,8 +155,9 @@ evidence quality. Three modes control strictness:
 | **soft** (default) | Warnings emitted but action proceeds |
 | **strict** | Missing prerequisites block the action |
 
-Stall detection kicks in after a configurable number of repeated attempts in the
-same state (default: 3), moving the session to `stalled` with coaching hints.
+Stall detection kicks in after a configurable number of consecutive repair
+attempts that bring no new evidence, hypothesis, plan or passing verification
+(default: 3), moving the session to `stalled` with coaching hints.
 
 ## Module Map
 

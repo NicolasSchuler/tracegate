@@ -37,6 +37,7 @@ class RCAAttemptRecord(TypedDict):
     state: RCAState
     failure_signature: str
     repeat_count: int
+    repair_streak: int
     evidence_refs: list[str]
     hypothesis: str | None
     hypothesis_delta: str
