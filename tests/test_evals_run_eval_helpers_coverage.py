@@ -773,6 +773,30 @@ class TestPytestAndContainerHelpers:
             output_format="json", snapshot_condition=True
         )
 
+    @pytest.mark.parametrize("seed", [0, 4_294_967_295, 4_294_967_296, 8_589_934_593, -1, -7])
+    def test_deterministic_seed_boundaries_still_start_an_interpreter(self, seed: int) -> None:
+        """ORC-01: a PYTHONHASHSEED outside 0..4294967295 aborts interpreter startup."""
+        import os
+        import subprocess
+
+        env = run_eval._base_pytest_env(
+            output_format="json",
+            snapshot_condition=False,
+            settings=run_eval._ActiveRunSettings(deterministic=True, seed=seed),
+        )
+        hash_seed = env["PYTHONHASHSEED"]
+        assert 0 <= int(hash_seed) <= 4_294_967_295
+        completed = subprocess.run(
+            [sys.executable, "-c", "import os; print(os.environ['PYTHONHASHSEED'])"],
+            env={**os.environ, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == hash_seed
+
     def test_run_pytest_local_and_pooled(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

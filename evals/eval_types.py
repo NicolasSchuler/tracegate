@@ -556,12 +556,30 @@ class ContextCompactionBundle:
     replace_project_files: bool
 
 
+PYTHON_HASH_SEED_MODULUS = 4_294_967_296
+"""``PYTHONHASHSEED`` accepts 0..4294967295; anything else aborts interpreter startup."""
+
+
 @dataclass
 class _ActiveRunSettings:
     """Global mutable state for deterministic-seed propagation."""
 
     deterministic: bool = False
     seed: int | None = None
+
+    @property
+    def hash_seed(self) -> int | None:
+        """``PYTHONHASHSEED`` for the pytest subprocess, or ``None`` when not deterministic.
+
+        ORC-01: CPython rejects a ``PYTHONHASHSEED`` outside 0..4294967295 with a fatal
+        initialization error, so a negative or 32-bit-overflowing ``--seed`` used to stop
+        every pytest subprocess from starting. The raw seed still drives bandit exploration
+        and is what run metadata and the settings fingerprint record; only the hash seed is
+        reduced into range.
+        """
+        if not self.deterministic or self.seed is None:
+            return None
+        return int(self.seed) % PYTHON_HASH_SEED_MODULUS
 
 
 @dataclass(frozen=True)

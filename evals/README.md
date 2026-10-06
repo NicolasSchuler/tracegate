@@ -1138,7 +1138,7 @@ uv run python -m evals.run_eval \
 ```
 
 Key flags:
-- `--deterministic --seed <int>`: enforce deterministic mode; fails fast if OpenAI-compatible backend does not acknowledge seed support.
+- `--deterministic --seed <int>`: enforce deterministic mode; fails fast if OpenAI-compatible backend does not acknowledge seed support. The raw seed is what run metadata, the settings fingerprint and bandit exploration use; the pytest subprocess's `PYTHONHASHSEED` is `seed % 4294967296`, because CPython refuses to start outside `0..4294967295` (ORC-01).
 - `--record-prompt full|hash|none`: controls prompt persistence in `attempt_metadata`.
 - `--record-evidence full|hash|none`: controls evidence persistence in `attempt_metadata`.
 - `--record-env KEY` (repeatable): allowlist environment keys into `run_metadata`.
