@@ -127,16 +127,23 @@ def _candidate_from_record(
     )
 
 
-def _iter_python_candidates(trickybugs_root: Path) -> list[TrickyBugsCandidate]:
+def _iter_python_candidates(
+    trickybugs_root: Path, *, unreadable: list[Path] | None = None
+) -> list[TrickyBugsCandidate]:
+    """Scan *trickybugs_root* for Python candidates.
+
+    JSON files that can't be read or parsed are skipped and, if *unreadable* is
+    given, appended to it so the import summary can report them (X-07).
+    """
     discovered: list[TrickyBugsCandidate] = []
     for json_path in sorted(trickybugs_root.rglob("*.json")):
         try:
             if json_path.stat().st_size > _JSON_SCAN_BYTES_LIMIT:
                 continue
             payload = json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            continue
-        except json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
+            if unreadable is not None:
+                unreadable.append(json_path)
             continue
 
         origin = f"json:{json_path.relative_to(trickybugs_root)}"
@@ -192,7 +199,8 @@ def import_trickybugs(
     del data_root
     del jobs
 
-    candidates = _iter_python_candidates(trickybugs_root)
+    unreadable_json: list[Path] = []
+    candidates = _iter_python_candidates(trickybugs_root, unreadable=unreadable_json)
     skip_reasons: Counter[str] = Counter()
     imported_case_ids: list[str] = []
     attempted = 0
@@ -319,6 +327,8 @@ def import_trickybugs(
         "No synthetic marker-test conversion is used.",
         "Candidates without deterministic native test mappings are skipped.",
     ]
+    if unreadable_json:
+        notes.append(f"Ignored {len(unreadable_json)} unreadable JSON file(s) during the scan.")
     return ImportRunSummary(
         source="trickybugs",
         attempted=attempted,

@@ -404,20 +404,75 @@ baseline was invoked but could not produce any candidate repair.
 
 ## Configuration
 
-### Shared CLI flags
+### Baseline CLI flags
 
-These flags apply to all baselines via `run_eval.py`:
+Every `--baseline-*` flag of `run_eval.py`, also settable as a TOML key in a run
+config. The table is generated from the argument parser, so the defaults are the
+CLI's own:
 
-| Flag / TOML key | Description | Default |
-|-----------------|-------------|---------|
-| `--baseline <name>` | Shorthand for `--patcher baseline --baseline-name <name>` | — |
-| `--baseline-repo-dir` | Path to the cloned baseline repo | `baselines/repos/<clone_dir>` |
-| `--baseline-python` | Python executable for the baseline's isolated env | auto-detected from `baselines/envs/<name>/bin/python` |
-| `--baseline-process-timeout-sec` / `baseline_process_timeout_sec` | Subprocess wall-clock limit | `600.0` |
-| `--baseline-max-iterations` / `baseline_max_iterations` | Inner loop iteration count per harness attempt | `2` |
-| `--baseline-openai-compat-profile` | OpenAI-compatible request adaptation profile | `lmstudio_model_yaml` |
-| `--baseline-openai-allow-reasoning-fallback` | Use reasoning content as fallback when final content is empty | `true` (in shipped templates) |
-| `--baseline-hybrid-guidance-mode` / `baseline_hybrid_guidance_mode` | llmdebug augmentation mode for adaptive+baseline hybrids: `tuned_v1`, `fair_v1`, or `fixed_v1` | `tuned_v1` |
+<!-- BEGIN AUTO-GENERATED: BASELINE_CLI_DEFAULTS -->
+<!-- Rendered from the code by `python -m evals.doc_sync --write`; do not edit. -->
+
+| Flag | TOML key | CLI default | Description |
+|------|----------|-------------|-------------|
+| `--baseline` | `baseline` | unset | One-switch baseline selector. External baselines resolve to --patcher baseline --baseline-name NAME and auto-fill the standard baselines/repos/<repo> and baselines/envs/<name>/bin/python paths when present. Native shorthand 'cot_repair' resolves onto the native OpenAI path instead. |
+| `--baseline-name` | `baseline_name` | unset | External baseline adapter name (for --patcher baseline). E.g. ldb, intervenor, tracecoder, lambda_rlm, rlm. |
+| `--baseline-repo-dir` | `baseline_repo_dir` | unset | Path to the cloned external baseline repository (for --patcher baseline). |
+| `--baseline-python` | `baseline_python` | unset | Optional Python executable for the selected baseline runtime env. If omitted, run_eval requires baselines/envs/<baseline>/bin/python. |
+| `--baseline-process-timeout-sec` | `baseline_process_timeout_sec` | unset | Optional timeout for one baseline-owned subprocess attempt. Defaults to --openai-timeout-sec when unset. |
+| `--baseline-max-iterations` | `baseline_max_iterations` | unset | Max internal iterations per baseline invocation. Controls the adapter's debug/repair loop count independently of --k (which sets the harness-level retry count). Defaults to 2 when omitted. |
+| `--baseline-openai-compat-profile` | `baseline_openai_compat_profile` | `lmstudio_model_yaml` | Shared OpenAI-compatible request-shaping profile for external baselines. Use qwen_openai_raw for vLLM/SGLang-style Qwen endpoints, qwen_dashscope for DashScope-compatible Qwen endpoints, lmstudio_model_yaml for LM Studio / llama.cpp model-template setups, or off to disable request shaping. |
+| `--baseline-openai-allow-reasoning-fallback` / `--no-baseline-openai-allow-reasoning-fallback` | `baseline_openai_allow_reasoning_fallback` | `true` | Allow external baselines to consume reasoning-only response fields when message.content is empty. |
+| `--baseline-openai-enable-thinking` / `--no-baseline-openai-enable-thinking` | `baseline_openai_enable_thinking` | `true` | Enable thinking/reasoning mode for external baselines (e.g. Qwen enable_thinking=True). Also auto-enables --baseline-openai-allow-reasoning-fallback. |
+| `--baseline-hybrid-guidance-mode` | `baseline_hybrid_guidance_mode` | `tuned_v1` | How llmdebug controller guidance is exposed to hybrid adaptive+baseline runs: 'tuned_v1' preserves baseline-specific prompt integration, 'fair_v1' uses one shared canonical guidance block across all baselines, and 'fixed_v1' uses a deterministic evidence block with full-snapshot injection intended for INTERVENOR fixed-evidence studies. |
+| `--baseline-intervenor-teacher-max-tokens` | `baseline_intervenor_teacher_max_tokens` | `1024` | Teacher-stage max_tokens for the INTERVENOR adapter. |
+| `--baseline-intervenor-learner-max-tokens` | `baseline_intervenor_learner_max_tokens` | `2048` | Learner-stage max_tokens for the INTERVENOR adapter. |
+| `--baseline-intervenor-teacher-guidance-max-chars` | `baseline_intervenor_teacher_guidance_max_chars` | `4000` | Teacher-stage controller-guidance budget for INTERVENOR. |
+| `--baseline-intervenor-learner-guidance-max-chars` | `baseline_intervenor_learner_guidance_max_chars` | `6000` | Learner-stage controller-guidance budget for INTERVENOR. |
+| `--baseline-intervenor-append-output-contract` / `--no-baseline-intervenor-append-output-contract` | `baseline_intervenor_append_output_contract` | `true` | Append the explicit single-file output suffix to INTERVENOR learner prompts. |
+| `--baseline-tracecoder-controller-guidance-max-chars` | `baseline_tracecoder_controller_guidance_max_chars` | `2000` | Controller-guidance budget appended to TraceCoder prompts. |
+| `--baseline-tracecoder-max-no-improvement-streak` | `baseline_tracecoder_max_no_improvement_streak` | `2` | TraceCoder --max-no-improvement-streak value. |
+| `--baseline-tracecoder-analysis-max-tokens` | `baseline_tracecoder_analysis_max_tokens` | `4096` | TraceCoder max_tokens for instrumentation/analysis-stage calls. |
+| `--baseline-tracecoder-implementation-max-tokens` | `baseline_tracecoder_implementation_max_tokens` | `4096` | TraceCoder max_tokens for direct/code-implementation calls. |
+| `--baseline-tracecoder-problem-summary-max-chars` | `baseline_tracecoder_problem_summary_max_chars` | `4000` | Max chars kept in the compact TraceCoder task/problem summary. |
+| `--baseline-tracecoder-exact-test-context-max-chars` | `baseline_tracecoder_exact_test_context_max_chars` | `3000` | Max chars of verbatim failing-test context injected into TraceCoder analysis prompts. |
+| `--baseline-tracecoder-failure-feedback-max-chars` | `baseline_tracecoder_failure_feedback_max_chars` | `6000` | Max chars retained in TraceCoder failure feedback summaries. |
+| `--baseline-tracecoder-failure-feedback-tail-max-chars` | `baseline_tracecoder_failure_feedback_tail_max_chars` | `2000` | Max chars reserved for the bounded tail excerpt in TraceCoder failure feedback. |
+| `--baseline-tracecoder-instrumentation-output-max-lines` | `baseline_tracecoder_instrumentation_output_max_lines` | `80` | Max lines retained from llmdebug instrumentation output before TraceCoder prompts. |
+| `--baseline-tracecoder-instrumentation-output-max-chars` | `baseline_tracecoder_instrumentation_output_max_chars` | `12000` | Max chars retained from llmdebug instrumentation output before TraceCoder prompts. |
+| `--baseline-lambda-context-window-chars` | `baseline_lambda_context_window_chars` | `100000` | Context window budget in chars passed to the lambda_rlm baseline. |
+| `--baseline-lambda-accuracy-target` | `baseline_lambda_accuracy_target` | `0.8` | Target accuracy passed to the lambda_rlm planner. |
+| `--baseline-lambda-a-leaf` | `baseline_lambda_a_leaf` | `0.95` | Leaf-call accuracy prior for the lambda_rlm planner. |
+| `--baseline-lambda-a-compose` | `baseline_lambda_a_compose` | `0.9` | Composition accuracy prior for the lambda_rlm planner. |
+| `--baseline-lambda-verbose` | `baseline_lambda_verbose` | `false` | Enable verbose native lambda_rlm plan logging inside the isolated env. |
+| `--baseline-lambda-temperature` | `baseline_lambda_temperature` | unset | Optional temperature override passed to lambda_rlm's OpenAI-compatible backend. |
+| `--baseline-lambda-top-p` | `baseline_lambda_top_p` | unset | Optional top-p override passed to lambda_rlm's OpenAI-compatible backend. |
+| `--baseline-lambda-max-tokens` | `baseline_lambda_max_tokens` | unset | Optional max_tokens override passed to lambda_rlm's OpenAI-compatible backend. |
+| `--baseline-lambda-stream` | `baseline_lambda_stream` | `false` | Enable streaming responses inside the lambda_rlm OpenAI-compatible backend. |
+| `--baseline-lambda-timeout-sec` | `baseline_lambda_timeout_sec` | unset | Optional per-attempt timeout cap inside the lambda_rlm isolated env. Defaults to the effective baseline process timeout when unset. |
+| `--baseline-lambda-force-task-type` | `baseline_lambda_force_task_type` | unset | Optional lambda-RLM task-type override forwarded into the isolated env (for example "qa") when small models misclassify repair prompts. |
+| `--baseline-lambda-prompt-contract` | `baseline_lambda_prompt_contract` | unset | Optional lambda-RLM prompt contract override: 'canonical' or 'repair_fair_v1'. Defaults to canonical when unset. |
+| `--baseline-lambda-controller-guidance-max-chars` | `baseline_lambda_controller_guidance_max_chars` | `2500` | Controller-guidance budget appended to lambda-RLM prompts. |
+| `--baseline-lambda-failure-feedback-max-chars` | `baseline_lambda_failure_feedback_max_chars` | `3500` | Failure-feedback budget injected into lambda-RLM prompts. |
+| `--baseline-lambda-failure-feedback-meta-max-chars` | `baseline_lambda_failure_feedback_meta_max_chars` | `2000` | Failure-feedback truncation budget stored in lambda-RLM attempt metadata. |
+| `--baseline-rlm-max-depth` | `baseline_rlm_max_depth` | `2` | Maximum recursive depth for the standalone rlm baseline. |
+| `--baseline-rlm-max-iterations` | `baseline_rlm_max_iterations` | `12` | Maximum native RLM iterations per outer attempt. |
+| `--baseline-rlm-timeout-sec` | `baseline_rlm_timeout_sec` | unset | Optional per-attempt timeout cap inside the standalone rlm env. Defaults to the effective baseline process timeout when unset. |
+| `--baseline-rlm-controller-guidance-max-chars` | `baseline_rlm_controller_guidance_max_chars` | `2500` | Controller-guidance budget appended to RLM root prompts. |
+| `--baseline-rlm-prompt-contract` | `baseline_rlm_prompt_contract` | unset | Optional RLM root prompt contract override: 'canonical' or 'repair_fair_v1'. Defaults to canonical when unset. |
+| `--baseline-rlm-failure-feedback-max-chars` | `baseline_rlm_failure_feedback_max_chars` | `3500` | Failure-feedback budget injected into RLM root prompts. |
+| `--baseline-rlm-failure-feedback-meta-max-chars` | `baseline_rlm_failure_feedback_meta_max_chars` | `2000` | Failure-feedback truncation budget stored in RLM attempt metadata. |
+| `--baseline-rlm-max-errors` | `baseline_rlm_max_errors` | `5` | Maximum consecutive REPL errors before aborting an rlm attempt. |
+| `--baseline-rlm-max-tokens` | `baseline_rlm_max_tokens` | unset | Optional OpenAI-compatible max_tokens override passed to the standalone rlm backend. |
+| `--baseline-rlm-max-total-tokens` | `baseline_rlm_max_total_tokens` | unset | Optional total token ceiling enforced by the standalone rlm loop. |
+| `--baseline-rlm-compaction` | `baseline_rlm_compaction` | `false` | Enable native trajectory compaction inside the standalone rlm loop. |
+| `--baseline-rlm-compaction-threshold-pct` | `baseline_rlm_compaction_threshold_pct` | `0.85` | Compaction trigger threshold for the standalone rlm loop. |
+| `--baseline-rlm-temperature` | `baseline_rlm_temperature` | unset | Optional temperature override passed to the standalone rlm OpenAI-compatible backend. |
+| `--baseline-rlm-top-p` | `baseline_rlm_top_p` | unset | Optional top-p override passed to the standalone rlm OpenAI-compatible backend. |
+| `--baseline-rlm-verbose` | `baseline_rlm_verbose` | `false` | Enable verbose native rlm logging inside the isolated env. |
+
+`unset` means the flag has no value of its own; its description says what applies instead. Shipped templates under `evals/configs/` may set other values.
+<!-- END AUTO-GENERATED: BASELINE_CLI_DEFAULTS -->
 
 ### Per-baseline TOML config
 
@@ -433,46 +488,18 @@ Each baseline has a template under `evals/configs/`:
 | lambda-RLM | [`evals/configs/baseline_lambda_rlm.template.toml`](../evals/configs/baseline_lambda_rlm.template.toml) |
 | RLM | [`evals/configs/baseline_rlm.template.toml`](../evals/configs/baseline_rlm.template.toml) |
 
-Notable per-baseline keys (set in the template or via `config.extra`):
+The templates set per-baseline values for the keys in the table above; read the
+template for the values a shipped lane uses.
 
-Shared across all five hybrid-capable baselines:
+Optional attempt metadata the adapters record when the provider or env shim
+exposes it:
 
-| Baseline | Key | Default | Description |
-|----------|-----|---------|-------------|
-| All | `baseline_hybrid_guidance_mode` | `tuned_v1` | Shared llmdebug augmentation mode for adaptive+baseline runs (`tuned_v1`, `fair_v1`, or `fixed_v1`) |
-
-| Baseline | Key | Default | Description |
-|----------|-----|---------|-------------|
-| INTERVENOR | `baseline_intervenor_teacher_max_tokens` | `3072` | Max tokens for the teacher LLM call |
-| INTERVENOR | `baseline_intervenor_learner_max_tokens` | `6144` | Max tokens for the learner LLM call |
-| INTERVENOR | `baseline_intervenor_teacher_guidance_max_chars` | `4000` | Controller guidance char limit for teacher prompt |
-| INTERVENOR | `baseline_intervenor_learner_guidance_max_chars` | `6000` | Controller guidance char limit for learner prompt |
-| INTERVENOR | attempt metadata: `teacher_finish_reason`, `learner_finish_reason` | optional | Saved when provider telemetry exposes per-call finish reasons |
-| TraceCoder | `baseline_tracecoder_controller_guidance_max_chars` | `2000` | Controller guidance char limit |
-| TraceCoder | `baseline_tracecoder_max_no_improvement_streak` | `2` | Stop early after N consecutive non-improving attempts |
-| TraceCoder | `baseline_tracecoder_analysis_max_tokens` | `4096` | Max tokens for instrumentation and analysis/planning calls |
-| TraceCoder | `baseline_tracecoder_implementation_max_tokens` | `4096` | Max tokens for direct-generation and code-implementation calls |
-| TraceCoder | `baseline_tracecoder_problem_summary_max_chars` | `4000` | Max chars kept in the compact llmdebug task description |
-| TraceCoder | `baseline_tracecoder_exact_test_context_max_chars` | `3000` | Max chars of verbatim failing-test excerpts injected into analysis prompts |
-| TraceCoder | `baseline_tracecoder_failure_feedback_max_chars` | `6000` | Max chars retained when formatting pytest failure feedback back into prompts |
-| TraceCoder | `baseline_tracecoder_failure_feedback_tail_max_chars` | `2000` | Tail budget reserved for the most relevant pytest output excerpt |
-| TraceCoder | `baseline_tracecoder_instrumentation_output_max_lines` | `80` | Max llmdebug instrumentation lines forwarded into TraceCoder prompts |
-| TraceCoder | `baseline_tracecoder_instrumentation_output_max_chars` | `12000` | Max llmdebug instrumentation chars forwarded into TraceCoder prompts |
-| lambda-RLM | `baseline_lambda_context_window_chars` | `100000` | Context window size in characters |
-| lambda-RLM | `baseline_lambda_accuracy_target` | `0.80` | Decomposition accuracy threshold |
-| lambda-RLM | `baseline_lambda_max_tokens` | `8192` | Per-call max tokens passed to bounded leaf/composition calls |
-| lambda-RLM | `baseline_lambda_timeout_sec` | `600` | Inner lambda-RLM timeout |
-| RLM | `baseline_rlm_max_depth` | `2` | Maximum recursion depth |
-| RLM | `baseline_rlm_max_iterations` | `24` | Maximum REPL iterations per attempt |
-| RLM | `baseline_rlm_max_tokens` | `3072` | Per-call max tokens passed to the OpenAI-compatible backend |
-| RLM | `baseline_rlm_max_total_tokens` | `200000` | Native total-token cap across the inner RLM search |
-| RLM | `baseline_rlm_timeout_sec` | `600` | Inner RLM timeout |
-| RLM | `baseline_rlm_max_errors` | `5` | Maximum consecutive errors before stopping |
-| RLM | `baseline_rlm_controller_guidance_max_chars` | `2500` | Controller guidance char limit |
-| RLM | `baseline_rlm_failure_feedback_max_chars` | `3500` | Failure feedback char limit |
-| lambda-RLM / RLM | attempt metadata: `call_finish_reason_counts`, `call_length_finish_count`, `compat_recovery_count` | optional | Per-attempt call-cap and compat telemetry when supported by the env shim |
-| lambda-RLM | attempt metadata: `planned_decomposition`, `executed_decomposition`, `task_detection_call_count`, `repl_llm_query_call_count` | optional | Separates planned recursive structure from observed model-call execution |
-| RLM | attempt metadata: `outcome_classification`, `stop_due_to_guard`, `guard_name` | optional | Distinguishes workspace-write wins, salvage wins, and search-exhaustion failures |
+| Baseline | Attempt metadata | Description |
+|----------|------------------|-------------|
+| INTERVENOR | `teacher_finish_reason`, `learner_finish_reason` | Per-call finish reasons |
+| lambda-RLM / RLM | `call_finish_reason_counts`, `call_length_finish_count`, `compat_recovery_count` | Per-attempt call-cap and compat telemetry |
+| lambda-RLM | `planned_decomposition`, `executed_decomposition`, `task_detection_call_count`, `repl_llm_query_call_count` | Separates planned recursive structure from observed model-call execution |
+| RLM | `outcome_classification`, `stop_due_to_guard`, `guard_name` | Distinguishes workspace-write wins, salvage wins, and search-exhaustion failures |
 
 ### Pinned repo commits
 

@@ -7,6 +7,7 @@ generated cases, and shared filter helpers used across importers.
 from __future__ import annotations
 
 import ast
+import logging
 import re
 import subprocess
 import sys
@@ -17,6 +18,8 @@ from .. import _json as json
 from ..eval_patches import _build_diff_from_changes, _diff_lines, _extract_diff_paths
 from .determinism import is_deterministic as is_deterministic
 from .determinism import nondeterminism_reasons as nondeterminism_reasons
+
+logger = logging.getLogger(__name__)
 
 
 def generate_oracle_patch(
@@ -69,7 +72,9 @@ def existing_source_ids(output_dir: Path) -> set[str]:
     for case_json in output_dir.rglob("case.json"):
         try:
             meta = json.loads(case_json.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
+            # The case can't be deduplicated against, so the same bug may import twice.
+            logger.warning("skipping unreadable %s in the source-id scan: %s", case_json, exc)
             continue
         if isinstance(meta, dict) and isinstance(meta.get("source_id"), str):
             found.add(meta["source_id"])

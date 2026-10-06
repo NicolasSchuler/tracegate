@@ -34,7 +34,8 @@ class _FileArityDebt:
 
 # This inventory records existing debt, not desired API design. Each ceiling is
 # the current named-parameter count and each file carries an explicit migration
-# reason. New entries and increases fail; reductions and removals pass.
+# reason. New entries and increases fail, and so do stale entries: a reduction or
+# removal must lower or delete its entry in the same patch (X-06).
 _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
     "baselines/intervenor/adapter.py": _FileArityDebt(
         "Boundary adapter still flattens upstream outcome metrics.",
@@ -164,7 +165,7 @@ _EXISTING_ARITY_DEBT: dict[str, _FileArityDebt] = {
         {
             "_adaptive_online_reward_breakdown": 30,
             "_adaptive_online_should_defer_credit": 7,
-            "_finalize_adaptive_online_attempt": 50,
+            "_finalize_adaptive_online_attempt": 48,
             "_record_adaptive_online_policy_outcome": 19,
         },
     ),
@@ -465,3 +466,22 @@ def test_named_parameter_arity_debt_does_not_grow() -> None:
             failures.append(f"increased debt: {key} grew {ceiling} -> {count}; reason: {reason}")
 
     assert not failures, "Signature arity debt grew:\n" + "\n".join(failures)
+
+
+def test_arity_debt_baseline_only_shrinks() -> None:
+    """X-06: a fixed or narrowed signature must leave the baseline in the same patch.
+
+    Stale entries and loose ceilings would let a signature grow back to its old width
+    without failing the ratchet above.
+    """
+    current_arities = _collect_signature_arities()
+    stale: list[str] = []
+    for key, (ceiling, _reason) in sorted(_flatten_existing_debt().items()):
+        count = current_arities.get(key)
+        if count is None:
+            stale.append(f"remove {key}: the function no longer exists")
+        elif count <= _SIGNATURE_BUDGET:
+            stale.append(f"remove {key}: {count} named parameters is within budget")
+        elif count < ceiling:
+            stale.append(f"lower {key}: ceiling {ceiling} but only {count} named parameters")
+    assert not stale, "Signature arity baseline is stale:\n" + "\n".join(stale)

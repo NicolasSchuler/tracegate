@@ -21,6 +21,7 @@ from ._debug_session import (
     build_debug_session,
     split_extra_context,
 )
+from ._warnings import emit_debug
 from .config import SnapshotConfig, resolve_snapshot_config
 from .output import write_bundle
 from .serialize import (
@@ -37,8 +38,9 @@ SCHEMA_VERSION = DEBUG_SESSION_SCHEMA_VERSION
 
 
 def _warn(warnings: list[str], message: str) -> None:
-    """Append a capture warning to the current capture-local buffer."""
+    """Append a capture warning to the snapshot's buffer and log it at DEBUG (X-07)."""
     warnings.append(message)
+    emit_debug(f"capture: {message}")
 
 
 def _safe_str(value: object) -> str:

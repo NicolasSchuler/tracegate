@@ -157,7 +157,7 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - Pyright runs in `strict` mode for `src/llmdebug`.
 - Prefer precise type annotations on new or changed APIs.
 - Naming conventions: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
-- Treat function signatures with more than 6 explicit named parameters (excluding `self`/`cls` and variadics) as a readability smell. Prefer grouped `*Config`, `*Inputs`, `*Request`, or `*State` objects and add or update a signature-budget regression test when you refactor those seams.
+- Treat function signatures with more than 6 explicit named parameters (excluding `self`/`cls` and variadics) as a readability smell. Prefer grouped `*Config`, `*Inputs`, `*Request`, or `*State` objects. `tests/test_signature_arity_budget.py` enforces this with a shrink-only allowlist: new or wider signatures fail, and so does an entry left behind after you narrow or remove a signature, so lower or delete it in the same patch.
 - Keep patches focused and local; prefer adapters or helper seams over broad refactors.
 
 ## Testing & Quality Expectations
@@ -183,7 +183,7 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 - Keep eval orchestration, patcher backends, importer logic, adaptive-policy logic, and SWE-Bench tooling loosely coupled; these pieces are reused across multiple flows.
 - `evals/run_eval.py` is the CLI entrypoint and a re-export facade; no other `evals/` module may import it (`tests/test_evals_architecture_boundaries.py`). Put new logic in the module that owns it.
 - Monkeypatch where a name is used. Run-level collaborators (`_REPO_ROOT`, `load_cases`, `make_patcher`, `run_one_condition`, resume and lock functions) can still be patched on `run_eval`, which passes them to the flows as `EvalSeams`; flow internals called directly read the owning modules through `default_eval_seams()`. Attempt-level collaborators (`run_pytest`, `apply_diff`, `read_latest_snapshot`, `collect_text_context`, ...) are patched on `evals.eval_attempt_flow`. Per-run state (execution config, `--deterministic`/`--seed`, the container pool) travels in `RunContext`, never in module globals.
-- `evals/README.md` contains an auto-generated case inventory block; refresh it with `python -m evals.doc_sync --write` when case metadata changes.
+- `python -m evals.doc_sync --write` regenerates the marker-delimited blocks that restate code: the case inventory in `evals/README.md`, the policy defaults in the two adaptive-policy docs, and the `--baseline-*` flag table in `docs/baseline-adapters.md`. Run it when case metadata, policy defaults, or baseline CLI flags change; `--check` (part of `just docs-check`) fails on drift. When a doc restates other code constants, add a block in `evals/doc_sync_cli.py` instead of a hand-written table.
 
 ### Policy-controlled evidence selection (design rationale)
 - In the adaptive conditions (`layered_adaptive_gated`, `layered_adaptive_llm`), a **policy layer — not the LLM — controls what evidence the patching model receives**. This is a deliberate design decision backed by empirical evidence: when given free choice, LLMs consistently over-request context (snapshots, files, frames), inflating token usage without proportional accuracy gains.
