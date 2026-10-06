@@ -7,8 +7,10 @@ scheduling while ``evals.run_eval`` remains the compatibility facade.
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import wait as futures_wait
 from dataclasses import replace
 from typing import Any
 
@@ -50,6 +52,7 @@ from evals.eval_types import (
 from evals.eval_types import RunConditionInputs as _RunConditionInputs
 from evals.native_stage_b_flow import openai_usable_prompt_tokens
 from evals.patcher_factory import (
+    PatcherConfigError,
     _resolve_openai_context_window_for_run,
 )
 from evals.progress_display import (
@@ -82,6 +85,40 @@ def _with_run_context(unit_inputs: EvalUnitInputs, run_context: RunContext) -> E
     return replace(
         unit_inputs, run_condition=replace(unit_inputs.run_condition, run_context=run_context)
     )
+
+
+def _interrupt_parallel_units(
+    *,
+    executor: ThreadPoolExecutor,
+    future_map: dict[Any, Any],
+    display: Any,
+) -> None:
+    """Stop scheduling on Ctrl-C, then let in-flight units finish or exit on a second one.
+
+    Running units can't be stopped from outside their threads, and the interpreter joins
+    worker threads at exit anyway, so a single Ctrl-C used to wait silently for all of
+    them (ORC-09). Their records are streamed and fsynced as they are written, so a
+    second Ctrl-C exits at once and ``--resume`` picks the run up again.
+    """
+    cancelled = sum(1 for future in list(future_map) if future.cancel())
+    executor.shutdown(wait=False, cancel_futures=True)
+    in_flight = [future for future in future_map if not future.done()]
+    display.add_event(
+        message=(
+            f"Interrupted: cancelled {cancelled} queued unit(s); waiting for "
+            f"{len(in_flight)} in-flight unit(s). Press Ctrl-C again to exit now."
+        ),
+        style="warning",
+    )
+    try:
+        futures_wait(in_flight)
+    except KeyboardInterrupt:
+        display.add_event(
+            message=f"Exiting with {sum(not f.done() for f in in_flight)} unit(s) unfinished.",
+            style="warning",
+        )
+        display.close()
+        os._exit(130)
 
 
 def run_main_flow(
@@ -179,6 +216,11 @@ def run_main_flow(
     jobs = int(args.jobs)
     try:
         patcher = seams.make_patcher(args)
+    except PatcherConfigError as exc:
+        _close_run_results_io()
+        display.close()
+        print(f"Invalid arguments: {exc}")
+        return 2
     except BaseException:
         _close_run_results_io()
         display.close()
@@ -627,6 +669,7 @@ def run_main_flow(
                 size=pool_size,
                 execution=execution_config,
                 workdirs_host=artifacts_root / "workdirs",
+                run_id=run_id,
             )
             run_context = replace(run_context, container_pool=container_pool)
             shared_unit_inputs = _with_run_context(shared_unit_inputs, run_context)
@@ -659,11 +702,13 @@ def run_main_flow(
                     ),
                     style="info",
                 )
+                # ORC-11: each unit builds its own patcher, as with --jobs N, so the job
+                # count can't become a confounder once a patcher keeps per-instance state.
                 outcome = _execute_eval_unit(
                     case=case,
                     condition=condition,
                     artifacts_root=artifacts_root,
-                    inputs=replace(_unit_inputs_for(condition), patcher_override=patcher),
+                    inputs=_unit_inputs_for(condition),
                 )
                 should_abort = _handle_outcome(outcome)
                 if should_abort:
@@ -707,7 +752,8 @@ def run_main_flow(
                 submitted_units += 1
                 return True
 
-            with ThreadPoolExecutor(max_workers=jobs) as executor:
+            executor = ThreadPoolExecutor(max_workers=jobs)
+            try:
                 while (
                     len(future_map) < jobs
                     and (not transport_fail_fast_triggered)
@@ -752,6 +798,11 @@ def run_main_flow(
                         and _submit_next(executor)
                     ):
                         pass
+            except KeyboardInterrupt:
+                _interrupt_parallel_units(executor=executor, future_map=future_map, display=display)
+                raise
+            finally:
+                executor.shutdown(wait=True)
     finally:
         if container_pool is not None:
             container_pool.shutdown()

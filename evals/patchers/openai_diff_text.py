@@ -88,8 +88,10 @@ def _iter_file_diffs(lines: list[str]) -> list[tuple[str, str]]:
         if not _is_file_header_pair(lines, j):
             i += 1
             continue
-        old_path = _clean_path_token(lines[j][4:].strip())
-        new_path = _clean_path_token(lines[j + 1][4:].strip())
+        old_path, new_path = _strip_git_prefixes(
+            _clean_path_token(lines[j][4:].strip()),
+            _clean_path_token(lines[j + 1][4:].strip()),
+        )
         if old_path is None or new_path is None:
             i = j + 2
             continue
@@ -184,13 +186,24 @@ def _clean_path_token(raw: str) -> str | None:
     # - "--- a/foo.py\t2026-..." (timestamps)
     if token in {"a/", "b/"}:
         return None
-    token = token.removeprefix("a/")
-    token = token.removeprefix("b/")
-    if not token:
-        return None
-    if token == "/dev/null":
-        return token
     return token
+
+
+def _strip_git_prefixes(old: str | None, new: str | None) -> tuple[str | None, str | None]:
+    """Drop git's ``a/`` and ``b/`` prefixes only when the headers use them as a pair.
+
+    Stripping each side unconditionally mangled a real top-level directory named ``a``
+    or ``b`` in prefix-less headers such as ``--- a/mod.py`` / ``+++ a/mod.py`` (LLM-23).
+    """
+    if old is None or new is None:
+        return old, new
+    old_git = old == "/dev/null" or old.startswith("a/")
+    new_git = new == "/dev/null" or new.startswith("b/")
+    if not (old_git and new_git):
+        return old, new
+    old = old.removeprefix("a/")
+    new = new.removeprefix("b/")
+    return (old or None), (new or None)
 
 
 def _looks_like_raw_unified_diff(text: str) -> bool:

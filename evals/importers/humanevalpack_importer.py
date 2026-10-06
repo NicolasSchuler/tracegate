@@ -90,6 +90,10 @@ def import_humanevalpack(
 ) -> list[dict[str, Any]]:
     """Import cases from HumanEvalPack dataset.
 
+    *max_cases* of 0 means unlimited, as in the other importers (DAT-22). Existing case
+    directories are skipped rather than overwritten, so corrections such as
+    ``fixup_expected_exceptions`` survive a re-run (DAT-23).
+
     Returns list of imported case metadata dicts (or preview dicts if dry_run).
     """
     try:
@@ -105,7 +109,7 @@ def import_humanevalpack(
     skipped = 0
 
     for row in ds:
-        if len(imported) >= max_cases:
+        if max_cases > 0 and len(imported) >= max_cases:
             break
 
         task_id = str(row.get("task_id", ""))
@@ -151,6 +155,10 @@ def import_humanevalpack(
         safe_task_id = task_id.replace("/", "_").replace(" ", "_").lower()
         safe_bug_type = bug_type.replace(" ", "_").lower()
         case_id = f"hep_{safe_task_id}_{safe_bug_type}"
+        if not dry_run and (output_dir / case_id).exists():
+            print(f"  [skip] {case_id}: already exists")
+            skipped += 1
+            continue
 
         generated_test = _generate_test(entry_point, test_code, prompt)
 

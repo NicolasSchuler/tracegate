@@ -17,6 +17,8 @@ import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from .case_contract import REQUIRED_CASE_FILES as REQUIRED_CASE_FILES
+from .case_contract import validate_case_contract
 from .case_loading import load_cases
 from .eval_config import (
     _REPO_ROOT,
@@ -29,7 +31,6 @@ from .eval_patches import apply_diff
 from .eval_types import CaseSpec, Condition
 from .pytest_runner import run_pytest
 
-REQUIRED_CASE_FILES = ("test_buggy.py", "case.json", "oracle.patch")
 EXCEPTION_TOKEN_RE = re.compile(r"\b([A-Za-z_][\w\.]*(?:Error|Exception|Exit|Interrupt))\b")
 
 
@@ -200,26 +201,6 @@ def _validate_selected_case(
         case.timeout_sec,
         output_format,
     )
-
-
-def validate_case_contract(case_path: Path) -> tuple[bool, str]:
-    """Check that *case_path* contains all required files.
-
-    Returns (ok, message) where *ok* is ``True`` when the directory
-    has ``test_buggy.py``, ``case.json``, ``oracle.patch``, and at
-    least one non-test Python implementation file.
-    """
-    for required_name in REQUIRED_CASE_FILES:
-        if not (case_path / required_name).exists():
-            return False, f"missing required file: {required_name}"
-    implementation_files = [
-        p
-        for p in case_path.rglob("*.py")
-        if p.name != "test_buggy.py" and not p.name.startswith("test_")
-    ]
-    if not implementation_files:
-        return False, "missing implementation python file (non-test)"
-    return True, "ok"
 
 
 def check_pytest_available() -> tuple[bool, str]:

@@ -98,3 +98,49 @@ def test_cleanup_stale_eval_containers_reports_unavailable_client(monkeypatch) -
     assert failed == 0
     assert error is not None
     assert "no docker" in error
+
+
+def _orphan_labels(pid: int, host: str) -> dict[str, str]:
+    return {
+        run_eval.EVAL_CONTAINER_LABEL_KEY: run_eval.EVAL_CONTAINER_LABEL_VALUE,
+        "io.llmdebug.eval.owner_pid": str(pid),
+        "io.llmdebug.eval.owner_host": host,
+    }
+
+
+def test_cleanup_reaps_running_pool_containers_whose_owner_died(monkeypatch) -> None:
+    """ORC-08: `sleep infinity` pool containers outlive a kill -9 of their run."""
+    import os
+    import socket
+
+    now_utc = datetime(2026, 2, 17, 15, 0, tzinfo=timezone.utc)
+    host = socket.gethostname()
+    orphan = _FakeContainer(status="running", created="2026-02-17T13:00:00Z")
+    orphan.labels = _orphan_labels(999_999, host)
+    alive_owner = _FakeContainer(status="running", created="2026-02-17T13:00:00Z")
+    alive_owner.labels = _orphan_labels(os.getpid() + 1, host)
+    other_host = _FakeContainer(status="running", created="2026-02-17T13:00:00Z")
+    other_host.labels = _orphan_labels(999_999, "some-other-host")
+    unlabelled = _FakeContainer(status="running", created="2026-02-17T13:00:00Z")
+    client = _FakeDockerClient([orphan, alive_owner, other_host, unlabelled])
+    monkeypatch.setattr(eval_containers, "_docker_client_from_env", lambda: client)
+    monkeypatch.setattr(eval_containers, "_pid_is_alive", lambda pid: pid != 999_999, raising=True)
+
+    removed, failed, error = run_eval.cleanup_stale_eval_containers(grace_sec=300, now_utc=now_utc)
+
+    assert (removed, failed, error) == (1, 0, None)
+    assert orphan.remove_calls == [(True, True)]
+    assert alive_owner.remove_calls == []
+    assert other_host.remove_calls == []
+    assert unlabelled.remove_calls == []
+
+
+def test_pool_container_labels_name_their_owner() -> None:
+    import os
+    import socket
+
+    labels = eval_containers._owner_labels("run-7")
+    assert labels["io.llmdebug.eval.owner_pid"] == str(os.getpid())
+    assert labels["io.llmdebug.eval.owner_host"] == socket.gethostname()
+    assert labels["io.llmdebug.eval.run_id"] == "run-7"
+    assert eval_containers._pid_is_alive(os.getpid()) is True

@@ -181,32 +181,39 @@ class _RunResultsLock:
             raise
 
     def release(self) -> None:
-        """Release the file lock and remove the lock file."""
+        """Release the file lock. The lock file stays (ORC-14).
+
+        Unlinking it while the lock was held let a second process create and lock a new
+        inode at the same path while a third still held the old one, so two writers
+        could both hold an "exclusive" lock. The next holder truncates the stale owner
+        record.
+        """
         if self._released:
             return
         self._released = True
         try:
-            try:
-                import fcntl
+            import fcntl
 
-                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-            except Exception:
-                pass
-            self._handle.close()
-        finally:
-            try:
-                self.path.unlink()
-            except OSError:
-                pass
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._handle.close()
 
 
 class _SynchronizedJsonlWriter:
-    """Thread-safe, append-only JSONL writer with lazy file open."""
+    """Thread-safe, append-only JSONL writer with lazy file open.
 
-    def __init__(self, path: Path) -> None:
+    Every *fsync_every* records reach the disk, not just the page cache, so a power
+    loss or kernel crash loses at most that many (ORC-14). Records arrive one per
+    attempt, so the default of 1 costs little; 0 turns fsync off.
+    """
+
+    def __init__(self, path: Path, *, fsync_every: int = 1) -> None:
         self._path = path
         self._lock = threading.Lock()
         self._handle: Any = None
+        self._fsync_every = max(0, int(fsync_every))
+        self._unsynced = 0
 
     def append_one(self, record: dict[str, Any]) -> None:
         """Serialize *record* as JSON and append one line to the file."""
@@ -217,6 +224,10 @@ class _SynchronizedJsonlWriter:
                 self._handle = self._path.open("a", encoding="utf-8")
             self._handle.write(line)
             self._handle.flush()
+            self._unsynced += 1
+            if self._fsync_every and self._unsynced >= self._fsync_every:
+                os.fsync(self._handle.fileno())
+                self._unsynced = 0
 
     def close(self) -> None:
         """Flush and close the underlying file handle."""
@@ -628,7 +639,9 @@ def _collect_dependency_versions(*, mode: str) -> dict[str, str]:
         out: dict[str, str] = {}
         for dist in importlib_metadata.distributions():
             try:
-                name = dist.name
+                # PackageMetadata's stub lacks .get; the email.Message behind it has it.
+                dist_metadata: Any = dist.metadata
+                name = dist_metadata.get("Name")
                 version = dist.version
             except Exception:
                 continue

@@ -331,6 +331,10 @@ DEFAULT_CONTAINER_TMPFS_SIZE_MB = 128
 DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC = 300
 EVAL_CONTAINER_LABEL_KEY = "io.llmdebug.eval.managed"
 EVAL_CONTAINER_LABEL_VALUE = "1"
+# Owner labels on pool containers, so cleanup can reap running ones whose owner died (ORC-08).
+EVAL_CONTAINER_OWNER_PID_LABEL = "io.llmdebug.eval.owner_pid"
+EVAL_CONTAINER_OWNER_HOST_LABEL = "io.llmdebug.eval.owner_host"
+EVAL_CONTAINER_RUN_ID_LABEL = "io.llmdebug.eval.run_id"
 _CONTAINER_ACTIVE_STATES = {"running", "restarting", "paused"}
 RUN_EVAL_CONFIG_SECTION = "run_eval"
 RUN_EVAL_CONFIG_LOCK_SCHEMA_VERSION = 1

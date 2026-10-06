@@ -88,3 +88,16 @@ def test_capture_warnings_are_logged_at_debug(capsys: pytest.CaptureFixture[str]
         diagnostics.setLevel(previous)
     assert buffer == ["locals count failed"]
     assert capsys.readouterr().err == "llmdebug: debug: capture: locals count failed\n"
+
+
+def test_reimporting_the_module_keeps_one_stderr_handler(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A re-imported _warnings must not print every warning twice."""
+    import importlib
+
+    import llmdebug._warnings as warnings_module
+
+    reloaded = importlib.reload(warnings_module)
+    reloaded.emit_warning("once")
+    assert capsys.readouterr().err == "llmdebug: warning: once\n"

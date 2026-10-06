@@ -27,7 +27,8 @@ from evals.analysis_api import (
     records_by_case_condition,
     summarize_bucket,
 )
-from evals.analysis_numeric import _mean, _ratio
+from evals.analysis_api import mean as _mean
+from evals.analysis_api import ratio as _ratio
 from evals.case_outcome import case_outcomes
 from evals.coerce import expand_paths as _expand_paths
 from evals.eval_types import normalize_condition_name

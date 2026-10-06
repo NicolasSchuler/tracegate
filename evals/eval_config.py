@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # CLI flags whose values never reach lockfiles, and how to pass each secret instead of a config
 # literal.
 _SECRET_CLI_FLAGS = frozenset({"--openai-api-key", "--adaptive-decision-model-api-key"})
+# KEY=VALUE flags whose values may be secrets; the key is kept (ORC-20).
+_KEY_VALUE_SECRET_CLI_FLAGS = frozenset({"--container-env"})
+
+
+def _redact_key_value(entry: object) -> str:
+    key, separator, _value = str(entry).partition("=")
+    return f"{key}={RUN_EVAL_LOCKFILE_REDACTED}" if separator else RUN_EVAL_LOCKFILE_REDACTED
+
+
 _SECRET_CONFIG_HINTS = {
     "openai_api_key": "Use 'openai_api_key_env' to reference an environment variable.",
     "adaptive_decision_model_api_key": (
@@ -450,18 +460,30 @@ def _json_compatible(value: Any) -> Any:
 def _redact_cli_argv(argv_tokens: list[str]) -> list[str]:
     out: list[str] = []
     redact_next = False
+    redact_next_value = False
     for token in argv_tokens:
         if redact_next:
             out.append(RUN_EVAL_LOCKFILE_REDACTED)
             redact_next = False
             continue
+        if redact_next_value:
+            out.append(_redact_key_value(token))
+            redact_next_value = False
+            continue
         if token in _SECRET_CLI_FLAGS:
             out.append(token)
             redact_next = True
             continue
-        flag, separator, _value = token.partition("=")
+        if token in _KEY_VALUE_SECRET_CLI_FLAGS:
+            out.append(token)
+            redact_next_value = True
+            continue
+        flag, separator, value = token.partition("=")
         if separator and flag in _SECRET_CLI_FLAGS:
             out.append(f"{flag}={RUN_EVAL_LOCKFILE_REDACTED}")
+            continue
+        if separator and flag in _KEY_VALUE_SECRET_CLI_FLAGS:
+            out.append(f"{flag}={_redact_key_value(value)}")
             continue
         out.append(token)
     return out
@@ -473,6 +495,9 @@ def _resolved_args_for_lockfile(args: argparse.Namespace) -> dict[str, Any]:
         if key in RUN_EVAL_LOCKFILE_REDACTED_KEYS:
             text = str(raw).strip() if raw is not None else ""
             payload[key] = RUN_EVAL_LOCKFILE_REDACTED if text else ""
+            continue
+        if key == "container_env" and isinstance(raw, list):
+            payload[key] = [_redact_key_value(entry) for entry in raw]
             continue
         payload[key] = _json_compatible(raw)
     return dict(sorted(payload.items()))
@@ -505,9 +530,12 @@ def _write_resolved_run_config_lockfile(
         "runtime_resolution": dict(config_state.runtime_resolution),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    # Atomic: a crash mid-write must not leave a truncated lockfile behind (ORC-20).
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8"
     )
+    os.replace(tmp_path, path)
     return path
 
 

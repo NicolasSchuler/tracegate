@@ -700,14 +700,15 @@ def test_openai_edits_rejects_directory_target(tmp_path) -> None:
 def test_openai_edits_surfaces_file_read_error(tmp_path, monkeypatch) -> None:
     target_file = tmp_path / "helper.py"
     target_file.write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
-    original_read_text = Path.read_text
+    # The edits path reads bytes to keep CRLF files intact (LLM-09).
+    original_read_bytes = Path.read_bytes
 
-    def _raising_read_text(self: Path, *args, **kwargs) -> str:
+    def _raising_read_bytes(self: Path) -> bytes:
         if self.resolve() == target_file.resolve():
             raise OSError("simulated read failure")
-        return original_read_text(self, *args, **kwargs)
+        return original_read_bytes(self)
 
-    monkeypatch.setattr(Path, "read_text", _raising_read_text)
+    monkeypatch.setattr(Path, "read_bytes", _raising_read_bytes)
     with OpenAIStubServer() as server:
         server.enqueue_json(
             method="POST",

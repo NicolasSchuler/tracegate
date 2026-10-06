@@ -18,6 +18,13 @@ import httpx
 import pytest
 
 from evals.patchers import openai_compat_patcher as mod
+from evals.patchers import (
+    openai_diff_text,
+    openai_edits_apply,
+    openai_probes,
+    openai_response,
+    openai_transport,
+)
 from evals.patchers.base import (
     ContextCompactionResult,
     ContextRequestResult,
@@ -25,6 +32,35 @@ from evals.patchers.base import (
     PatchResult,
 )
 from evals.patchers.openai_compat_patcher import OpenAICompatPatcher
+
+# ---------------------------------------------------------------------------
+# Monkeypatch retargeting
+# ---------------------------------------------------------------------------
+# ``openai_compat_patcher`` re-exports helpers that now live in sibling modules
+# (``openai_transport``, ``openai_probes``, ``openai_edits_apply``, ...). Each
+# function resolves those names in the module that *defines* it, so a fake has
+# to be installed on every patcher module that exposes the name.
+_PATCHER_MODULES = (
+    mod,
+    openai_transport,
+    openai_probes,
+    openai_response,
+    openai_diff_text,
+    openai_edits_apply,
+)
+
+
+def _patch_patcher_modules(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    targets = [module for module in _PATCHER_MODULES if hasattr(module, name)]
+    assert targets, f"no patcher module exposes {name!r}"
+    for target in targets:
+        monkeypatch.setattr(target, name, value)
+
+
+def _patch_instant_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse the transport retry backoff so retry ladders do not really sleep."""
+    monkeypatch.setattr(openai_transport, "_jittered_retry_delay_sec", lambda *a, **kw: 0.0)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -289,13 +325,17 @@ class TestFirstNonemptyEnv:
 
 class TestShouldUseProxy:
     def test_proxy_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"})
-        monkeypatch.setattr(mod.urllib.request, "proxy_bypass", lambda h: False)
+        monkeypatch.setattr(
+            openai_transport.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
+        )
+        monkeypatch.setattr(openai_transport.urllib.request, "proxy_bypass", lambda h: False)
         assert mod._should_use_proxy_transport("http://localhost:1234/v1") is True
 
     def test_proxy_bypassed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"})
-        monkeypatch.setattr(mod.urllib.request, "proxy_bypass", lambda h: True)
+        monkeypatch.setattr(
+            openai_transport.urllib.request, "getproxies", lambda: {"http": "http://proxy:8080"}
+        )
+        monkeypatch.setattr(openai_transport.urllib.request, "proxy_bypass", lambda h: True)
         assert mod._should_use_proxy_transport("http://localhost:1234/v1") is False
 
 
@@ -419,7 +459,7 @@ class TestHttpGetJsonHttp2Fallback:
                     http_version="HTTP/1.1",
                 )
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -446,7 +486,7 @@ class TestHttpGetJsonHttp2Fallback:
                     raise httpx.RemoteProtocolError("http/2 protocol error")
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -472,7 +512,7 @@ class TestHttpGetJsonHttp2Fallback:
                     raise httpx.RemoteProtocolError("http/2 protocol error")
                 raise OSError("connection failed")
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -499,7 +539,7 @@ class TestHttpGetJsonHttp2Fallback:
                     status_code=200, text="not json at all", http_version="HTTP/1.1"
                 )
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -525,7 +565,7 @@ class TestHttpGetJsonHttp2Fallback:
                     status_code=200, text='"just a string"', http_version="HTTP/1.1"
                 )
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -551,7 +591,7 @@ class TestHttpGetJsonHttp2Fallback:
                     status_code=500, text="internal error", http_version="HTTP/1.1"
                 )
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         data, meta = mod._http_get_json(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -588,7 +628,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url: str, headers: Any) -> SimpleNamespace:
                 return fake_resp
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -615,7 +655,7 @@ class TestHttpGetJsonAsync:
                     status_code=500, text="server error", http_version="HTTP/1.1"
                 )
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -640,7 +680,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url: str, headers: Any) -> SimpleNamespace:
                 return SimpleNamespace(status_code=200, text="not-json", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -665,7 +705,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url: str, headers: Any) -> SimpleNamespace:
                 return SimpleNamespace(status_code=200, text='"hello"', http_version="HTTP/1.1")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -694,7 +734,7 @@ class TestHttpGetJsonAsync:
                     status_code=200, text='{"ok": true}', http_version="HTTP/1.1"
                 )
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -721,7 +761,7 @@ class TestHttpGetJsonAsync:
                     raise httpx.RemoteProtocolError("http/2 protocol error")
                 raise ValueError("bad")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -748,7 +788,7 @@ class TestHttpGetJsonAsync:
                     raise httpx.RemoteProtocolError("http/2 protocol error")
                 raise OSError("fail")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -774,7 +814,7 @@ class TestHttpGetJsonAsync:
             async def get(self, url: str, headers: Any) -> SimpleNamespace:
                 raise OSError("connection refused")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         data, meta = await mod._http_get_json_async(
             url="http://localhost:8080/v1/models",
             api_key="k",
@@ -792,11 +832,11 @@ class TestHttpGetJsonAsync:
 
 class TestHttpProbeReady:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.get_text.return_value = (200, "ok")
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -807,11 +847,11 @@ class TestHttpProbeReady:
         assert meta["status"] == 200
 
     def test_non_2xx(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.get_text.return_value = (500, "error")
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -822,10 +862,10 @@ class TestHttpProbeReady:
         assert meta["error"] == "http_error"
 
     def test_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.get_text.side_effect = ValueError("bad")
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -836,10 +876,10 @@ class TestHttpProbeReady:
         assert meta["error"] == "bad_request_url"
 
     def test_generic_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.get_text.side_effect = OSError("fail")
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -850,7 +890,7 @@ class TestHttpProbeReady:
         assert meta["error"] == "request_failed"
 
     def test_http2_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         call_count = 0
 
         def fake_get_client(**kw: Any) -> MagicMock:
@@ -864,7 +904,7 @@ class TestHttpProbeReady:
             call_count += 1
             return client
 
-        monkeypatch.setattr(mod, "_get_thread_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", fake_get_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -875,7 +915,7 @@ class TestHttpProbeReady:
         assert meta.get("transport_http2_fallback_used") is True
 
     def test_http2_fallback_inner_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         def fake_get_client(**kw: Any) -> MagicMock:
             client = MagicMock()
@@ -885,7 +925,7 @@ class TestHttpProbeReady:
                 client.get_text.side_effect = ValueError("bad url")
             return client
 
-        monkeypatch.setattr(mod, "_get_thread_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", fake_get_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -896,7 +936,7 @@ class TestHttpProbeReady:
         assert meta["error"] == "bad_request_url"
 
     def test_http2_fallback_inner_generic_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         def fake_get_client(**kw: Any) -> MagicMock:
             client = MagicMock()
@@ -906,7 +946,7 @@ class TestHttpProbeReady:
                 client.get_text.side_effect = OSError("fail")
             return client
 
-        monkeypatch.setattr(mod, "_get_thread_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", fake_get_client)
         ready, meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -918,7 +958,7 @@ class TestHttpProbeReady:
         assert meta["transport_http2_fallback_used"] is True
 
     def test_proxy_transport_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         class FakeClient:
             def __init__(self, **kw: Any) -> None:
@@ -933,7 +973,7 @@ class TestHttpProbeReady:
             def get(self, url: str, headers: Any) -> SimpleNamespace:
                 return SimpleNamespace(status_code=200, text="ok", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         ready, _meta = mod._http_probe_ready(
             url="http://localhost:1234/health",
             api_key="k",
@@ -946,11 +986,11 @@ class TestHttpProbeReady:
 class TestHttpProbeReadyAsync:
     @pytest.mark.asyncio
     async def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.get_text = AsyncMock(return_value=(200, "ok"))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         ready, _meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -963,7 +1003,7 @@ class TestHttpProbeReadyAsync:
     async def test_success_with_real_persistent_async_client(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         transport = AsyncMock()
         transport.get.return_value = SimpleNamespace(
             status_code=200,
@@ -977,7 +1017,7 @@ class TestHttpProbeReadyAsync:
             http2=False,
         )
         monkeypatch.setattr(client, "_new_client", lambda *, timeout_sec: transport)
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: client)
 
         ready, meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
@@ -992,11 +1032,11 @@ class TestHttpProbeReadyAsync:
 
     @pytest.mark.asyncio
     async def test_non_2xx(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.get_text = AsyncMock(return_value=(500, "err"))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         ready, _meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1007,10 +1047,10 @@ class TestHttpProbeReadyAsync:
 
     @pytest.mark.asyncio
     async def test_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.get_text = AsyncMock(side_effect=ValueError("bad"))
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         _ready, meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1021,10 +1061,10 @@ class TestHttpProbeReadyAsync:
 
     @pytest.mark.asyncio
     async def test_generic_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.get_text = AsyncMock(side_effect=OSError("fail"))
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         _ready, meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1035,7 +1075,7 @@ class TestHttpProbeReadyAsync:
 
     @pytest.mark.asyncio
     async def test_http2_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         def fake_get_client(**kw: Any) -> AsyncMock:
             client = AsyncMock()
@@ -1048,7 +1088,7 @@ class TestHttpProbeReadyAsync:
                 client.last_http_version = "HTTP/1.1"
             return client
 
-        monkeypatch.setattr(mod, "_get_async_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", fake_get_client)
         ready, _meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1059,7 +1099,7 @@ class TestHttpProbeReadyAsync:
 
     @pytest.mark.asyncio
     async def test_http2_fallback_inner_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         def fake_get_client(**kw: Any) -> AsyncMock:
             client = AsyncMock()
@@ -1071,7 +1111,7 @@ class TestHttpProbeReadyAsync:
                 client.get_text = AsyncMock(side_effect=ValueError("bad"))
             return client
 
-        monkeypatch.setattr(mod, "_get_async_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", fake_get_client)
         _ready, meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1084,7 +1124,7 @@ class TestHttpProbeReadyAsync:
     async def test_http2_fallback_inner_generic_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         def fake_get_client(**kw: Any) -> AsyncMock:
             client = AsyncMock()
@@ -1096,7 +1136,7 @@ class TestHttpProbeReadyAsync:
                 client.get_text = AsyncMock(side_effect=OSError("fail"))
             return client
 
-        monkeypatch.setattr(mod, "_get_async_http_client", fake_get_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", fake_get_client)
         _ready, meta = await mod._http_probe_ready_async(
             url="http://localhost:1234/health",
             api_key="k",
@@ -1120,7 +1160,7 @@ class TestProbeContextWindowTokensAsync:
                 return {"data": [{"id": "m1", "context_length": 4096}]}, {"transport_impl": "httpx"}
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_get_json_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_get_json_async)
         tokens, _meta = await mod._probe_context_window_tokens_async(
             base_url="http://localhost:1234/v1",
             model="m1",
@@ -1135,7 +1175,7 @@ class TestProbeContextWindowTokensAsync:
         async def fake_get_json_async(**kw: Any) -> tuple[None, dict[str, Any]]:
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_get_json_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_get_json_async)
         tokens, meta = await mod._probe_context_window_tokens_async(
             base_url="http://localhost:1234/v1",
             model="m1",
@@ -1153,7 +1193,7 @@ class TestProbeContextWindowTokensAsync:
                 "transport_impl": "httpx"
             }
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_get_json_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_get_json_async)
         tokens, _meta = await mod._probe_context_window_tokens_async(
             base_url="http://localhost:1234/v1",
             model="m1",
@@ -1174,7 +1214,7 @@ class TestProbeContextWindowTokensAsync:
             calls.append(str(kw["url"]))
             return None, {"error": "request_failed"}
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_get_json_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_get_json_async)
         tokens, meta = await mod._probe_context_window_tokens_async(
             base_url="http://localhost:1234/api/v1",
             model="m1",
@@ -1208,7 +1248,7 @@ class TestProbeServerReadyAsync:
                 return True, {"status": 200, "transport_impl": "httpx"}
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(mod, "_http_probe_ready_async", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", fake_probe)
         ready, _meta = await mod._probe_server_ready_async(
             base_url="http://localhost:1234/v1",
             api_key="k",
@@ -1222,7 +1262,7 @@ class TestProbeServerReadyAsync:
         async def fake_probe(**kw: Any) -> tuple[bool, dict[str, Any]]:
             return False, {"error": "request_failed"}
 
-        monkeypatch.setattr(mod, "_http_probe_ready_async", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", fake_probe)
         ready, meta = await mod._probe_server_ready_async(
             base_url="http://localhost:1234/v1",
             api_key="k",
@@ -1241,7 +1281,7 @@ class TestProbeServerReadyAsync:
 class TestChatCompletionAsync:
     @pytest.mark.asyncio
     async def test_basic_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(
             return_value=(
@@ -1255,7 +1295,7 @@ class TestChatCompletionAsync:
             )
         )
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         data, _meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1272,13 +1312,13 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_with_seed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         resp = _ok_response("hi")
         resp["seed"] = 42
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(200, json.dumps(resp)))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         _data, meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1295,11 +1335,11 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_with_extra_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(200, json.dumps(_ok_response("hi"))))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         data, _meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1316,11 +1356,12 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_bad_json_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(200, "NOT JSON"))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_instant_retry_delay(monkeypatch)
         data, meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1337,11 +1378,11 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_http_error_non_retryable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(400, "bad request"))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         data, meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1361,7 +1402,7 @@ class TestChatCompletionAsync:
     async def test_budget_exhausted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import time
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         data, meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1379,8 +1420,8 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_retries_then_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
-        monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+        monkeypatch.setattr(openai_transport.asyncio, "sleep", AsyncMock())
         call_count = 0
 
         def make_client(**kw: Any) -> AsyncMock:
@@ -1398,7 +1439,7 @@ class TestChatCompletionAsync:
             client.last_http_version = "HTTP/1.1"
             return client
 
-        monkeypatch.setattr(mod, "_get_async_http_client", make_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", make_client)
         data, _meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1418,7 +1459,7 @@ class TestChatCompletionAsync:
 
     @pytest.mark.asyncio
     async def test_reasoning_content_extracted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         resp = {
             "choices": [
                 {
@@ -1438,7 +1479,7 @@ class TestChatCompletionAsync:
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(200, json.dumps(resp)))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         _data, meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1457,11 +1498,11 @@ class TestChatCompletionAsync:
     @pytest.mark.asyncio
     async def test_backoff_max_adjusted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When backoff_max < backoff_base, it gets adjusted upward."""
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = AsyncMock()
         fake_client.post_json = AsyncMock(return_value=(200, json.dumps(_ok_response("ok"))))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_async_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_async_http_client", lambda **kw: fake_client)
         data, _meta = await mod._chat_completion_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1498,7 +1539,7 @@ class TestProposePatchViaDiffAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(diff_text), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_diff_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1518,7 +1559,7 @@ class TestProposePatchViaDiffAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response("I don't know how to fix this."), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_diff_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1537,7 +1578,7 @@ class TestProposePatchViaDiffAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return {"choices": [{"message": {}}]}, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_diff_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1558,7 +1599,7 @@ class TestProposePatchViaDiffAsync:
         async def fake_chat_async(**kw: Any) -> tuple[None, dict[str, Any]]:
             return None, {"error": "request_budget_exceeded", "llm_call_count": 1}
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_diff_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1577,7 +1618,7 @@ class TestProposePatchViaDiffAsync:
         async def fake_chat_async(**kw: Any) -> tuple[None, dict[str, Any]]:
             return None, {"error": "request_failed", "llm_call_count": 1}
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_diff_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1609,7 +1650,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1645,7 +1686,7 @@ class TestProposePatchViaEditsAsync:
             )
             return _ok_response(diff), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1669,7 +1710,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response("no json here"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1697,7 +1738,7 @@ class TestProposePatchViaEditsAsync:
                 "llm_call_count": 1,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1735,7 +1776,7 @@ class TestProposePatchViaEditsAsync:
             )
             return _ok_response(diff), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1757,7 +1798,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1781,7 +1822,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1806,7 +1847,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1837,7 +1878,7 @@ class TestProposePatchViaEditsAsync:
                 return _ok_response(edits_json), dict(_GOOD_META)
             return None, {"error": "request_failed", "llm_call_count": 1}
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1865,7 +1906,7 @@ class TestProposePatchViaEditsAsync:
                 return _ok_response(json.dumps({"something": "else"})), dict(_GOOD_META)
             return None, {"error": "request_failed", "llm_call_count": 1}
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1905,7 +1946,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return resp, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_edits_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1938,7 +1979,7 @@ class TestProposePatchViaFullFileAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response("def f():\n    return 2\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_full_file_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1966,7 +2007,7 @@ class TestProposePatchViaFullFileAsync:
         async def fake_chat_async(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response(diff), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         result = await mod._propose_patch_via_full_file_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2086,7 +2127,7 @@ class TestPatcherAsyncProbe:
         async def fake_probe(**kw: Any) -> tuple[int | None, dict[str, Any]]:
             return 8192, {"context_window_source": "test"}
 
-        monkeypatch.setattr(mod, "_probe_context_window_tokens_async", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_probe_context_window_tokens_async", fake_probe)
         patcher = _make_patcher()
         tokens, _meta = await patcher.aprobe_context_window_tokens()
         assert tokens == 8192
@@ -2096,7 +2137,7 @@ class TestPatcherAsyncProbe:
         async def fake_probe(**kw: Any) -> tuple[bool, dict[str, Any]]:
             return True, {"server_ready": True}
 
-        monkeypatch.setattr(mod, "_probe_server_ready_async", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_probe_server_ready_async", fake_probe)
         patcher = _make_patcher()
         ready, _meta = await patcher.aprobe_server_ready()
         assert ready is True
@@ -2156,7 +2197,7 @@ class TestCompactContextViaJsonAsync:
         async def fake_chat(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return response, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         text, _raw, _meta = await mod._compact_context_via_json_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2187,7 +2228,7 @@ class TestCompactContextViaJsonAsync:
                 }
             return _ok_response(json.dumps({"compacted_context": "ok"})), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         text, _raw, _meta = await mod._compact_context_via_json_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2221,7 +2262,7 @@ class TestRequestContextViaJsonAsync:
         async def fake_chat(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return response, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         raw, _meta = await mod._request_context_via_json_async(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2352,7 +2393,7 @@ class TestPlanPatch:
         def fake_chat(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return _ok_response("   "), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         patcher = _make_patcher()
         result = patcher.plan_patch(prompt="fix", context_dir=tmp_path, cwd=tmp_path)
         assert result is not None
@@ -2370,7 +2411,7 @@ class TestPlanPatch:
             observed.update(kw)
             return _ok_response("Diagnosis\nMinimal edit plan"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         patcher = _make_patcher(max_tokens=4096, plan_patch_max_tokens=2048)
 
         result = patcher.plan_patch(prompt="fix", context_dir=tmp_path, cwd=tmp_path)
@@ -2463,7 +2504,7 @@ class TestProposePatchViaDiffSyncEdge:
         def fake_chat(**kw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             return {"choices": [{"message": {}}]}, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_diff(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2493,7 +2534,7 @@ class TestProposePatchViaDiffSyncEdge:
             )
             return _ok_response(diff), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_diff(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2516,11 +2557,11 @@ class TestProposePatchViaDiffSyncEdge:
 
 class TestChatCompletionSyncEdge:
     def test_extra_payload_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.post_json.return_value = (200, json.dumps(_ok_response("ok")))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         data, _meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2536,11 +2577,11 @@ class TestChatCompletionSyncEdge:
         assert data is not None
 
     def test_backoff_max_adjusted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.post_json.return_value = (200, json.dumps(_ok_response("ok")))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         data, _meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2557,11 +2598,12 @@ class TestChatCompletionSyncEdge:
         assert data is not None
 
     def test_bad_json_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         fake_client = MagicMock()
         fake_client.post_json.return_value = (200, "NOT JSON")
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_instant_retry_delay(monkeypatch)
         data, meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2577,7 +2619,7 @@ class TestChatCompletionSyncEdge:
         assert meta["error"] == "bad_json_response"
 
     def test_seed_and_reasoning(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         resp = {
             "choices": [
                 {
@@ -2595,7 +2637,7 @@ class TestChatCompletionSyncEdge:
         fake_client = MagicMock()
         fake_client.post_json.return_value = (200, json.dumps(resp))
         fake_client.last_http_version = "HTTP/1.1"
-        monkeypatch.setattr(mod, "_get_thread_http_client", lambda **kw: fake_client)
+        _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda **kw: fake_client)
         _data, meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2614,7 +2656,7 @@ class TestChatCompletionSyncEdge:
     def test_budget_with_retry_attempts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import time
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         data, meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -2658,8 +2700,8 @@ class TestGenerateText:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import TextGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: (_ok_response("hello from model"), dict(_GOOD_META)),
         )
@@ -2679,8 +2721,8 @@ class TestGenerateText:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import TextGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: (None, {"error": "http_error", "llm_call_count": 1, "usage": {}}),
         )
@@ -2698,8 +2740,8 @@ class TestGenerateText:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import TextGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: ({"choices": [], "usage": {}}, dict(_GOOD_META)),
         )
@@ -2723,7 +2765,7 @@ class TestGenerateText:
             captured.update(kw)
             return (_ok_response("ok"), dict(_GOOD_META))
 
-        monkeypatch.setattr(mod, "_chat_completion", _fake_completion)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_completion)
         patcher.generate_text(
             system_prompt="sys",
             prompt="user",
@@ -2752,8 +2794,8 @@ class TestGenerateJson:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import JsonGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: (_ok_response('{"key": "value"}'), dict(_GOOD_META)),
         )
@@ -2775,8 +2817,8 @@ class TestGenerateJson:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import JsonGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: (None, {"error": "timeout", "llm_call_count": 1, "usage": {}}),
         )
@@ -2814,7 +2856,7 @@ class TestGenerateJson:
             # Retry: succeed with plain JSON response
             return (_ok_response('{"result": 42}'), dict(_GOOD_META))
 
-        monkeypatch.setattr(mod, "_chat_completion", _fake_completion)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_completion)
         result = patcher.generate_json(
             system_prompt="sys",
             prompt="user",
@@ -2832,8 +2874,8 @@ class TestGenerateJson:
         patcher = self._make_patcher()
         from evals.patchers.openai_compat_patcher import JsonGenerationResult
 
-        monkeypatch.setattr(
-            mod,
+        _patch_patcher_modules(
+            monkeypatch,
             "_chat_completion",
             lambda **kw: (_ok_response("not valid json at all"), dict(_GOOD_META)),
         )

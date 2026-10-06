@@ -768,8 +768,10 @@ def _build_stage_b_prompt_sections(
 ) -> list[dict[str, Any]]:
     """Assemble the ordered list of prompt sections for Stage-B.
 
-    Each section is a dict with ``key``, ``text``, and ``priority`` used
-    by ``_apply_prompt_budget`` for truncation and overflow handling.
+    Each section is a dict with ``key`` and ``text``. ``_apply_prompt_budget`` trims
+    sections in its own fixed ``drop_order``; sections not listed there, such as
+    ``diagnosis_refinement``, are never trimmed (LLM-20). The unread per-section
+    ``priority`` field was removed.
     """
     repro = evidence.get("repro")
     stdout = evidence.get("stdout", "")
@@ -808,7 +810,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "instructions",
-                "priority": 3,
                 "text": (
                     "You are a coding assistant. This is a retry with delta-first protocol.\n"
                     "Use the retry packet and new evidence blocks first.\n"
@@ -823,7 +824,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "instructions",
-                "priority": 3,
                 "text": (
                     "You are a coding assistant. Fix the failing behavior shown by the tests.\n"
                     "Prioritize non-test source files; edit tests only when evidence shows a test is wrong.\n"
@@ -846,13 +846,12 @@ def _build_stage_b_prompt_sections(
     ]
     if has_previous:
         rca_lines.append("6) Diff vs previous failed attempt: what changed and why")
-    sections.append({"key": "rca_checklist", "priority": 3, "text": "\n".join(rca_lines)})
+    sections.append({"key": "rca_checklist", "text": "\n".join(rca_lines)})
 
     if prompt_repair_method_scaffold and not planning_mode:
         sections.append(
             {
                 "key": "repair_method_scaffold",
-                "priority": 3,
                 "text": (
                     "Modification method — write each item explicitly before your patch:\n"
                     "- Code region: identify the exact file and code region to edit.\n"
@@ -868,7 +867,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "cot_preamble",
-                "priority": 3,
                 "text": (
                     "Before proposing a fix, think through the problem step by step:\n"
                     "Step 1: Identify the failing behavior from the test output.\n"
@@ -882,25 +880,22 @@ def _build_stage_b_prompt_sections(
         )
 
     if retry_packet:
-        sections.append(
-            {"key": "retry_packet", "priority": 3, "text": retry_packet.rstrip() + "\n"}
-        )
+        sections.append({"key": "retry_packet", "text": retry_packet.rstrip() + "\n"})
     if retry_history:
         sections.append(
             {
                 "key": "retry_history",
-                "priority": 2,
                 "text": "Retry history from previous attempts:\n" + retry_history.rstrip() + "\n",
             }
         )
 
-    sections.append({"key": "repro", "priority": 3, "text": f"Repro command:\n{repro}\n"})
+    sections.append({"key": "repro", "text": f"Repro command:\n{repro}\n"})
 
     if not is_delta_retry and include_pytest_output:
         pytest_block = "Pytest output (stdout):\n" + (stdout or "").rstrip() + "\n"
         if stderr:
             pytest_block += "\nPytest output (stderr):\n" + stderr.rstrip() + "\n"
-        sections.append({"key": "pytest_output", "priority": 2, "text": pytest_block})
+        sections.append({"key": "pytest_output", "text": pytest_block})
 
     if not is_delta_retry and include_snapshot:
         snapshot_section_text = ""
@@ -909,7 +904,7 @@ def _build_stage_b_prompt_sections(
         elif snapshot is not None:
             snapshot_section_text = _format_snapshot_section(snapshot)
         if snapshot_section_text:
-            sections.append({"key": "snapshot", "priority": 2, "text": snapshot_section_text})
+            sections.append({"key": "snapshot", "text": snapshot_section_text})
     if (
         not is_delta_retry
         and include_snapshot
@@ -918,7 +913,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "distractor_mitigation",
-                "priority": 2,
                 "text": (
                     "The snapshot above contains many locals. Focus ONLY on variables mentioned "
                     "in the exception message, the crash line, or the test assertion. Other locals "
@@ -931,7 +925,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "failure_signatures",
-                "priority": 3,
                 "text": f"Current failure signature:\n{failure_signature}\n",
             }
         )
@@ -939,7 +932,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "failure_signatures",
-                "priority": 3,
                 "text": (
                     f"Previous failure signature:\n{previous_failure_signature}\n"
                     f"Failure signature repeated:\n{failure_signature_repeat}\n"
@@ -952,7 +944,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "previous_attempt_diff",
-                "priority": 2,
                 "text": (
                     "Structured diff vs previous failed attempt:\n"
                     + json.dumps(prompt_safe_diff, indent=2, ensure_ascii=False)
@@ -963,7 +954,6 @@ def _build_stage_b_prompt_sections(
     if failure_signature_repeat:
         if enable_tep and stagnation_streak > 0:
             # TEP: Escalate nudge intensity with stagnation depth.
-            nudge_priority = max(0, 3 - stagnation_streak)
             if stagnation_streak >= 3:
                 nudge_text = (
                     f"CRITICAL STAGNATION ({stagnation_streak} consecutive identical failures): "
@@ -984,7 +974,6 @@ def _build_stage_b_prompt_sections(
             sections.append(
                 {
                     "key": "loop_breaker",
-                    "priority": nudge_priority,
                     "text": nudge_text,
                 }
             )
@@ -992,7 +981,6 @@ def _build_stage_b_prompt_sections(
                 sections.append(
                     {
                         "key": "diagnosis_refinement",
-                        "priority": 1,
                         "text": (
                             "REQUIRED: Before proposing a fix, write one sentence: "
                             "'My new diagnosis is [X] because [reasoning different from previous].'\n"
@@ -1003,7 +991,6 @@ def _build_stage_b_prompt_sections(
             sections.append(
                 {
                     "key": "loop_breaker",
-                    "priority": 3,
                     "text": (
                         "Loop breaker: The signature repeated. "
                         "Change either diagnosis or evidence basis before retrying.\n"
@@ -1014,7 +1001,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "retry_reflection",
-                "priority": 3,
                 "text": (
                     "Retry reflection — write each item explicitly before your patch:\n"
                     "- Previous failure: explain why the previous attempt failed or remained "
@@ -1035,7 +1021,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "timeout_risk",
-                "priority": 3,
                 "text": (
                     "Timeout risk signal: the latest failing run timed out "
                     f"(budget={timeout_label}).\n"
@@ -1054,7 +1039,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "verifier_retry_guidance",
-                "priority": 3,
                 "text": (
                     "Verifier-aware retry guidance: the previous candidate was rejected by patch "
                     f"verifier (scope={scope_text}; reasons={reasons_text}).\n"
@@ -1068,7 +1052,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "file_index",
-                "priority": 1,
                 "text": "Available files (use exact relative paths):\n"
                 + str(file_index).rstrip()
                 + "\n",
@@ -1078,7 +1061,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "compacted_context",
-                "priority": 2,
                 "text": "Compacted context summary:\n" + compacted_context.rstrip() + "\n",
             }
         )
@@ -1086,7 +1068,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "snapshot_lite",
-                "priority": 2,
                 "text": "Compact snapshot index:\n" + snapshot_lite_context.rstrip() + "\n",
             }
         )
@@ -1094,7 +1075,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "stage_a_context",
-                "priority": 2,
                 "text": "Stage-A requested context:\n" + stage_a_context.rstrip() + "\n",
             }
         )
@@ -1102,7 +1082,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "stage_a_evidence_index",
-                "priority": 1,
                 "text": "Stage-A evidence index:\n" + stage_a_evidence_index.rstrip() + "\n",
             }
         )
@@ -1110,7 +1089,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "retry_repair_plan",
-                "priority": 3,
                 "text": "Structured repair plan from planning step:\n"
                 + retry_repair_plan.strip()
                 + "\n",
@@ -1122,7 +1100,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "known_evidence_refs",
-                "priority": 1,
                 "text": "Known evidence references:\n"
                 + "\n".join(f"- {item}" for item in known_refs),
             }
@@ -1131,7 +1108,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "new_evidence_ids",
-                "priority": 2,
                 "text": "New evidence IDs in this retry:\n"
                 + "\n".join(f"- {item}" for item in new_evidence_ids),
             }
@@ -1140,7 +1116,6 @@ def _build_stage_b_prompt_sections(
         sections.append(
             {
                 "key": "project_files",
-                "priority": 0,
                 "text": "Project files:\n" + str(files).rstrip() + "\n",
             }
         )
@@ -1148,7 +1123,6 @@ def _build_stage_b_prompt_sections(
     sections.append(
         {
             "key": "closing",
-            "priority": 2,
             "text": (
                 "CRITICAL — RETURN ONLY THE REPAIR PLAN:\n"
                 "- Do NOT return code, a diff, file contents, or markdown fences.\n"

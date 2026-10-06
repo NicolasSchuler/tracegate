@@ -10,12 +10,60 @@ import pytest
 
 from evals import run_eval
 from evals.patchers import openai_compat_patcher as openai_mod
+from evals.patchers import (
+    openai_diff_text,
+    openai_edits_apply,
+    openai_probes,
+    openai_response,
+    openai_transport,
+)
 from evals.patchers.base import PatchResult
 from evals.patchers.openai_compat_patcher import (
     OpenAICompatPatcher,
     _base_url_from_chat_url,
     _build_diff_from_changes,
 )
+
+# ---------------------------------------------------------------------------
+# Monkeypatch retargeting
+# ---------------------------------------------------------------------------
+# ``openai_compat_patcher`` re-exports helpers that now live in sibling modules
+# (``openai_transport``, ``openai_probes``, ``openai_edits_apply``, ...). Each
+# function resolves those names in the module that *defines* it, so a fake has
+# to be installed on every patcher module that exposes the name.
+_PATCHER_MODULES = (
+    openai_mod,
+    openai_transport,
+    openai_probes,
+    openai_response,
+    openai_diff_text,
+    openai_edits_apply,
+)
+
+
+def _patch_patcher_modules(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    targets = [module for module in _PATCHER_MODULES if hasattr(module, name)]
+    assert targets, f"no patcher module exposes {name!r}"
+    for target in targets:
+        monkeypatch.setattr(target, name, value)
+
+
+class _MaxJitterRandom:
+    """``random`` stand-in that always draws the top of the requested range."""
+
+    @staticmethod
+    def uniform(low: float, high: float) -> float:
+        del low
+        return high
+
+
+def _patch_max_retry_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin ``_jittered_retry_delay_sec`` to the un-jittered backoff ladder.
+
+    Retry delays use equal jitter (half the backoff plus a random share of the
+    other half), so a maximal draw reproduces the plain exponential schedule.
+    """
+    monkeypatch.setattr(openai_transport, "random", _MaxJitterRandom)
 
 
 def test_openai_patcher_default_max_propose_sec() -> None:
@@ -174,8 +222,8 @@ def test_chat_completion_applies_qwen_compat_request_profile(monkeypatch) -> Non
             captured["payload"] = json.loads(body.decode("utf-8"))
             return 200, json.dumps({"choices": [{"message": {"content": "ok"}}]})
 
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda **_kwargs: _Client(),
     )
@@ -215,8 +263,8 @@ def test_chat_completion_applies_qwen_compat_request_profile_with_thinking_enabl
             captured["payload"] = json.loads(body.decode("utf-8"))
             return 200, json.dumps({"choices": [{"message": {"content": "ok"}}]})
 
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda **_kwargs: _Client(),
     )
@@ -268,8 +316,8 @@ def test_chat_completion_reasoning_only_response_returns_compat_error(monkeypatc
                 ),
             )
 
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda **_kwargs: _Client(),
     )
@@ -319,8 +367,8 @@ def test_chat_completion_reasoning_only_response_uses_reasoning_fallback_when_en
                 ),
             )
 
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda **_kwargs: _Client(),
     )
@@ -370,8 +418,8 @@ def test_run_eval_make_patcher_defaults_tolerate_reasoning_only_local_responses(
                 ),
             )
 
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda **_kwargs: _Client(),
     )
@@ -440,7 +488,7 @@ def test_openai_edits_short_circuits_on_reasoning_only_error(tmp_path, monkeypat
             },
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(
         openai_mod,
         "_propose_patch_via_diff",
@@ -501,8 +549,8 @@ def test_openai_force_patch_attempt_skips_on_compat_failure(tmp_path, monkeypatc
 
 
 def test_openai_plan_patch_preserves_compat_reasoning_only_error(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_chat_completion",
         lambda **_kwargs: (
             None,
@@ -556,7 +604,7 @@ def test_openai_full_file_mode_builds_local_diff_from_single_source_file(
             {"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234",
@@ -606,7 +654,7 @@ def test_openai_full_file_mode_extracts_fenced_code_with_preamble(tmp_path, monk
             {"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234",
@@ -659,7 +707,7 @@ def test_openai_full_file_mode_plain_unified_diff_falls_back_to_diff(tmp_path, m
             meta={"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(openai_mod, "_propose_patch_via_diff", _fake_diff)
 
     patcher = OpenAICompatPatcher(
@@ -719,7 +767,7 @@ def test_openai_full_file_mode_truncated_output_falls_back_to_diff(tmp_path, mon
             meta={"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(openai_mod, "_propose_patch_via_diff", _fake_diff)
 
     patcher = OpenAICompatPatcher(
@@ -767,7 +815,7 @@ def test_openai_full_file_mode_identical_output_falls_back_to_diff(tmp_path, mon
             meta={"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion", _fake_chat_completion)
+    _patch_patcher_modules(monkeypatch, "_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(openai_mod, "_propose_patch_via_diff", _fake_diff)
 
     patcher = OpenAICompatPatcher(
@@ -875,7 +923,7 @@ async def test_openai_full_file_mode_async_truncated_output_falls_back_to_diff(
             meta={"llm_call_count": 1},
         )
 
-    monkeypatch.setattr(openai_mod, "_chat_completion_async", _fake_chat_completion_async)
+    _patch_patcher_modules(monkeypatch, "_chat_completion_async", _fake_chat_completion_async)
     monkeypatch.setattr(openai_mod, "_propose_patch_via_diff_async", _fake_diff_async)
 
     patcher = OpenAICompatPatcher(
@@ -946,7 +994,7 @@ def test_probe_context_window_tokens_prefers_lmstudio_v1_loaded_instance(monkeyp
             )
         raise AssertionError(f"unexpected probe url: {url}")
 
-    monkeypatch.setattr(openai_mod, "_http_get_json", _fake_get_json)
+    _patch_patcher_modules(monkeypatch, "_http_get_json", _fake_get_json)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234",
@@ -981,7 +1029,7 @@ def test_probe_context_window_tokens_falls_back_to_lmstudio_v0(monkeypatch) -> N
             )
         raise AssertionError(f"unexpected probe url: {url}")
 
-    monkeypatch.setattr(openai_mod, "_http_get_json", _fake_get_json)
+    _patch_patcher_modules(monkeypatch, "_http_get_json", _fake_get_json)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234",
@@ -1005,7 +1053,7 @@ def test_probe_context_window_tokens_reports_probe_failure(monkeypatch) -> None:
         del api_key, timeout_sec, http2
         return None, {"error": "request_failed", "exc": f"failed:{url}"}
 
-    monkeypatch.setattr(openai_mod, "_http_get_json", _fake_get_json)
+    _patch_patcher_modules(monkeypatch, "_http_get_json", _fake_get_json)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234",
@@ -1026,7 +1074,7 @@ def test_probe_context_window_tokens_skips_duplicate_openai_models_url(monkeypat
         calls.append(url)
         return None, {"error": "request_failed"}
 
-    monkeypatch.setattr(openai_mod, "_http_get_json", _fake_get_json)
+    _patch_patcher_modules(monkeypatch, "_http_get_json", _fake_get_json)
 
     patcher = OpenAICompatPatcher(
         base_url="http://127.0.0.1:1234/api/v1",
@@ -1055,7 +1103,7 @@ def test_http_get_json_request_failures_return_none(monkeypatch) -> None:
         kwargs.pop("http2", None)
         return _original_client(transport=_BoomTransport(), **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(openai_mod.httpx, "Client", _boom_client)
+    monkeypatch.setattr(openai_transport.httpx, "Client", _boom_client)
 
     payload, meta = openai_mod._http_get_json(
         url="http://127.0.0.1:1234/v1/models",
@@ -1075,7 +1123,7 @@ def test_probe_server_ready_prefers_health(monkeypatch) -> None:
             return True, {"status": 200, "transport_http_version": "HTTP/1.1"}
         raise AssertionError(f"unexpected probe url: {url}")
 
-    monkeypatch.setattr(openai_mod, "_http_probe_ready", _fake_probe_ready)
+    _patch_patcher_modules(monkeypatch, "_http_probe_ready", _fake_probe_ready)
 
     patcher = OpenAICompatPatcher(base_url="http://127.0.0.1:1234/v1", model="dummy")
     ready, meta = patcher.probe_server_ready()
@@ -1094,7 +1142,7 @@ def test_probe_server_ready_falls_back_to_models(monkeypatch) -> None:
             return True, {"status": 200}
         raise AssertionError(f"unexpected probe url: {url}")
 
-    monkeypatch.setattr(openai_mod, "_http_probe_ready", _fake_probe_ready)
+    _patch_patcher_modules(monkeypatch, "_http_probe_ready", _fake_probe_ready)
 
     patcher = OpenAICompatPatcher(base_url="http://127.0.0.1:1234/v1", model="dummy")
     ready, meta = patcher.probe_server_ready()
@@ -1112,8 +1160,8 @@ def test_probe_server_ready_falls_back_to_models(monkeypatch) -> None:
 
 
 def test_probe_server_ready_reports_failure(monkeypatch) -> None:
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(
+        monkeypatch,
         "_http_probe_ready",
         lambda **_kwargs: (False, {"error": "request_failed", "status": None}),
     )
@@ -2604,7 +2652,7 @@ def test_openai_edits_no_effective_changes_falls_back_to_diff(tmp_path, monkeypa
 
 
 def test_chat_http_client_cache_is_keyed_by_http2(monkeypatch) -> None:
-    monkeypatch.setattr(openai_mod, "_THREAD_HTTP_CLIENTS", threading.local())
+    _patch_patcher_modules(monkeypatch, "_THREAD_HTTP_CLIENTS", threading.local())
 
     client_h2_a = openai_mod._get_thread_http_client(
         url="http://127.0.0.1:1234/v1/chat/completions",
@@ -2641,7 +2689,7 @@ def test_chat_completion_falls_back_to_http1_when_http2_protocol_errors(monkeypa
         ) -> tuple[int, str]:
             del target, body, headers, timeout_sec
             if self.http2:
-                raise openai_mod.httpx.RemoteProtocolError("HTTP/2 stream reset")
+                raise openai_transport.httpx.RemoteProtocolError("HTTP/2 stream reset")
             return (
                 200,
                 '{"choices":[{"message":{"content":"{\\"ok\\":true}"}}],'
@@ -2655,8 +2703,8 @@ def test_chat_completion_falls_back_to_http1_when_http2_protocol_errors(monkeypa
         calls.append(bool(http2))
         return _FakeClient(http2=http2)
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", _fake_get_client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", _fake_get_client)
 
     raw, meta = openai_mod._chat_completion(
         url="http://127.0.0.1:1234/v1/chat/completions",
@@ -2708,8 +2756,8 @@ def test_openai_plan_patch_emits_retry_and_backoff_transport_progress(
     sleep_calls: list[float] = []
     events: list[tuple[str, dict[str, object] | None]] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     patcher = OpenAICompatPatcher(base_url="http://127.0.0.1:1234", model="dummy")
@@ -2763,7 +2811,7 @@ def test_openai_plan_patch_emits_http2_fallback_progress_once(tmp_path, monkeypa
         ) -> tuple[int, str]:
             del target, body, headers, timeout_sec
             if self.http2:
-                raise openai_mod.httpx.RemoteProtocolError("HTTP/2 stream reset")
+                raise openai_transport.httpx.RemoteProtocolError("HTTP/2 stream reset")
             return (
                 200,
                 '{"choices":[{"message":{"content":"Minimal edit plan"}}],'
@@ -2772,9 +2820,9 @@ def test_openai_plan_patch_emits_http2_fallback_progress_once(tmp_path, monkeypa
 
     events: list[tuple[str, dict[str, object] | None]] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(
-        openai_mod,
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(
+        monkeypatch,
         "_get_thread_http_client",
         lambda *, url, http2: _FakeClient(http2=http2),
     )
@@ -2886,9 +2934,9 @@ def test_chat_completion_uses_proxy_httpx_transport_when_proxy_enabled(monkeypat
             f"(url={url}, http2={http2})"
         )
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", _unexpected_client)
-    monkeypatch.setattr(openai_mod.httpx, "Client", _FakeHTTPXClient)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", _unexpected_client)
+    monkeypatch.setattr(openai_transport.httpx, "Client", _FakeHTTPXClient)
 
     raw, meta = openai_mod._chat_completion(
         url="http://127.0.0.1:1234/v1/chat/completions",
@@ -2942,8 +2990,8 @@ def test_chat_completion_proxy_transport_retries_request_failed_then_succeeds(mo
                 ),
             )
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
-    monkeypatch.setattr(openai_mod.httpx, "Client", _FlakyHTTPXClient)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+    monkeypatch.setattr(openai_transport.httpx, "Client", _FlakyHTTPXClient)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3002,8 +3050,8 @@ def test_chat_completion_proxy_transport_retries_http_503_then_succeeds(monkeypa
                 ),
             )
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: True)
-    monkeypatch.setattr(openai_mod.httpx, "Client", _FlakyHTTPXClient)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+    monkeypatch.setattr(openai_transport.httpx, "Client", _FlakyHTTPXClient)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3055,8 +3103,8 @@ def test_chat_completion_retries_request_failed_then_succeeds(monkeypatch) -> No
     client = _FlakyClient()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3107,8 +3155,8 @@ def test_chat_completion_retries_retryable_http_error_then_succeeds(monkeypatch)
     client = _FlakyClient()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3154,8 +3202,8 @@ def test_chat_completion_does_not_retry_non_retryable_http_error(monkeypatch) ->
     client = _BadRequestClient()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3202,8 +3250,8 @@ def test_chat_completion_stops_after_transport_retry_limit(monkeypatch) -> None:
     client = _AlwaysFlakyClient()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
     monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
 
     raw, meta = openai_mod._chat_completion(
@@ -3251,9 +3299,10 @@ def test_chat_completion_respects_custom_transport_retry_profile(monkeypatch) ->
     client = _AlwaysFlakyClient()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr(openai_mod, "_should_use_proxy_transport", lambda url: False)
-    monkeypatch.setattr(openai_mod, "_get_thread_http_client", lambda *, url, http2: client)
-    monkeypatch.setattr(openai_mod.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
+    _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
+    _patch_patcher_modules(monkeypatch, "_get_thread_http_client", lambda *, url, http2: client)
+    monkeypatch.setattr(openai_transport.time, "sleep", lambda sec: sleep_calls.append(float(sec)))
+    _patch_max_retry_jitter(monkeypatch)
 
     raw, meta = openai_mod._chat_completion(
         url="http://127.0.0.1:1234/v1/chat/completions",

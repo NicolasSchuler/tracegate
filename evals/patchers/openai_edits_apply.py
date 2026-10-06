@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import os
 import re
+import time
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -213,6 +214,10 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
         if ch in {" ", "\t"}:
             while i < len(text) and text[i] in {" ", "\t"}:
                 i += 1
+            # Before a line break the newline piece absorbs the run: adjacent
+            # [ \t]+[ \t]* classes backtracked polynomially (LLM-12).
+            if i < len(text) and text[i] == "\n":
+                continue
             pieces.append(r"[ \t]+")
             continue
         if ch == "\n":
@@ -223,6 +228,10 @@ def _compile_whitespace_normalized_pattern(text: str) -> re.Pattern[str]:
         pieces.append(re.escape(ch))
         i += 1
     return re.compile("".join(pieces))
+
+
+_FUZZY_BLOCK_TIME_BUDGET_SEC = 2.0
+"""Wall-time cap on one fuzzy block search (LLM-12)."""
 
 
 def _apply_fuzzy_block_replacement(
@@ -262,15 +271,29 @@ def _apply_fuzzy_block_replacement(
     for chunk in line_chunks:
         cumulative_lengths.append(cumulative_lengths[-1] + len(chunk))
 
+    min_ratio = 0.96 if target_lines == 1 else 0.92
+    # LLM-12: a window whose ratio can't reach min_ratio - margin can be neither the
+    # accepted match nor within the ambiguity margin of one, so the cheap upper bounds
+    # (real_quick_ratio, quick_ratio) skip it without changing the outcome. The matcher
+    # caches the find block as its second sequence, and a wall-time cap makes a
+    # pathological file fail closed instead of burning CPU outside any deadline.
+    ambiguity_margin = 0.03
+    prune_below = min_ratio - ambiguity_margin
+    matcher = difflib.SequenceMatcher(None, "", find_block)
+    deadline = time.monotonic() + _FUZZY_BLOCK_TIME_BUDGET_SEC
     scored_windows: list[tuple[float, int, int]] = []
     for window_len in sorted(candidate_window_lengths):
         max_start = len(line_chunks) - window_len
         for start in range(max_start + 1):
+            if time.monotonic() > deadline:
+                return None
             raw_window = "".join(line_chunks[start : start + window_len]).strip()
             if not raw_window:
                 continue
-            ratio = difflib.SequenceMatcher(None, raw_window, find_block).ratio()
-            scored_windows.append((ratio, start, window_len))
+            matcher.set_seq1(raw_window)
+            if matcher.real_quick_ratio() < prune_below or matcher.quick_ratio() < prune_below:
+                continue
+            scored_windows.append((matcher.ratio(), start, window_len))
 
     if not scored_windows:
         return None
@@ -279,10 +302,9 @@ def _apply_fuzzy_block_replacement(
     best_ratio, best_start, best_len = scored_windows[0]
     second_ratio = scored_windows[1][0] if len(scored_windows) > 1 else 0.0
 
-    min_ratio = 0.96 if target_lines == 1 else 0.92
     if best_ratio < min_ratio:
         return None
-    if (best_ratio - second_ratio) < 0.03:
+    if (best_ratio - second_ratio) < ambiguity_margin:
         return None
 
     start_offset = cumulative_lengths[best_start]
@@ -318,23 +340,22 @@ def _normalize_full_file_response(raw: dict[str, Any]) -> tuple[str | None, Patc
     return repaired, meta
 
 
-def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
+def _workdir_python_files(cwd: Path) -> list[str]:
+    """The workdir's Python files, relative and sorted, skipping tool directories."""
     exclude_dirs = {".llmdebug", "__pycache__", ".venv", ".git"}
-    candidates: list[str] = []
+    found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(cwd):
         dirnames[:] = sorted(name for name in dirnames if name not in exclude_dirs)
         dirpath_path = Path(dirpath)
         for filename in sorted(filenames):
-            if not filename.endswith(".py"):
-                continue
             path = dirpath_path / filename
-            if not path.is_file():
-                continue
-            rel = str(path.relative_to(cwd))
-            if _is_test_file_path(rel):
-                continue
-            candidates.append(rel)
-    candidates.sort()
+            if filename.endswith(".py") and path.is_file():
+                found.append(str(path.relative_to(cwd)))
+    return sorted(found)
+
+
+def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
+    candidates = [rel for rel in _workdir_python_files(cwd) if not _is_test_file_path(rel)]
     if len(candidates) == 1:
         return candidates[0], "single_non_test_python_file"
     if not candidates:
@@ -342,9 +363,13 @@ def _resolve_full_file_target(*, cwd: Path) -> tuple[str | None, str]:
     return None, "multiple_non_test_python_files"
 
 
-def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | None:
-    """Build a deterministic minimal patch when model output is empty/invalid."""
-    candidates = _extract_file_index_paths(prompt)
+def _build_forced_attempt_diff(*, cwd: Path) -> tuple[str, str] | None:
+    """Build a deterministic minimal patch when model output is empty/invalid.
+
+    The target comes from the workdir itself, not from a file list parsed back out of
+    the prompt, where a case file's text could redirect it (LLM-26).
+    """
+    candidates = _workdir_python_files(cwd)
     if not candidates:
         return None
 
@@ -385,28 +410,3 @@ def _build_forced_attempt_diff(*, prompt: str, cwd: Path) -> tuple[str, str] | N
 
     diff = _build_diff_from_changes([(target_rel, before, after)])
     return target_rel, diff
-
-
-def _extract_file_index_paths(prompt: str) -> list[str]:
-    lines = prompt.splitlines()
-    start = None
-    for i, line in enumerate(lines):
-        if line.strip().startswith("Available files"):
-            start = i + 1
-            break
-    if start is None:
-        return []
-
-    out: list[str] = []
-    for line in lines[start:]:
-        s = line.strip()
-        if not s:
-            if out:
-                break
-            continue
-        if s.endswith(":"):
-            break
-        if s.startswith("Pytest output") or s.startswith("Project files:"):
-            break
-        out.append(s)
-    return out

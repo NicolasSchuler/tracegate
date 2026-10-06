@@ -20,6 +20,7 @@ from evals.eval_types import (
     ConfigResolutionState,
     RunResult,
 )
+from evals.patcher_factory import PatcherConfigError
 from evals.patchers.base import (
     ContextCompactionResult,
     ContextRequestResult,
@@ -101,7 +102,7 @@ class TestRecoveryGate:
     def test_follower_waits(self) -> None:
         g = run_eval._OpenAITransportRecoveryGate(enabled=True, max_wait_sec=5, poll_sec=0.02)
         g._outage_active, g._outage_generation, g._leader_claimed_generation = True, 1, 1
-        g._last_outcome = {
+        g._outcomes[1] = {
             "attempted": True,
             "recovered": True,
             "timed_out": False,
@@ -720,7 +721,7 @@ class TestMakePatcher:
         )
 
     def test_openai_no_model(self) -> None:
-        with pytest.raises(SystemExit, match="openai-model"):
+        with pytest.raises(PatcherConfigError, match="openai-model"):
             run_eval.make_patcher(self._args(patcher="openai"))
 
     def test_openai_with_model(self) -> None:
@@ -767,5 +768,5 @@ class TestMakePatcher:
         assert isinstance(run_eval.make_patcher(self._args(patcher="unk")), NullPatcher)
 
     def test_baseline_no_name(self) -> None:
-        with pytest.raises(SystemExit, match="baseline-name"):
+        with pytest.raises(PatcherConfigError, match="baseline-name"):
             run_eval.make_patcher(self._args(patcher="baseline", baseline=""))

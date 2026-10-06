@@ -1246,6 +1246,60 @@ class TestHumanevalpackImportPipeline:
         assert len(result) == 2
         assert all("case_id" in r for r in result)
 
+    def _install_rows(self, monkeypatch: Any, count: int) -> None:
+        rows = [
+            {
+                "task_id": f"Task/{i}",
+                "buggy_solution": "def f():\n    return 1\n",
+                "canonical_solution": "def f():\n    return 2\n",
+                "prompt": "",
+                "test": "assert f() == 2\n",
+                "bug_type": "logic",
+                "entry_point": "f()",
+                "failure_symptoms": "",
+            }
+            for i in range(count)
+        ]
+        _install_fake_datasets(monkeypatch, rows)
+        monkeypatch.setattr(humanevalpack_importer, "map_humanevalpack_type", lambda bt: "logic")
+        monkeypatch.setattr(humanevalpack_importer, "infer_snapshot_dependency", lambda c: "dep")
+        monkeypatch.setattr(
+            humanevalpack_importer,
+            "generate_oracle_patch",
+            lambda b, f: "--- a/buggy.py\n+++ b/buggy.py\n-1\n+2\n",
+        )
+        monkeypatch.setattr(humanevalpack_importer, "count_patch_lines", lambda p: 1)
+
+    def test_max_cases_zero_means_unlimited(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """DAT-22: 0 means unlimited, as in the other importers."""
+        self._install_rows(monkeypatch, 5)
+        result = humanevalpack_importer.import_humanevalpack(
+            tmp_path / "cases", max_cases=0, dry_run=True
+        )
+        assert len(result) == 5
+
+    def test_existing_cases_are_not_overwritten(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """DAT-23: a re-run keeps earlier corrections such as fixed expected exceptions."""
+        self._install_rows(monkeypatch, 2)
+        output_dir = tmp_path / "cases"
+        existing = output_dir / "hep_task_0_logic"
+        existing.mkdir(parents=True)
+        (existing / "case.json").write_text('{"corrected": true}', encoding="utf-8")
+        written: list[str] = []
+        monkeypatch.setattr(
+            humanevalpack_importer,
+            "write_case_files",
+            lambda case_dir, **_kwargs: written.append(case_dir.name),
+        )
+        monkeypatch.setattr(
+            humanevalpack_importer, "validate_generated_case", lambda *_a, **_k: (True, "ok")
+        )
+
+        humanevalpack_importer.import_humanevalpack(output_dir, max_cases=0)
+
+        assert written == ["hep_task_1_logic"]
+        assert (existing / "case.json").read_text(encoding="utf-8") == '{"corrected": true}'
+
     def test_empty_patch_skipped(self, tmp_path: Path, monkeypatch: Any) -> None:
         """Lines 130-131: empty oracle patch → skip."""
         rows = [

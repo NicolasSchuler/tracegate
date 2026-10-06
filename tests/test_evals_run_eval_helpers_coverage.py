@@ -619,7 +619,7 @@ class TestOpenAITransportRecoveryGate:
 
         gate._outage_active = True
         gate._outage_generation = 7
-        gate._last_outcome = {
+        gate._outcomes[7] = {
             "attempted": True,
             "recovered": True,
             "timed_out": False,

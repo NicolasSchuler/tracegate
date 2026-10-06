@@ -154,7 +154,9 @@ def _add_pyresbugs_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_humanevalpack_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--max-cases", type=int, default=20)
+    parser.add_argument(
+        "--max-cases", type=int, default=20, help="Max cases to import (0 = unlimited)."
+    )
     _add_common_import_arguments(parser)
 
 

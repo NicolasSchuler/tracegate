@@ -557,7 +557,7 @@ Important execution flags:
   outlive units. Before the 2026-10-04 fix (ORC-02) the pool was started but never used, so
   every earlier result ran in one-shot containers. Recorded as
   `run_metadata.patcher_config.execution.container_pool`.
-- stale eval containers are pruned automatically at run start (best-effort, 5-minute grace)
+- stale eval containers are pruned automatically at run start (best-effort, 5-minute grace); this includes running pool containers whose owning run process on this host is gone, for example after `kill -9` (they are labelled with the owner's PID, host and run id)
 
 Use `--executor local` if you want the legacy host-side pytest execution.
 
@@ -989,6 +989,9 @@ Crash/recovery safeguards:
 - result records are appended incrementally during each unit, so progress survives process crashes
 - trailing malformed JSON in the last line of a results file is auto-repaired during resume (file is truncated to the last valid record and a `.corrupt-tail-*.log` sidecar backup is written)
 - a per-run lock file (`<run_id>.jsonl.lock`) prevents two writers from appending to the same run simultaneously when OS file-lock support is available; unsupported platforms continue with a warning
+- the lock file stays after a run (removing it would let two processes each hold an "exclusive" lock on different files); it only records the last holder, so it is safe to leave or delete between runs
+- each result record is fsynced as it is written, so a power loss or kernel crash loses at most the record being written
+- with `--jobs N`, the first Ctrl-C stops scheduling and reports how many units are still running, then waits for them; a second Ctrl-C exits at once (status 130), and `--resume` continues the run
 
 To compare retry strategies cleanly, run separate `run_id`s with identical settings except
 `--retry-context-mode`:

@@ -16,6 +16,7 @@ SKIP_UNSUPPORTED_NATIVE_COMMAND = "unsupported_native_test_command"
 SKIP_NATIVE_COMMAND_MISSING_SELECTOR = "native_command_missing_test_selector"
 SKIP_UNSAFE_DATASET_PATH = "unsafe_dataset_path"
 SKIP_GIT_CLONE_FAILED = "git_clone_failed"
+SKIP_UNSAFE_REPO_URL = "unsafe_repo_url"
 SKIP_GIT_SHOW_FAILED = "git_show_failed"
 SKIP_UNSUPPORTED_PATCH_FILE_COUNT = "unsupported_patch_file_count"
 
@@ -109,8 +110,20 @@ def normalize_native_pytest_command(command_text: str) -> NativePytestCommand | 
     )
 
 
+# Dataset-supplied clone URLs: https or scp-style ssh only. A leading "-" would be parsed
+# as a git option, and transports such as ext:: can run commands (DAT-12).
+_SAFE_REPO_URL_RE = re.compile(r"^(?:https://[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+)$")
+
+
+def is_safe_repo_url(repo_url: str) -> bool:
+    """Whether *repo_url* is an ``https://`` or ``git@host:path`` URL."""
+    return bool(_SAFE_REPO_URL_RE.match(repo_url))
+
+
 def ensure_git_repo(repo_url: str, clone_dir: Path) -> tuple[bool, str | None]:
     """Clone or refresh a git repository for deterministic file reads."""
+    if not is_safe_repo_url(repo_url):
+        return False, SKIP_UNSAFE_REPO_URL
     try:
         if clone_dir.exists() and (clone_dir / ".git").exists():
             proc = subprocess.run(
@@ -127,7 +140,7 @@ def ensure_git_repo(repo_url: str, clone_dir: Path) -> tuple[bool, str | None]:
 
         clone_dir.parent.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
-            ["git", "clone", "--filter=blob:none", repo_url, str(clone_dir)],
+            ["git", "clone", "--filter=blob:none", "--", repo_url, str(clone_dir)],
             capture_output=True,
             text=True,
             timeout=240,
@@ -143,8 +156,8 @@ def ensure_git_repo(repo_url: str, clone_dir: Path) -> tuple[bool, str | None]:
 def git_show_file(repo_dir: Path, request: GitShowFileRequest) -> str | None:
     """Read file content at `commitish:rel_path` from a local git repo."""
     rel_path = normalize_relative_path(request.rel_path)
-    if rel_path is None:
-        return None
+    if rel_path is None or request.commitish.startswith("-"):
+        return None  # a leading "-" would be read as a git option (DAT-12)
     try:
         proc = subprocess.run(
             ["git", "show", f"{request.commitish}:{rel_path}"],

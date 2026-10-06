@@ -25,6 +25,7 @@ AttemptNote = Literal[
     "retry_gate_no_new_evidence",
     "no_patch_needed",
     "unit_runtime_error",
+    "patch_cycle_incomplete",
 ]
 ATTEMPT_NOTES: frozenset[str] = frozenset(get_args(AttemptNote))
 
@@ -41,6 +42,7 @@ NOTE_INFRA_TRANSPORT_FAILURE: AttemptNote = "infra_transport_failure"
 NOTE_RETRY_GATE_NO_NEW_EVIDENCE: AttemptNote = "retry_gate_no_new_evidence"
 NOTE_NO_PATCH_NEEDED: AttemptNote = "no_patch_needed"
 NOTE_UNIT_RUNTIME_ERROR: AttemptNote = "unit_runtime_error"
+NOTE_PATCH_CYCLE_INCOMPLETE: AttemptNote = "patch_cycle_incomplete"
 
 # Keys read outside the module that writes them.
 KEY_INFRA_RESUME_ELIGIBLE = "infra_resume_eligible"

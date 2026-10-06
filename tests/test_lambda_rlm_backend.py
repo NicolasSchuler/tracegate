@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from baselines.controller_packet import parse_controller_packet
+from baselines.openai_compat import ENV_CLIENT_API_KEY_ENV
 from evals import lambda_rlm_backend
 from llmdebug import _json as json
 
@@ -233,7 +234,9 @@ def test_invoke_lambda_rlm_decomposition_uses_env_fallback_api_key(
         request_path = Path(cmd[2])
         response_path = Path(cmd[3])
         request_payload = json.loads(request_path.read_text(encoding="utf-8"))
-        observed["api_key"] = request_payload["api_key"]
+        # LLM-25: the key travels in the environment, never in the request file.
+        assert "api_key" not in request_payload
+        observed["api_key"] = env[ENV_CLIENT_API_KEY_ENV]
         response_path.write_text(
             json.dumps(
                 {
@@ -286,7 +289,9 @@ def test_invoke_lambda_rlm_decomposition_defaults_to_local_when_no_api_key_avail
         request_path = Path(cmd[2])
         response_path = Path(cmd[3])
         request_payload = json.loads(request_path.read_text(encoding="utf-8"))
-        observed["api_key"] = request_payload["api_key"]
+        # LLM-25: the key travels in the environment, never in the request file.
+        assert "api_key" not in request_payload
+        observed["api_key"] = env[ENV_CLIENT_API_KEY_ENV]
         response_path.write_text(
             json.dumps(
                 {
@@ -580,3 +585,40 @@ def test_invoke_with_no_usage_summary_returns_empty_dict(
         timeout_sec=5,
     )
     assert result.usage_summary == {}
+
+
+def test_env_client_failure_text_does_not_echo_the_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LLM-25: a child that prints its key must not leak it into the exception."""
+
+    def _fake_run(cmd, **_kwargs):  # type: ignore[no-untyped-def]
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="", stderr="auth failed for sk-test-secret-123"
+        )
+
+    monkeypatch.setattr(lambda_rlm_backend.subprocess, "run", _fake_run)
+    with pytest.raises(RuntimeError) as excinfo:
+        lambda_rlm_backend.invoke_lambda_rlm_decomposition(
+            controller_packet=_controller_packet(),
+            model="m",
+            base_url="http://127.0.0.1:1",
+            api_key="sk-test-secret-123",
+            repo_dir=tmp_path,
+            python_executable=tmp_path / "python",
+            context_window_chars=1000,
+            timeout_sec=5,
+        )
+    assert "sk-test-secret-123" not in str(excinfo.value)
+    assert "***REDACTED***" in str(excinfo.value)
+
+
+def test_env_clients_read_the_key_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from baselines.openai_compat import env_client_api_key, env_client_subprocess_env
+
+    monkeypatch.delenv(ENV_CLIENT_API_KEY_ENV, raising=False)
+    assert env_client_api_key({}) == "sk-placeholder"
+    monkeypatch.setenv(ENV_CLIENT_API_KEY_ENV, "sk-from-env")
+    assert env_client_api_key({}) == "sk-from-env"
+    assert env_client_api_key({"api_key": "sk-request"}) == "sk-request"
+    assert env_client_subprocess_env("sk-x")[ENV_CLIENT_API_KEY_ENV] == "sk-x"

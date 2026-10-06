@@ -35,6 +35,7 @@ from baselines.openai_compat import (  # noqa: E402
     apply_compat_request_profile,
     build_request_validation_retry_plan,
     compat_config_from_extra,
+    env_client_api_key,
     normalize_chat_completion_response,
     request_validation_compat_error_from_exception,
     require_final_content,
@@ -858,7 +859,7 @@ def main(argv: list[str]) -> int:
     logger = RLMLogger()
     backend_kwargs: dict[str, Any] = {
         "model_name": str(payload.get("model") or ""),
-        "api_key": str(payload.get("api_key") or "sk-placeholder"),
+        "api_key": env_client_api_key(payload),
         "base_url": compat_base_url or None,
     }
     api_timeout_sec = payload.get("api_timeout_sec")

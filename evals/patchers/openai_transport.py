@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import math
+import random
 import threading
 import time
 import urllib.parse
@@ -11,6 +13,8 @@ import urllib.request
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -194,6 +198,7 @@ class _PersistentHTTPClient:
     _client: httpx.Client | None = None
     _timeout_sec: float | None = None
     last_http_version: str = ""
+    last_retry_after: str = ""
 
     @property
     def origin(self) -> str:
@@ -237,6 +242,7 @@ class _PersistentHTTPClient:
             try:
                 response = client.post(url, content=body, headers=headers)
                 self.last_http_version = str(getattr(response, "http_version", "") or "")
+                self.last_retry_after = _retry_after_header(response)
                 return int(response.status_code), response.text
             except _RETRYABLE_HTTP_ERRORS:
                 self.close()
@@ -276,6 +282,7 @@ class _PersistentAsyncHTTPClient:
     _client: httpx.AsyncClient | None = None
     _timeout_sec: float | None = None
     last_http_version: str = ""
+    last_retry_after: str = ""
 
     @property
     def origin(self) -> str:
@@ -321,6 +328,7 @@ class _PersistentAsyncHTTPClient:
             try:
                 response = await client.post(url, content=body, headers=headers)
                 self.last_http_version = str(getattr(response, "http_version", "") or "")
+                self.last_retry_after = _retry_after_header(response)
                 return int(response.status_code), response.text
             except _RETRYABLE_HTTP_ERRORS:
                 await self.close()
@@ -594,12 +602,17 @@ def _chat_completion(
     }
     payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
-    def _send_request(*, timeout: float, use_http2: bool) -> tuple[int, str, str]:
+    def _send_request(*, timeout: float, use_http2: bool) -> tuple[int, str, str, str]:
         if _should_use_proxy_transport(url):
             with httpx.Client(timeout=timeout, http2=use_http2, trust_env=True) as client:
                 response = client.post(url, content=payload_bytes, headers=headers)
                 http_version = str(getattr(response, "http_version", "") or "")
-                return int(response.status_code), response.text, http_version
+                return (
+                    int(response.status_code),
+                    response.text,
+                    http_version,
+                    _retry_after_header(response),
+                )
         client = _get_thread_http_client(url=url, http2=use_http2)
         status, raw = client.post_json(
             target=_chat_http_target(url),
@@ -608,7 +621,7 @@ def _chat_completion(
             timeout_sec=timeout,
         )
         http_version = str(getattr(client, "last_http_version", "") or "")
-        return status, raw, http_version
+        return status, raw, http_version, str(getattr(client, "last_retry_after", "") or "")
 
     for attempt_index in range(max_retries + 1):
         remaining_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
@@ -662,9 +675,10 @@ def _chat_completion(
         raw_text = ""
         status = 0
         http_version = ""
+        retry_after = ""
         error_meta: PatcherMeta | None = None
         try:
-            status, raw_text, http_version = _send_request(
+            status, raw_text, http_version, retry_after = _send_request(
                 timeout=effective_timeout_sec,
                 use_http2=transport_http2_effective,
             )
@@ -682,7 +696,7 @@ def _chat_completion(
                 attempt_meta["transport_http2_effective"] = False
                 attempt_meta["transport_http2_fallback_used"] = True
                 try:
-                    status, raw_text, http_version = _send_request(
+                    status, raw_text, http_version, retry_after = _send_request(
                         timeout=effective_timeout_sec,
                         use_http2=False,
                     )
@@ -718,6 +732,7 @@ def _chat_completion(
                 "error": "http_error",
                 "status": int(status),
                 "body": raw_text[:2000],
+                **_retry_after_meta(retry_after),
             }
         data: Any = None
         if error_meta is None:
@@ -736,9 +751,13 @@ def _chat_completion(
                 error_meta
             )
             if should_retry:
-                backoff_sec = _chat_completion_retry_backoff_sec(
-                    attempt_index,
-                    base_sec=retry_backoff_base_sec,
+                backoff_sec = _jittered_retry_delay_sec(
+                    _chat_completion_retry_backoff_sec(
+                        attempt_index,
+                        base_sec=retry_backoff_base_sec,
+                        max_sec=retry_backoff_max_sec,
+                    ),
+                    retry_after_sec=error_meta.get("retry_after_sec"),
                     max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
@@ -930,14 +949,19 @@ async def _chat_completion_async(
     }
     payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
-    async def _send_request(*, timeout: float, use_http2: bool) -> tuple[int, str, str]:
+    async def _send_request(*, timeout: float, use_http2: bool) -> tuple[int, str, str, str]:
         if _should_use_proxy_transport(url):
             async with httpx.AsyncClient(
                 timeout=timeout, http2=use_http2, trust_env=True
             ) as client:
                 response = await client.post(url, content=payload_bytes, headers=headers)
                 http_version = str(getattr(response, "http_version", "") or "")
-                return int(response.status_code), response.text, http_version
+                return (
+                    int(response.status_code),
+                    response.text,
+                    http_version,
+                    _retry_after_header(response),
+                )
         client = _get_async_http_client(url=url, http2=use_http2)
         status, raw = await client.post_json(
             target=_chat_http_target(url),
@@ -946,7 +970,7 @@ async def _chat_completion_async(
             timeout_sec=timeout,
         )
         http_version = str(getattr(client, "last_http_version", "") or "")
-        return status, raw, http_version
+        return status, raw, http_version, str(getattr(client, "last_retry_after", "") or "")
 
     for attempt_index in range(max_retries + 1):
         remaining_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
@@ -1000,9 +1024,10 @@ async def _chat_completion_async(
         raw_text = ""
         status = 0
         http_version = ""
+        retry_after = ""
         error_meta: PatcherMeta | None = None
         try:
-            status, raw_text, http_version = await _send_request(
+            status, raw_text, http_version, retry_after = await _send_request(
                 timeout=effective_timeout_sec,
                 use_http2=transport_http2_effective,
             )
@@ -1020,7 +1045,7 @@ async def _chat_completion_async(
                 attempt_meta["transport_http2_effective"] = False
                 attempt_meta["transport_http2_fallback_used"] = True
                 try:
-                    status, raw_text, http_version = await _send_request(
+                    status, raw_text, http_version, retry_after = await _send_request(
                         timeout=effective_timeout_sec,
                         use_http2=False,
                     )
@@ -1056,6 +1081,7 @@ async def _chat_completion_async(
                 "error": "http_error",
                 "status": int(status),
                 "body": raw_text[:2000],
+                **_retry_after_meta(retry_after),
             }
         data: Any = None
         if error_meta is None:
@@ -1074,9 +1100,13 @@ async def _chat_completion_async(
                 error_meta
             )
             if should_retry:
-                backoff_sec = _chat_completion_retry_backoff_sec(
-                    attempt_index,
-                    base_sec=retry_backoff_base_sec,
+                backoff_sec = _jittered_retry_delay_sec(
+                    _chat_completion_retry_backoff_sec(
+                        attempt_index,
+                        base_sec=retry_backoff_base_sec,
+                        max_sec=retry_backoff_max_sec,
+                    ),
+                    retry_after_sec=error_meta.get("retry_after_sec"),
                     max_sec=retry_backoff_max_sec,
                 )
                 remaining_retry_budget_sec = _remaining_request_budget_sec(deadline_monotonic)
@@ -1194,6 +1224,54 @@ def _remaining_request_budget_sec(deadline_monotonic: float | None) -> float | N
     if deadline_monotonic is None:
         return None
     return max(0.0, deadline_monotonic - time.monotonic())
+
+
+def _retry_after_header(response: Any) -> str:
+    headers = getattr(response, "headers", None)
+    try:
+        return str(headers.get("retry-after") or "") if headers is not None else ""
+    except Exception:
+        return ""
+
+
+def _retry_after_meta(raw: str) -> PatcherMeta:
+    """``retry_after_sec`` from a ``Retry-After`` header (delta-seconds or an HTTP-date)."""
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        seconds = float(text)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(text)
+        except (TypeError, ValueError):
+            return {}
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        seconds = (when - datetime.now(timezone.utc)).total_seconds()
+    if not math.isfinite(seconds):
+        return {}
+    return {"retry_after_sec": max(0.0, seconds)}
+
+
+def _jittered_retry_delay_sec(
+    backoff_sec: float,
+    *,
+    retry_after_sec: object,
+    max_sec: float,
+    rng: random.Random | None = None,
+) -> float:
+    """The delay before a retry: jittered backoff, but at least the server's Retry-After.
+
+    Equal jitter (half the backoff plus a random share of the other half) keeps parallel
+    workers from retrying in lockstep after a shared outage. A ``Retry-After`` is
+    honoured up to the backoff cap, *max_sec* (LLM-22).
+    """
+    base = max(0.0, float(backoff_sec))
+    delay = base / 2 + (rng or random).uniform(0.0, base / 2)
+    if isinstance(retry_after_sec, (int, float)) and retry_after_sec > 0:
+        delay = max(delay, min(float(retry_after_sec), max(float(max_sec), base)))
+    return delay
 
 
 def _chat_completion_retry_backoff_sec(

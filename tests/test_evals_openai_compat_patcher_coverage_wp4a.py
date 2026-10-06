@@ -23,7 +23,38 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from evals.patchers import openai_compat_patcher as mod
+from evals.patchers import (
+    openai_diff_text,
+    openai_edits_apply,
+    openai_probes,
+    openai_response,
+    openai_transport,
+)
 from evals.patchers.base import PatchResult
+
+# ---------------------------------------------------------------------------
+# Monkeypatch retargeting
+# ---------------------------------------------------------------------------
+# ``openai_compat_patcher`` re-exports helpers that now live in sibling modules
+# (``openai_transport``, ``openai_probes``, ``openai_edits_apply``, ...). Each
+# function resolves those names in the module that *defines* it, so a fake has
+# to be installed on every patcher module that exposes the name.
+_PATCHER_MODULES = (
+    mod,
+    openai_transport,
+    openai_probes,
+    openai_response,
+    openai_diff_text,
+    openai_edits_apply,
+)
+
+
+def _patch_patcher_modules(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    targets = [module for module in _PATCHER_MODULES if hasattr(module, name)]
+    assert targets, f"no patcher module exposes {name!r}"
+    for target in targets:
+        monkeypatch.setattr(target, name, value)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -183,7 +214,7 @@ class TestProbeContextWindowTokens:
             call_count += 1
             return None, {"error": "timeout"}
 
-        monkeypatch.setattr(mod, "_http_get_json", fake_http_get)
+        _patch_patcher_modules(monkeypatch, "_http_get_json", fake_http_get)
         # base_url with origin that produces duplicate URLs
         tokens, _meta = mod._probe_context_window_tokens(
             base_url="http://localhost:1234/v1",
@@ -202,7 +233,7 @@ class TestProbeContextWindowTokens:
         def fake_http_get(*, url, api_key, timeout_sec, http2):
             return {"data": [{"id": "other-model", "context_length": 4096}]}, {}
 
-        monkeypatch.setattr(mod, "_http_get_json", fake_http_get)
+        _patch_patcher_modules(monkeypatch, "_http_get_json", fake_http_get)
         tokens, meta = mod._probe_context_window_tokens(
             base_url="http://localhost:1234/v1",
             model="target-model",
@@ -222,7 +253,7 @@ class TestProbeContextWindowTokens:
             seen.add(url)
             return None, {"error": "fail"}
 
-        monkeypatch.setattr(mod, "_http_get_json", fake_http_get)
+        _patch_patcher_modules(monkeypatch, "_http_get_json", fake_http_get)
         # To make all probes collapse to the same URL, we'd need a special base_url
         # but that's hard. Instead, test the async version with a simpler approach.
 
@@ -242,7 +273,7 @@ class TestProbeContextWindowTokens:
         async def fake_http_get_async(*, url, api_key, timeout_sec, http2):
             return {"data": [{"id": "wrong-model", "context_length": 4096}]}, {}
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_http_get_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_http_get_async)
         tokens, _meta = asyncio.run(
             mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -260,7 +291,7 @@ class TestProbeContextWindowTokens:
         async def fake_http_get_async(*, url, api_key, timeout_sec, http2):
             return None, {"error": "timeout"}
 
-        monkeypatch.setattr(mod, "_http_get_json_async", fake_http_get_async)
+        _patch_patcher_modules(monkeypatch, "_http_get_json_async", fake_http_get_async)
         tokens, meta = asyncio.run(
             mod._probe_context_window_tokens_async(
                 base_url="http://localhost:1234/v1",
@@ -281,7 +312,7 @@ class TestProbeServerReady:
         def fake_probe(*, url, api_key, timeout_sec, http2):
             return False, {"error": "timeout"}
 
-        monkeypatch.setattr(mod, "_http_probe_ready", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready", fake_probe)
         ready, meta = mod._probe_server_ready(
             base_url="http://localhost:1234/v1",
             api_key="k",
@@ -295,7 +326,7 @@ class TestProbeServerReady:
         async def fake_probe(*, url, api_key, timeout_sec, http2):
             return False, {"error": "timeout"}
 
-        monkeypatch.setattr(mod, "_http_probe_ready_async", fake_probe)
+        _patch_patcher_modules(monkeypatch, "_http_probe_ready_async", fake_probe)
         ready, _meta = asyncio.run(
             mod._probe_server_ready_async(
                 base_url="http://localhost:1234/v1",
@@ -326,7 +357,7 @@ class TestRequestContextViaJsonAsyncFallback:
                 }
             return _ok_response('{"files": ["foo.py"]}'), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat_async)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat_async)
         _raw, meta = asyncio.run(
             mod._request_context_via_json_async(
                 url="http://localhost/v1/chat/completions",
@@ -396,7 +427,7 @@ class TestProposePatchViaDiff:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_diff(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -425,7 +456,7 @@ class TestProposePatchViaDiff:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_diff(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -455,7 +486,7 @@ class TestProposePatchViaEdits:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -491,7 +522,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return resp, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         cwd = Path("/nonexistent")
         # Will fail because file doesn't exist; that's okay, we care about metadata
         result = mod._propose_patch_via_edits(
@@ -516,7 +547,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return {"choices": [{"message": {}}], "usage": _GOOD_USAGE}, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -541,7 +572,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(json.dumps({"something": "else"})), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -567,7 +598,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -591,7 +622,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -615,7 +646,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -643,7 +674,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -669,7 +700,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -695,7 +726,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -720,7 +751,7 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -746,12 +777,12 @@ class TestProposePatchViaEdits:
         def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
 
         def bad_read(path):
             raise PermissionError("nope")
 
-        monkeypatch.setattr(mod, "_read_edit_target", bad_read)
+        _patch_patcher_modules(monkeypatch, "_read_edit_target", bad_read)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -782,13 +813,13 @@ class TestProposePatchViaEdits:
             call_idx += 1
             return resp, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         # Monkeypatch the payload after extraction to simulate empty edits
 
         def fake_normalize(payload):
             return [], "edits_list"
 
-        monkeypatch.setattr(mod, "_normalize_edits_payload", fake_normalize)
+        _patch_patcher_modules(monkeypatch, "_normalize_edits_payload", fake_normalize)
         result = mod._propose_patch_via_edits(
             url="http://localhost/v1/chat/completions",
             api_key="k",
@@ -816,12 +847,12 @@ class TestProposePatchViaFullFile:
         def fake_resolve(*, cwd):
             return "../../../etc/passwd", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         def fake_chat(**kw):
             return _ok_response("fixed content"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -850,7 +881,7 @@ class TestProposePatchViaFullFile:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         def fake_chat(**kw):
             return None, {
@@ -859,7 +890,7 @@ class TestProposePatchViaFullFile:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -888,12 +919,12 @@ class TestProposePatchViaFullFile:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         def fake_chat(**kw):
             return _ok_response("partial content...", finish_reason="length"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -923,12 +954,12 @@ class TestProposePatchViaFullFile:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         def fake_chat(**kw):
             return _ok_response("original content\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -955,7 +986,7 @@ class TestProposePatchViaFullFile:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         call_count = 0
 
@@ -964,7 +995,7 @@ class TestProposePatchViaFullFile:
             call_count += 1
             return _ok_response(""), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion", fake_chat)
         monkeypatch.setattr(
             mod, "_propose_patch_via_diff", lambda **kw: PatchResult(diff=None, meta={})
         )
@@ -1000,7 +1031,7 @@ class TestProposePatchViaDiffAsync:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         result = asyncio.run(
             mod._propose_patch_via_diff_async(
                 url="http://localhost/v1/chat/completions",
@@ -1026,7 +1057,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat(**kw):
             return {"choices": [{"message": {}}], "usage": _GOOD_USAGE}, dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1059,7 +1090,7 @@ class TestProposePatchViaEditsAsync:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1086,7 +1117,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1116,7 +1147,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1143,12 +1174,12 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         def bad_read(path):
             raise PermissionError("nope")
 
-        monkeypatch.setattr(mod, "_read_edit_target", bad_read)
+        _patch_patcher_modules(monkeypatch, "_read_edit_target", bad_read)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1180,7 +1211,7 @@ class TestProposePatchViaEditsAsync:
         async def fake_chat(**kw):
             return _ok_response(edits_json), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
         result = asyncio.run(
             mod._propose_patch_via_edits_async(
                 url="http://localhost/v1/chat/completions",
@@ -1209,12 +1240,12 @@ class TestProposePatchViaFullFileAsync:
         def fake_resolve(*, cwd):
             return "../../../etc/passwd", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         async def fake_chat(**kw):
             return _ok_response("fixed"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1246,7 +1277,7 @@ class TestProposePatchViaFullFileAsync:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         async def fake_chat(**kw):
             return None, {
@@ -1255,7 +1286,7 @@ class TestProposePatchViaFullFileAsync:
                 "usage": _GOOD_USAGE,
             }
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1287,12 +1318,12 @@ class TestProposePatchViaFullFileAsync:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         async def fake_chat(**kw):
             return _ok_response("partial...", finish_reason="length"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1324,12 +1355,12 @@ class TestProposePatchViaFullFileAsync:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         async def fake_chat(**kw):
             return _ok_response("original\n"), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1361,12 +1392,12 @@ class TestProposePatchViaFullFileAsync:
         def fake_resolve(*, cwd):
             return "foo.py", "single_non_test_python_file"
 
-        monkeypatch.setattr(mod, "_resolve_full_file_target", fake_resolve)
+        _patch_patcher_modules(monkeypatch, "_resolve_full_file_target", fake_resolve)
 
         async def fake_chat(**kw):
             return _ok_response(""), dict(_GOOD_META)
 
-        monkeypatch.setattr(mod, "_chat_completion_async", fake_chat)
+        _patch_patcher_modules(monkeypatch, "_chat_completion_async", fake_chat)
 
         async def fake_diff(**kw):
             return PatchResult(diff=None, meta={})
@@ -1409,7 +1440,7 @@ class TestChatCompletionSync:
             raise ConnectionError("fail")
 
         # Use a deadline that's already passed
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
 
         result_raw, result_meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
@@ -1453,8 +1484,8 @@ class TestChatCompletionSync:
             def post(self, url, content, headers):
                 return fake_post(url, content, headers)
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         result_raw, result_meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1496,8 +1527,8 @@ class TestChatCompletionSync:
             def post(self, url, content, headers):
                 return fake_post(url, content, headers)
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         result_raw, result_meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1529,8 +1560,8 @@ class TestChatCompletionSync:
             def post(self, url, content, headers):
                 raise ValueError("bad URL")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         result_raw, result_meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1567,8 +1598,8 @@ class TestChatCompletionSync:
                     return MagicMock(status_code=500, text="server error", http_version="HTTP/1.1")
                 return MagicMock(status_code=200, text="not json{{{", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         result_raw, result_meta = mod._chat_completion(
             url="http://localhost:1234/v1/chat/completions",
             api_key="k",
@@ -1604,8 +1635,8 @@ class TestChatCompletionSync:
             def post(self, url, content, headers):
                 return MagicMock(status_code=429, text="rate limited", http_version="HTTP/1.1")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "Client", FakeClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "Client", FakeClient)
         # With max_retries=1, we get attempt 0 (429, retryable) → retry → attempt 1 (429)
         # The second 429 should return as non-retryable (attempt_index == max_retries)
         result_raw, result_meta = mod._chat_completion(
@@ -1633,7 +1664,7 @@ class TestChatCompletionAsync:
         """Line 4578: budget with prior retry attempts (async)."""
         import time as time_mod
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: False)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: False)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1665,7 +1696,7 @@ class TestChatCompletionAsync:
                 raise httpx_mod.RemoteProtocolError("h2 error")
             raise ValueError("bad url")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
 
         # We need to patch the inner _send_request in _chat_completion_async
         # Easier to just test via the outer function since it constructs _send_request internally
@@ -1687,7 +1718,7 @@ class TestChatCompletionAsync:
                     raise httpx_mod.RemoteProtocolError("h2 error")
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1728,8 +1759,8 @@ class TestChatCompletionAsync:
                     raise httpx_mod.RemoteProtocolError("h2 error")
                 raise RuntimeError("boom")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1763,8 +1794,8 @@ class TestChatCompletionAsync:
             async def post(self, url, content, headers):
                 raise ValueError("bad url")
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1811,8 +1842,8 @@ class TestChatCompletionAsync:
                 resp.http_version = "HTTP/1.1"
                 return resp
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
 
         result_raw, _result_meta = asyncio.run(
             mod._chat_completion_async(
@@ -1861,8 +1892,8 @@ class TestChatCompletionAsync:
                 resp.http_version = "HTTP/1.1"
                 return resp
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1903,8 +1934,8 @@ class TestChatCompletionAsync:
                 resp.http_version = "HTTP/1.1"
                 return resp
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
                 url="http://localhost:1234/v1/chat/completions",
@@ -1946,8 +1977,8 @@ class TestChatCompletionAsync:
                 resp.http_version = "HTTP/1.1"
                 return resp
 
-        monkeypatch.setattr(mod, "_should_use_proxy_transport", lambda url: True)
-        monkeypatch.setattr(mod.httpx, "AsyncClient", FakeAsyncClient)
+        _patch_patcher_modules(monkeypatch, "_should_use_proxy_transport", lambda url: True)
+        monkeypatch.setattr(openai_transport.httpx, "AsyncClient", FakeAsyncClient)
         # 400 is not retryable, so first attempt returns immediately
         result_raw, result_meta = asyncio.run(
             mod._chat_completion_async(
@@ -2094,29 +2125,23 @@ class TestBuildForcedAttemptDiff:
     """Cover lines 5307, 5367-5368, 5379, 5444."""
 
     def test_no_candidates(self) -> None:
-        result = mod._build_forced_attempt_diff(
-            prompt="just some text without file index",
-            cwd=Path("/nonexistent"),
-        )
+        result = mod._build_forced_attempt_diff(cwd=Path("/nonexistent"))
         assert result is None
 
     def test_path_outside_case(self, tmp_path: Path) -> None:
         """Lines 5367-5368: path escapes cwd."""
-        prompt = "Available files\n../../etc/passwd.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
     def test_file_does_not_exist(self, tmp_path: Path) -> None:
-        prompt = "Available files\nnonexistent.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
     def test_marker_already_present(self, tmp_path: Path) -> None:
         """Line 5379: marker already in file → use alternate marker."""
         src = tmp_path / "buggy.py"
         src.write_text("# llmdebug-force-attempt\n")
-        prompt = "Available files\nbuggy.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         _target_rel, diff = result
         assert "force-attempt-2" in diff
@@ -2125,22 +2150,19 @@ class TestBuildForcedAttemptDiff:
         """Line 5307: skip test files, use first non-test .py."""
         (tmp_path / "test_foo.py").write_text("# test\n")
         (tmp_path / "buggy.py").write_text("code\n")
-        prompt = "Available files\ntest_foo.py\nbuggy.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "buggy.py"
 
     def test_only_test_files_falls_back(self, tmp_path: Path) -> None:
         """Lines around 5307: all .py files are test files → fallback to any .py."""
         (tmp_path / "test_main.py").write_text("# test\n")
-        prompt = "Available files\ntest_main.py\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is not None
         assert result[0] == "test_main.py"
 
     def test_no_py_files_returns_none(self, tmp_path: Path) -> None:
-        prompt = "Available files\nREADME.md\n"
-        result = mod._build_forced_attempt_diff(prompt=prompt, cwd=tmp_path)
+        result = mod._build_forced_attempt_diff(cwd=tmp_path)
         assert result is None
 
 
@@ -2171,20 +2193,6 @@ class TestFixHunkCounts:
         """)
         result = mod._fix_hunk_counts(diff)
         assert "@@ -1,1 +1,1 @@" in result
-
-
-class TestExtractFileIndexPaths:
-    """Cover _extract_file_index_paths edge cases."""
-
-    def test_stops_at_colon_line(self) -> None:
-        prompt = "Available files\nfoo.py\nbar.py\nSome section:\nmore stuff"
-        result = mod._extract_file_index_paths(prompt)
-        assert result == ["foo.py", "bar.py"]
-
-    def test_stops_at_pytest_output(self) -> None:
-        prompt = "Available files\nfoo.py\nPytest output here"
-        result = mod._extract_file_index_paths(prompt)
-        assert result == ["foo.py"]
 
 
 class TestResolveFullFileTarget:

@@ -376,7 +376,8 @@ def _collect(root: Path, normalizer: Normalizer, requests: list[dict[str, Any]])
     artifacts_dir = root / "evals" / "artifacts"
     output: dict[str, Any] = {"files": {}, "artifacts": {}, "requests": []}
     for path in sorted(results_dir.rglob("*")):
-        if not path.is_file():
+        # The run lock outlives the run (ORC-14) but only names its last holder's pid.
+        if not path.is_file() or path.suffix == ".lock":
             continue
         rel = path.relative_to(root).as_posix()
         if path.suffix == ".jsonl":

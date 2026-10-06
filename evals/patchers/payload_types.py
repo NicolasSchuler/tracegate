@@ -156,6 +156,7 @@ class TransportMeta(TypedDict, total=False):
     transport_retry_count: int
     transport_retry_attempts: list[dict[str, Any]]
     transport_error: str
+    retry_after_sec: float
 
 
 class ResponseMeta(TypedDict, total=False):

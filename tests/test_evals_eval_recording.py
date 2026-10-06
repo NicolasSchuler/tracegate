@@ -25,13 +25,13 @@ import pytest
 
 from evals.attempt_metadata import (
     AdaptiveAttemptMetadata,
+    AttemptMetadataRequest,
     ContextCompactionMetadata,
     OpenAIAttemptMetadata,
     PromptBudgetMetadata,
     RetryAttemptMetadata,
     StageAAttemptMetadata,
     SyntaxPreflightMetadata,
-    build_attempt_metadata_request,
     build_attempt_metadata_request_from_legacy_kwargs,
 )
 from evals.eval_recording import (
@@ -845,7 +845,7 @@ class TestMaterializeAttemptMetadata:
             legacy_request = build_attempt_metadata_request_from_legacy_kwargs(**required)
         assert Path(captured[0].filename).resolve() == Path(__file__).resolve()
         grouped_meta = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(**required)
+            request=AttemptMetadataRequest(**required)
         )
 
         assert legacy_meta == grouped_meta
@@ -1034,7 +1034,7 @@ class TestMaterializeAttemptMetadata:
 
         legacy_meta = _materialize_attempt_metadata(**base_kwargs)
         grouped_meta = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(
+            request=AttemptMetadataRequest(
                 attempt_dir=attempt_dir,
                 attempt=1,
                 max_attempts=3,
@@ -1294,3 +1294,41 @@ class TestCollectDependencyVersionsDefault:
         """Default mode returns at least pytest (since it's installed)."""
         result = _collect_dependency_versions(mode="default")
         assert "pytest" in result
+
+
+def test_release_keeps_the_lock_file_so_its_inode_stays_shared(tmp_path: Path) -> None:
+    """ORC-14: unlinking a held lock file let two processes lock different inodes."""
+    from evals.eval_recording import _RunResultsLock
+
+    results = tmp_path / "run.jsonl"
+    lock, error, _warning = _RunResultsLock.acquire(results_path=results, run_id="r1")
+    assert lock is not None and error is None
+    lock_path = lock.path
+    inode = lock_path.stat().st_ino
+    lock.release()
+    assert lock_path.exists()
+
+    again, error, _warning = _RunResultsLock.acquire(results_path=results, run_id="r2")
+    assert again is not None and error is None
+    assert lock_path.stat().st_ino == inode
+    assert '"run_id": "r2"' in lock_path.read_text(encoding="utf-8")
+    again.release()
+
+
+def test_jsonl_writer_fsyncs_on_its_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evals import eval_recording
+
+    synced: list[int] = []
+    monkeypatch.setattr(eval_recording.os, "fsync", lambda fd: synced.append(fd))
+    writer = eval_recording._SynchronizedJsonlWriter(tmp_path / "r.jsonl", fsync_every=2)
+    for index in range(5):
+        writer.append_one({"i": index})
+    writer.close()
+    assert len(synced) == 2
+
+    off = eval_recording._SynchronizedJsonlWriter(tmp_path / "off.jsonl", fsync_every=0)
+    off.append_one({"i": 0})
+    off.close()
+    assert len(synced) == 2

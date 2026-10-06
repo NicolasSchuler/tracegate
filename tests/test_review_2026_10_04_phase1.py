@@ -247,7 +247,7 @@ def test_pol05_pol23_budget_controllers_are_per_condition_with_own_seeds(
     tmp_path: Path,
 ) -> None:
     from evals.adaptive_budget_online_policy import BudgetPolicyConfig
-    from evals.eval_main_flow import _per_condition_budget_configs
+    from evals.eval_main_policies import _per_condition_budget_configs
 
     base = BudgetPolicyConfig.normalize(
         mode="on",

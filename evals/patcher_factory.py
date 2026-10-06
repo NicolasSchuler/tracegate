@@ -16,21 +16,28 @@ from evals.baseline_runtime import (
 from evals.eval_recording import _native_openai_compat_settings_from_args
 
 
+class PatcherConfigError(ValueError):
+    """The patcher can't be built from the given arguments (ORC-12)."""
+
+
 def make_patcher(args: argparse.Namespace):
     """Instantiate the patcher backend selected by ``--patcher``.
 
     Returns one of ``OpenAICompatPatcher``, ``HeuristicSnapshotPatcher``,
     ``NullPatcher``, ``CommandPatcher``, or ``BaselinePatcher`` depending
-    on *args.patcher*.
+    on *args.patcher*. Units build their patchers from worker threads, so this works
+    on a private copy of *args* and raises :class:`PatcherConfigError` rather than
+    ``SystemExit``, which escaped the units' ``except Exception`` (ORC-12).
     """
     from evals.patchers import CommandPatcher, HeuristicSnapshotPatcher, NullPatcher
     from evals.patchers.command_patcher import patcher_from_env
 
+    args = argparse.Namespace(**vars(args))
     try:
         _normalize_baseline_selection(args=args, config_state=None)
         _normalize_adaptive_controller_lambda_rlm_settings(args=args, config_state=None)
     except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
+        raise PatcherConfigError(str(exc)) from exc
 
     if args.patcher == "baseline":
         from baselines.adapter_base import BaselineGenerationSettings
@@ -38,13 +45,13 @@ def make_patcher(args: argparse.Namespace):
 
         baseline_name = (getattr(args, "baseline_name", "") or "").strip()
         if not baseline_name:
-            raise SystemExit(
+            raise PatcherConfigError(
                 "--baseline-name is required for --patcher baseline. "
                 "Available: ldb, intervenor, tracecoder, lambda_rlm, rlm."
             )
         repo_dir = (getattr(args, "baseline_repo_dir", "") or "").strip()
         if not repo_dir:
-            raise SystemExit(
+            raise PatcherConfigError(
                 "--baseline-repo-dir is required for --patcher baseline. "
                 "Point to the cloned baseline repository."
             )
@@ -56,7 +63,7 @@ def make_patcher(args: argparse.Namespace):
                 baseline_python=baseline_python,
             )
         except ValueError as exc:
-            raise SystemExit(str(exc)) from exc
+            raise PatcherConfigError(str(exc)) from exc
         args.baseline_repo_dir = repo_dir
         args.baseline_python = baseline_python
         api_key = (args.openai_api_key or "").strip() or ""
@@ -100,7 +107,7 @@ def make_patcher(args: argparse.Namespace):
 
         model = (args.openai_model or "").strip()
         if not model:
-            raise SystemExit(
+            raise PatcherConfigError(
                 "--openai-model is required for --patcher openai (or set OPENAI_MODEL)."
             )
         api_key = (args.openai_api_key or "").strip() or None
@@ -139,7 +146,7 @@ def make_patcher(args: argparse.Namespace):
         )
     env_patcher = patcher_from_env()
     if env_patcher is None:
-        raise SystemExit(
+        raise PatcherConfigError(
             "Command patcher selected but no command configured. "
             "Set --patch-cmd or LLMDEBUG_EVAL_PATCH_CMD."
         )

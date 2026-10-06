@@ -11,6 +11,29 @@
 
 ### Bug Fixes
 
+- Eval orchestration (Phase 5.6):
+  - The transport-recovery gate always reopens. A crash in the outage leader's probe loop used to block every worker for the rest of the run, and a follower woken late could report a newer outage's outcome (ORC-07).
+  - Pool containers whose run was killed (`kill -9`, OOM) are reaped at the next run start. They are labelled with their owner's PID, host and run id (ORC-08).
+  - Ctrl-C in a `--jobs N` run stops scheduling and reports the units still in flight, and a second Ctrl-C exits at once with status 130. Before, one Ctrl-C waited silently for every running unit (ORC-09).
+  - Every unit builds its own patcher, with `--jobs 1` too, so the job count can't confound results (ORC-11). `make_patcher` no longer writes into the shared arguments from worker threads, and a patcher config error exits 2 with "Invalid arguments: ..." instead of a raw `SystemExit` traceback (ORC-12).
+  - Budget-clamped and mode-switched patcher clones keep reporting progress (ORC-13).
+  - The run lock file stays after a run (unlinking it let two processes each hold an "exclusive" lock), and result records are fsynced as they are written (ORC-14).
+  - SWE-Bench Pro run output and `.benchmarks` no longer change the eval image fingerprint (ORC-16).
+  - `--container-env` values are redacted in the resolved-config lockfile, which is now written atomically (ORC-20).
+  - Auto-generated run ids are UTC and end the time part in `Z` (ORC-24).
+- Eval model I/O (Phase 5.6):
+  - Text and JSON generations (TEP, Stage A) honour `max_propose_sec` (LLM-11).
+  - A failed fuzzy edit recovery takes about 0.3 s instead of up to 24 s on a large file, with the same decisions. The whitespace-normalized match no longer backtracks (LLM-12).
+  - Transport retries use jittered backoff and honour `Retry-After` (LLM-22).
+  - A real top-level directory named `a` or `b` survives diff normalization (LLM-23).
+  - The λ-RLM and RLM env clients get the API key from their environment instead of a request file, and failure text is scrubbed of it (LLM-25).
+  - The forced-patch fallback picks its target from the workdir, not from a file list parsed back out of the prompt (LLM-26, part).
+- Eval importers and attempts (Phase 5.6):
+  - Importers and `validate_cases` share one case-file contract (`evals/case_contract.py`). Native-repro cases were rejected by one or the other (DAT-06).
+  - Dataset clone URLs must be `https://` or `git@host:`, with `--` before positional git arguments (DAT-12).
+  - The HumanEvalPack import treats `--max-cases 0` as unlimited and keeps existing cases (DAT-22, DAT-23).
+  - An incomplete syntax-preflight cycle is scored as `patch_cycle_incomplete` instead of looping (ATT-18).
+- Failures the TrickyBugs importer, the source-id scan and the SWE-Bench Pro Docker scorer swallowed are reported (X-07). llmdebug's own warnings go through the `llmdebug.diagnostics` logger, which keeps the `llmdebug: warning:` stderr output by default and can now be silenced or redirected.
 - Array statistics have one implementation (CAP-23): `count_anomalies` and `compute_array_stats` were separate copies of the backend code and had drifted from the combined path used by snapshots. That path counted NaN/Inf on the up-cast copy, so a JAX float64 array with values beyond float32 range reported false `inf` anomalies, and CuPy arrays got no anomaly counts. All three now share one dispatcher; anomalies are counted on the original array, and CuPy is included.
 - `generate_hypotheses` keeps distinct hypotheses of one pattern (CAP-16): de-duplication by pattern alone kept only the first, so a `KeyError` with several dict locals or a `TypeError` naming two types reported one of them. Hypotheses are now de-duplicated by pattern and description, with at most `max_per_pattern` (default 3) per pattern; `max_per_pattern=1` gives the old output, and the eval decision-model state uses it so its inputs are unchanged.
 - `diff_snapshots` no longer hands out shared mutable placeholders (CAP-14): for snapshots without git context, `SnapshotDiffResult.old_git`/`new_git` were one module-level dict, so a caller mutating one corrupted every later diff. Empty values are now fresh objects.
@@ -134,6 +157,13 @@
 
 ### Refactoring
 
+- Eval harness structure (Phase 5):
+  - `run_eval` is a CLI plus a declared facade (`__all__`). Its helpers live in owner modules, and run state travels in a `RunContext`, so the `_ACTIVE_*` globals are gone.
+  - The very large functions are split: the argument parser, the attempt loop's terminal recorder, helper-action selection and Stage A, `run_main_flow`'s metadata and policies, `analyze_results`, and `openai_compat_patcher`.
+  - Shared code has one copy: the coercion helpers, the SWE-Bench Lite/Pro run helpers and the baseline adapter runtime. A parity test keeps the sync and async OpenAI helpers in step.
+  - Records and patcher metadata are typed: an `AttemptNote` Literal and `AttemptRecord`, and a `PatcherMeta` composed per concern. `pyrightconfig.evals.json` covers all of `evals/` and `baselines/` except seven holdouts.
+  - The signature-arity allowlist is shrink-only.
+  - Golden fixture runs (`just golden-evals`) pin the harness's records.
 - Remove a Stage-B reverse dependency and consolidate legacy eval metadata plumbing behind typed request objects.
 - Move notebook/eval analytics libraries out of the core install and behind explicit extras.
 - Move the helper-policy decision/event records to `evals/adaptive_policy_records.py` (re-exported from `evals.adaptive_online_policy`).
@@ -144,6 +174,7 @@
 
 ### Documentation
 
+- `docs/baseline-adapters.md` carries a `--baseline-*` flag table generated from the parser by `evals.doc_sync` (X-08). The hand-written defaults had drifted.
 - Align architecture, coverage, testing, and first-run guidance with the executable repository contracts.
 
 ## v3.1.0 (2026-04-07)

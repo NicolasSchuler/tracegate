@@ -38,6 +38,7 @@ from baselines.controller_packet import (
     parse_controller_packet,
     render_hybrid_controller_guidance,
 )
+from baselines.openai_compat import env_client_subprocess_env, scrub_secret
 from baselines.pins import get_expected_env_client_compatibility, get_pinned_repo_commit
 from llmdebug import _json as json
 
@@ -827,11 +828,12 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
     ) -> dict[str, Any]:
         repo_dir = config.repo_dir.expanduser().resolve()
         python_executable = config.python_executable or Path(sys.executable)
+        # LLM-25: the key travels in the environment, not in the request file.
+        api_key = str(config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder"))
         payload: dict[str, Any] = {
             "repo_dir": str(repo_dir),
             "model": str(config.model or ""),
             "base_url": str(config.api_base_url or ""),
-            "api_key": str(config.api_key or os.environ.get("OPENAI_API_KEY", "sk-placeholder")),
             "api_timeout_sec": float(config.api_timeout_sec or 0.0),
             "baseline_openai_compat_profile": str(
                 config.extra.get("baseline_openai_compat_profile") or "auto"
@@ -888,10 +890,11 @@ class RLMAdapter(_RuntimeFeedbackMixin, _CandidateWorkspaceMixin, BaselineAdapte
                 text=True,
                 timeout=max(1, int(timeout_sec)),
                 cwd=str(repo_dir),
-                env=os.environ.copy(),
+                env=env_client_subprocess_env(api_key),
             )
             if completed.returncode != 0:
                 detail = completed.stderr[-1200:] if completed.stderr else completed.stdout[-1200:]
+                detail = scrub_secret(detail, api_key)
                 raise RuntimeError(f"RLM env client failed: {detail}")
             raw_payload = json.loads(response_path.read_text(encoding="utf-8"))
         if not isinstance(raw_payload, dict):

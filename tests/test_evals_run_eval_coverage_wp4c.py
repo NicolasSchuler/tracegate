@@ -26,6 +26,7 @@ from evals.eval_types import (
     RunResult,
     _TrailingResultsTailIssue,
 )
+from evals.patcher_factory import PatcherConfigError
 from evals.patchers.base import PatchPlanResult, PatchResult
 
 # ---------------------------------------------------------------------------
@@ -772,7 +773,7 @@ class TestMakePatcherEdgeCases:
     """Edge cases in the patcher factory function."""
 
     def test_baseline_missing_name_raises(self) -> None:
-        """--patcher baseline without --baseline-name raises SystemExit."""
+        """--patcher baseline without --baseline-name raises PatcherConfigError (ORC-12)."""
         args = argparse.Namespace(
             patcher="baseline",
             baseline_name="",
@@ -784,11 +785,11 @@ class TestMakePatcherEdgeCases:
             openai_base_url="http://localhost",
             openai_timeout_sec=30,
         )
-        with pytest.raises(SystemExit, match="--baseline-name is required"):
+        with pytest.raises(PatcherConfigError, match="--baseline-name is required"):
             run_eval.make_patcher(args)
 
     def test_command_patcher_no_config_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When no patcher is configured, raises SystemExit."""
+        """When no patcher is configured, raises PatcherConfigError (ORC-12)."""
         args = argparse.Namespace(
             patcher="command",
             patch_cmd="",
@@ -801,7 +802,7 @@ class TestMakePatcherEdgeCases:
             "evals.patchers.command_patcher.patcher_from_env",
             lambda: None,
         )
-        with pytest.raises(SystemExit, match="no command configured"):
+        with pytest.raises(PatcherConfigError, match="no command configured"):
             run_eval.make_patcher(args)
 
 

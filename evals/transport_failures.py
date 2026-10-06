@@ -183,7 +183,15 @@ def _result_with_meta(result: Any, meta: dict[str, Any]) -> Any:
 
 
 class _OpenAITransportRecoveryGate:
-    """Coordinate OpenAI transport outage recovery across worker threads."""
+    """Coordinate OpenAI transport outage recovery across worker threads.
+
+    The first worker to hit an outage leads: it probes the server while the others wait,
+    then reopens the gate. It reopens it even if probing raises, so a dead leader can't
+    block every worker forever, and outcomes are kept per outage generation, so a
+    follower woken late can't report a newer outage's outcome (ORC-07).
+    """
+
+    _KEPT_OUTCOMES = 16
 
     def __init__(
         self,
@@ -199,7 +207,7 @@ class _OpenAITransportRecoveryGate:
         self._outage_active = False
         self._outage_generation = 0
         self._leader_claimed_generation = 0
-        self._last_outcome: dict[str, Any] | None = None
+        self._outcomes: dict[int, dict[str, Any]] = {}
 
     def wait_if_open(self) -> None:
         if not self._enabled:
@@ -244,12 +252,51 @@ class _OpenAITransportRecoveryGate:
             with self._condition:
                 while self._outage_active and self._outage_generation == generation:
                     self._condition.wait(timeout=self._poll_sec)
-                outcome = dict(self._last_outcome or {})
+                outcome = dict(self._outcomes.get(generation) or {})
             outcome.setdefault("attempted", True)
             outcome.setdefault("operation", operation_name)
             outcome["leader"] = False
             return outcome
 
+        outcome: dict[str, Any] = {
+            "attempted": True,
+            "recovered": False,
+            "timed_out": False,
+            "wait_sec": 0.0,
+            "probe_attempts": [],
+            "probe_meta": {},
+            "operation": operation_name,
+            "leader": True,
+            "generation": generation,
+            "error": "recovery_leader_failed",
+        }
+        try:
+            outcome = self._lead_recovery(
+                patcher=patcher,
+                operation_name=operation_name,
+                generation=generation,
+                started_at=started_at,
+                deadline=deadline,
+            )
+        finally:
+            with self._condition:
+                self._outcomes[generation] = dict(outcome)
+                for stale in sorted(self._outcomes)[: -self._KEPT_OUTCOMES]:
+                    del self._outcomes[stale]
+                if self._outage_generation == generation:
+                    self._outage_active = False
+                    self._condition.notify_all()
+        return outcome
+
+    def _lead_recovery(
+        self,
+        *,
+        patcher: Any,
+        operation_name: str,
+        generation: int,
+        started_at: float,
+        deadline: float,
+    ) -> dict[str, Any]:
         probe_attempts: list[dict[str, Any]] = []
         recovered = False
         probe_meta: dict[str, Any] = {}
@@ -282,7 +329,7 @@ class _OpenAITransportRecoveryGate:
             time.sleep(min(self._poll_sec, remaining))
         finished_at = time.monotonic()
 
-        outcome = {
+        return {
             "attempted": True,
             "recovered": recovered,
             "timed_out": not recovered,
@@ -293,12 +340,6 @@ class _OpenAITransportRecoveryGate:
             "leader": True,
             "generation": generation,
         }
-        with self._condition:
-            self._last_outcome = dict(outcome)
-            if self._outage_generation == generation:
-                self._outage_active = False
-                self._condition.notify_all()
-        return outcome
 
 
 def _request_context_failure_kind_from_meta(meta: dict[str, Any] | None) -> str:

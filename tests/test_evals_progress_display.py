@@ -214,7 +214,8 @@ def test_build_startup_sections_groups_expected_content() -> None:
     assert selection_rows["Snapshot dep"] == "helpful, required"
     execution_backend_rows = dict(sections[8].rows)
     assert execution_backend_rows["container_image"] == "llmdebug-eval-runner:latest"
-    assert execution_backend_rows["container_env"] == "[FOO=bar]"
+    # Container env values are redacted in the resolved-config view (secret hygiene).
+    assert execution_backend_rows["container_env"] == "[FOO=***REDACTED***]"
     openai_rows = dict(sections[9].rows)
     assert openai_rows["openai_api_key"] == "***REDACTED***"
     assert openai_rows["openai_http2"] == "true"

@@ -26,10 +26,17 @@ class _StderrHandler(logging.Handler):
             self.handleError(record)
 
 
+_HANDLER_NAME = "llmdebug.diagnostics.stderr"
+
+
 def _configure_logger() -> logging.Logger:
     logger = logging.getLogger(LOGGER_NAME)
-    if not any(isinstance(handler, _StderrHandler) for handler in logger.handlers):
-        logger.addHandler(_StderrHandler())
+    # Found by name, not class: a re-imported module defines a new _StderrHandler class,
+    # and an isinstance check would add a second handler and print every warning twice.
+    if not any(handler.get_name() == _HANDLER_NAME for handler in logger.handlers):
+        handler = _StderrHandler()
+        handler.set_name(_HANDLER_NAME)
+        logger.addHandler(handler)
     if logger.level == logging.NOTSET:
         logger.setLevel(logging.WARNING)
     logger.propagate = False

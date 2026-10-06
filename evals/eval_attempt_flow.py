@@ -71,13 +71,13 @@ from evals.adaptive_tep import (
 )
 from evals.attempt_metadata import (
     AdaptiveAttemptMetadata,
+    AttemptMetadataRequest,
     ContextCompactionMetadata,
     OpenAIAttemptMetadata,
     PromptBudgetMetadata,
     RetryAttemptMetadata,
     StageAAttemptMetadata,
     SyntaxPreflightMetadata,
-    build_attempt_metadata_request,
 )
 from evals.attempt_proposal import (
     _ensure_deterministic_seed_ack,
@@ -282,7 +282,7 @@ from evals.patch_relevance import (
 from evals.patcher_factory import (
     make_patcher,
 )
-from evals.patchers.base import Patcher
+from evals.patchers.base import Patcher, replace_patcher
 from evals.patchers.baseline_patcher import resolve_effective_baseline_model
 from evals.policy_feature_scaling import (
     is_percentile_feature_scaling_profile,
@@ -312,6 +312,7 @@ from evals.record_keys import (
     NOTE_NO_PATCH_NEEDED,
     NOTE_NO_PATCH_PROPOSED,
     NOTE_PATCH_APPLY_FAILED,
+    NOTE_PATCH_CYCLE_INCOMPLETE,
     NOTE_PATCH_VERIFIER_REJECTED,
     NOTE_PATCHER_REQUEST_FAILED,
     NOTE_RETRY_GATE_NO_NEW_EVIDENCE,
@@ -4760,11 +4761,11 @@ def _run_one_condition_attempts(
             + max(0, len(retry_plan_text))
         )
         attempt_metadata = _materialize_attempt_metadata_request(
-            request=build_attempt_metadata_request(
+            request=AttemptMetadataRequest(
                 attempt_dir=attempt_dir,
                 attempt=attempt,
                 max_attempts=k,
-                evidence=evidence,
+                evidence=dict(evidence),
                 prompt=prompt,
                 record_prompt=record_prompt,
                 record_evidence=record_evidence,
@@ -5743,7 +5744,9 @@ def _run_one_condition_attempts(
             current_mode = str(getattr(patcher_for_attempt, "response_mode", "")).strip()
             if target_mode and target_mode != current_mode:
                 try:
-                    patcher_for_attempt = replace(patcher_for_attempt, response_mode=target_mode)
+                    patcher_for_attempt = replace_patcher(
+                        patcher_for_attempt, response_mode=target_mode
+                    )
                     patch_meta["adaptive_openai_response_mode_override"] = target_mode
                 except Exception as exc:
                     patch_meta["adaptive_openai_response_mode_override_error"] = (
@@ -7425,6 +7428,11 @@ def _run_one_condition_attempts(
                 break
             continue
         if not patch_applied_and_ready:
+            # ATT-18: the syntax cycle ended without a patch or a terminal note. That is
+            # unreachable today, but continuing without consuming the attempt would spin
+            # forever, so the attempt is scored as incomplete.
+            if _record_terminal_attempt(NOTE_PATCH_CYCLE_INCOMPLETE):
+                break
             continue
 
         # Re-run after patch, against the pristine test surface (ATT-01, D10).
