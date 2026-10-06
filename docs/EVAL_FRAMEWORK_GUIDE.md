@@ -83,7 +83,7 @@ class OnlinePolicyConfig:
     l2: float = 1.0                # L2 regularization for matrix inversion
     warmup_decisions: int = 50     # Uniform sampling phase
     save_every: int = 50           # Save state after N updates
-    decay: float = 0.95            # Recency weighting for non-stationary runs
+    decay: float = 1.0             # < 1: per-arm recency weighting for non-stationary runs
     feature_scaling_profile: str = "v1"  # Feature normalization
     state_path: Path | None = None # Persist model to disk
     events_path: Path | None = None # Log decisions/outcomes as JSONL
@@ -122,7 +122,8 @@ class LinUCBState:
     feature_names: list[str]           # Feature ordering (sorted)
     decisions: int                     # Total decisions made
     updates: int                       # Total model updates
-    action_counts: dict[str, int]      # Count per action
+    action_counts: dict[str, int]      # Count per selected action
+    applied_action_counts: dict[str, int]  # Count per applied action (differs in shadow mode)
     A: dict[str, np.ndarray]           # A matrices (d×d per action)
     b: dict[str, np.ndarray]           # b vectors (d× per action)
 ```
@@ -153,8 +154,8 @@ The second term is the prediction confidence interval width.
 **50+ features grouped by category**:
 
 **Attempt Progress**:
-- `attempt_frac`: current attempt / max attempts
-- `attempts_remaining_frac`: fraction of attempts left
+- `attempt_frac`: current attempt / max attempts (`attempts_remaining_frac`, always
+  `1 - attempt_frac`, was dropped: POL-06)
 - `timed_out`: 1 if attempt timeout exceeded
 
 **Helper Budget**:
@@ -174,7 +175,7 @@ The second term is the prediction confidence interval width.
 - `last_helper_invalid_response`: binary
 - `last_helper_declined`: binary
 - `supports_context_request`: patcher capability
-- `last_helper_action_executed`: one of 10 actions (encoded as binary flags)
+- `last_helper_action_executed`: one of 10 actions, encoded as nine binary flags with `skip_helper` (also the value before any helper call) as the reference level, so the flags don't sum to `bias` (POL-06)
 
 **Context Compaction**:
 - `context_compaction_enabled`: binary
@@ -226,7 +227,7 @@ reward = success_hint
 | token_penalty | λ_tokens × (tokens / token_scale) | Discourage token usage |
 | latency_penalty | μ_latency × (wall_sec / latency_scale) | Discourage slow calls |
 | stagnation_penalty | κ_stagnation × min(1, no_progress_streak/3) × SCALE | Discourage repeated failures |
-| delayed_rescue_bonus | Deferred credit from later rescue | Exploit-later reward |
+| delayed_rescue_bonus | Deferred credit when a success within two attempts re-sends evidence the helper added (POL-11) | Exploit-later reward |
 
 **Default Parameters** (eval_types.py):
 - λ_tokens = 0.08 (token scaling)
@@ -350,6 +351,8 @@ class PolicyEvent:
     model_updated: bool
     update_reason: str            # "on_policy_update", "shadow_no_update", etc.
     nan_replacement_counts: dict[str, int]
+    effective_evidence: dict[str, float]  # trace(A_k) - d*l2 per arm (schema 6, POL-01)
+    state_resets: dict[str, int]  # arm:<action>, feature_set_mismatch (schema 7, POL-21)
 ```
 
 ---
@@ -375,7 +378,7 @@ class BudgetPolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 20    # Short warm-up before budget learning
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = 1.0
     feature_scaling_profile: str = "v1"
     state_path: Path | None = None
     events_path: Path | None = None
@@ -439,14 +442,27 @@ _V1_FINAL_CLIP = 4.0
 ```
 
 ### Percentile Scaler
-**Class**: `PercentileScaler` (policy_feature_scaling.py:140-195)
+**Function**: `percentile_scale()` in `policy_feature_scaling.py` (used by both controllers
+under `percentile_v1`)
 
-Optionally learns caps from historical data:
+Each count-like feature collects observations until it has `min_samples` (30), then its
+95th-percentile cap is fitted once and frozen, so a raw value keeps its scaled value for the
+rest of the run (POL-09). Until then the feature uses its `v1` cap. Only count-like features
+are log-scaled, so only they get history and caps; an all-zero history keeps the `v1` cap.
+States saved before POL-09 are pruned to that layout on load. `PercentileScaler` (fit, then
+scale) remains for offline use:
 ```python
 scaler = PercentileScaler(percentile=95.0, min_samples=30)
 scaler.fit({"stagnation_streak": [1, 2, 3, ...], ...})
 scaled = scaler.scale(raw_features, profile="v1")
 ```
+
+### Interaction Features (`v1_interactions`)
+`interaction_features()` adds `ix_attempt_frac_x_stagnation`,
+`ix_pregate_score_x_snapshot_available` and `ix_helper_calls_used_x_low_yield_ratio`:
+products of the `v1`-scaled factors. They used to multiply raw values, and
+`attempt_frac_x_stagnation_streak` was log-scaled again because of its `_streak` suffix
+(POL-19).
 
 ---
 

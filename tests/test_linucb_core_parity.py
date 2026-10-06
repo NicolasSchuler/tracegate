@@ -1,0 +1,263 @@
+"""Phase 3.1: the shared LinUCB core matches the implementations it replaced.
+
+The reference functions below are frozen copies of the pre-extraction code (identical
+in ``adaptive_online_policy``, ``adaptive_budget_online_policy`` and
+``bootstrap_policy_state``). ``tests/golden/policy_online_parity.golden`` was first captured
+from a seeded online-controller run, plus a bootstrap replay of its events, before the
+extraction; it is regenerated only for intended behaviour changes (POL-01 per-arm decay, POL-24
+random tie-breaking, POL-07 default score biases).
+"""
+
+from __future__ import annotations
+
+import tempfile
+from collections.abc import Mapping
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from evals import _json as json
+from evals import linucb_core as core
+
+GOLDEN = Path(__file__).parent / "golden" / "policy_online_parity.golden"
+
+
+# --- frozen pre-extraction reference -------------------------------------------------
+
+
+class _RefState:
+    def __init__(self, actions: tuple[str, ...]) -> None:
+        self.action_names = actions
+        self.feature_names: list[str] = []
+        self.A: dict[str, np.ndarray] = {}
+        self.b: dict[str, np.ndarray] = {}
+        self.updates = 0
+
+
+def _ref_ensure(state: _RefState, cleaned: Mapping[str, float], l2: float) -> None:
+    if not state.feature_names:
+        state.feature_names = sorted(str(k) for k in cleaned)
+        dim = len(state.feature_names)
+        if dim <= 0:
+            state.feature_names = ["bias"]
+            dim = 1
+        state.A = {a: np.eye(dim) * float(l2) for a in state.action_names}
+        state.b = {a: np.zeros((dim,)) for a in state.action_names}
+        return
+    expanded = sorted(set(state.feature_names) | {str(k) for k in cleaned})
+    if expanded != state.feature_names:
+        prev = {n: i for i, n in enumerate(state.feature_names)}
+        prev_dim = len(state.feature_names)
+        new_dim = len(expanded)
+        state.feature_names = list(expanded)
+        for action in state.action_names:
+            pa, pb = state.A.get(action), state.b.get(action)
+            na, nb = np.eye(new_dim) * float(l2), np.zeros((new_dim,))
+            if pa is not None and pb is not None and pa.shape == (prev_dim, prev_dim):
+                for r, fr in enumerate(expanded):
+                    orow = prev.get(fr)
+                    if orow is None:
+                        continue
+                    nb[r] = pb[orow]
+                    for c, fc in enumerate(expanded):
+                        ocol = prev.get(fc)
+                        if ocol is None:
+                            continue
+                        na[r, c] = pa[orow, ocol]
+            state.A[action], state.b[action] = na, nb
+
+
+def _ref_decay(state: _RefState, decay: float, l2: float) -> None:
+    if decay >= 1.0 or not state.feature_names:
+        return
+    dim = len(state.feature_names)
+    prior = np.eye(dim) * float(l2)
+    for action in state.action_names:
+        state.A[action] = decay * state.A[action] + (1.0 - decay) * prior
+        state.b[action] = decay * state.b[action]
+
+
+def _ref_update(state: _RefState, action: str, reward: float, x: np.ndarray) -> None:
+    state.A[action] = state.A[action] + np.outer(x, x)
+    state.b[action] = state.b[action] + reward * x
+    state.updates += 1
+
+
+def _ref_scores(state: _RefState, x: np.ndarray, alpha: float) -> dict[str, float]:
+    out = {}
+    for action in state.action_names:
+        sol = np.linalg.solve(state.A[action], np.column_stack((state.b[action], x)))
+        out[action] = float(sol[:, 0] @ x) + alpha * float(np.sqrt(max(0.0, x @ sol[:, 1])))
+    return out
+
+
+# --- parity ---------------------------------------------------------------------------
+
+
+def test_core_matches_frozen_reference_over_random_sequences() -> None:
+    """Without decay the core's math is the old math (POL-01 changed decay semantics)."""
+    decay = 1.0
+    actions = ("a", "b", "c")
+    rng = np.random.default_rng(11)
+    ref = _RefState(actions)
+    state = core.LinUCBState(action_names=actions)
+    names = ["bias", "f1"]
+    for step in range(60):
+        if step in (20, 40):
+            names.append(f"new{step}")
+        values = {name: float(rng.normal()) for name in names}
+        _ref_ensure(ref, values, l2=1.0)
+        core.ensure_feature_state(state, values, l2=1.0)
+        assert state.feature_names == ref.feature_names
+        x = np.array([values.get(n, 0.0) for n in ref.feature_names])
+        assert core.feature_vector(state, values, to_float=lambda v, _n: float(v)).tolist() == (
+            x.tolist()
+        )
+        np.testing.assert_allclose(
+            list(core.linucb_scores(state, x, l2=1.0, alpha=0.8).values()),
+            list(_ref_scores(ref, x, 0.8).values()),
+        )
+        action = actions[step % 3]
+        reward = float(rng.normal())
+        _ref_decay(ref, decay, 1.0)
+        core.apply_recency_decay(state, action=action, decay=decay, l2=1.0)
+        _ref_update(ref, action, reward, x)
+        assert core.rank_one_update(state, action=action, reward=reward, x=x)
+    for action in actions:
+        np.testing.assert_allclose(state.A[action], ref.A[action])
+        np.testing.assert_allclose(state.b[action], ref.b[action])
+    assert state.updates == ref.updates
+
+
+def test_pol01_decay_shrinks_only_the_updated_arm() -> None:
+    """POL-01: decay used to shrink all arms on every update."""
+    state = core.LinUCBState(action_names=("a", "b"))
+    core.ensure_feature_state(state, {"x": 1.0}, l2=1.0)
+    x = np.array([1.0])
+    for action in ("a", "b"):
+        core.rank_one_update(state, action=action, reward=1.0, x=x)
+    before_b = (state.A["b"].copy(), state.b["b"].copy())
+
+    core.apply_recency_decay(state, action="a", decay=0.5, l2=1.0)
+
+    assert state.A["a"][0, 0] == pytest.approx(0.5 * 2.0 + 0.5 * 1.0)
+    assert state.b["a"][0] == pytest.approx(0.5)
+    np.testing.assert_array_equal(state.A["b"], before_b[0])
+    np.testing.assert_array_equal(state.b["b"], before_b[1])
+    assert core.effective_evidence(state, l2=1.0) == {"a": pytest.approx(0.5), "b": 1.0}
+
+
+def test_pol01_default_decay_is_one() -> None:
+    from evals.adaptive_budget_online_policy import BudgetPolicyConfig
+    from evals.adaptive_online_policy import OnlinePolicyConfig
+
+    assert OnlinePolicyConfig().decay == 1.0
+    assert OnlinePolicyConfig.normalize().decay == 1.0
+    assert BudgetPolicyConfig().decay == 1.0
+    assert BudgetPolicyConfig.normalize().decay == 1.0
+
+
+def test_online_controller_and_replay_match_the_golden_scenario() -> None:
+    from tests._policy_parity_scenario import run_online_scenario
+
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory() as tmp:
+        observed = run_online_scenario(Path(tmp))
+    assert [step["selected"] for step in observed["trace"]] == [
+        step["selected"] for step in golden["trace"]
+    ]
+    for got, want in zip(observed["trace"], golden["trace"], strict=True):
+        assert got["scores"] == pytest.approx(want["scores"], abs=1e-8)
+    assert observed["feature_names"] == golden["feature_names"]
+    for key in ("A", "b"):
+        for action, values in golden[key].items():
+            np.testing.assert_allclose(observed[key][action], values, atol=1e-8)
+        for action, values in golden["replay"][key].items():
+            np.testing.assert_allclose(observed["replay"][key][action], values, atol=1e-8)
+
+
+def test_pol22_scoring_a_singular_arm_does_not_change_it() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, {"x": 1.0, "y": 1.0}, l2=1.0)
+    state.A["a"] = np.zeros((2, 2))  # singular
+    before = state.A["a"].copy()
+
+    scores = core.linucb_scores(state, np.array([1.0, 0.5]), l2=1.0, alpha=1.0)
+
+    assert np.isfinite(scores["a"])
+    np.testing.assert_array_equal(state.A["a"], before)
+
+
+# --- POL-20: cached inverses ------------------------------------------------------------
+
+
+def test_cached_inverse_tracks_updates_decay_and_expansion() -> None:
+    actions = ("a", "b")
+    rng = np.random.default_rng(5)
+    state = core.LinUCBState(action_names=actions)
+    names = ["bias", "f1", "f2"]
+    for step in range(200):
+        if step == 120:
+            names.append("late")
+        values = {name: float(rng.normal()) for name in names}
+        core.ensure_feature_state(state, values, l2=1.0)
+        x = core.feature_vector(state, values, to_float=lambda v, _n: float(v))
+        scores = core.linucb_scores(state, x, l2=1.0, alpha=0.7)
+        for action in actions:
+            A, b = state.A[action], state.b[action]
+            exact_inv = np.linalg.inv(A)
+            want = float(exact_inv @ b @ x) + 0.7 * float(np.sqrt(x @ exact_inv @ x))
+            assert scores[action] == pytest.approx(want, rel=1e-9, abs=1e-9)
+            np.testing.assert_allclose(core.arm_inverse(state, action), exact_inv, atol=1e-9)
+        action = actions[step % 2]
+        if step % 50 == 49:
+            core.apply_recency_decay(state, action=action, decay=0.9, l2=1.0)
+        core.rank_one_update(state, action=action, reward=float(rng.normal()), x=x)
+
+
+def test_inverse_cache_is_invalidated_when_a_matrix_is_replaced() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, ["bias"], l2=1.0)
+    x = np.array([1.0])
+    assert core.linucb_scores(state, x, l2=1.0, alpha=1.0)["a"] == pytest.approx(1.0)
+    state.A["a"] = np.array([[4.0]])  # e.g. a loaded or reset arm
+    assert core.linucb_scores(state, x, l2=1.0, alpha=1.0)["a"] == pytest.approx(0.5)
+
+
+def test_inverse_cache_refreshes_exactly_after_the_refresh_interval() -> None:
+    state = core.LinUCBState(action_names=("a",))
+    core.ensure_feature_state(state, ["bias", "f"], l2=1.0)
+    x = np.array([1.0, 0.5])
+    core.arm_inverse(state, "a")
+    for step in range(core.INVERSE_REFRESH_UPDATES + 3):
+        core.rank_one_update(state, action="a", reward=1.0, x=x)
+        entry = state.inverse_cache.get("a")
+        if step + 1 < core.INVERSE_REFRESH_UPDATES:
+            assert entry is not None
+            assert entry[2] == step + 1
+    assert "a" not in state.inverse_cache  # dropped, recomputed exactly on the next score
+    np.testing.assert_allclose(core.arm_inverse(state, "a"), np.linalg.inv(state.A["a"]))
+
+
+def test_scorers_handle_missing_and_singular_arms() -> None:
+    state = core.LinUCBState(action_names=("ok", "singular", "missing"))
+    core.ensure_feature_state(state, ["bias", "x"], l2=1.0)
+    state.A["singular"] = np.zeros((2, 2))
+    del state.A["missing"]
+    x = np.array([1.0, 0.5])
+
+    assert core.arm_inverse(state, "missing") is None
+    assert core.arm_inverse(state, "singular") is None
+    assert "singular" not in state.inverse_cache
+
+    ucb = core.linucb_scores(state, x, l2=1.0, alpha=1.0)
+    assert ucb["missing"] == 0.0
+    assert np.isfinite(ucb["singular"])  # regularized for this score only (POL-22)
+    np.testing.assert_array_equal(state.A["singular"], np.zeros((2, 2)))
+
+    first = core.thompson_scores(state, x, seed=3)
+    assert first["missing"] == 0.0
+    assert first["singular"] == 0.0
+    assert np.isfinite(first["ok"])
+    assert core.thompson_scores(state, x, seed=3) == first

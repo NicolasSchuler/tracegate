@@ -327,43 +327,43 @@ Then run `run_pytest` with the local executor and confirm the return code is 0 w
 **Goal:** the bandit can learn, its logs support valid off-policy evaluation, and the two adaptive conditions are independent. Changing defaults affects comparability with earlier runs, so record a `policy_defaults_version` in run metadata.
 
 ### 3.1. One bandit core first
-- [ ] Extract a `LinUCBBandit` core covering state, feature scaling, decay, feature expansion, persistence and Sherman–Morrison updates. Use it from the helper controller, the budget gate and family controllers, and the bootstrap replay (part of X-04).
+- [x] Extract a `LinUCBBandit` core covering state, feature scaling, decay, feature expansion, persistence and Sherman–Morrison updates. *(Done as `evals/linucb_core.py`: state, feature expansion, scores, decay, rank-1 and Sherman–Morrison updates, tie-breaking and count parsing; percentile scaling is shared through `policy_feature_scaling.percentile_scale`. The state loaders stay per controller because their payload layouts differ.)* Use it from the helper controller, the budget gate and family controllers, and the bootstrap replay (part of X-04).
   - Land the behaviour-preserving extraction as its own commit, with parity tests against the old implementations.
   - Then make the fixes below, so each fix lands once.
 
 ### 3.2. Learning dynamics
-- [ ] **POL-01:** decay per D6, applied only to the updated arm.
-- [ ] **POL-06:** drop one one-hot level.
-- [ ] **POL-07:** one source for the score biases, scaled per D6.
-- [ ] **POL-24:** random tie-breaking; record selected and applied counts.
-- [ ] **POL-22:** scoring never mutates the model. **POL-16:** NaN counter updated under the lock. **POL-21:** fail on a feature-set mismatch.
-- [ ] **POL-09, POL-19:** freeze scaling caps after warm-up; compute interactions from scaled features and rename them.
-- [ ] **POL-20:** cache inverse matrices and maintain caps incrementally.
+- [x] **POL-01:** decay per D6, applied only to the updated arm.
+- [x] **POL-06:** drop one one-hot level. *(Also dropped `attempts_remaining_frac`, always `1 − attempt_frac`.)*
+- [x] **POL-07:** one source for the score biases, scaled per D6. *(Default `search_only=-0.10`, `frame_only=-0.05`; the CLI rejects |bias| > 0.1.)*
+- [x] **POL-24:** random tie-breaking; record selected and applied counts.
+- [x] **POL-22:** scoring never mutates the model. **POL-16:** NaN counter updated under the lock. **POL-21:** fail on a feature-set mismatch.
+- [x] **POL-09, POL-19:** freeze scaling caps after warm-up; compute interactions from scaled features and rename them. *(Caps freeze per feature after `min_samples` = 30 observations.)*
+- [x] **POL-20:** cache inverse matrices and maintain caps incrementally.
 
 ### 3.3. Rewards and budget
-- [ ] **POL-08:** charge only the incremental cost of escalation.
-- [ ] **POL-11:** award the rescue bonus only when the evidence appears in the successful prompt; remove the dead parameters.
-- [ ] **POL-04:** wire the BwK dual variable into the scores and fix its update, or rename the architecture.
-- [ ] **POL-10:** the context family widens by at least 1.
+- [x] **POL-08:** charge only the incremental cost of escalation. *(`1 − default/applied` multiplier share of the attempt's tokens and time.)*
+- [x] **POL-11:** award the rescue bonus only when the evidence appears in the successful prompt; remove the dead parameters.
+- [x] **POL-04:** wire the BwK dual variable into the scores and fix its update, or rename the architecture. *(Wired: pacing target `budget / (cases × k)`, dual step 0.05, score penalty `λ · ĉ_k / target`.)*
+- [x] **POL-10:** the context family widens by at least 1.
 
 ### 3.4. Logging and off-policy data
-- [ ] **POL-03:** correct propensities for shadow mode and warm-up.
-- [ ] **POL-13:** export accepts the supported schema versions and rejects non-finite values.
-- [ ] **POL-18:** one chronological event loader.
-- [ ] **POL-14, POL-15:** bootstrap refuses `percentile_v1` state, adds `--exclude-case-ids` and `--exclude-run-ids`, and warns on overlap with the target cases.
+- [x] **POL-03:** correct propensities for shadow mode and warm-up. *(The helper paths were fixed in M1; the budget controller's events still used the selection's propensity in shadow mode. One shared rule now.)*
+- [x] **POL-13:** export accepts the supported schema versions and rejects non-finite values. *(v3 predates the published repo and is counted as `records_unsupported_schema`.)*
+- [x] **POL-18:** one chronological event loader. *(`evals/policy_event_log.py`; ties within a second keep log order.)*
+- [x] **POL-14, POL-15:** bootstrap refuses `percentile_v1` state, adds `--exclude-case-ids` and `--exclude-run-ids`, and warns on overlap with the target cases. *(Overlap needs `--target-case-ids`.)*
 
 ### 3.5. TEP
-- [ ] **POL-17:** critic-parse flag, averaged or paired acceptance, robust score parsing.
-- [ ] **ATT-17:** surface save failures.
+- [x] **POL-17:** critic-parse flag, averaged or paired acceptance, robust score parsing. *(Paired: the critic scores the current and the candidate surface.)*
+- [x] **ATT-17:** surface save failures.
 
 ### 3.6. Docs
-- [ ] **POL-25, X-08:** generate the policy defaults tables via `evals.doc_sync`, and fix the probe-template comment.
+- [x] **POL-25, X-08:** generate the policy defaults tables via `evals.doc_sync`, and fix the probe-template comment. *(The probe comment was already fixed with POL-01.)*
 
 **Acceptance:**
-- A seeded synthetic test (linear rewards, about 53 features, 10 arms) shows that the default config's best-arm selection rate clearly beats uniform.
-- Propensity tests cover shadow mode, on mode and warm-up.
-- Identical seeds produce identical event streams with `--jobs 1`.
-- Event and state schema versions are bumped if their fields change.
+- [x] A seeded synthetic test (linear rewards, about 53 features, 10 arms) shows that the default config's best-arm selection rate clearly beats uniform. *(58–69% vs 10%; `tests/test_evals_policy_acceptance.py`.)*
+- [x] Propensity tests cover shadow mode, on mode and warm-up. *(`tests/test_evals_policy_propensities.py`.)*
+- [x] Identical seeds produce identical event streams with `--jobs 1`. *(Controller-level, apart from decision id and timestamp.)*
+- [x] Event and state schema versions are bumped if their fields change. *(Helper events 7, budget events 7, both states 4.)*
 
 ---
 

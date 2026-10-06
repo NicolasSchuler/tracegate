@@ -18,22 +18,56 @@ Helper-policy reward is local to Stage A consultation:
 `reward = success_hint + progress_hint + helper_materialization_bonus - token_penalty - latency_penalty - stagnation_penalty`
 
 With:
-- `success_hint = 0.25` on final success
-- `progress_hint = 0.5 * eta_progress` when downstream progress is made
-- `helper_materialization_bonus = 0.25 * eta_progress` when Stage A yields context/snapshot for Stage B
+- `success_hint = success_hint_scale` on final success
+- `progress_hint = progress_hint_scale * eta_progress * progress_score` (score in [0, 1])
+- `helper_materialization_bonus = materialization_scale * eta_progress` when Stage A yields
+  context/snapshot for Stage B
 - `token_penalty = lambda_tokens * (helper_local_tokens_total / token_scale)`
 - `latency_penalty = mu_latency * (helper_local_wall_sec / latency_scale)`
-- `stagnation_penalty = 0.5 * kappa_stagnation * min(1, streak / 3)`
+- `stagnation_penalty = stagnation_scale * kappa_stagnation * min(1, streak / 3)`
+- plus the delayed rescue bonus when a later success re-sends the helper's evidence (POL-11)
 
-Default coefficients:
-- `lambda_tokens = 0.08`
-- `mu_latency = 0.05`
-- `token_scale = 1000`
-- `latency_scale = 10`
-- `success_hint = 0.25`
-- `progress_hint scale = 0.5`
-- `helper materialization scale = 0.25`
-- `stagnation scale = 0.5`
+## Defaults
+
+The tables are generated from the code (POL-25); the hand-written values that used to be
+here had drifted (8 actions, hint scales 0.25/0.5/0.25/0.5, event schema 3).
+
+<!-- BEGIN AUTO-GENERATED: POLICY_DEFAULTS -->
+<!-- Rendered from the code by `python -m evals.doc_sync --write`; do not edit. -->
+
+| Setting | Helper policy | Budget policy |
+|---------|---------------|---------------|
+| Algorithms | `linucb`, `thompson` | `linucb`, `thompson` |
+| Modes | `off`, `on`, `shadow` | `off`, `on`, `shadow` |
+| Actions | 10: `skip_helper`, `invoke_helper`, `frame_only`, `file_only`, `search_only`, `snapshot_lite`, `frame_locals_lite`, `snapshot_full_lite`, `compact_then_patch`, `retry_helper_strict_json` | `keep_budget`, `increase_budget`; families `time`, `tokens`, `context` |
+| Architectures | - | `bwk_v1`, `hierarchical_v1`, `tier_binary` |
+| `alpha` (CLI / Python API) | 0.6 / 0.8 | 0.4 / 0.6 |
+| `epsilon` (CLI / Python API) | 0.1 / 0.15 | 0.05 / 0.08 |
+| Warm-up decisions (CLI / Python API) | 50 / 50 | 20 / 20 |
+| Recency decay | 1.0 (per arm when < 1) | 1.0 (per arm when < 1) |
+| `l2` | 1.0 | 1.0 |
+| Save every (updates) | 50 | 50 |
+| Feature scaling | `v1` (of `none`, `percentile_v1`, `v1`, `v1_interactions`) | `v1` |
+| Score biases | `frame_only=-0.05,search_only=-0.10`, each within ±0.1 | - |
+| Budget ladder | - | `1.0,1.1,1.2,1.35,1.5`, max 1 up(s) per case |
+| Event / state schema | 7 / 4 | 7 / 4 |
+
+| Reward coefficient (CLI default) | Value |
+|----------------------------------|-------|
+| `lambda_tokens` (token penalty weight) | 0.08 |
+| `token_scale` | 1000.0 |
+| `mu_latency` (latency penalty weight) | 0.05 |
+| `latency_scale` (seconds) | 10.0 |
+| `eta_progress` | 0.15 |
+| `kappa_stagnation` | 0.1 |
+| Success hint scale | 1.0 |
+| Progress hint scale | 1.0 |
+| Stagnation penalty scale | 1.0 |
+| Helper materialization scale | 0.5 |
+| Budget `rho_budget_exceeded` | 0.5 |
+
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+<!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## Budget-policy extension (adaptive tooling only)
 The online policy now has a companion **adaptive budget policy** for adaptive conditions
@@ -85,6 +119,11 @@ Current `hierarchical_v1` family definitions:
   - `retry_history_max_chars`
   - `context_compaction_max_calls` via the same capped discrete-widening envelope
 
+The discrete limits (`helper_max_calls`, `stage_a_max_requests`, `context_compaction_max_calls`)
+widen by `floor(2 · steps_above_base / ladder_span)`, at least 1 and at most 2 for any level
+above base (POL-10). The first step on the default five-rung ladder used to floor to 0, so with
+`max_ups_per_case = 1` the `context` family changed only the char budgets.
+
 Budget-policy reward is local to the patch-proposal family for the attempt:
 
 `reward = success_hint + progress_hint - token_penalty - latency_penalty - stagnation_penalty - rho_budget_exceeded*I(request_budget_exceeded)`
@@ -92,8 +131,13 @@ Budget-policy reward is local to the patch-proposal family for the attempt:
 Default:
 - `rho_budget_exceeded = 0.5`
 
-Budget local accounting records the proposal-family usage/latency for the attempt, while
-`keep_budget` is still treated as having zero additional budget-cost penalty in the reward update.
+Budget local accounting records the proposal-family usage/latency for the attempt. The
+proposal is paid under either arm, so the token and latency penalties charge only what the
+escalation added (POL-08): `keep_budget` pays nothing extra, and `increase_budget` pays
+`1 - default_multiplier / applied_multiplier` of the attempt's tokens and time (cost treated as
+proportional to the budget multiplier). It used to be charged the whole attempt, about 0.40 of
+a 1.0 success reward at `lambda_tokens = 0.08` and 5k tokens. Events still log the attempt's
+full `local_tokens_*`; `reward_token_penalty` is the charged part.
 
 The budget policy uses the same runtime modes as helper policy:
 - `off`
@@ -127,9 +171,12 @@ The budget policy uses the same runtime modes as helper policy:
   - `frame_only`: one `frame` plus up to two `local_var` requests
   - `file_only`: one `file` request
   - `search_only`: up to two `search` requests
-- Greedy helper selection can include additive score priors. Shared adaptive
-  defaults down-weight `search_only` by `-0.50` and `frame_only` by `-0.25`
-  without removing either action from exploration or feasibility masks.
+- Greedy helper selection can include additive score priors. The defaults down-weight
+  `search_only` by `-0.10` and `frame_only` by `-0.05` without removing either action from
+  exploration or feasibility masks. They come from one constant
+  (`DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES`), and every bias must stay within ±0.1 of the
+  success reward of 1.0 (decision D6, POL-07); the CLI default used to be `-1.00`/`-0.50`,
+  which acted as a veto.
 - Helper arms are feasibility-masked before selection. Actions that cannot run because of missing
   snapshot state, missing `request_context`, disabled/unsupported compaction, or strict-JSON
   preconditions are excluded from the LinUCB choice set and logged as unavailable.
@@ -145,11 +192,17 @@ The budget policy uses the same runtime modes as helper policy:
   invalid helper payload, `no_progress_v2`, `patch_verifier_rejected`,
   `syntax_preflight_failed`, `retry_gate_no_new_evidence`, or the existing
   `need_more_context` recovery case.
-- Optional recency decay is supported via multiplicative discounting of `A`/`b` before each update.
+- Scores use each arm's cached `A^-1`, updated by Sherman-Morrison after every rank-1 update
+  and recomputed exactly every 64 updates; replacing a matrix (decay, feature expansion, arm
+  reset, load) drops its cache entry (POL-20).
+- Optional recency decay (`decay < 1`; the default is 1.0) discounts the updated arm's `A`/`b` toward the prior before its update. Decaying every arm on every update left about 20 observations of evidence in total and is gone (POL-01). Outcome events carry `effective_evidence` (`trace(A_k) - d·λ` per arm).
 - Feature scaling supports:
   - `v1`: fixed log-scaled caps
   - `none`: raw features
-  - `percentile_v1`: runtime percentile-fitted caps with safe fallback to `v1` until enough samples exist
+  - `percentile_v1`: each count-like feature's cap is fitted once from its first 30
+    observations and then frozen (POL-09); until then it uses the `v1` cap
+  - `v1_interactions`: `v1` plus three `ix_*` interaction features built from `v1`-scaled
+    factors (POL-19)
 
 ## Persistence and observability
 - State JSON:
@@ -160,9 +213,10 @@ The budget policy uses the same runtime modes as helper policy:
   - helper policy: `evals/results/<run_id>.adaptive_policy.jsonl`
   - budget policy: `evals/results/<run_id>.adaptive_budget_policy.jsonl`
 - Event schema versions:
-  - helper policy events: `5` (v5 adds the nested `decision_model` block; the record classes live
-    in `evals/adaptive_policy_records.py`)
-  - budget policy events: `4`
+  - helper policy events: `7` (v5 adds the nested `decision_model` block, v6 `effective_evidence`,
+    v7 `state_resets`; the record classes live in `evals/adaptive_policy_records.py`)
+  - budget policy events: `7` (v5 `effective_evidence`, v6 `state_resets`, v7 the `bwk_v1`
+    pacing fields)
 - Every decision/outcome emits one event with:
   - action selected/applied
   - propensity
@@ -222,6 +276,15 @@ historical runs can be reproduced, and all are recorded in the run configuration
 - **Shadow propensities.** In shadow mode the executed baseline action is deterministic, so the
   logged behavior propensity is 1.0 (helper and budget policies). OPE corrects older shadow
   rows at read time.
+- **Greedy ties (POL-24).** When several feasible actions share the top score (always the case
+  at cold start), the greedy action is drawn uniformly among them with the policy RNG; ties used
+  to go to `invoke_helper` (helper policy) or the default action (budget gate, which made the
+  `time` family win budget-family ties). The logged propensity is
+  `ε/K + (1−ε)/|ties|` for a tied action and `ε/K` otherwise.
+- **Selected and applied counts (POL-24).** Persisted state keeps `action_counts` (the selected
+  action) and `applied_action_counts` (the action that ran) for every controller; they differ in
+  shadow mode. State schema 4 adds the applied counts; schema 3 states still load with applied
+  counts at zero.
 
 ## Decision-model advice (System-1)
 
@@ -279,8 +342,15 @@ before the first unit runs; an unhealthy sidecar stops the run with a clear erro
   - local accounting columns (`local_*`)
   - feature columns (`feature_*`)
   - importance weights (`1 / propensity_clipped`)
-- The export path accepts helper-policy event schema versions 4 and 5 and budget-policy
-  version 4 (explicit sets, `SUPPORTED_*_EVENT_SCHEMA_VERSIONS`).
+- The export path accepts helper-policy and budget-policy event schema versions 4 to 7
+  (explicit sets, `SUPPORTED_*_EVENT_SCHEMA_VERSIONS`); fields added after v4 are optional.
+  Earlier versions predate the published repository and are counted as
+  `records_unsupported_schema`.
+- Export and bootstrap replay share one loader (`evals/policy_event_log.py`, POL-18): events
+  are ordered by `(created_at_utc, run_id, log, line)`, the first occurrence of a duplicate
+  wins, and events with a non-finite reward, propensity, score or feature value are rejected
+  and counted as `records_non_finite` (POL-13). Export used to sort by case id and keep the
+  last duplicate; replay followed glob order, and `inf` values reached the CSV.
 - Decision-model columns (v5 events): `dm_role`, `dm_status`, `dm_profile`, `dm_model`,
   `dm_top_action`, `dm_top_prob`, `dm_margin`, `dm_entropy`, `dm_atomic_action`,
   `dm_traceback_sufficient`, `dm_fix_confidence`, `dm_latency_ms`, `dm_input_tokens`,

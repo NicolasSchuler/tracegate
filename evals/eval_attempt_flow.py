@@ -1853,7 +1853,9 @@ def _run_one_condition_attempts(
                 remaining.append(pending)
         pending_online_credits[:] = remaining
 
-    def _resolve_pending_online_credits_for_success(*, success_attempt: int) -> None:
+    def _resolve_pending_online_credits_for_success(
+        *, success_attempt: int, prompt_evidence_ids: list[str]
+    ) -> None:
         if not pending_online_credits:
             return
         credited_index: int | None = None
@@ -1865,18 +1867,23 @@ def _run_one_condition_attempts(
                 break
         for idx, pending in enumerate(pending_online_credits):
             if idx == credited_index:
+                # POL-11: the helper's new evidence must be in the successful prompt.
                 delayed_rescue_bonus = _adaptive_online_delayed_rescue_bonus(
                     origin_attempt=pending.attempt,
                     resolved_attempt=success_attempt,
                     failure_signature_repeat=pending.failure_signature_repeat,
-                    case_difficulty=pending.case_difficulty,
-                    case_snapshot_dependency=pending.case_snapshot_dependency,
+                    helper_evidence_ids=list(pending.patch_meta.get("evidence_ids_new") or []),
+                    prompt_evidence_ids=prompt_evidence_ids,
                 )
                 _resolve_pending_online_credit_and_flush(
                     pending=pending,
                     delayed_rescue_bonus=delayed_rescue_bonus,
-                    resolved_attempt=success_attempt,
-                    resolution_reason="future_success_attempt",
+                    resolved_attempt=success_attempt if delayed_rescue_bonus > 0.0 else 0,
+                    resolution_reason=(
+                        "future_success_attempt"
+                        if delayed_rescue_bonus > 0.0
+                        else "local_only_evidence_not_in_success_prompt"
+                    ),
                 )
             else:
                 _resolve_pending_online_credit_and_flush(
@@ -5830,8 +5837,6 @@ def _run_one_condition_attempts(
                 attempt_metadata.get("adaptive_helper_action_executed") or "none"
             ),
             "normalized_adaptive_online_policy_mode": normalized_adaptive_online_policy_mode,
-            "case_difficulty": case.difficulty,
-            "case_snapshot_dependency": case.snapshot_dependency,
             "adaptive_progress_made": adaptive_progress_made,
             "adaptive_progress_score": adaptive_progress_score,
             "adaptive_no_progress_streak_current": adaptive_no_progress_streak_current,
@@ -8187,6 +8192,10 @@ def _run_one_condition_attempts(
             attempt_metadata["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_full_learning"] = adaptive_tep_learning
             patch_meta["adaptive_tep_beta"] = float(adaptive_tep_controller.state.beta)
+            # ATT-17: persist after every learning pass and record a failed save.
+            tep_save_error = adaptive_tep_controller.save()
+            attempt_metadata["adaptive_tep_save_error"] = tep_save_error
+            patch_meta["adaptive_tep_save_error"] = tep_save_error
         pending_credit = _finalize_adaptive_policy_attempt(
             note=note,
             success=success,
@@ -8228,7 +8237,10 @@ def _run_one_condition_attempts(
         )
 
         if success:
-            _resolve_pending_online_credits_for_success(success_attempt=attempt)
+            _resolve_pending_online_credits_for_success(
+                success_attempt=attempt,
+                prompt_evidence_ids=_evidence_ids_from_items(bookkeeping_evidence_items_for_prompt),
+            )
             break
         if adaptive_stop_triggered:
             break
@@ -8244,8 +8256,10 @@ def _run_one_condition_attempts(
 
     _resolve_remaining_pending_online_credits()
     if adaptive_tep_controller is not None:
-        try:
-            adaptive_tep_controller.save()
-        except Exception:
-            pass
+        tep_save_error = adaptive_tep_controller.save()
+        if tep_save_error and records:
+            # ATT-17: the failure used to be swallowed; attach it to the case's last record.
+            last_metadata = records[-1].get("attempt_metadata")
+            if isinstance(last_metadata, dict):
+                last_metadata["adaptive_tep_save_error"] = tep_save_error
     return records

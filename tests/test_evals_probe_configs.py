@@ -150,8 +150,9 @@ def test_tuned_template_only_changes_policy_knobs_not_reward_scales() -> None:
     base = _flatten_config("openai_adaptive.template.toml")
     tuned = _flatten_config("openai_adaptive_tuned.template.toml")
 
-    assert base["adaptive_online_action_score_biases"] == "search_only=-1.00,frame_only=-0.50"
-    assert tuned["adaptive_online_action_score_biases"] == "search_only=-1.00,frame_only=-0.50"
+    # Templates inherit the single score-bias default (POL-07); they used to pin -1.00/-0.50.
+    assert "adaptive_online_action_score_biases" not in base
+    assert "adaptive_online_action_score_biases" not in tuned
     assert base["adaptive_budget_policy_tiers"] == "1.0,1.1,1.2,1.35,1.5"
     assert tuned["adaptive_budget_policy_tiers"] == "1.0,1.1,1.2,1.35,1.5"
     assert base["adaptive_budget_policy_max_ups_per_case"] == 1

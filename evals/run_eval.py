@@ -163,6 +163,7 @@ from evals.eval_types import (  # noqa: E402
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_ALPHA,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
     DEFAULT_ADAPTIVE_BUDGET_ONLINE_EPSILON,
+    DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS,
     DEFAULT_ADAPTIVE_BUDGET_POLICY_MAX_UPS_PER_CASE,
     DEFAULT_ADAPTIVE_BUDGET_POLICY_TIERS,
     DEFAULT_ADAPTIVE_BUDGET_TOPUP_MAX_CALLS,
@@ -171,6 +172,9 @@ from evals.eval_types import (  # noqa: E402
     DEFAULT_ADAPTIVE_ONLINE_ALPHA,
     DEFAULT_ADAPTIVE_ONLINE_DECAY,
     DEFAULT_ADAPTIVE_ONLINE_EPSILON,
+    DEFAULT_ADAPTIVE_ONLINE_WARMUP_DECISIONS,
+    DEFAULT_ADAPTIVE_POLICY_L2,
+    DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY,
     DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC,
     DEFAULT_EXECUTOR,
     DEFAULT_OPENAI_TRANSPORT_RECOVERY_ENABLED,
@@ -2242,28 +2246,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--adaptive-online-l2",
         type=float,
-        default=1.0,
-        help="L2 regularization for LinUCB matrices (default: 1.0).",
+        default=DEFAULT_ADAPTIVE_POLICY_L2,
+        help=f"L2 regularization for LinUCB matrices (default: {DEFAULT_ADAPTIVE_POLICY_L2}).",
     )
     parser.add_argument(
         "--adaptive-online-warmup-decisions",
         type=int,
-        default=50,
-        help="Uniform warmup decisions before LinUCB greedy/explore policy (default: 50).",
+        default=DEFAULT_ADAPTIVE_ONLINE_WARMUP_DECISIONS,
+        help=(
+            "Uniform warmup decisions before LinUCB greedy/explore policy "
+            f"(default: {DEFAULT_ADAPTIVE_ONLINE_WARMUP_DECISIONS})."
+        ),
     )
     parser.add_argument(
         "--adaptive-online-save-every",
         type=int,
-        default=50,
-        help="Persist online policy state every N updates (default: 50).",
+        default=DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY,
+        help=(
+            "Persist online policy state every N updates "
+            f"(default: {DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY})."
+        ),
     )
     parser.add_argument(
         "--adaptive-online-decay",
         type=float,
         default=DEFAULT_ADAPTIVE_ONLINE_DECAY,
         help=(
-            "Optional LinUCB recency decay in (0,1]; 1.0 disables forgetting "
-            f"(default: {DEFAULT_ADAPTIVE_ONLINE_DECAY:g})."
+            "Optional LinUCB recency decay in (0,1], applied to the updated arm only; "
+            f"1.0 disables forgetting (default: {DEFAULT_ADAPTIVE_ONLINE_DECAY:g})."
         ),
     )
     parser.add_argument(
@@ -2276,7 +2286,8 @@ def main(argv: list[str] | None = None) -> int:
         "--adaptive-online-action-score-biases",
         default=DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
         help=(
-            "Comma-separated additive helper-action score priors as action=bias pairs "
+            "Comma-separated additive helper-action score priors as action=bias pairs, "
+            "each within +/-0.1 of the success reward "
             f"(default: {DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES})."
         ),
     )
@@ -2361,28 +2372,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--adaptive-budget-online-l2",
         type=float,
-        default=1.0,
-        help="L2 regularization for adaptive budget LinUCB matrices (default: 1.0).",
+        default=DEFAULT_ADAPTIVE_POLICY_L2,
+        help=(
+            "L2 regularization for adaptive budget LinUCB matrices "
+            f"(default: {DEFAULT_ADAPTIVE_POLICY_L2})."
+        ),
     )
     parser.add_argument(
         "--adaptive-budget-online-warmup-decisions",
         type=int,
-        default=20,
-        help="Uniform warmup decisions before budget policy exploitation (default: 20).",
+        default=DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS,
+        help=(
+            "Uniform warmup decisions before budget policy exploitation "
+            f"(default: {DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS})."
+        ),
     )
     parser.add_argument(
         "--adaptive-budget-online-save-every",
         type=int,
-        default=50,
-        help="Persist adaptive budget policy state every N updates (default: 50).",
+        default=DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY,
+        help=(
+            "Persist adaptive budget policy state every N updates "
+            f"(default: {DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY})."
+        ),
     )
     parser.add_argument(
         "--adaptive-budget-online-decay",
         type=float,
         default=DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
         help=(
-            "Optional LinUCB recency decay in (0,1] for budget policy; "
-            f"{DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY:g} enables forgetting."
+            "Optional LinUCB recency decay in (0,1] for the budget policy, applied to the "
+            "updated arm only; 1.0 disables forgetting "
+            f"(default: {DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY:g})."
         ),
     )
     parser.add_argument(

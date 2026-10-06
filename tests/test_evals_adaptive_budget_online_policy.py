@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
 
+from evals import linucb_core
 from evals.adaptive_budget_online_policy import (
     ACTION_BUDGET_FAMILY_CONTEXT,
     ACTION_BUDGET_FAMILY_TIME,
@@ -24,6 +26,17 @@ from evals.policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
 )
 from llmdebug import _json as json
+
+
+def _pin_greedy_ties_to(monkeypatch: pytest.MonkeyPatch, action: str) -> None:
+    """Resolve greedy ties to *action* for tests about something other than tie-breaking.
+
+    Ties are broken at random since POL-24; these tests used to rely on ties going to the
+    default action.
+    """
+    monkeypatch.setattr(
+        linucb_core, "pick_greedy", lambda tied, _rng: action if action in tied else tied[0]
+    )
 
 
 def _linucb_state_payload(
@@ -500,9 +513,11 @@ def test_budget_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
         decision_after_threshold.feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # POL-09: the cap is frozen once MIN_SAMPLES observations exist, so the history stops
+    # growing (it used to keep every observation and refit the cap on each decision).
     assert (
         len(state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
     reloaded = AdaptiveBudgetPolicyController(config)
@@ -512,11 +527,15 @@ def test_budget_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
     assert reloaded.load_error is None
     assert (
         len(reloaded_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
+    assert reloaded_state.feature_scaling_caps == state.feature_scaling_caps
 
 
-def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history(tmp_path) -> None:
+def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history(
+    tmp_path, monkeypatch
+) -> None:
+    _pin_greedy_ties_to(monkeypatch, ACTION_INCREASE_BUDGET)
     config = BudgetPolicyConfig.normalize(
         mode="on",
         algorithm="linucb",
@@ -577,13 +596,14 @@ def test_budget_policy_hierarchical_family_percentile_profile_uses_prior_history
         decision_after_threshold.family_feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # Frozen at MIN_SAMPLES observations (POL-09); the history used to keep growing.
     assert (
         len(gate_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
     assert (
         len(family_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
 
@@ -891,8 +911,9 @@ def test_budget_policy_linucb_scores_regularize_singular_covariance(tmp_path) ->
     scores = controller._linucb_scores(state=state, x=x)
 
     assert all(math.isfinite(score) for score in scores.values())
-    assert state.A[ACTION_KEEP_BUDGET][0, 0] == pytest.approx(1.0)
-    assert state.A[ACTION_INCREASE_BUDGET][0, 0] == pytest.approx(1.0)
+    # POL-22: the regularized matrix is used for the score only; A is left as loaded.
+    assert state.A[ACTION_KEEP_BUDGET][0, 0] == pytest.approx(0.0)
+    assert state.A[ACTION_INCREASE_BUDGET][0, 0] == pytest.approx(0.0)
     controller.close()
 
 
@@ -1117,6 +1138,8 @@ def test_budget_policy_bwk_state_path_resume_preserves_run_budget_counters(tmp_p
         random_seed=0,
         decay=1.0,
     )
+    # Pacing target 40 / 4 = 10 tokens per decision (POL-04).
+    cfg = dataclasses.replace(cfg, bwk_horizon_decisions=4)
     ctrl = AdaptiveBudgetPolicyController(cfg)
     decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
     event = _record(ctrl, decision, local_tokens_total=50)
@@ -1131,11 +1154,13 @@ def test_budget_policy_bwk_state_path_resume_preserves_run_budget_counters(tmp_p
     assert resumed.load_error is None
     assert event.bwk_remaining_token_budget_after == 0
     assert event.bwk_cumulative_tokens_charged == 50
-    assert event.bwk_dual_variable_after == pytest.approx(0.25)
+    # 0.05 * (50 - 10) / 10; the old overspend rule gave (50 - 40) / 40 = 0.25.
+    assert event.bwk_dual_variable_after == pytest.approx(0.2)
     assert resumed.bwk_status["run_token_budget"] == 40
     assert resumed.bwk_status["remaining_token_budget"] == 0
     assert resumed.bwk_status["cumulative_tokens_charged"] == 50
-    assert resumed.bwk_status["dual_variable"] == pytest.approx(0.25)
+    assert resumed.bwk_status["dual_variable"] == pytest.approx(0.2)
+    assert resumed.bwk_status["cost_estimates"][decision.applied_action] == pytest.approx(50.0)
     assert resumed_decision.bwk_budget_exhausted is True
     resumed.close()
 
@@ -1241,11 +1266,12 @@ def test_controller_architecture_property(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _record_feature_scaling_history — history exceeds limit (line 476)
+# percentile_v1 history — bounded by the freeze, and only for count-like features
+# (POL-09; this test used to check truncation at the 256-entry limit)
 # ---------------------------------------------------------------------------
 
 
-def test_feature_scaling_history_truncated_at_limit(tmp_path) -> None:
+def test_feature_scaling_history_is_bounded_and_count_like_only(tmp_path) -> None:
     from evals.policy_feature_scaling import (
         DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT,
     )
@@ -1262,12 +1288,17 @@ def test_feature_scaling_history_truncated_at_limit(tmp_path) -> None:
     ctrl = AdaptiveBudgetPolicyController(cfg)
     for i in range(DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT + 10):
         ctrl.decide(
-            feature_values={"x": float(i)},
+            feature_values={"x": float(i), "stagnation_streak": float(i % 7)},
             default_action=ACTION_KEEP_BUDGET,
         )
     state = ctrl.state
     ctrl.close()
-    assert len(state.feature_scaling_history["x"]) <= DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT
+    assert "x" not in state.feature_scaling_history
+    assert "x" not in state.feature_scaling_caps
+    assert (
+        len(state.feature_scaling_history["stagnation_streak"])
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1300,8 +1331,9 @@ def test_record_outcome_off_mode_returns_off_no_update(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_record_outcome_gate_updated_family_skipped(tmp_path) -> None:
+def test_record_outcome_gate_updated_family_skipped(tmp_path, monkeypatch) -> None:
     """Hierarchical: gate updates but family has no A/b → family returns False."""
+    _pin_greedy_ties_to(monkeypatch, ACTION_INCREASE_BUDGET)
     state_path = tmp_path / "s.json"
     state_path.write_text(
         json.dumps(
@@ -1625,8 +1657,9 @@ def test_apply_recency_decay_skips_bad_shapes(tmp_path) -> None:
             ACTION_INCREASE_BUDGET: np.zeros(5, dtype=float),  # wrong shape
         },
     )
-    # Should not raise — both actions are skipped via continue
-    ctrl._apply_recency_decay(state=state)
+    # Should not raise — both actions are skipped
+    ctrl._apply_recency_decay(state=state, action=ACTION_KEEP_BUDGET)
+    ctrl._apply_recency_decay(state=state, action=ACTION_INCREASE_BUDGET)
     # Matrices remain unchanged
     assert state.A[ACTION_KEEP_BUDGET] is None
     assert state.A[ACTION_INCREASE_BUDGET].shape == (5, 5)
@@ -1999,3 +2032,66 @@ def test_budget_thompson_state_roundtrip(tmp_path) -> None:
     for score in d2.scores.values():
         assert math.isfinite(score)
     ctrl2.close()
+
+
+# ---------------------------------------------------------------------------
+# POL-04: the bwk_v1 dual variable paces spending and enters the gate scores
+# ---------------------------------------------------------------------------
+
+
+def _bwk_controller(tmp_path, *, horizon: int) -> AdaptiveBudgetPolicyController:
+    cfg = BudgetPolicyConfig.normalize(
+        mode="on",
+        architecture=BUDGET_POLICY_ARCH_BWK_V1,
+        alpha=0.0,
+        epsilon=0.0,
+        warmup_decisions=0,
+        bwk_run_token_budget=1000,
+        state_path=tmp_path / "bwk_state.json",
+        events_path=tmp_path / "bwk_events.jsonl",
+        random_seed=3,
+        decay=1.0,
+    )
+    return AdaptiveBudgetPolicyController(dataclasses.replace(cfg, bwk_horizon_decisions=horizon))
+
+
+def test_bwk_dual_rises_on_overspend_and_falls_on_underspend(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=100)  # target 10 tokens per decision
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    first = _record(ctrl, decision, local_tokens_total=30)
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    second = _record(ctrl, decision, local_tokens_total=0)
+    status = ctrl.bwk_status
+    ctrl.close()
+
+    # The old rule stayed 0 until the remaining budget was nearly exhausted.
+    assert first.bwk_dual_variable_after == pytest.approx(0.05 * (30 - 10) / 10)
+    assert second.bwk_dual_variable_after == pytest.approx(0.1 - 0.05)
+    assert first.bwk_target_tokens_per_decision == pytest.approx(10.0)
+    assert status["target_tokens_per_decision"] == pytest.approx(10.0)
+
+
+def test_bwk_dual_penalizes_the_costlier_gate_arm(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=100)
+    ctrl._bwk_dual_variable = 1.0
+    ctrl._bwk_cost_sums.update({ACTION_INCREASE_BUDGET: 400.0, ACTION_KEEP_BUDGET: 50.0})
+    ctrl._bwk_cost_counts.update({ACTION_INCREASE_BUDGET: 10, ACTION_KEEP_BUDGET: 10})
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_INCREASE_BUDGET)
+    ctrl.close()
+
+    # Untrained arms tie at 0; the Lagrangian term lambda * cost / target breaks it.
+    assert decision.scores[ACTION_INCREASE_BUDGET] == pytest.approx(-4.0)
+    assert decision.scores[ACTION_KEEP_BUDGET] == pytest.approx(-0.5)
+    assert decision.selected_action == ACTION_KEEP_BUDGET
+    assert decision.propensity == pytest.approx(1.0)
+
+
+def test_bwk_without_a_horizon_only_masks_on_exhaustion(tmp_path) -> None:
+    ctrl = _bwk_controller(tmp_path, horizon=0)
+    decision = ctrl.decide(feature_values={"bias": 1.0}, default_action=ACTION_KEEP_BUDGET)
+    event = _record(ctrl, decision, local_tokens_total=500)
+    ctrl.close()
+
+    assert event.bwk_dual_variable_after == 0.0
+    assert event.bwk_target_tokens_per_decision == 0.0
+    assert ctrl._bwk_score_penalties() == {}

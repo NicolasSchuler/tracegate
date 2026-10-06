@@ -64,6 +64,7 @@ from .eval_types import (
     PATCH_VERIFIER_RECOVERY_RESULT_NOT_ELIGIBLE,
     PATCH_VERIFIER_SCOPE_ALL,
     PATCH_VERIFIER_SCOPE_DISABLED,
+    POLICY_DEFAULTS_VERSION,
     CaseSpec,
     Condition,
 )
@@ -249,6 +250,7 @@ def _build_run_metadata(
         "patcher_config": patcher_config,
         "patcher_config_fingerprint": _xxh3_128_jsonlike(patcher_config),
         "run_settings_fingerprint": run_settings_fingerprint,
+        "policy_defaults_version": POLICY_DEFAULTS_VERSION,
         "record_policy": {
             "prompt": str(args.record_prompt),
             "evidence": str(args.record_evidence),

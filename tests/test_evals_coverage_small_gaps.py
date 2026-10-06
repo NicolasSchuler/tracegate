@@ -230,10 +230,10 @@ class TestAdaptiveOnlinePolicyGaps:
         )
         assert config.feature_scaling_profile == DEFAULT_POLICY_FEATURE_SCALING_PROFILE
 
-    def test_record_feature_scaling_history_truncates(self) -> None:
-        """Line 380: history exceeds limit → truncated to last N entries."""
+    def test_scale_features_keeps_a_frozen_cap(self) -> None:
+        """POL-09: a feature with a frozen cap records no more history (this test used to
+        check truncation of an ever-growing history)."""
         from evals.adaptive_online_policy import (
-            DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT,
             AdaptiveOnlinePolicyController,
             OnlinePolicyConfig,
         )
@@ -245,15 +245,14 @@ class TestAdaptiveOnlinePolicyGaps:
             decay=1.0,
         )
         policy = AdaptiveOnlinePolicyController(config)
-        # Pre-fill history to hit the truncation path
-        key = "test_feature"
-        policy._state.feature_scaling_history[key] = list(
-            range(DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT + 10)
-        )
-        policy._record_feature_scaling_history(cleaned_features={key: 42.0})
-        assert len(policy._state.feature_scaling_history[key]) <= (
-            DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT
-        )
+        key = "stagnation_streak"
+        policy._state.feature_scaling_history[key] = [1.0] * 30
+        policy._state.feature_scaling_caps[key] = 3.0
+        _values, caps, sizes, fallback = policy._scale_features(cleaned_features={key: 42.0})
+        assert caps == {key: 3.0}
+        assert sizes == {key: 30}
+        assert fallback is False
+        assert len(policy._state.feature_scaling_history[key]) == 30
 
     def test_linucb_scores_returns_zero_when_A_b_is_none(self) -> None:
         """Lines 793-794: A or b is None for an action → score 0.0."""

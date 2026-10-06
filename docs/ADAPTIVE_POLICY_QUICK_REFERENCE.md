@@ -18,13 +18,14 @@ A **contextual-bandit (LinUCB)** controller that learns which helper-invocation 
    ▼
 2. SCALE FEATURES (profile "v1" / "percentile_v1" / "none")
    • Count features: log1p normalization
-   • `percentile_v1`: fit runtime caps from recent history, else fall back to `v1`
+   • `percentile_v1`: fit each count-like cap once from its first 30 observations, then
+     freeze it (POL-09); `v1` caps until then
    • Clip all to [-4, 4]
    ▼
 3. DECIDE ACTION
    • Feasibility-mask unavailable helper arms before scoring
-   • Warm-up phase (first 200): Uniform random over feasible actions
-   • Then: LinUCB greedy (95%) + ε-greedy (5%)
+   • Warm-up phase (first `warmup_decisions`, default 50): Uniform random over feasible actions
+   • Then: LinUCB greedy (1 − ε) + uniform random (ε, default 0.10)
    • Score = exploit + α × explore
    ▼
 4. EXECUTE ATTEMPT
@@ -81,8 +82,8 @@ score_k = θ_k^T · x  +  α × √(x^T · A_k^{-1} · x)
 ## 📈 50+ Input Features
 
 ### Attempt Progress (4)
-- `attempt_frac`: current / max attempts
-- `attempts_remaining_frac`: (max - current) / max
+- `attempt_frac`: current / max attempts (`attempts_remaining_frac = 1 - attempt_frac` was
+  dropped as redundant with `bias`, POL-06)
 - `timed_out`: 1 if timeout exceeded
 - (others)
 
@@ -105,7 +106,7 @@ score_k = θ_k^T · x  +  α × √(x^T · A_k^{-1} · x)
 - `last_helper_invalid_response`: binary
 - `last_helper_declined`: binary
 - `supports_context_request`: patcher capability
-- `last_helper_action_executed`: encoded flags
+- `last_helper_action_*`: one flag per action except `skip_helper`, the reference level (POL-06)
 - (others)
 
 ### Context Compaction (8)
@@ -144,12 +145,52 @@ reward = success_hint (if success)
        + delayed_rescue_bonus (if resolved later)
 ```
 
-**Default parameters** (eval_types.py):
-- λ_tokens = 0.08
-- μ_latency = 0.05
-- η_progress = 0.15
-- κ_stagnation = 0.10
-- token_scale = 1000, latency_scale = 10
+The delayed rescue bonus goes to the newest helper call one or two attempts before a success,
+and only when evidence that call added is sent again in the successful attempt's prompt
+(POL-11); otherwise the credit resolves as `local_only_evidence_not_in_success_prompt`.
+
+**Default parameters**: see the generated table in [Defaults](#defaults).
+
+## Defaults
+
+Generated from the code by `python -m evals.doc_sync --write` (POL-25).
+
+<!-- BEGIN AUTO-GENERATED: POLICY_DEFAULTS -->
+<!-- Rendered from the code by `python -m evals.doc_sync --write`; do not edit. -->
+
+| Setting | Helper policy | Budget policy |
+|---------|---------------|---------------|
+| Algorithms | `linucb`, `thompson` | `linucb`, `thompson` |
+| Modes | `off`, `on`, `shadow` | `off`, `on`, `shadow` |
+| Actions | 10: `skip_helper`, `invoke_helper`, `frame_only`, `file_only`, `search_only`, `snapshot_lite`, `frame_locals_lite`, `snapshot_full_lite`, `compact_then_patch`, `retry_helper_strict_json` | `keep_budget`, `increase_budget`; families `time`, `tokens`, `context` |
+| Architectures | - | `bwk_v1`, `hierarchical_v1`, `tier_binary` |
+| `alpha` (CLI / Python API) | 0.6 / 0.8 | 0.4 / 0.6 |
+| `epsilon` (CLI / Python API) | 0.1 / 0.15 | 0.05 / 0.08 |
+| Warm-up decisions (CLI / Python API) | 50 / 50 | 20 / 20 |
+| Recency decay | 1.0 (per arm when < 1) | 1.0 (per arm when < 1) |
+| `l2` | 1.0 | 1.0 |
+| Save every (updates) | 50 | 50 |
+| Feature scaling | `v1` (of `none`, `percentile_v1`, `v1`, `v1_interactions`) | `v1` |
+| Score biases | `frame_only=-0.05,search_only=-0.10`, each within ±0.1 | - |
+| Budget ladder | - | `1.0,1.1,1.2,1.35,1.5`, max 1 up(s) per case |
+| Event / state schema | 7 / 4 | 7 / 4 |
+
+| Reward coefficient (CLI default) | Value |
+|----------------------------------|-------|
+| `lambda_tokens` (token penalty weight) | 0.08 |
+| `token_scale` | 1000.0 |
+| `mu_latency` (latency penalty weight) | 0.05 |
+| `latency_scale` (seconds) | 10.0 |
+| `eta_progress` | 0.15 |
+| `kappa_stagnation` | 0.1 |
+| Success hint scale | 1.0 |
+| Progress hint scale | 1.0 |
+| Stagnation penalty scale | 1.0 |
+| Helper materialization scale | 0.5 |
+| Budget `rho_budget_exceeded` | 0.5 |
+
+Runs take the CLI defaults; the Python API defaults apply only to configs built in code. Percentile caps freeze after 30 observations per feature. Run metadata records `policy_defaults_version: 2`.
+<!-- END AUTO-GENERATED: POLICY_DEFAULTS -->
 
 ## 🔧 Configuration
 
@@ -162,7 +203,7 @@ OnlinePolicyConfig(
     l2: 1.0                              # Regularization for the LinUCB solve
     warmup_decisions: 50                 # Uniform sampling for first N
     save_every: 50                       # Save state after N updates
-    decay: 0.95                          # Lower values discount stale data
+    decay: 1.0                           # < 1 discounts the updated arm's older data (opt-in)
     feature_scaling_profile: "v1"        # "v1", "percentile_v1", or "none"
     state_path: Path | None              # Default: evals/artifacts/policies/<run_id>.json
     events_path: Path | None             # Log all decisions+outcomes as JSONL
@@ -184,9 +225,9 @@ OnlinePolicyConfig(
 2. **On decision** with context x:
     - Compute θ̂_k = A_k^{-1} b_k for each action
     - Score each action: UCB_k = θ̂_k^T x + α √(x^T A_k^{-1} x)
-    - Select argmax_k UCB_k (greedy) or random (ε-greedy) from the feasible action set
+    - Select argmax_k UCB_k (greedy; ties drawn uniformly) or random (ε-greedy) from the feasible action set
 3. **On reward** r for action a with context x:
-    - Optionally decay all A_k / b_k toward the L2 prior
+    - Optionally (decay < 1) decay A_a / b_a of the updated arm toward the L2 prior
     - A_a ← A_a + x x^T
     - b_a ← b_a + r·x
 4. **Save state** every 50 updates to enable resuming
@@ -275,15 +316,17 @@ BudgetPolicyConfig(
     alpha: 0.4        # Lower than the helper policy (0.6)
     epsilon: 0.05     # Lower exploration for the 2-action controller
     warmup: 20        # Short uniform warm-up before budget learning
-    decay: 0.95       # Optional recency decay, same semantics as helper policy
+    decay: 1.0        # Optional per-arm recency decay, same semantics as helper policy
     max_ups_per_case: 1
     feature_scaling_profile: "v1" | "percentile_v1" | "none"
 )
 ```
 
-Shared helper defaults also apply additive score priors:
-- `search_only = -0.50`
-- `frame_only = -0.25`
+Shared helper defaults also apply additive score priors (one source,
+`DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES`; each bias at most ±0.1 of the success reward,
+POL-07 / D6):
+- `search_only = -0.10`
+- `frame_only = -0.05`
 
 `hierarchical_v1` also exposes/logs:
 - family availability masks
@@ -331,9 +374,9 @@ online_policy_controller.close()  # Flush state to disk
 
 ## 🎓 Learning Dynamics
 
-- **Warm-up (decisions 1-200)**: Uniform random → explores all actions equally
+- **Warm-up (the first `warmup_decisions`, default 50)**: Uniform random → explores all actions equally
 - **Early phase**: ε-greedy with high uncertainty → balanced exploration/exploitation
-- **Steady state**: Greedy arm selection (high confidence actions) with 5% random exploration
+- **Steady state**: Greedy arm selection (high confidence actions) with ε (default 10%) random exploration
 - **Uncertainty bonus**: √(x^T A^{-1} x) is **larger** when context x is new → encourages exploration of unfamiliar situations
 
 ## 💡 Key Insights
@@ -395,19 +438,22 @@ How to A/B test policy changes:
 
 Which parameters matter most and suggested sweep ranges:
 
-| Parameter | CLI Flag | Default | Sweep Range | Effect |
-|-----------|----------|---------|-------------|--------|
-| `alpha` | `--adaptive-online-alpha` | 0.8 | 0.3–2.0 | Higher = more exploration via UCB bonus |
-| `epsilon` | `--adaptive-online-epsilon` | 0.05 | 0.01–0.15 | Higher = more random exploration |
-| `lambda_tokens` | `--adaptive-reward-lambda-tokens` | 0.08 | 0.02–0.15 | Higher = heavier penalty for token usage |
-| `mu_latency` | `--adaptive-reward-mu-latency` | 0.05 | 0.01–0.10 | Higher = heavier penalty for wall-clock time |
-| `eta_progress` | `--adaptive-reward-eta-progress` | 0.15 | 0.05–0.30 | Higher = larger bonus for progress signals |
-| `kappa_stagnation` | `--adaptive-reward-kappa-stagnation` | 0.10 | 0.05–0.20 | Higher = larger penalty for no-progress streaks |
-| `pregate_threshold` | `--adaptive-informativeness-pregate-threshold` | 0.7 | 0.3–0.9 | Higher = skip helper more often |
-| `warmup_decisions` | `--adaptive-online-warmup-decisions` | 50 | 25–500 | Uniform random sampling before LinUCB kicks in |
-| `decay` | `--adaptive-online-decay` | 0.95 | 0.90–1.0 | Lower = forget older data faster (recency bias) |
+Defaults are in the generated [Defaults](#defaults) table (this table listed `alpha` 0.8
+and `epsilon` 0.05; the CLI defaults are 0.6 and 0.10; POL-25).
 
-**Budget policy** has its own parameter set with different defaults (lower `alpha=0.4`, lower `epsilon=0.05`, shorter `warmup=20`). Use the `--adaptive-budget-*` family of flags to tune those independently.
+| Parameter | CLI Flag | Sweep Range | Effect |
+|-----------|----------|-------------|--------|
+| `alpha` | `--adaptive-online-alpha` | 0.3–2.0 | Higher = more exploration via UCB bonus |
+| `epsilon` | `--adaptive-online-epsilon` | 0.01–0.15 | Higher = more random exploration |
+| `lambda_tokens` | `--adaptive-reward-lambda-tokens` | 0.02–0.15 | Higher = heavier penalty for token usage |
+| `mu_latency` | `--adaptive-reward-mu-latency` | 0.01–0.10 | Higher = heavier penalty for wall-clock time |
+| `eta_progress` | `--adaptive-reward-eta-progress` | 0.05–0.30 | Higher = larger bonus for progress signals |
+| `kappa_stagnation` | `--adaptive-reward-kappa-stagnation` | 0.05–0.20 | Higher = larger penalty for no-progress streaks |
+| `pregate_threshold` | `--adaptive-informativeness-pregate-threshold` (default 0.7) | 0.3–0.9 | Higher = skip helper more often |
+| `warmup_decisions` | `--adaptive-online-warmup-decisions` | 25–500 | Uniform random sampling before LinUCB kicks in |
+| `decay` | `--adaptive-online-decay` | 0.90–1.0 | Below 1, the updated arm forgets older data faster (opt-in, for non-stationary runs; POL-01) |
+
+**Budget policy** has its own parameter set (see the Defaults table). Use the `--adaptive-budget-*` family of flags to tune those independently.
 
 ### Common Tuning Scenarios
 
@@ -502,7 +548,7 @@ For the budget policy, use the corresponding flag:
 --adaptive-budget-online-state-path evals/artifacts/policies/prior-run-001.adaptive_budget_policy.json
 ```
 
-**Caveat**: Feature dimensions must match between runs.  If you changed the feature set or scaling profile, start fresh.
+**Caveat**: Feature dimensions must match between runs.  If you changed the feature set or scaling profile, start fresh. The controller enforces this (POL-21): a state whose features the run no longer produces is discarded at the first decision with a `FeatureSetMismatch` `load_error` and `state_resets.feature_set_mismatch` in the policy events (helper event schema 7, budget event schema 6); features the run adds are fine and start from the prior. States saved before POL-06 (2026-10-04 review) carry `last_helper_action_skip_helper` and `attempts_remaining_frac` and are discarded this way.
 
 ### Reward Debugging
 
@@ -545,7 +591,7 @@ Which feature categories tend to drive action selection the most:
 | Category | Key Features | Why They Matter |
 |----------|-------------|-----------------|
 | **Budget signals** | `helper_budget_remaining_frac`, `helper_budget_exhausted` | Policy learns to skip helper when budget is nearly spent |
-| **Attempt progress** | `attempt_frac`, `attempts_remaining_frac` | Late attempts get more conservative; early attempts explore |
+| **Attempt progress** | `attempt_frac` | Late attempts get more conservative; early attempts explore |
 | **Failure history** | `stagnation_streak`, `adaptive_no_progress_streak`, `failure_signature_repeat` | Repeated failures signal that current strategy isn't working |
 | **Pre-gate signals** | `pregate_score`, `pregate_fired`, `pregate_type_specificity` | High informativeness score → traceback is self-explanatory → skip helper |
 | **Context state** | `last_helper_need_more_context`, `last_helper_declined` | If helper asked for more context, `compact_then_patch` or `file_only` may help next |

@@ -308,9 +308,9 @@ eval framework, and adaptive online learning.
  │  Attempt progress:           Helper state:                             │
  │  ├─ bias (=1.0, intercept)   ├─ helper_calls_used                     │
  │  ├─ attempt_frac             ├─ helper_low_yield_ratio                │
- │  ├─ attempts_remaining_frac  ├─ helper_budget_remaining_frac          │
- │  ├─ timed_out                ├─ helper_budget_exhausted               │
- │  └─ failure_signature_repeat ├─ helper_saturation_guarded             │
+ │  ├─ timed_out                ├─ helper_budget_remaining_frac          │
+ │  └─ failure_signature_repeat ├─ helper_budget_exhausted               │
+ │                              ├─ helper_saturation_guarded             │
  │                              ├─ helper_topup_used/remaining_frac      │
  │  Stagnation signals:         └─ last_helper_need_more_context         │
  │  ├─ stagnation_streak                                                 │
@@ -325,8 +325,8 @@ eval framework, and adaptive online learning.
  │       (stage_a/overflow/     ├─ pregate_crash_in_user_code            │
  │        always)               ├─ pregate_assertion_quality             │
  │                              └─ pregate_exception_is_*                │
- │  Last action one-hot:                                                 │
- │  └─ last_helper_action_{skip|invoke|frame|file|search|lite|...}       │
+ │  Last action one-hot (skip_helper is the reference level):            │
+ │  └─ last_helper_action_{invoke|frame|file|search|lite|...}            │
  └───────────────────────────────────┬─────────────────────────────────────┘
                                      │
                                      ▼

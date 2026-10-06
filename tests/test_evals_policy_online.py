@@ -109,8 +109,8 @@ class TestDelayedRescueBonus:
             origin_attempt=3,
             resolved_attempt=3,
             failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         assert bonus == 0.0
 
@@ -119,8 +119,8 @@ class TestDelayedRescueBonus:
             origin_attempt=5,
             resolved_attempt=3,
             failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         assert bonus == 0.0
 
@@ -129,8 +129,8 @@ class TestDelayedRescueBonus:
             origin_attempt=1,
             resolved_attempt=1 + ADAPTIVE_DELAYED_RESCUE_HORIZON_ATTEMPTS + 1,
             failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         assert bonus == 0.0
 
@@ -139,8 +139,8 @@ class TestDelayedRescueBonus:
             origin_attempt=1,
             resolved_attempt=2,
             failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         assert bonus == pytest.approx(ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE)
 
@@ -149,8 +149,8 @@ class TestDelayedRescueBonus:
             origin_attempt=1,
             resolved_attempt=3,
             failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         expected = (
             ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE
@@ -163,8 +163,8 @@ class TestDelayedRescueBonus:
             origin_attempt=1,
             resolved_attempt=2,
             failure_signature_repeat=True,
-            case_difficulty="easy",
-            case_snapshot_dependency="none",
+            helper_evidence_ids=["e1"],
+            prompt_evidence_ids=["e1"],
         )
         expected = (
             ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE
@@ -172,39 +172,33 @@ class TestDelayedRescueBonus:
         )
         assert bonus == pytest.approx(min(expected, ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_MAX))
 
-    def test_context_multiplier_for_hard_difficulty(self) -> None:
-        # case_difficulty is retained for backward compat but no longer triggers multiplier
+    @pytest.mark.parametrize(
+        ("helper_ids", "prompt_ids"),
+        [(["e1"], ["e2"]), ([], ["e1"]), (["e1"], [])],
+    )
+    def test_no_bonus_unless_helper_evidence_reaches_the_success_prompt(
+        self, helper_ids: list[str], prompt_ids: list[str]
+    ) -> None:
+        """POL-11: timing alone used to earn the bonus (case_difficulty and
+        case_snapshot_dependency were accepted but never read; they are gone)."""
         bonus = _adaptive_online_delayed_rescue_bonus(
             origin_attempt=1,
             resolved_attempt=2,
-            failure_signature_repeat=False,
-            case_difficulty="hard",
-            case_snapshot_dependency="none",
+            failure_signature_repeat=True,
+            helper_evidence_ids=helper_ids,
+            prompt_evidence_ids=prompt_ids,
         )
-        expected = ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE
-        assert bonus == pytest.approx(expected)
-
-    def test_context_multiplier_for_snapshot_dependency_helpful(self) -> None:
-        # case_snapshot_dependency is retained for backward compat but no longer triggers multiplier
-        bonus = _adaptive_online_delayed_rescue_bonus(
-            origin_attempt=1,
-            resolved_attempt=2,
-            failure_signature_repeat=False,
-            case_difficulty="easy",
-            case_snapshot_dependency="helpful",
-        )
-        expected = ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_BASE
-        assert bonus == pytest.approx(expected)
+        assert bonus == 0.0
 
     def test_bonus_capped_at_max(self) -> None:
         bonus = _adaptive_online_delayed_rescue_bonus(
             origin_attempt=1,
             resolved_attempt=2,
             failure_signature_repeat=True,
-            case_difficulty="hard",
-            case_snapshot_dependency="required",
+            helper_evidence_ids=["e1", "e2"],
+            prompt_evidence_ids=["e2"],
         )
-        assert bonus <= ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_MAX
+        assert 0.0 < bonus <= ADAPTIVE_LOCAL_REWARD_DELAYED_RESCUE_BONUS_MAX
 
 
 # ── _adaptive_online_behavior_fields ─────────────────────────────────────
@@ -590,8 +584,6 @@ def _finalize_kwargs(**overrides: Any) -> dict[str, Any]:
         "online_policy_features_scaled": {},
         "helper_decision_reason": "",
         "normalized_adaptive_online_policy_mode": "on",
-        "case_difficulty": "medium",
-        "case_snapshot_dependency": "none",
         "adaptive_progress_made": False,
         "adaptive_progress_score": 0.0,
         "adaptive_no_progress_streak_current": 0,

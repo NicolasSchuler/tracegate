@@ -46,6 +46,9 @@ from evals.adaptive_online_policy import (
     OnlinePolicyConfig,
 )
 from evals.adaptive_online_policy import (
+    EVENT_SCHEMA_VERSION as ONLINE_EVENT_SCHEMA_VERSION,
+)
+from evals.adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
 from evals.decision_model.config import DecisionModelPolicyConfig
@@ -151,7 +154,17 @@ def _online_policy_state_payload(
     *,
     mode: str,
     preferred_action: str,
+    fallback_action: str | None = None,
 ) -> dict[str, object]:
+    """State where *preferred_action* scores best and *fallback_action* second.
+
+    Masking tests name the fallback arm explicitly: greedy ties are broken at random
+    since POL-24, so the next arm no longer comes from the action order.
+    """
+    b_values = dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
+    if fallback_action is not None:
+        b_values[fallback_action] = 1.0
+    b_values[preferred_action] = 2.0
     return {
         "schema_version": ONLINE_STATE_SCHEMA_VERSION,
         "mode": mode,
@@ -166,9 +179,7 @@ def _online_policy_state_payload(
         "updates": 0,
         "action_counts": dict.fromkeys(ONLINE_POLICY_ACTIONS, 0),
         "A": {action: [[1.0]] for action in ONLINE_POLICY_ACTIONS},
-        "b": {
-            action: [2.0 if action == preferred_action else 0.0] for action in ONLINE_POLICY_ACTIONS
-        },
+        "b": {action: [b_values[action]] for action in ONLINE_POLICY_ACTIONS},
     }
 
 
@@ -229,13 +240,15 @@ def _invoke_biased_online_controller(
 
 
 def _preferred_action_online_controller(
-    tmp_path: Path, *, mode: str, preferred_action: str
+    tmp_path: Path, *, mode: str, preferred_action: str, fallback_action: str | None = None
 ) -> tuple[AdaptiveOnlinePolicyController, Path]:
     state_path = tmp_path / f"policy_state_{preferred_action}_{mode}.json"
     events_path = tmp_path / f"policy_events_{preferred_action}_{mode}.jsonl"
     state_path.write_text(
         json.dumps(
-            _online_policy_state_payload(mode=mode, preferred_action=preferred_action),
+            _online_policy_state_payload(
+                mode=mode, preferred_action=preferred_action, fallback_action=fallback_action
+            ),
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -1572,13 +1585,14 @@ def _run_adaptive_action_case(
     include_snapshot: bool = True,
     extra_run_kwargs: dict[str, object] | None = None,
     decision_model: DecisionModelBinding | None = None,
+    fallback_action: str | None = None,
 ) -> tuple[list[dict[str, object]], Path]:
     case = _make_case(tmp_path)
     workdir = tmp_path / f"{run_id}_workdir"
     context_dir = tmp_path / f"{run_id}_context"
     shutil.copytree(case.path, workdir)
     controller, events_path = _preferred_action_online_controller(
-        tmp_path, mode="on", preferred_action=preferred_action
+        tmp_path, mode="on", preferred_action=preferred_action, fallback_action=fallback_action
     )
     controller.decision_model = decision_model
 
@@ -1960,7 +1974,7 @@ def test_adaptive_llm_discretion_decision_model_policy_role_drives_helper_action
     assert str(tmp_path) not in built.rendered
 
     events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
-    assert events[0]["schema_version"] == 5
+    assert events[0]["schema_version"] == ONLINE_EVENT_SCHEMA_VERSION  # 7 since POL-21
     assert events[0]["decision_model"]["role"] == "policy"
     states = [json.loads(line) for line in states_path.read_text(encoding="utf-8").splitlines()]
     assert states[0]["decision_id"] == attempt_meta["adaptive_online_decision_id"]
@@ -2109,7 +2123,7 @@ def test_adaptive_reveal_traceback_first_uses_snapshot_index_without_full_snapsh
 def test_adaptive_llm_discretion_snapshot_lite_masks_unavailable_snapshot_action(
     tmp_path, monkeypatch
 ) -> None:
-    """Ensures that snapshot-lite is removed from available actions and the policy falls back to invoke-helper when no snapshot is present."""
+    """Ensures that snapshot-lite is removed from available actions and the policy falls back to the next-best arm (invoke-helper) when no snapshot is present."""
     patcher = _AdaptiveActionCapturePatcher()
 
     records, _events_path = _run_adaptive_action_case(
@@ -2118,6 +2132,7 @@ def test_adaptive_llm_discretion_snapshot_lite_masks_unavailable_snapshot_action
         patcher=patcher,
         preferred_action=ACTION_SNAPSHOT_LITE,
         run_id="run-snapshot-lite-fallback",
+        fallback_action=ACTION_INVOKE_HELPER,
         include_snapshot=False,
     )
 
@@ -2244,7 +2259,7 @@ def test_context_compaction_policy_action_respects_mode_off() -> None:
 def test_adaptive_llm_discretion_compact_then_patch_masks_disabled_compaction_action(
     tmp_path, monkeypatch
 ) -> None:
-    """Ensures that compact-then-patch is excluded from available actions and the policy falls back to invoke-helper when compaction mode is 'off'."""
+    """Ensures that compact-then-patch is excluded from available actions and the policy falls back to the next-best arm (invoke-helper) when compaction mode is 'off'."""
     patcher = _AdaptiveActionCapturePatcher(
         request_payload={
             "need_more_context": True,
@@ -2259,6 +2274,7 @@ def test_adaptive_llm_discretion_compact_then_patch_masks_disabled_compaction_ac
         patcher=patcher,
         preferred_action=ACTION_COMPACT_THEN_PATCH,
         run_id="run-compact-then-patch-mode-off",
+        fallback_action=ACTION_INVOKE_HELPER,
         extra_run_kwargs={"context_compaction_mode": "off"},
     )
 
@@ -2312,6 +2328,7 @@ def test_adaptive_llm_discretion_compact_then_patch_masks_unsupported_compaction
         patcher=patcher,
         preferred_action=ACTION_COMPACT_THEN_PATCH,
         run_id="run-compact-then-patch-fallback",
+        fallback_action=ACTION_INVOKE_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -2376,6 +2393,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_masks_until_prior_inva
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-retry-helper-strict-json",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2452,6 +2470,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_supports_non_openai_st
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-retry-helper-strict-json-non-openai",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2517,6 +2536,7 @@ def test_adaptive_llm_discretion_retry_helper_strict_json_supports_legacy_patche
         patcher=patcher,
         preferred_action=ACTION_RETRY_HELPER_STRICT_JSON,
         run_id="run-legacy-strict-json-retry",
+        fallback_action=ACTION_INVOKE_HELPER,
         k=2,
         adaptive_helper_max_calls_per_case=2,
     )
@@ -2553,6 +2573,7 @@ def test_adaptive_llm_discretion_masks_stage_a_actions_when_request_context_unsu
         patcher=_NoRequestContextPatcher(),
         preferred_action=ACTION_FILE_ONLY,
         run_id="run-file-only-fallback",
+        fallback_action=ACTION_SKIP_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -2581,6 +2602,7 @@ def test_inherited_noop_request_context_is_treated_as_unsupported(tmp_path, monk
         patcher=_InheritedNoRequestContextPatcher(),
         preferred_action=ACTION_FILE_ONLY,
         run_id="run-inherited-request-context-noop",
+        fallback_action=ACTION_SKIP_HELPER,
     )
 
     attempt_meta = records[0]["attempt_metadata"]
@@ -5485,7 +5507,6 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
     feature_vector_1 = records[0]["attempt_metadata"]["adaptive_online_feature_vector"]
     feature_vector_2 = records[1]["attempt_metadata"]["adaptive_online_feature_vector"]
     expected_keys = {
-        "attempts_remaining_frac",
         "helper_budget_remaining_frac",
         "helper_topup_used_frac",
         "helper_topup_remaining_frac",
@@ -5512,8 +5533,10 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
     assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_1.keys())
     assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_2.keys())
     assert _CASE_LABEL_FEATURES.isdisjoint(raw_feature_vector_1.keys())
-    assert feature_vector_1["attempts_remaining_frac"] == 0.5
-    assert feature_vector_2["attempts_remaining_frac"] == 0.0
+    # attempts_remaining_frac was dropped as 1 - attempt_frac (POL-06).
+    assert "attempts_remaining_frac" not in feature_vector_1
+    assert feature_vector_1["attempt_frac"] == 0.5
+    assert feature_vector_2["attempt_frac"] == 1.0
     assert feature_vector_1["pregate_exception_is_assertion"] == 1.0
     assert feature_vector_1["last_helper_invalid_response"] == 0.0
     assert feature_vector_2["last_helper_invalid_response"] == 1.0
@@ -6067,7 +6090,7 @@ def test_adaptive_budget_feature_vector_excludes_case_metadata(tmp_path, monkeyp
     assert len(records) == 2
     feature_vector = records[0]["attempt_metadata"]["adaptive_budget_feature_vector"]
     expected_keys = {
-        "attempts_remaining_frac",
+        "attempt_frac",
         "helper_low_yield_ratio",
         "adaptive_no_progress_token_sum_k",
         "context_compaction_enabled",
@@ -6424,21 +6447,21 @@ def test_adaptive_progress_signal_uses_weighted_components_and_reason_priority()
 
 
 def test_adaptive_online_delayed_rescue_bonus_uses_horizon_and_context_multiplier() -> None:
-    # case_snapshot_dependency no longer triggers the context multiplier;
-    # only failure_signature_repeat does.
+    # Only failure_signature_repeat triggers the context multiplier, and the helper's
+    # evidence must reach the successful prompt (POL-11).
     assert run_eval._adaptive_online_delayed_rescue_bonus(
         origin_attempt=1,
         resolved_attempt=2,
         failure_signature_repeat=False,
-        case_difficulty="easy",
-        case_snapshot_dependency="required",
+        helper_evidence_ids=["file:helper.py"],
+        prompt_evidence_ids=["file:helper.py"],
     ) == pytest.approx(0.5)
     assert run_eval._adaptive_online_delayed_rescue_bonus(
         origin_attempt=1,
         resolved_attempt=3,
         failure_signature_repeat=False,
-        case_difficulty="easy",
-        case_snapshot_dependency="none",
+        helper_evidence_ids=["file:helper.py"],
+        prompt_evidence_ids=["file:helper.py", "frame:0"],
     ) == pytest.approx(0.25)
 
 
@@ -6449,18 +6472,49 @@ def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_next_success(
         tmp_path,
         monkeypatch,
         patch_outcomes=("no_diff", "fix"),
-        adaptive_max_helper_calls=1,
+        adaptive_max_helper_calls=2,
         k=2,
         run_id="run-adaptive-delayed-credit",
     )
 
     assert [bool(record["success"]) for record in records] == [False, True]
-    assert patcher.request_calls == 1
+    assert patcher.request_calls == 2
     first_meta = records[0]["attempt_metadata"]
+    # The first helper's evidence is sent again in the successful prompt (POL-11).
+    assert set(records[0]["patch_meta"]["evidence_ids_new"]) & set(
+        records[1]["patch_meta"]["evidence_ids_reused"]
+    )
     assert first_meta["adaptive_online_reward_scope"] == "helper_credit_v2"
     assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == pytest.approx(0.5)
     assert first_meta["adaptive_online_reward_credit_horizon_attempts"] == 1
     assert first_meta["adaptive_online_reward_credit_resolution_reason"] == "future_success_attempt"
+
+    event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(event_lines) == 2
+
+
+def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent(
+    tmp_path, monkeypatch
+) -> None:
+    """POL-11: with one helper call, the success at attempt 2 never sees the helper's
+    evidence. This scenario used to pay the 0.5 bonus on timing alone."""
+    records, patcher, events_path = _run_adaptive_delayed_credit_case(
+        tmp_path,
+        monkeypatch,
+        patch_outcomes=("no_diff", "fix"),
+        adaptive_max_helper_calls=1,
+        k=2,
+        run_id="run-adaptive-delayed-credit-unused",
+    )
+
+    assert [bool(record["success"]) for record in records] == [False, True]
+    assert patcher.request_calls == 1
+    first_meta = records[0]["attempt_metadata"]
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
 
     event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(event_lines) == 1
@@ -6499,7 +6553,7 @@ def test_adaptive_llm_discretion_delayed_credit_sink_emits_resolved_case_end_met
     assert len(event_lines) == 1
 
 
-def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_horizon_two_success(
+def test_adaptive_llm_discretion_horizon_two_success_without_resent_evidence_earns_no_bonus(
     tmp_path, monkeypatch
 ) -> None:
     records, patcher, events_path = _run_adaptive_delayed_credit_case(
@@ -6515,9 +6569,13 @@ def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_horizon_two_s
     assert [bool(record["success"]) for record in records] == [False, False, True]
     assert patcher.request_calls == 1
     first_meta = records[0]["attempt_metadata"]
-    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == pytest.approx(0.25)
-    assert first_meta["adaptive_online_reward_credit_horizon_attempts"] == 2
-    assert first_meta["adaptive_online_reward_credit_resolution_reason"] == "future_success_attempt"
+    # Two attempts later, without another helper call, the evidence isn't in the
+    # successful prompt, so no bonus (POL-11; this used to pay 0.25 on timing alone).
+    assert first_meta["adaptive_online_reward_delayed_rescue_bonus"] == 0.0
+    assert (
+        first_meta["adaptive_online_reward_credit_resolution_reason"]
+        == "local_only_evidence_not_in_success_prompt"
+    )
 
     event_lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(event_lines) == 1
@@ -6647,8 +6705,6 @@ def test_finalize_adaptive_policy_uses_recomputed_progress_metadata() -> None:
         "online_policy_features_scaled": {},
         "helper_decision_reason": "llm_discretion_pending",
         "normalized_adaptive_online_policy_mode": "on",
-        "case_difficulty": "easy",
-        "case_snapshot_dependency": "helpful",
         # Deliberately stale values: should be overwritten from attempt_metadata.
         "adaptive_progress_made": True,
         "adaptive_progress_score": 1.0,
@@ -6799,9 +6855,14 @@ def test_pol12_no_decision_logs_no_scaled_vector_under_percentile_scaling(
 
     original_factory = _preferred_action_online_controller
 
-    def _percentile_controller(tmp_path_arg, *, mode: str, preferred_action: str):
+    def _percentile_controller(
+        tmp_path_arg, *, mode: str, preferred_action: str, fallback_action: str | None = None
+    ):
         controller, events = original_factory(
-            tmp_path_arg, mode=mode, preferred_action=preferred_action
+            tmp_path_arg,
+            mode=mode,
+            preferred_action=preferred_action,
+            fallback_action=fallback_action,
         )
         controller.config = dc_replace(
             controller.config, mode="off", feature_scaling_profile="percentile_v1"

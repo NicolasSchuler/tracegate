@@ -21,14 +21,12 @@ from typing import Any
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import (
     coerce_float as _coerce_float,
 )
 from ._policy_utils import (
     coerce_nonnegative_int as _coerce_nonnegative_int,
-)
-from ._policy_utils import (
-    linucb_exploit_explore as _linucb_exploit_explore,
 )
 from ._policy_utils import (
     policy_effective_epsilon as _policy_effective_epsilon,
@@ -61,9 +59,10 @@ from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     POLICY_FEATURE_SCALING_PROFILES,
-    PercentileScaler,
     is_percentile_feature_scaling_profile,
     normalize_feature_scaling_profile,
+    percentile_scale,
+    prune_percentile_state,
     scale_feature_mapping,
 )
 from .seed_derivation import derive_seed
@@ -92,11 +91,19 @@ ONLINE_POLICY_ACTIONS = (
 )
 ONLINE_POLICY_MODES = {"off", "shadow", "on"}
 ONLINE_POLICY_ALGOS = {"linucb", "thompson"}
+ONLINE_ACTION_SCORE_BIAS_LIMIT = 0.1
+"""Largest allowed |score bias|: a small prior, at most 0.1 of the success reward of 1.0
+(decision D6, POL-07). Larger biases acted as a veto on the arm."""
 DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES = {
-    ACTION_SEARCH_ONLY: -0.50,
-    ACTION_FRAME_ONLY: -0.25,
+    ACTION_SEARCH_ONLY: -0.10,
+    ACTION_FRAME_ONLY: -0.05,
 }
-STATE_SCHEMA_VERSION = 3
+"""The one source of the default score biases (POL-07); the CLI default is derived from it."""
+STATE_SCHEMA_VERSION = 4
+# Schema 4 adds ``applied_action_counts`` (POL-24); schema 3 states still load.
+SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
+DEFAULT_ADAPTIVE_ONLINE_DECAY = 1.0
+"""Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
 
 
 def default_online_action_score_biases() -> dict[str, float]:
@@ -105,6 +112,20 @@ def default_online_action_score_biases() -> dict[str, float]:
         action: float(DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES.get(action, 0.0))
         for action in ONLINE_POLICY_ACTIONS
     }
+
+
+def format_online_action_score_biases(biases: Mapping[str, float]) -> str:
+    """``action=bias`` pairs for the non-zero biases, in action order (the CLI format)."""
+    return ",".join(
+        f"{action}={float(biases[action]):.2f}"
+        for action in ONLINE_POLICY_ACTIONS
+        if float(biases.get(action, 0.0)) != 0.0
+    )
+
+
+DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES = format_online_action_score_biases(
+    DEFAULT_ONLINE_ACTION_SCORE_BIAS_OVERRIDES
+)
 
 
 def zero_online_action_score_biases() -> dict[str, float]:
@@ -138,7 +159,7 @@ class OnlinePolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 50
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = DEFAULT_ADAPTIVE_ONLINE_DECAY
     feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     init_state_path: Path | None = None
     state_path: Path | None = None
@@ -159,7 +180,7 @@ class OnlinePolicyConfig:
         l2: float = 1.0,
         warmup_decisions: int = 50,
         save_every: int = 50,
-        decay: float = 0.95,
+        decay: float = DEFAULT_ADAPTIVE_ONLINE_DECAY,
         feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
         init_state_path: Path | None = None,
         state_path: Path | None = None,
@@ -179,7 +200,9 @@ class OnlinePolicyConfig:
         l2_norm = max(1e-9, _coerce_float(l2, default=1.0))
         warmup_norm = _coerce_nonnegative_int(warmup_decisions, default=50)
         save_every_norm = max(1, _coerce_nonnegative_int(save_every, default=50))
-        decay_norm = min(1.0, max(1e-9, _coerce_float(decay, default=0.95)))
+        decay_norm = min(
+            1.0, max(1e-9, _coerce_float(decay, default=DEFAULT_ADAPTIVE_ONLINE_DECAY))
+        )
         feature_scaling_profile_norm = normalize_feature_scaling_profile(feature_scaling_profile)
         if feature_scaling_profile_norm not in POLICY_FEATURE_SCALING_PROFILES:
             feature_scaling_profile_norm = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
@@ -208,19 +231,10 @@ class OnlinePolicyConfig:
 
 
 @dataclass
-class LinUCBState:
-    """Mutable state for a per-action LinUCB model (A matrices and b vectors)."""
+class LinUCBState(core.LinUCBState):
+    """The shared LinUCB core state over the helper actions."""
 
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(
-        default_factory=lambda: dict.fromkeys(ONLINE_POLICY_ACTIONS, 0)
-    )
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
+    action_names: tuple[str, ...] = ONLINE_POLICY_ACTIONS
 
 
 class AdaptiveOnlinePolicyController:
@@ -242,6 +256,9 @@ class AdaptiveOnlinePolicyController:
         self._state = LinUCBState()
         self._save_counter = 0
         self._nan_counts: dict[str, int] = {}
+        # POL-21: cumulative model resets (``arm:<action>``, ``feature_set_mismatch``).
+        self._state_resets: dict[str, int] = {}
+        self._check_loaded_features = False
         self.load_error: str | None = None
         self._load_state_if_present()
 
@@ -269,6 +286,9 @@ class AdaptiveOnlinePolicyController:
                 decisions=int(self._state.decisions),
                 updates=int(self._state.updates),
                 action_counts={k: int(v) for k, v in self._state.action_counts.items()},
+                applied_action_counts={
+                    k: int(v) for k, v in self._state.applied_action_counts.items()
+                },
                 A={k: v.copy() for k, v in self._state.A.items()},
                 b={k: v.copy() for k, v in self._state.b.items()},
                 feature_scaling_history={
@@ -285,28 +305,49 @@ class AdaptiveOnlinePolicyController:
         with self._lock:
             return dict(self._nan_counts)
 
+    def get_state_resets(self) -> dict[str, int]:
+        """Return a snapshot of the model reset counts (POL-21)."""
+        with self._lock:
+            return dict(self._state_resets)
+
+    def _count_state_reset(self, key: str) -> None:
+        self._state_resets[key] = self._state_resets.get(key, 0) + 1
+
+    def _discard_mismatched_loaded_state(self, feature_names: Collection[str]) -> None:
+        """Treat a loaded state that lacks this run's features as a load failure (POL-21).
+
+        The features a model was trained on must all still be produced; zero-filling a
+        removed feature would silently reinterpret its learned weights.
+        """
+        if not self._check_loaded_features:
+            return
+        self._check_loaded_features = False
+        missing = core.missing_features(self._state, feature_names)
+        if missing:
+            self.load_error = core.feature_set_mismatch_error(missing)
+            self._state = LinUCBState()
+            self._count_state_reset("feature_set_mismatch")
+
     def _tracked_safe_float(self, value: Any, *, feature_name: str, default: float = 0.0) -> float:
-        """Convert *value* via :func:`safe_float`, tracking NaN replacements."""
+        """Convert *value* via :func:`safe_float`, tracking NaN replacements.
+
+        The counter is updated under the (re-entrant) lock: ``decide()`` cleans features
+        before taking it, and concurrent increments were lost (POL-16).
+        """
         result, replaced = _safe_float_tracked(value, default=default)
         if replaced:
-            self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
+            with self._lock:
+                self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
         return result
-
-    def _record_feature_scaling_history(self, *, cleaned_features: Mapping[str, float]) -> None:
-        """Append raw feature observations used by percentile scaling."""
-        if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
-            return
-        for key, value in cleaned_features.items():
-            history = list(self._state.feature_scaling_history.get(str(key), []))
-            history.append(float(value))
-            if len(history) > DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:
-                history = history[-DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:]
-            self._state.feature_scaling_history[str(key)] = history
 
     def _scale_features(
         self, *, cleaned_features: Mapping[str, float]
     ) -> tuple[dict[str, float], dict[str, float], dict[str, int], bool]:
-        """Scale features and expose percentile-cap telemetry when enabled."""
+        """Scale features; under ``percentile_v1`` also collect history and freeze caps.
+
+        Each count-like feature's cap is fitted once from its first observations and then
+        kept (POL-09); see ``policy_feature_scaling.percentile_scale``.
+        """
         if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
             return (
                 scale_feature_mapping(
@@ -317,24 +358,17 @@ class AdaptiveOnlinePolicyController:
                 {},
                 False,
             )
-        history = {
-            str(name): [float(item) for item in values]
-            for name, values in self._state.feature_scaling_history.items()
-        }
-        scaler = PercentileScaler(min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES)
-        scaler.fit(history)
-        caps = scaler.caps
-        history_sizes = {str(name): len(values) for name, values in history.items()}
-        self._state.feature_scaling_caps = {str(name): float(value) for name, value in caps.items()}
-        fallback_to_v1 = any(
-            history_sizes.get(str(name), 0) < DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
-            for name in cleaned_features
+        scaled = percentile_scale(
+            cleaned_features,
+            history=self._state.feature_scaling_history,
+            caps=self._state.feature_scaling_caps,
+            min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
         )
         return (
-            scaler.scale(cleaned_features, profile="v1"),
-            {str(name): float(value) for name, value in caps.items()},
-            history_sizes,
-            bool(fallback_to_v1),
+            scaled.values,
+            dict(scaled.caps),
+            dict(scaled.history_sizes),
+            scaled.fallback_to_v1,
         )
 
     def _normalize_available_actions(
@@ -414,13 +448,13 @@ class AdaptiveOnlinePolicyController:
         if role == ROLE_FEATURES:
             cleaned_features.update(advice_feature_values(advice))
         with self._lock, self._decision_rng(rng_key):
+            self._discard_mismatched_loaded_state(cleaned_features)
             (
                 scaled_features,
                 feature_scaling_caps,
                 feature_scaling_history_sizes,
                 feature_scaling_fallback_to_v1,
             ) = self._scale_features(cleaned_features=cleaned_features)
-            self._record_feature_scaling_history(cleaned_features=cleaned_features)
             self._ensure_feature_state(cleaned_features=scaled_features)
             decision_index = self._state.decisions + 1
             mode = self.config.mode
@@ -462,10 +496,7 @@ class AdaptiveOnlinePolicyController:
                 ranking = self._ranking_scores(
                     scores, advice, available_actions_norm, decision_model_effect
                 )
-                greedy = max(
-                    available_actions_norm,
-                    key=lambda action: (ranking[action], action == ACTION_INVOKE_HELPER),
-                )
+                tied = core.greedy_ties(ranking, available_actions_norm)
                 role_selection = self._role_selection(
                     advice, available_actions_norm, decision_index, baseline_action
                 )
@@ -484,14 +515,16 @@ class AdaptiveOnlinePolicyController:
                         selected = self._rng.choice(list(available_actions_norm))
                         strategy = "epsilon_uniform"
                     else:
-                        selected = greedy
+                        selected = core.pick_greedy(tied, self._rng)
                         strategy = f"{self.config.algorithm}_greedy"
-                    k_actions = float(len(available_actions_norm))
                     if decision_index <= self.config.warmup_decisions:
-                        propensity = 1.0 / k_actions
+                        propensity = 1.0 / float(len(available_actions_norm))
                     else:
-                        propensity = self.config.epsilon / k_actions + (
-                            (1.0 - self.config.epsilon) if selected == greedy else 0.0
+                        propensity = core.epsilon_greedy_propensity(
+                            selected,
+                            tied,
+                            epsilon=self.config.epsilon,
+                            n_available=len(available_actions_norm),
                         )
                 propensity = min(1.0, max(1e-9, propensity))
                 applied = selected if mode == "on" else baseline_action
@@ -499,6 +532,9 @@ class AdaptiveOnlinePolicyController:
             self._state.decisions = decision_index
             self._state.action_counts[selected] = (
                 int(self._state.action_counts.get(selected, 0)) + 1
+            )
+            self._state.applied_action_counts[applied] = (
+                int(self._state.applied_action_counts.get(applied, 0)) + 1
             )
             return PolicyDecision(
                 decision_id=uuid.uuid4().hex,
@@ -647,9 +683,12 @@ class AdaptiveOnlinePolicyController:
             if behavior_propensity is None:
                 # Only an applied ("on") selection was sampled by the policy; in shadow mode the
                 # executed baseline action is deterministic, so its probability is 1.
-                behavior_propensity_norm = 1.0
-                if str(decision.mode) == "on" and selected_action == behavior_action_norm:
-                    behavior_propensity_norm = min(1.0, max(1e-9, float(decision.propensity)))
+                behavior_propensity_norm = core.behavior_propensity(
+                    mode=decision.mode,
+                    selected=selected_action,
+                    behavior=behavior_action_norm,
+                    propensity=decision.propensity,
+                )
             else:
                 behavior_propensity_norm = min(1.0, max(1e-9, float(behavior_propensity)))
             model_updated = False
@@ -736,8 +775,10 @@ class AdaptiveOnlinePolicyController:
                 local_wall_sec=max(0.0, float(local_wall_sec)),
                 override_reason=str(override_reason),
                 model_updated=bool(model_updated),
+                effective_evidence=core.effective_evidence(self._state, l2=float(self.config.l2)),
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
+                state_resets=dict(self._state_resets),
                 created_at_utc=_utc_now(),
                 decision_model=dict(getattr(decision, "decision_model", None) or {}),
             )
@@ -762,124 +803,33 @@ class AdaptiveOnlinePolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in ONLINE_POLICY_ALGOS:
             return
-        if not self._state.feature_names:
-            self._state.feature_names = sorted(str(k) for k in cleaned_features)
-            dim = len(self._state.feature_names)
-            if dim <= 0:
-                self._state.feature_names = ["bias"]
-                dim = 1
-            self._state.A = {
-                action: (np.eye(dim, dtype=float) * float(self.config.l2))
-                for action in ONLINE_POLICY_ACTIONS
-            }
-            self._state.b = {
-                action: np.zeros((dim,), dtype=float) for action in ONLINE_POLICY_ACTIONS
-            }
-            return
-        expanded_feature_names = sorted(
-            set(self._state.feature_names) | {str(key) for key in cleaned_features}
-        )
-        if expanded_feature_names != self._state.feature_names:
-            previous_feature_names = list(self._state.feature_names)
-            previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-            previous_dim = len(previous_feature_names)
-            new_dim = len(expanded_feature_names)
-            self._state.feature_names = list(expanded_feature_names)
-            for action in ONLINE_POLICY_ACTIONS:
-                previous_A = self._state.A.get(action)
-                previous_b = self._state.b.get(action)
-                next_A = np.eye(new_dim, dtype=float) * float(self.config.l2)
-                next_b = np.zeros((new_dim,), dtype=float)
-                if (
-                    isinstance(previous_A, np.ndarray)
-                    and isinstance(previous_b, np.ndarray)
-                    and previous_A.shape == (previous_dim, previous_dim)
-                    and previous_b.shape == (previous_dim,)
-                ):
-                    for new_row, feature_row in enumerate(expanded_feature_names):
-                        old_row = previous_index.get(feature_row)
-                        if old_row is None:
-                            continue
-                        next_b[new_row] = previous_b[old_row]
-                        for new_col, feature_col in enumerate(expanded_feature_names):
-                            old_col = previous_index.get(feature_col)
-                            if old_col is None:
-                                continue
-                            next_A[new_row, new_col] = previous_A[old_row, old_col]
-                self._state.A[action] = next_A
-                self._state.b[action] = next_b
-        dim = len(self._state.feature_names)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or A.shape != (dim, dim):
-                self._state.A[action] = np.eye(dim, dtype=float) * float(self.config.l2)
-            if b is None or b.shape != (dim,):
-                self._state.b[action] = np.zeros((dim,), dtype=float)
+        change = core.ensure_feature_state(self._state, cleaned_features, l2=float(self.config.l2))
+        for action in change.reset_arms:
+            self._count_state_reset(f"arm:{action}")
 
     def _feature_vector(self, *, cleaned_features: Mapping[str, float]) -> np.ndarray:
         """Build a numpy feature vector aligned with ``feature_names``."""
-        feature_names = self._state.feature_names
-        if not feature_names:
-            feature_names = ["bias"]
-        values = np.array(
-            [
-                self._tracked_safe_float(
-                    cleaned_features.get(name, 0.0),
-                    feature_name=name,
-                    default=0.0,
-                )
-                for name in feature_names
-            ],
-            dtype=float,
+        return core.feature_vector(
+            self._state,
+            cleaned_features,
+            to_float=lambda value, name: self._tracked_safe_float(
+                value, feature_name=name, default=0.0
+            ),
         )
-        return values
 
     def _linucb_scores(self, *, x: np.ndarray) -> dict[str, float]:
         """Compute UCB scores (exploit + alpha * explore) for every action."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "linucb":
             return dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            exploit, explore, updated_A = _linucb_exploit_explore(
-                A,
-                b,
-                x,
-                l2=float(self.config.l2),
-            )
-            if updated_A is not None:
-                self._state.A[action] = updated_A
-            scores[action] = exploit + (float(self.config.alpha) * explore)
-        return scores
+        return core.linucb_scores(
+            self._state, x, l2=float(self.config.l2), alpha=float(self.config.alpha)
+        )
 
     def _thompson_scores(self, *, x: np.ndarray) -> dict[str, float]:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "thompson":
             return dict.fromkeys(ONLINE_POLICY_ACTIONS, 0.0)
-        seed = self.config.random_seed
-        rng = np.random.default_rng(
-            seed=(seed + self._state.decisions) if seed is not None else None,
-        )
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            try:
-                A_inv = np.linalg.solve(A, np.eye(A.shape[0]))
-                theta_hat = A_inv @ b
-                theta_sample = rng.multivariate_normal(theta_hat, A_inv)
-                scores[action] = float(theta_sample @ x)
-            except np.linalg.LinAlgError:
-                scores[action] = 0.0
-        return scores
+        return core.thompson_scores(self._state, x, seed=self.config.random_seed)
 
     def _apply_action_score_biases(self, scores: Mapping[str, float]) -> dict[str, float]:
         """Apply additive score priors without changing feasibility masks."""
@@ -904,32 +854,14 @@ class AdaptiveOnlinePolicyController:
         if not self._state.feature_names:
             return False
         x = self._feature_vector(cleaned_features=feature_values)
-        self._apply_recency_decay()
-        A = self._state.A.get(action)
-        b = self._state.b.get(action)
-        if A is None or b is None:
-            return False
-        A += np.outer(x, x)
-        b += float(reward) * x
-        self._state.A[action] = A
-        self._state.b[action] = b
-        self._state.updates = int(self._state.updates) + 1
-        return True
+        self._apply_recency_decay(action=action)
+        return core.rank_one_update(self._state, action=action, reward=reward, x=x)
 
-    def _apply_recency_decay(self) -> None:
-        """Exponentially discount prior LinUCB evidence when configured."""
-        if float(self.config.decay) >= 1.0 or not self._state.feature_names:
-            return
-        dim = len(self._state.feature_names)
-        prior = np.eye(dim, dtype=float) * float(self.config.l2)
-        decay = float(self.config.decay)
-        for action in ONLINE_POLICY_ACTIONS:
-            A = self._state.A.get(action)
-            b = self._state.b.get(action)
-            if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
-                continue
-            self._state.A[action] = (decay * A) + ((1.0 - decay) * prior)
-            self._state.b[action] = decay * b
+    def _apply_recency_decay(self, *, action: str) -> None:
+        """Discount the updated arm's prior evidence when decay < 1 is configured."""
+        core.apply_recency_decay(
+            self._state, action=action, decay=float(self.config.decay), l2=float(self.config.l2)
+        )
 
     def _state_payload(self) -> dict[str, Any]:
         """Build a JSON-serialisable snapshot of the full model state."""
@@ -953,6 +885,10 @@ class AdaptiveOnlinePolicyController:
             "updates": int(self._state.updates),
             "action_counts": {
                 action: int(self._state.action_counts.get(action, 0))
+                for action in ONLINE_POLICY_ACTIONS
+            },
+            "applied_action_counts": {
+                action: int(self._state.applied_action_counts.get(action, 0))
                 for action in ONLINE_POLICY_ACTIONS
             },
             "A": {
@@ -993,7 +929,7 @@ class AdaptiveOnlinePolicyController:
             raw = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("state payload is not an object")
-            if int(raw.get("schema_version", 0)) != STATE_SCHEMA_VERSION:
+            if int(raw.get("schema_version", 0)) not in SUPPORTED_STATE_SCHEMA_VERSIONS:
                 raise ValueError("unsupported schema version")
             algorithm = str(raw.get("algorithm") or "")
             if algorithm and algorithm != self.config.algorithm:
@@ -1013,13 +949,13 @@ class AdaptiveOnlinePolicyController:
                 raise ValueError("missing or invalid feature_names")
             feature_names = [str(item) for item in feature_names_raw]
             dim = len(feature_names)
-            action_counts_raw = raw.get("action_counts")
-            action_counts = dict.fromkeys(ONLINE_POLICY_ACTIONS, 0)
-            if isinstance(action_counts_raw, dict):
-                for action in ONLINE_POLICY_ACTIONS:
-                    action_counts[action] = _coerce_nonnegative_int(
-                        action_counts_raw.get(action), default=0
-                    )
+            action_counts = core.parse_action_counts(
+                raw.get("action_counts"), ONLINE_POLICY_ACTIONS
+            )
+            # Schema 3 states predate applied counts (POL-24); they start at zero.
+            applied_action_counts = core.parse_action_counts(
+                raw.get("applied_action_counts"), ONLINE_POLICY_ACTIONS
+            )
             decisions = _coerce_nonnegative_int(raw.get("decisions"), default=0)
             updates = _coerce_nonnegative_int(raw.get("updates"), default=0)
             feature_scaling_history_raw = raw.get("feature_scaling_history")
@@ -1039,12 +975,18 @@ class AdaptiveOnlinePolicyController:
                 for key, value in feature_scaling_caps_raw.items():
                     if isinstance(value, (int, float)) and np.isfinite(float(value)):
                         feature_scaling_caps[str(key)] = float(value)
+            feature_scaling_history, feature_scaling_caps = prune_percentile_state(
+                feature_scaling_history,
+                feature_scaling_caps,
+                min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
+            )
             if dim <= 0:
                 self._state = LinUCBState(
                     feature_names=[],
                     decisions=decisions,
                     updates=updates,
                     action_counts=action_counts,
+                    applied_action_counts=applied_action_counts,
                     A={},
                     b={},
                     feature_scaling_history=feature_scaling_history,
@@ -1074,12 +1016,14 @@ class AdaptiveOnlinePolicyController:
                 decisions=decisions,
                 updates=updates,
                 action_counts=action_counts,
+                applied_action_counts=applied_action_counts,
                 A=A,
                 b=b,
                 feature_scaling_history=feature_scaling_history,
                 feature_scaling_caps=feature_scaling_caps,
             )
             self.load_error = None
+            self._check_loaded_features = True
         except Exception as exc:  # pragma: no cover - defensive load hardening
             self.load_error = f"{type(exc).__name__}: {exc}"
             self._state = LinUCBState()

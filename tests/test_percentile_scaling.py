@@ -11,6 +11,8 @@ from evals.policy_feature_scaling import (
     _V1_DEFAULT_STREAK_CAP,
     PercentileScaler,
     compute_percentile_caps,
+    percentile_scale,
+    prune_percentile_state,
     scale_feature_mapping,
 )
 
@@ -132,14 +134,16 @@ class TestComputePercentileCapsEdge:
         )
         assert caps["stagnation_streak"] == pytest.approx(7.0)
 
-    def test_all_same_zero_caps_to_one(self) -> None:
+    def test_all_zero_history_keeps_the_v1_cap(self) -> None:
+        """POL-09: a cap of 1.0 from an all-zero history amplified every later value
+        (this test used to expect 1.0)."""
         values = [0.0] * 50
         caps = compute_percentile_caps(
             {"stagnation_streak": values},
             percentile=95,
             min_samples=5,
         )
-        assert caps["stagnation_streak"] == 1.0
+        assert caps["stagnation_streak"] == 10.0
 
     def test_insufficient_data_uses_v1_cap(self) -> None:
         caps = compute_percentile_caps(
@@ -340,3 +344,83 @@ class TestExistingBehaviourPreserved:
     def test_none_passthrough(self) -> None:
         scaled = scale_feature_mapping({"custom_signal": 99.0}, profile="none")
         assert scaled["custom_signal"] == pytest.approx(99.0)
+
+
+# ---------------------------------------------------------------------------
+# percentile_scale - caps are fitted once, then frozen (POL-09)
+# ---------------------------------------------------------------------------
+
+
+class TestFrozenPercentileCaps:
+    def test_a_raw_value_keeps_its_scaled_value_after_the_freeze(self) -> None:
+        """The review saw stagnation_streak=3 scale to 1.26, 0.71 and 0.60 as the history
+        grew from 40 to 200 samples, all summed into one linear model."""
+        history: dict[str, list[float]] = {}
+        caps: dict[str, float] = {}
+        seen: list[float] = []
+        for step in range(200):
+            raw = float(step % 9)
+            percentile_scale({"stagnation_streak": raw}, history=history, caps=caps, min_samples=30)
+            if step >= 30 and step % 40 == 0:
+                probe = percentile_scale(
+                    {"stagnation_streak": 3.0}, history=history, caps=caps, min_samples=30
+                )
+                seen.append(probe.values["stagnation_streak"])
+        assert len(seen) == 4
+        assert len(set(seen)) == 1
+        assert len(history["stagnation_streak"]) == 30
+
+    def test_fallback_until_min_samples_then_fitted_from_prior_observations(self) -> None:
+        history: dict[str, list[float]] = {}
+        caps: dict[str, float] = {}
+        for step in range(4):
+            result = percentile_scale(
+                {"helper_calls_used": 20.0}, history=history, caps=caps, min_samples=5
+            )
+            assert result.fallback_to_v1 is True
+            assert result.caps == {"helper_calls_used": _V1_COUNT_CAPS["helper_calls_used"]}
+            assert result.history_sizes == {"helper_calls_used": step}
+        # The fifth observation freezes the cap; this decision still used the fallback.
+        assert percentile_scale(
+            {"helper_calls_used": 20.0}, history=history, caps=caps, min_samples=5
+        ).fallback_to_v1
+        frozen = percentile_scale(
+            {"helper_calls_used": 20.0}, history=history, caps=caps, min_samples=5
+        )
+        assert frozen.fallback_to_v1 is False
+        assert frozen.caps == {"helper_calls_used": 20.0}
+        assert frozen.values["helper_calls_used"] == pytest.approx(1.0)
+
+    def test_only_count_like_features_get_history_and_caps(self) -> None:
+        history: dict[str, list[float]] = {}
+        caps: dict[str, float] = {}
+        for _ in range(40):
+            result = percentile_scale(
+                {"attempt_frac": 0.5, "pregate_score": 0.2, "stagnation_streak": 2.0},
+                history=history,
+                caps=caps,
+                min_samples=30,
+            )
+        assert set(history) == {"stagnation_streak"}
+        assert set(caps) == {"stagnation_streak"}
+        assert set(result.caps) == {"stagnation_streak"}
+        assert result.values["attempt_frac"] == 0.5
+
+
+class TestPrunePercentileState:
+    def test_drops_caps_that_were_never_frozen_or_never_applied(self) -> None:
+        history = {
+            "stagnation_streak": [1.0] * 40,
+            "helper_calls_used": [1.0] * 3,
+            "attempt_frac": [0.5] * 40,
+        }
+        caps = {
+            "stagnation_streak": 4.0,
+            "helper_calls_used": 8.0,
+            "attempt_frac": 1.0,
+            "adaptive_no_progress_streak": 6.0,
+        }
+        kept_history, kept_caps = prune_percentile_state(history, caps, min_samples=30)
+        assert set(kept_history) == {"stagnation_streak", "helper_calls_used"}
+        # A cap with no history at all is a frozen override (bootstrapped state).
+        assert kept_caps == {"stagnation_streak": 4.0, "adaptive_no_progress_streak": 6.0}

@@ -20,6 +20,9 @@ from evals.adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCH_TIER_BINARY,
     BUDGET_POLICY_MODES,
 )
+from evals.adaptive_budget_online_policy import (
+    DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY as DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
+)
 from evals.adaptive_online_policy import (
     ACTION_COMPACT_THEN_PATCH,
     ACTION_FILE_ONLY,
@@ -35,6 +38,15 @@ from evals.adaptive_online_policy import (
     ONLINE_POLICY_ALGOS,
     ONLINE_POLICY_MODES,
     PolicyDecision,
+)
+from evals.adaptive_online_policy import (
+    DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES as DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
+)
+from evals.adaptive_online_policy import (
+    DEFAULT_ADAPTIVE_ONLINE_DECAY as DEFAULT_ADAPTIVE_ONLINE_DECAY,
+)
+from evals.adaptive_online_policy import (
+    ONLINE_ACTION_SCORE_BIAS_LIMIT as ONLINE_ACTION_SCORE_BIAS_LIMIT,
 )
 from evals.lambda_rlm_backend import (
     DEFAULT_LAMBDA_RLM_CONTEXT_WINDOW_CHARS,
@@ -152,6 +164,11 @@ PYTEST_TIMEOUT_RETURNCODE = 124
 RETRY_GATE_MAX_CONSECUTIVE_BLOCKS = 1
 """ATT-05 / D9: the no-new-evidence retry gate may block at most once in a row."""
 EVAL_RECORD_SCHEMA_VERSION = 7
+POLICY_DEFAULTS_VERSION = 2
+"""Adaptive-policy defaults generation, recorded in run metadata (Phase 3). Version 2
+(2026-10-04 review): decay 1.0, decayed per arm (POL-01); random greedy tie-breaking
+(POL-24); no feature equal to a combination of ``bias`` and others (POL-06). Earlier runs
+are version 1."""
 RECORD_MODES = {"full", "hash", "none"}
 CONTEXT_PROTOCOLS = {"monolithic", "staged"}
 RETRY_PROMPT_MODES = {"full", "delta", "auto"}
@@ -190,14 +207,15 @@ ADAPTIVE_REWARD_MATERIALIZATION_SCALE_DEFAULT = 0.5
 DEFAULT_ADAPTIVE_ONLINE_ALPHA = 0.6
 DEFAULT_ADAPTIVE_ONLINE_EPSILON = 0.10
 DEFAULT_ADAPTIVE_ONLINE_WARMUP_DECISIONS = 50
-DEFAULT_ADAPTIVE_ONLINE_DECAY = 0.95
-DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES = "search_only=-1.00,frame_only=-0.50"
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_ALPHA = 0.4
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_EPSILON = 0.05
 DEFAULT_ADAPTIVE_BUDGET_ONLINE_WARMUP_DECISIONS = 20
-DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 0.95
 DEFAULT_ADAPTIVE_BUDGET_POLICY_TIERS = "1.0,1.1,1.2,1.35,1.5"
 DEFAULT_ADAPTIVE_BUDGET_POLICY_MAX_UPS_PER_CASE = 1
+DEFAULT_ADAPTIVE_POLICY_L2 = 1.0
+"""Ridge prior of both LinUCB controllers (``--adaptive-online-l2``, ``--adaptive-budget-online-l2``)."""
+DEFAULT_ADAPTIVE_POLICY_SAVE_EVERY = 50
+"""State save interval in updates for both controllers."""
 # Auxiliary reward signal weights (enabled by default; disable with --no-adaptive-aux-reward).
 ADAPTIVE_AUX_REWARD_PYTEST_REDUCTION_WEIGHT_DEFAULT = 0.15
 ADAPTIVE_AUX_REWARD_EVIDENCE_NOVELTY_WEIGHT_DEFAULT = 0.10
@@ -1447,8 +1465,6 @@ class PendingAdaptiveOnlineCredit:
     helper_outcome: str
     progress_state: AdaptiveProgressState
     failure_signature_repeat: bool
-    case_difficulty: str
-    case_snapshot_dependency: str
     reward_success_hint_scale: float = ADAPTIVE_LOCAL_REWARD_SUCCESS_HINT
     reward_progress_hint_scale: float = ADAPTIVE_LOCAL_REWARD_PROGRESS_HINT_SCALE
     reward_stagnation_penalty_scale: float = ADAPTIVE_LOCAL_REWARD_STAGNATION_PENALTY_SCALE

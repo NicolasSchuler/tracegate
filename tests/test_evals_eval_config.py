@@ -102,11 +102,41 @@ class TestParseAdaptiveOnlineActionScoreBiases:
 
     def test_valid_bias_string(self) -> None:
         result = eval_config._parse_adaptive_online_action_score_biases(
-            "search_only=-0.5,frame_only=-0.25"
+            "search_only=-0.1,frame_only=-0.05"
         )
-        assert result[ACTION_SEARCH_ONLY] == pytest.approx(-0.5)
-        assert result[ACTION_FRAME_ONLY] == pytest.approx(-0.25)
+        assert result[ACTION_SEARCH_ONLY] == pytest.approx(-0.1)
+        assert result[ACTION_FRAME_ONLY] == pytest.approx(-0.05)
         assert result[ACTION_INVOKE_HELPER] == pytest.approx(0.0)
+
+    @pytest.mark.parametrize("raw", ["search_only=-0.5", "frame_only=0.11", "search_only=nan"])
+    def test_bias_beyond_the_d6_limit_raises(self, raw: str) -> None:
+        """POL-07 / D6: a bias is at most 0.1 of the success reward (it was -1.00)."""
+        with pytest.raises(ValueError, match="bias_out_of_range"):
+            eval_config._parse_adaptive_online_action_score_biases(raw)
+
+    def test_cli_and_controller_defaults_are_one_source(self) -> None:
+        """POL-07: the CLI string, the parsed map and the controller default agree."""
+        from evals import eval_types, run_eval
+        from evals.adaptive_online_policy import (
+            DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES,
+            ONLINE_ACTION_SCORE_BIAS_LIMIT,
+            OnlinePolicyConfig,
+            default_online_action_score_biases,
+        )
+
+        parsed = eval_config._parse_adaptive_online_action_score_biases(
+            DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES
+        )
+        assert parsed == default_online_action_score_biases()
+        assert OnlinePolicyConfig().action_score_biases == parsed
+        assert run_eval.DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES is (
+            DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES
+        )
+        assert eval_types.AdaptiveRuntimeConfig().adaptive_online_action_score_biases == (
+            DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES
+        )
+        assert all(abs(value) <= ONLINE_ACTION_SCORE_BIAS_LIMIT for value in parsed.values())
+        assert any(value < 0.0 for value in parsed.values())
 
     def test_unknown_action_raises(self) -> None:
         with pytest.raises(ValueError, match="unknown_action"):
@@ -115,7 +145,7 @@ class TestParseAdaptiveOnlineActionScoreBiases:
     def test_duplicate_action_raises(self) -> None:
         with pytest.raises(ValueError, match="duplicate"):
             eval_config._parse_adaptive_online_action_score_biases(
-                "search_only=-0.5,search_only=-0.25"
+                "search_only=-0.05,search_only=-0.1"
             )
 
     def test_invalid_float_raises(self) -> None:

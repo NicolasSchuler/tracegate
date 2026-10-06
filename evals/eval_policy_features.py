@@ -17,6 +17,7 @@ from .adaptive_budget_online_policy import (
 )
 from .adaptive_online_policy import (
     ACTION_FRAME_LOCALS_LITE,
+    ACTION_SKIP_HELPER,
     ACTION_SNAPSHOT_FULL_LITE,
     ACTION_SNAPSHOT_LITE,
     ONLINE_POLICY_ACTIONS,
@@ -37,6 +38,7 @@ from .eval_types import (
 )
 from .policy_feature_scaling import (
     INTERACTION_POLICY_FEATURE_SCALING_PROFILE,
+    interaction_features,
     normalize_feature_scaling_profile,
 )
 
@@ -186,9 +188,6 @@ def _adaptive_online_feature_vector(
     features = {
         "bias": 1.0,
         "attempt_frac": float(attempt_safe / float(max_attempts_safe)),
-        "attempts_remaining_frac": float(
-            max(0.0, (max_attempts_safe - attempt_safe) / float(max_attempts_safe))
-        ),
         "timed_out": 1.0 if timed_out else 0.0,
         "failure_signature_repeat": 1.0 if failure_signature_repeat else 0.0,
         "stagnation_streak": float(max(0, int(stagnation_streak))),
@@ -248,21 +247,18 @@ def _adaptive_online_feature_vector(
         if pregate_exception_type_normalized in {"syntaxerror", "indentationerror", "taberror"}
         else 0.0,
     }
+    # skip_helper (also the value before any helper call) is the reference level: with all
+    # ten levels the one-hot features summed to ``bias`` (POL-06).
     for action in ONLINE_POLICY_ACTIONS:
-        features[f"last_helper_action_{action}"] = 1.0 if last_helper_action_norm == action else 0.0
+        if action != ACTION_SKIP_HELPER:
+            features[f"last_helper_action_{action}"] = (
+                1.0 if last_helper_action_norm == action else 0.0
+            )
     if (
         normalize_feature_scaling_profile(feature_scaling_profile)
         == INTERACTION_POLICY_FEATURE_SCALING_PROFILE
     ):
-        features["attempt_frac_x_stagnation_streak"] = float(
-            features["attempt_frac"] * features["stagnation_streak"]
-        )
-        features["pregate_score_x_snapshot_available"] = float(
-            features["pregate_score"] * features["snapshot_available"]
-        )
-        features["helper_calls_used_x_helper_low_yield_ratio"] = float(
-            features["helper_calls_used"] * features["helper_low_yield_ratio"]
-        )
+        features.update(interaction_features(features))
     return features
 
 
@@ -323,7 +319,10 @@ def _adaptive_budget_discrete_widening_delta(
     if span == 1:
         return 1
     scaled_position = (2.0 * float(normalized_level - normalized_base_level)) / float(span)
-    return min(2, max(0, math.floor(scaled_position)))
+    # Any step above base widens by at least 1 (POL-10): on the default five-rung ladder with
+    # max_ups_per_case=1 the first step used to floor to 0, so the context family changed
+    # nothing.
+    return min(2, max(1, math.floor(scaled_position)))
 
 
 def _adaptive_budget_next_tier_index(
@@ -902,9 +901,6 @@ def _adaptive_budget_feature_vector(
     return {
         "bias": 1.0,
         "attempt_frac": float(attempt_safe / float(max_attempts_safe)),
-        "attempts_remaining_frac": float(
-            max(0.0, (max_attempts_safe - attempt_safe) / float(max_attempts_safe))
-        ),
         "timed_out": 1.0 if timed_out else 0.0,
         "failure_signature_repeat": 1.0 if failure_signature_repeat else 0.0,
         "stagnation_streak": float(max(0, int(stagnation_streak))),

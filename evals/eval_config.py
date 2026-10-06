@@ -7,6 +7,7 @@ Re-exported by ``evals.run_eval`` for backward compatibility.
 from __future__ import annotations
 
 import argparse
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,7 @@ from .eval_types import (
     DEFAULT_CONTAINER_TMPFS_SIZE_MB,
     DEFAULT_CONTAINER_USER,
     DEFAULT_EXECUTOR,
+    ONLINE_ACTION_SCORE_BIAS_LIMIT,
     ONLINE_POLICY_ACTIONS,
     RUN_EVAL_CONFIG_LOCK_SCHEMA_VERSION,
     RUN_EVAL_CONFIG_SECTION,
@@ -203,6 +205,9 @@ def _parse_adaptive_online_action_score_biases(raw: Any) -> dict[str, float]:
             bias = float(bias_text.strip())
         except (TypeError, ValueError) as exc:
             raise ValueError("invalid_float") from exc
+        if not math.isfinite(bias) or abs(bias) > ONLINE_ACTION_SCORE_BIAS_LIMIT + 1e-12:
+            # D6 / POL-07: a bias is a small prior, not a veto on the arm.
+            raise ValueError("bias_out_of_range")
         parsed[action] = float(bias)
         seen.add(action)
     return parsed

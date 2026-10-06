@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import numpy as np
@@ -550,14 +551,18 @@ def test_bootstrap_budget_bwk_replays_budget_telemetry(tmp_path: Path) -> None:
     saved_state_path = tmp_path / "bwk_state_saved.json"
     bootstrapped_state_path = tmp_path / "bwk_state_bootstrapped.json"
     controller = AdaptiveBudgetPolicyController(
-        BudgetPolicyConfig.normalize(
-            mode="on",
-            architecture="bwk_v1",
-            decay=0.98,
-            bwk_run_token_budget=100,
-            state_path=saved_state_path,
-            events_path=events_path,
-            random_seed=0,
+        dataclasses.replace(
+            BudgetPolicyConfig.normalize(
+                mode="on",
+                architecture="bwk_v1",
+                decay=0.98,
+                bwk_run_token_budget=100,
+                state_path=saved_state_path,
+                events_path=events_path,
+                random_seed=0,
+            ),
+            # Pacing target 100 / 5 = 20 tokens per decision (POL-04).
+            bwk_horizon_decisions=5,
         )
     )
     decision_one = controller.decide(
@@ -662,10 +667,14 @@ def test_bootstrap_budget_bwk_replays_budget_telemetry(tmp_path: Path) -> None:
     assert bootstrapped["bwk_run_token_budget"] == saved["bwk_run_token_budget"]
     assert bootstrapped["bwk_remaining_token_budget"] == saved["bwk_remaining_token_budget"]
     assert bootstrapped["bwk_cumulative_tokens_charged"] == saved["bwk_cumulative_tokens_charged"]
+    assert float(saved["bwk_dual_variable"]) > 0.0
     assert np.isclose(
         float(bootstrapped["bwk_dual_variable"]),
         float(saved["bwk_dual_variable"]),
     )
+    assert bootstrapped["bwk_cost_counts"] == saved["bwk_cost_counts"]
+    assert bootstrapped["bwk_cost_sums"] == pytest.approx(saved["bwk_cost_sums"])
+    assert "bwk_dual_variable_mismatch" not in bootstrapped["bootstrap_warning_codes"]
 
 
 def test_bootstrap_online_preserves_feature_expansion_without_model_update(
@@ -1393,7 +1402,8 @@ def test_load_policy_events_skips_records_missing_required_keys(tmp_path: Path) 
 
 
 def test_load_policy_events_deduplicates_events(tmp_path: Path) -> None:
-    """Two events with the same dedup key → duplicate_events_seen == 1, last wins."""
+    """Two events with the same dedup key → duplicate_events_seen == 1, first wins (POL-18;
+    this used to keep the last one)."""
     events_path = tmp_path / "dupe.jsonl"
     e1 = _minimal_online_event(reward=0.1)
     e2 = _minimal_online_event(reward=0.9)  # same key (run/case/condition/attempt/decision_id)
@@ -1403,7 +1413,7 @@ def test_load_policy_events_deduplicates_events(tmp_path: Path) -> None:
 
     assert errors["duplicate_events_seen"] == 1
     assert len(events) == 1
-    assert float(events[0].payload["reward"]) == pytest.approx(0.9)
+    assert float(events[0].payload["reward"]) == pytest.approx(0.1)
 
 
 # --- _detect_policy_kind mismatch ---
@@ -1670,7 +1680,7 @@ def test_apply_recency_decay_skips_action_with_missing_matrix() -> None:
     state = ReplayState(action_names=("a",))
     state.feature_names = ["x"]
     # Leave A and b empty (None for action "a")
-    _apply_recency_decay(state=state, decay=0.9, l2=1.0)
+    _apply_recency_decay(state=state, action="a", decay=0.9, l2=1.0)
     # Should not raise; A and b remain empty
     assert state.A.get("a") is None
 
@@ -1841,3 +1851,62 @@ def test_bootstrap_online_without_case_labels_emits_no_mask_warning(tmp_path: Pa
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["feature_names"] == ["bias"]
     assert payload["bootstrap_warning_codes"] == []
+
+
+# --- POL-14 / POL-15: percentile refusal, exclusions and target overlap ---
+
+
+def _bootstrap(tmp_path: Path, events: list, *extra: str) -> tuple[int, Path]:  # type: ignore[type-arg]
+    events_path = tmp_path / "events.jsonl"
+    output = tmp_path / "state.json"
+    _write_jsonl(events_path, events)
+    code = bootstrap_policy_state_main(
+        ["--events", str(events_path), "--output-state", str(output), *extra]
+    )
+    return code, output
+
+
+def test_bootstrap_refuses_percentile_profile(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    code, output = _bootstrap(
+        tmp_path, [_minimal_online_event(feature_scaling_profile="percentile_v1")]
+    )
+    assert code == 2
+    assert not output.exists()
+    assert "refusing to bootstrap percentile_v1" in capsys.readouterr().out
+
+
+def test_bootstrap_excludes_cases_and_runs(tmp_path: Path) -> None:
+    ids_file = tmp_path / "exclude.txt"
+    ids_file.write_text("case-2\ncase-3\n", encoding="utf-8")
+    events = [
+        _minimal_online_event(case_id="case-1", decision_id="d1"),
+        _minimal_online_event(case_id="case-2", decision_id="d2"),
+        _minimal_online_event(case_id="case-3", decision_id="d3"),
+        _minimal_online_event(run_id="run-old", case_id="case-4", decision_id="d4"),
+    ]
+    code, output = _bootstrap(
+        tmp_path,
+        events,
+        "--exclude-case-ids",
+        f"@{ids_file}",
+        "--exclude-run-ids",
+        "run-old",
+    )
+    payload = _load_json(output)
+    assert code == 0
+    assert payload["bootstrap_events_replayed"] == 1
+    assert payload["bootstrap_excluded_events"] == 3
+    assert payload["bootstrap_target_case_overlap"] == 0
+
+
+def test_bootstrap_warns_when_replayed_cases_overlap_targets(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    events = [
+        _minimal_online_event(case_id="case-1", decision_id="d1"),
+        _minimal_online_event(case_id="case-2", decision_id="d2"),
+    ]
+    code, output = _bootstrap(tmp_path, events, "--target-case-ids", "case-2,case-9")
+    payload = _load_json(output)
+    assert code == 0
+    assert payload["bootstrap_target_case_overlap"] == 1
+    assert "target_case_overlap" in payload["bootstrap_warning_codes"]
+    assert "WARNING: 1 replayed case(s) are also target cases" in capsys.readouterr().out

@@ -56,7 +56,10 @@ Files named `*.template.toml` must be copied and customised before use (set
 after setting `run_id`.
 
 Shared adaptive templates now ship with two paper-facing defaults:
-- helper score priors: `online_action_score_biases = "search_only=-1.00,frame_only=-0.50"`
+- helper score priors: templates don't set `online_action_score_biases`, so they use the one
+  runtime default, `frame_only=-0.05,search_only=-0.10` (POL-07, decision D6). Each bias must
+  stay within ±0.1 of the success reward; the templates used to set `-1.00`/`-0.50`, which
+  vetoed those arms.
 - conservative budget ladder: `budget_policy_tiers = "1.0,1.1,1.2,1.35,1.5"` with `budget_policy_max_ups_per_case = 1`
 
 Two policy-input defaults changed in 2026-10 and are recorded in the run configuration:
@@ -420,13 +423,17 @@ uv run python -m evals.bootstrap_policy_state \
 
 Bootstrap notes:
 
-- replay order follows the expanded `--events` argument order and file line order
-- duplicate decision keys resolve last-writer-wins
-- percentile-style feature-scaling histories are not reconstructable from event
-  logs, so the bootstrap utility preserves the latest cap metadata but starts
-  history buffers empty
+- events are replayed in chronological order (`created_at_utc`, run, then log
+  position) whatever the `--events` order, and the first occurrence of a duplicate
+  decision key wins (POL-18)
+- `percentile_v1` state is refused: its caps are fitted from raw-value history that
+  event logs don't contain, so a replayed state would resume in a different feature
+  space; warm-start such runs from their saved state file (POL-14)
+- `--exclude-case-ids` / `--exclude-run-ids` (comma-separated or `@file`) drop events,
+  and `--target-case-ids` warns (`target_case_overlap`) when replayed cases are also the
+  cases the warm-started run will be evaluated on (POL-15)
 - `*_init_state_path` warm-starts learned controller state only; exact run
   continuation should keep using the run-scoped `*_state_path`
 - for `bwk_v1`, warm-starting from `budget_init_state_path` resets the new run's
-  remaining-budget / cumulative-charge / dual-variable telemetry from the
-  current config instead of inheriting prior-run depletion
+  remaining-budget / cumulative-charge / dual-variable / per-arm cost state from
+  the current config instead of inheriting prior-run depletion

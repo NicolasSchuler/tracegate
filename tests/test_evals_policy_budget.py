@@ -17,6 +17,8 @@ from evals.adaptive_budget_online_policy import (
 from evals.eval_policy_budget import (
     AdaptiveBudgetMetadataUpdate,
     _adaptive_budget_behavior_fields,
+    _escalation_accounting,
+    _escalation_cost_share,
     _finalize_adaptive_budget_policy_attempt,
     _nonnegative_int,
     _sync_adaptive_budget_policy_metadata,
@@ -431,6 +433,81 @@ class TestFinalizeBudgetAttemptUpdateReasons:
             )
         )
         assert meta["adaptive_budget_update_reason"].startswith("event_logging_error:")
+
+
+# ── POL-08: escalation is charged only its incremental cost ─────────────
+
+
+class _CapturingController:
+    @dataclass
+    class _Config:
+        decay: float = 1.0
+        architecture: str = BUDGET_POLICY_ARCH_TIER_BINARY
+
+    config = _Config()
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def record_outcome(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        raise RuntimeError("captured")
+
+
+@pytest.mark.parametrize(
+    ("action", "applied_multiplier", "expected_penalty"),
+    [
+        # 5k tokens at lambda 0.08 / scale 1k used to cost the escalation 0.40.
+        (ACTION_INCREASE_BUDGET, 1.25, 0.08 * 5.0 * 0.2),
+        (ACTION_INCREASE_BUDGET, 1.0, 0.0),
+        (ACTION_KEEP_BUDGET, 1.0, 0.0),
+    ],
+)
+def test_budget_reward_charges_only_the_escalation_share(
+    action: str, applied_multiplier: float, expected_penalty: float
+) -> None:
+    controller = _CapturingController()
+    _finalize_adaptive_budget_policy_attempt(
+        **_finalize_budget_kwargs(
+            budget_policy_decision=_make_budget_decision(
+                selected_action=action, applied_action=action
+            ),
+            adaptive_budget_policy_controller=controller,
+            reward_lambda_tokens=0.08,
+            reward_token_scale=1000.0,
+            local_accounting=AdaptivePolicyLocalAccounting(
+                llm_call_count=1, tokens_prompt=4000, tokens_completion=1000, tokens_total=5000
+            ),
+            applied_multiplier=applied_multiplier,
+            default_multiplier=1.0,
+        )
+    )
+    (call,) = controller.calls
+    assert call["reward_token_penalty"] == pytest.approx(expected_penalty)
+    # The event still logs the attempt's full cost.
+    assert call["local_tokens_total"] == 5000
+
+
+def test_escalation_cost_share_and_accounting() -> None:
+    assert _escalation_cost_share(applied_multiplier=1.5, default_multiplier=1.0) == (
+        pytest.approx(1.0 / 3.0)
+    )
+    assert _escalation_cost_share(applied_multiplier=1.0, default_multiplier=1.0) == 0.0
+    assert _escalation_cost_share(applied_multiplier=0.8, default_multiplier=1.0) == 0.0
+    assert _escalation_cost_share(applied_multiplier=1.5, default_multiplier=0.0) == 0.0
+    scaled = _escalation_accounting(
+        AdaptivePolicyLocalAccounting(
+            llm_call_count=2,
+            tokens_prompt=300,
+            tokens_completion=100,
+            tokens_total=400,
+            wall_sec=8.0,
+        ),
+        share=0.25,
+    )
+    assert scaled == AdaptivePolicyLocalAccounting(
+        llm_call_count=2, tokens_prompt=75, tokens_completion=25, tokens_total=100, wall_sec=2.0
+    )
 
 
 # ── _sync_finalize_progress_kwargs_from_attempt_metadata ─────────────────

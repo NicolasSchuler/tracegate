@@ -22,20 +22,23 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import math
 from pathlib import Path
 from typing import Any
 
-from . import _json as json
 from .adaptive_online_policy import EVENT_SCHEMA_VERSION as ONLINE_EVENT_SCHEMA_VERSION
+from .policy_event_log import event_key, load_policy_events
 
 POLICY_EVENT_SCHEMA_VERSION = ONLINE_EVENT_SCHEMA_VERSION
 # Accepted schema versions are declared per policy kind instead of derived from the controllers'
-# current EVENT_SCHEMA_VERSION, so that reading older logs is an explicit decision: helper events
-# are read at v4 (pre decision model) and v5 (with the ``decision_model`` block), budget events at
-# v4.  ``tests/test_evals_export_policy_dataset.py`` pins the live controller versions against
-# these sets, so a controller bump fails loudly here instead of silently dropping v4 logs.
-SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS = frozenset({4, 5})
-SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS = frozenset({4})
+# current EVENT_SCHEMA_VERSION, so that reading older logs is an explicit decision. Fields added
+# after v4 fall back when missing: ``decision_model`` (v5), ``effective_evidence`` (v6),
+# ``state_resets`` (v7 helper / v6 budget) and the bwk pacing fields (v7 budget) are optional in
+# the export. v3 predates the published repository and is counted as
+# ``records_unsupported_schema``. ``tests/test_evals_export_policy_dataset.py`` pins the live
+# controller versions against these sets, so a controller bump fails loudly here.
+SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS = frozenset({4, 5, 6, 7})
+SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS = frozenset({4, 5, 6, 7})
 SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS = (
     SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS | SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS
 )
@@ -132,76 +135,20 @@ def _expand_paths(items: list[str]) -> list[str]:
 def _load_events(
     paths: list[str], *, strict_input: bool
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    input_errors = {
-        "files_unreadable": 0,
-        "json_lines_invalid": 0,
-        "records_skipped": 0,
-        "duplicate_events_seen": 0,
-        "duplicate_events_resolved": 0,
-    }
-    deduped: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
-    for src in paths:
-        src_path = Path(src)
-        try:
-            lines = src_path.read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
-            input_errors["files_unreadable"] += 1
-            if strict_input:
-                raise ValueError(f"{src}: unable to read ({exc})") from exc
-            continue
-        for line_no, raw_line in enumerate(lines, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                input_errors["json_lines_invalid"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: invalid JSON ({exc})") from exc
-                continue
-            if not isinstance(payload, dict):
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: JSON root is not an object")
-                continue
-            schema_version = _safe_int(payload.get("schema_version"), default=-1)
-            if schema_version not in SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS:
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(
-                        f"{src}:{line_no}: unsupported policy event schema_version="
-                        f"{schema_version!r}, expected one of "
-                        f"{sorted(SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS)!r}"
-                    )
-                continue
-            key = _event_key(payload)
-            if key is None:
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: missing run/case/condition/attempt")
-                continue
-            if key in deduped:
-                input_errors["duplicate_events_seen"] += 1
-            deduped[key] = payload
-    input_errors["duplicate_events_resolved"] = input_errors["duplicate_events_seen"]
-    ordered = [deduped[key] for key in sorted(deduped)]
-    return ordered, input_errors
+    """Chronologically ordered, deduplicated, finite events (the shared loader).
+
+    Rows used to be sorted by case id, and ``inf`` values passed through (POL-13, POL-18).
+    """
+    events, input_errors = load_policy_events(
+        paths,
+        strict_input=strict_input,
+        supported_versions=SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS,
+    )
+    return [event.payload for event in events], input_errors
 
 
 def _event_key(payload: dict[str, Any]) -> tuple[str, str, str, int, str] | None:
-    run_id = str(payload.get("run_id") or "").strip()
-    case_id = str(payload.get("case_id") or "").strip()
-    condition = str(payload.get("condition") or "").strip()
-    attempt = _safe_int(payload.get("attempt"), default=-1)
-    if not run_id or not case_id or not condition or attempt < 0:
-        return None
-    decision_id = str(payload.get("decision_id") or "").strip()
-    if not decision_id:
-        decision_id = str(payload.get("created_at_utc") or "").strip()
-    if not decision_id:
-        decision_id = "unknown"
-    return run_id, case_id, condition, attempt, decision_id
+    return event_key(payload)
 
 
 def _events_to_rows(*, events: list[dict[str, Any]], min_propensity: float) -> list[dict[str, Any]]:
@@ -483,7 +430,7 @@ def _safe_float(value: Any, *, default: float) -> float:
         out = float(value)
     except (TypeError, ValueError):
         return float(default)
-    if out != out:  # NaN check
+    if not math.isfinite(out):  # NaN or +/-inf never reach a CSV cell (POL-13)
         return float(default)
     return out
 

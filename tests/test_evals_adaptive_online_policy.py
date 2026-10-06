@@ -121,7 +121,10 @@ def test_online_policy_on_updates_and_state_roundtrip(tmp_path) -> None:
     assert payload["reward_helper_materialization_bonus_scale"] == pytest.approx(0.6)
     assert state.decisions == 1
     assert state.updates == 1
-    assert state.action_counts[ACTION_INVOKE_HELPER] == 1
+    # Cold-start ties are broken at random since POL-24, so count whichever arm won.
+    assert state.action_counts[decision.selected_action] == 1
+    assert sum(state.action_counts.values()) == 1
+    assert state.applied_action_counts[decision.applied_action] == 1
     assert events_path.exists()
     assert len([line for line in events_path.read_text(encoding="utf-8").splitlines() if line]) == 1
 
@@ -131,6 +134,7 @@ def test_online_policy_on_updates_and_state_roundtrip(tmp_path) -> None:
     assert reloaded.load_error is None
     assert reloaded_state.decisions == 1
     assert reloaded_state.updates == 1
+    assert reloaded_state.applied_action_counts == state.applied_action_counts
 
 
 def test_online_policy_init_state_path_loads_from_separate_source(tmp_path) -> None:
@@ -685,9 +689,11 @@ def test_online_policy_masks_unavailable_actions_before_selection(tmp_path) -> N
     state_path = tmp_path / "policy_state_masked.json"
     state_path.write_text(
         json.dumps(
+            # invoke_helper is the best available arm; it used to win only by tie order (POL-24).
             _policy_state_payload(
                 preferred_action=ACTION_SNAPSHOT_LITE,
                 preferred_value=5.0,
+                b_by_action={ACTION_INVOKE_HELPER: 1.0},
             ),
             ensure_ascii=False,
         ),
@@ -823,9 +829,13 @@ def test_online_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
         decision_after_threshold.feature_scaling_caps["helper_calls_used"]
         > _V1_COUNT_CAPS["helper_calls_used"]
     )
+    # POL-09: the cap is frozen once MIN_SAMPLES observations exist, so the history stops
+    # growing (it used to keep every observation and refit the cap on each decision).
+    frozen_cap = state.feature_scaling_caps["helper_calls_used"]
+    assert frozen_cap == decision_after_threshold.feature_scaling_caps["helper_calls_used"]
     assert (
         len(state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
 
     reloaded = AdaptiveOnlinePolicyController(config)
@@ -835,8 +845,9 @@ def test_online_policy_percentile_profile_persists_history_and_caps(tmp_path) ->
     assert reloaded.load_error is None
     assert (
         len(reloaded_state.feature_scaling_history["helper_calls_used"])
-        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES + 1
+        == DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
     )
+    assert reloaded_state.feature_scaling_caps == {"helper_calls_used": frozen_cap}
 
 
 def test_online_policy_linucb_scores_match_known_ucb_values(tmp_path) -> None:
@@ -905,8 +916,9 @@ def test_online_policy_linucb_scores_regularize_singular_covariance(tmp_path) ->
     scores = controller._linucb_scores(x=x)
 
     assert all(math.isfinite(score) for score in scores.values())
-    assert controller.state.A[ACTION_INVOKE_HELPER][0, 0] == pytest.approx(1.0)
-    assert controller.state.A[ACTION_SKIP_HELPER][0, 0] == pytest.approx(1.0)
+    # POL-22: the regularized matrix is used for the score only; A is left as loaded.
+    assert controller.state.A[ACTION_INVOKE_HELPER][0, 0] == pytest.approx(0.0)
+    assert controller.state.A[ACTION_SKIP_HELPER][0, 0] == pytest.approx(0.0)
     controller.close()
 
 
@@ -1902,3 +1914,27 @@ def test_thompson_respects_warmup(tmp_path) -> None:
     # During warmup, strategy should be uniform random.
     assert "warmup" in decision.decision_strategy
     ctrl.close()
+
+
+def test_pol16_nan_counter_survives_concurrent_decisions(tmp_path) -> None:
+    """POL-16: NaN replacements were counted outside the lock and could be lost."""
+    import threading
+
+    controller = AdaptiveOnlinePolicyController(
+        OnlinePolicyConfig.normalize(mode="on", events_path=tmp_path / "e.jsonl")
+    )
+    barrier = threading.Barrier(8)
+
+    def _decide() -> None:
+        barrier.wait()
+        for _ in range(50):
+            controller.decide(feature_values={"bias": 1.0, "broken": float("nan")})
+
+    threads = [threading.Thread(target=_decide) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert controller.get_nan_stats()["broken"] == 400
+    controller.close()

@@ -8,6 +8,9 @@ for count-like features and clips all values to a fixed bound.
 Optionally, :class:`PercentileScaler` computes caps from historical
 feature distributions at a configurable percentile, falling back to
 hardcoded v1 caps when fewer than ``min_samples`` observations exist.
+The controllers use :func:`percentile_scale`, which fits each count-like
+feature's cap once and then freezes it (POL-09), so a raw value keeps its
+scaled value for the rest of the run.
 """
 
 from __future__ import annotations
@@ -69,6 +72,11 @@ def _is_count_like_feature(name: str) -> bool:
     if name.endswith("_streak"):
         return True
     return name in _V1_COUNT_CAPS
+
+
+def is_count_like_feature(name: str) -> bool:
+    """Whether *name* is log-scaled, the only kind of feature a cap applies to."""
+    return _is_count_like_feature(str(name))
 
 
 def _count_cap_for(
@@ -145,6 +153,11 @@ def compute_percentile_caps(
         upper = min(lower + 1, len(sorted_vals) - 1)
         frac = idx - lower
         pval = sorted_vals[lower] + frac * (sorted_vals[upper] - sorted_vals[lower])
+        if pval <= 0.0:
+            # No positive observations: a cap of 1.0 would amplify every later value
+            # (POL-09), so keep the hardcoded cap.
+            caps[name] = _count_cap_for(name)
+            continue
         caps[name] = max(1.0, pval)
 
     return caps
@@ -207,6 +220,124 @@ class PercentileScaler:
         )
 
 
+@dataclass(frozen=True)
+class PercentileScaling:
+    """Result of :func:`percentile_scale` for one decision."""
+
+    values: dict[str, float]
+    caps: dict[str, float]
+    """Cap used for each count-like feature in this decision: frozen, or the v1 fallback.
+    Features that aren't count-like have no cap (one was logged but never applied)."""
+    history_sizes: dict[str, int]
+    """Observations collected per count-like feature (stops growing once frozen)."""
+    fallback_to_v1: bool
+    """Some count-like feature in this decision has no frozen cap yet."""
+
+
+def prune_percentile_state(
+    history: Mapping[str, Sequence[float]],
+    caps: Mapping[str, float],
+    *,
+    min_samples: int = DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
+) -> tuple[dict[str, list[float]], dict[str, float]]:
+    """Keep count-like history, and the caps that count as frozen.
+
+    States saved before POL-09 stored a refitted cap for every feature on every decision,
+    including fallback caps (fewer than *min_samples* observations) and caps that were
+    never applied; those are dropped. A cap with no history at all is a frozen override
+    (a bootstrapped state) and is kept.
+    """
+    kept_history = {
+        str(name): [float(value) for value in values]
+        for name, values in history.items()
+        if is_count_like_feature(str(name))
+    }
+    kept_caps: dict[str, float] = {}
+    for key, cap in caps.items():
+        name = str(key)
+        observed = len(kept_history.get(name, ()))
+        if is_count_like_feature(name) and (observed == 0 or observed >= min_samples):
+            kept_caps[name] = float(cap)
+    return kept_history, kept_caps
+
+
+def percentile_scale(
+    feature_values: Mapping[str, float],
+    *,
+    history: dict[str, list[float]],
+    caps: dict[str, float],
+    min_samples: int = DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
+    percentile: float = DEFAULT_POLICY_FEATURE_SCALING_PERCENTILE,
+) -> PercentileScaling:
+    """Scale with frozen percentile caps, then record this decision's observations.
+
+    *history* and *caps* are the model's state and are updated in place: each count-like
+    feature collects observations until it has *min_samples*, then its cap is fitted once
+    and frozen (POL-09). Until then the feature uses its v1 cap. The current observation
+    is recorded after scaling, so a decision never scales with a cap fitted on itself.
+    """
+    applied = {
+        str(name): float(caps[str(name)]) if str(name) in caps else _count_cap_for(str(name))
+        for name in feature_values
+        if is_count_like_feature(str(name))
+    }
+    values = scale_feature_mapping(feature_values, profile="v1", cap_overrides=applied)
+    fallback_to_v1 = False
+    history_sizes: dict[str, int] = {}
+    for key, raw_value in feature_values.items():
+        name = str(key)
+        if not is_count_like_feature(name):
+            continue
+        if name in caps:
+            history_sizes[name] = len(history.get(name, ()))
+            continue
+        fallback_to_v1 = True
+        samples = history.setdefault(name, [])
+        history_sizes[name] = len(samples)
+        value = float(raw_value)
+        if math.isfinite(value):
+            samples.append(value)
+        if len(samples) >= min_samples:
+            caps[name] = compute_percentile_caps(
+                {name: samples}, percentile=percentile, min_samples=min_samples
+            )[name]
+    return PercentileScaling(
+        values=values,
+        caps=applied,
+        history_sizes=history_sizes,
+        fallback_to_v1=fallback_to_v1,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interaction features (``v1_interactions``)
+# ---------------------------------------------------------------------------
+
+INTERACTION_FEATURE_FACTORS: dict[str, tuple[str, str]] = {
+    "ix_attempt_frac_x_stagnation": ("attempt_frac", "stagnation_streak"),
+    "ix_pregate_score_x_snapshot_available": ("pregate_score", "snapshot_available"),
+    "ix_helper_calls_used_x_low_yield_ratio": ("helper_calls_used", "helper_low_yield_ratio"),
+}
+"""Interaction name -> factors. The names don't match the count-like heuristic (POL-19)."""
+
+
+def interaction_features(feature_values: Mapping[str, float]) -> dict[str, float]:
+    """Products of v1-scaled factors, so every interaction is on the same bounded scale.
+
+    The interactions used to multiply raw values (a count times a fraction), and
+    ``attempt_frac_x_stagnation_streak`` was then log-scaled again because of its suffix
+    (POL-19).
+    """
+    factors = {name for pair in INTERACTION_FEATURE_FACTORS.values() for name in pair}
+    scaled = scale_feature_mapping(
+        {name: float(feature_values.get(name, 0.0)) for name in factors}, profile="v1"
+    )
+    return {
+        name: float(scaled[left] * scaled[right])
+        for name, (left, right) in INTERACTION_FEATURE_FACTORS.items()
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core scaling entry-point
 # ---------------------------------------------------------------------------
@@ -262,12 +393,18 @@ __all__ = [
     "DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES",
     "DEFAULT_POLICY_FEATURE_SCALING_PERCENTILE",
     "DEFAULT_POLICY_FEATURE_SCALING_PROFILE",
+    "INTERACTION_FEATURE_FACTORS",
     "INTERACTION_POLICY_FEATURE_SCALING_PROFILE",
     "PERCENTILE_POLICY_FEATURE_SCALING_PROFILE",
     "POLICY_FEATURE_SCALING_PROFILES",
     "PercentileScaler",
+    "PercentileScaling",
     "compute_percentile_caps",
+    "interaction_features",
+    "is_count_like_feature",
     "is_percentile_feature_scaling_profile",
     "normalize_feature_scaling_profile",
+    "percentile_scale",
+    "prune_percentile_state",
     "scale_feature_mapping",
 ]

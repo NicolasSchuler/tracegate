@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 import threading
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,14 +19,12 @@ from typing import Any
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import (
     coerce_float as _coerce_float,
 )
 from ._policy_utils import (
     coerce_nonnegative_int as _coerce_nonnegative_int,
-)
-from ._policy_utils import (
-    linucb_exploit_explore as _linucb_exploit_explore,
 )
 from ._policy_utils import (
     policy_effective_epsilon as _policy_effective_epsilon,
@@ -42,9 +40,10 @@ from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
     POLICY_FEATURE_SCALING_PROFILES,
-    PercentileScaler,
     is_percentile_feature_scaling_profile,
     normalize_feature_scaling_profile,
+    percentile_scale,
+    prune_percentile_state,
     scale_feature_mapping,
 )
 from .seed_derivation import derive_seed
@@ -70,8 +69,16 @@ BUDGET_POLICY_ARCHITECTURES = {
 }
 BUDGET_POLICY_MODES = {"off", "shadow", "on"}
 BUDGET_POLICY_ALGOS = {"linucb", "thompson"}
-STATE_SCHEMA_VERSION = 3
-EVENT_SCHEMA_VERSION = 4
+STATE_SCHEMA_VERSION = 4
+# Schema 4 adds ``applied_action_counts`` (POL-24); schema 2 and 3 states still load.
+SUPPORTED_STATE_SCHEMA_VERSIONS = (3, 4)
+DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY = 1.0
+"""Decay is opt-in (decision D6, POL-01); below 1 it only discounts the updated arm."""
+EVENT_SCHEMA_VERSION = 7
+"""v5 adds ``effective_evidence`` (POL-01); v6 adds ``state_resets`` (POL-21); v7 adds
+``bwk_target_tokens_per_decision`` and ``bwk_cost_estimates`` (POL-04)."""
+BWK_DUAL_STEP = 0.05
+"""Step size of the ``bwk_v1`` dual update ``lambda += step * (spend - target) / target``."""
 
 
 @dataclass(frozen=True)
@@ -86,13 +93,17 @@ class BudgetPolicyConfig:
     l2: float = 1.0
     warmup_decisions: int = 20
     save_every: int = 50
-    decay: float = 0.95
+    decay: float = DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY
     feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     init_state_path: Path | None = None
     state_path: Path | None = None
     events_path: Path | None = None
     bwk_run_token_budget: int | None = None
     random_seed: int | None = None
+    bwk_horizon_decisions: int = 0
+    """Expected budget decisions in the run (cases x attempts), set by the eval harness.
+    ``bwk_v1`` paces spending to ``bwk_run_token_budget / bwk_horizon_decisions`` tokens per
+    decision; 0 disables pacing and leaves only the exhaustion mask (POL-04)."""
 
     @classmethod
     def normalize(
@@ -106,7 +117,7 @@ class BudgetPolicyConfig:
         l2: float = 1.0,
         warmup_decisions: int = 20,
         save_every: int = 50,
-        decay: float = 0.95,
+        decay: float = DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY,
         feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
         init_state_path: Path | None = None,
         state_path: Path | None = None,
@@ -129,7 +140,9 @@ class BudgetPolicyConfig:
         l2_norm = max(1e-9, _coerce_float(l2, default=1.0))
         warmup_norm = _coerce_nonnegative_int(warmup_decisions, default=20)
         save_every_norm = max(1, _coerce_nonnegative_int(save_every, default=50))
-        decay_norm = min(1.0, max(1e-9, _coerce_float(decay, default=0.95)))
+        decay_norm = min(
+            1.0, max(1e-9, _coerce_float(decay, default=DEFAULT_ADAPTIVE_BUDGET_ONLINE_DECAY))
+        )
         feature_scaling_profile_norm = normalize_feature_scaling_profile(feature_scaling_profile)
         if feature_scaling_profile_norm not in POLICY_FEATURE_SCALING_PROFILES:
             feature_scaling_profile_norm = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
@@ -297,6 +310,10 @@ class BudgetPolicyEvent:
     bwk_dual_variable_before: float = 0.0
     bwk_dual_variable_after: float = 0.0
     bwk_budget_exhausted: bool = False
+    effective_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
+    state_resets: dict[str, int] = field(default_factory=dict)
+    bwk_target_tokens_per_decision: float = 0.0
+    bwk_cost_estimates: dict[str, float] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dict."""
@@ -400,33 +417,23 @@ class BudgetPolicyEvent:
             "bwk_dual_variable_before": self.bwk_dual_variable_before,
             "bwk_dual_variable_after": self.bwk_dual_variable_after,
             "bwk_budget_exhausted": bool(self.bwk_budget_exhausted),
+            "effective_evidence": {
+                model: {action: float(value) for action, value in evidence.items()}
+                for model, evidence in self.effective_evidence.items()
+            },
+            "state_resets": {key: int(value) for key, value in self.state_resets.items()},
+            "bwk_target_tokens_per_decision": float(self.bwk_target_tokens_per_decision),
+            "bwk_cost_estimates": {
+                action: float(value) for action, value in self.bwk_cost_estimates.items()
+            },
         }
 
 
 @dataclass
-class LinUCBState:
-    """Mutable state for a per-action LinUCB model (A matrices and b vectors)."""
+class LinUCBState(core.LinUCBState):
+    """The shared LinUCB core state, defaulting to the budget actions."""
 
-    action_names: tuple[str, ...] = field(default_factory=lambda: BUDGET_POLICY_ACTIONS)
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(default_factory=dict)
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        normalized_actions = tuple(str(action) for action in self.action_names)
-        if not normalized_actions:
-            normalized_actions = ("default",)
-        self.action_names = normalized_actions
-        normalized_counts = dict.fromkeys(normalized_actions, 0)
-        for key, value in dict(self.action_counts).items():
-            if key in normalized_counts:
-                normalized_counts[key] = int(value)
-        self.action_counts = normalized_counts
+    action_names: tuple[str, ...] = BUDGET_POLICY_ACTIONS
 
 
 class AdaptiveBudgetPolicyController:
@@ -448,6 +455,12 @@ class AdaptiveBudgetPolicyController:
         self._bwk_remaining_token_budget = int(self._bwk_run_token_budget)
         self._bwk_cumulative_tokens_charged = 0
         self._bwk_dual_variable = 0.0
+        self._bwk_cost_sums: dict[str, float] = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0.0)
+        self._bwk_cost_counts: dict[str, int] = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0)
+        # POL-21: cumulative model resets (``gate_arm:<a>``, ``family_arm:<f>``,
+        # ``feature_set_mismatch``).
+        self._state_resets: dict[str, int] = {}
+        self._check_loaded_features = False
         self.load_error: str | None = None
         self._load_state_if_present()
 
@@ -488,7 +501,42 @@ class AdaptiveBudgetPolicyController:
                 "cumulative_tokens_charged": int(self._bwk_cumulative_tokens_charged),
                 "dual_variable": float(self._bwk_dual_variable),
                 "budget_exhausted": bool(self._bwk_remaining_token_budget <= 0),
+                "target_tokens_per_decision": self._bwk_target_tokens(),
+                "cost_estimates": self._bwk_cost_estimates(),
             }
+
+    def _bwk_target_tokens(self) -> float:
+        """Per-decision spend that makes the run budget last the horizon (0: no pacing)."""
+        horizon = max(0, int(self.config.bwk_horizon_decisions))
+        if self.config.architecture != BUDGET_POLICY_ARCH_BWK_V1 or horizon <= 0:
+            return 0.0
+        return float(self._bwk_run_token_budget) / float(horizon)
+
+    def _bwk_cost_estimates(self) -> dict[str, float]:
+        """Mean tokens per applied gate action; an arm not yet observed is assumed to
+        spend the target."""
+        target = self._bwk_target_tokens()
+        return {
+            action: (
+                self._bwk_cost_sums[action] / self._bwk_cost_counts[action]
+                if self._bwk_cost_counts[action] > 0
+                else target
+            )
+            for action in BUDGET_POLICY_ACTIONS
+        }
+
+    def _bwk_score_penalties(self) -> dict[str, float]:
+        """Lagrangian cost term ``lambda * cost_k / target`` per gate action (POL-04).
+
+        The dual variable used to be computed and logged but never read.
+        """
+        target = self._bwk_target_tokens()
+        if target <= 0.0 or self._bwk_dual_variable <= 0.0:
+            return {}
+        return {
+            action: float(self._bwk_dual_variable) * cost / target
+            for action, cost in self._bwk_cost_estimates().items()
+        }
 
     def _copy_state(self, state: LinUCBState) -> LinUCBState:
         return LinUCBState(
@@ -497,6 +545,7 @@ class AdaptiveBudgetPolicyController:
             decisions=int(state.decisions),
             updates=int(state.updates),
             action_counts={k: int(v) for k, v in state.action_counts.items()},
+            applied_action_counts={k: int(v) for k, v in state.applied_action_counts.items()},
             A={k: v.copy() for k, v in state.A.items()},
             b={k: v.copy() for k, v in state.b.items()},
             feature_scaling_history={
@@ -511,28 +560,45 @@ class AdaptiveBudgetPolicyController:
         with self._lock:
             return dict(self._nan_counts)
 
+    def get_state_resets(self) -> dict[str, int]:
+        """Return a snapshot of the model reset counts (POL-21)."""
+        with self._lock:
+            return dict(self._state_resets)
+
+    def _count_state_reset(self, key: str) -> None:
+        self._state_resets[key] = self._state_resets.get(key, 0) + 1
+
+    def _discard_mismatched_loaded_state(
+        self, gate_features: Collection[str], family_features: Collection[str]
+    ) -> None:
+        """Treat a loaded state that lacks this run's features as a load failure (POL-21)."""
+        if not self._check_loaded_features:
+            return
+        self._check_loaded_features = False
+        missing = sorted(
+            set(core.missing_features(self._state, gate_features))
+            | {
+                f"family:{name}"
+                for name in core.missing_features(self._family_state, family_features)
+            }
+        )
+        if missing:
+            self.load_error = core.feature_set_mismatch_error(missing)
+            self._state = LinUCBState(action_names=BUDGET_POLICY_ACTIONS)
+            self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
+            self._count_state_reset("feature_set_mismatch")
+
     def _tracked_safe_float(self, value: Any, *, feature_name: str, default: float = 0.0) -> float:
-        """Convert *value* via :func:`safe_float`, tracking NaN replacements."""
+        """Convert *value* via :func:`safe_float`, tracking NaN replacements.
+
+        The counter is updated under the (re-entrant) lock: ``decide()`` cleans features
+        before taking it, and concurrent increments were lost (POL-16).
+        """
         result, replaced = _safe_float_tracked(value, default=default)
         if replaced:
-            self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
+            with self._lock:
+                self._nan_counts[feature_name] = self._nan_counts.get(feature_name, 0) + 1
         return result
-
-    def _record_feature_scaling_history(
-        self,
-        *,
-        state: LinUCBState,
-        cleaned_features: Mapping[str, float],
-    ) -> None:
-        """Append raw feature observations used by percentile scaling."""
-        if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
-            return
-        for key, value in cleaned_features.items():
-            history = list(state.feature_scaling_history.get(str(key), []))
-            history.append(float(value))
-            if len(history) > DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:
-                history = history[-DEFAULT_POLICY_FEATURE_SCALING_HISTORY_LIMIT:]
-            state.feature_scaling_history[str(key)] = history
 
     def _scale_features(
         self,
@@ -540,7 +606,11 @@ class AdaptiveBudgetPolicyController:
         state: LinUCBState,
         cleaned_features: Mapping[str, float],
     ) -> tuple[dict[str, float], dict[str, float], dict[str, int], bool]:
-        """Scale features and expose percentile-cap telemetry when enabled."""
+        """Scale features; under ``percentile_v1`` also collect history and freeze caps.
+
+        Each count-like feature's cap is fitted once from its first observations and then
+        kept (POL-09); see ``policy_feature_scaling.percentile_scale``.
+        """
         if not is_percentile_feature_scaling_profile(self.config.feature_scaling_profile):
             return (
                 scale_feature_mapping(
@@ -551,24 +621,17 @@ class AdaptiveBudgetPolicyController:
                 {},
                 False,
             )
-        history = {
-            str(name): [float(item) for item in values]
-            for name, values in state.feature_scaling_history.items()
-        }
-        scaler = PercentileScaler(min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES)
-        scaler.fit(history)
-        caps = scaler.caps
-        history_sizes = {str(name): len(values) for name, values in history.items()}
-        state.feature_scaling_caps = {str(name): float(value) for name, value in caps.items()}
-        fallback_to_v1 = any(
-            history_sizes.get(str(name), 0) < DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES
-            for name in cleaned_features
+        scaled = percentile_scale(
+            cleaned_features,
+            history=state.feature_scaling_history,
+            caps=state.feature_scaling_caps,
+            min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
         )
         return (
-            scaler.scale(cleaned_features, profile="v1"),
-            {str(name): float(value) for name, value in caps.items()},
-            history_sizes,
-            bool(fallback_to_v1),
+            scaled.values,
+            dict(scaled.caps),
+            dict(scaled.history_sizes),
+            scaled.fallback_to_v1,
         )
 
     def _decide_with_state(
@@ -578,6 +641,7 @@ class AdaptiveBudgetPolicyController:
         cleaned_features: Mapping[str, float],
         default_action: str,
         available_actions: tuple[str, ...],
+        score_penalties: Mapping[str, float] | None = None,
     ) -> tuple[
         str,
         float,
@@ -595,7 +659,6 @@ class AdaptiveBudgetPolicyController:
             feature_scaling_history_sizes,
             feature_scaling_fallback_to_v1,
         ) = self._scale_features(state=state, cleaned_features=cleaned_features)
-        self._record_feature_scaling_history(state=state, cleaned_features=cleaned_features)
         self._ensure_feature_state(state=state, cleaned_features=scaled_features)
         decision_index = state.decisions + 1
         default_norm = (
@@ -615,10 +678,10 @@ class AdaptiveBudgetPolicyController:
                 scores = self._thompson_scores(state=state, x=x)
             else:
                 scores = self._linucb_scores(state=state, x=x)
-            greedy = max(
-                available,
-                key=lambda action: (scores.get(action, 0.0), action == default_norm),
-            )
+            for action, penalty in dict(score_penalties or {}).items():
+                if action in scores:
+                    scores[action] = float(scores[action]) - float(penalty)
+            tied = core.greedy_ties(scores, available)
             if decision_index <= self.config.warmup_decisions:
                 selected = self._rng.choice(list(available))
                 strategy = "warmup_uniform"
@@ -627,15 +690,13 @@ class AdaptiveBudgetPolicyController:
                     selected = self._rng.choice(list(available))
                     strategy = "epsilon_uniform"
                 else:
-                    selected = greedy
+                    selected = core.pick_greedy(tied, self._rng)
                     strategy = "linucb_greedy"
-            k_actions = float(len(available))
-            base_prob = self.config.epsilon / k_actions
             if decision_index <= self.config.warmup_decisions:
-                propensity = 1.0 / k_actions
+                propensity = 1.0 / float(len(available))
             else:
-                propensity = base_prob + (
-                    (1.0 - self.config.epsilon) if selected == greedy else 0.0
+                propensity = core.epsilon_greedy_propensity(
+                    selected, tied, epsilon=self.config.epsilon, n_available=len(available)
                 )
             propensity = min(1.0, max(1e-9, propensity))
         state.decisions = decision_index
@@ -698,6 +759,7 @@ class AdaptiveBudgetPolicyController:
             if str(key) in BUDGET_POLICY_FAMILIES and str(value)
         }
         with self._lock, self._decision_rng(rng_key):
+            self._discard_mismatched_loaded_state(cleaned_features, cleaned_family_features)
             default_norm = (
                 default_action if default_action in BUDGET_POLICY_ACTIONS else ACTION_KEEP_BUDGET
             )
@@ -734,6 +796,7 @@ class AdaptiveBudgetPolicyController:
                 cleaned_features=cleaned_features,
                 default_action=default_norm,
                 available_actions=gate_available_actions,
+                score_penalties=self._bwk_score_penalties(),
             )
             mode = self.config.mode
             applied = selected if mode == "on" else default_norm
@@ -770,6 +833,13 @@ class AdaptiveBudgetPolicyController:
                 )
                 if mode == "on" and applied == ACTION_INCREASE_BUDGET:
                     applied_family = selected_family
+            self._state.applied_action_counts[applied] = (
+                int(self._state.applied_action_counts.get(applied, 0)) + 1
+            )
+            if applied_family:
+                self._family_state.applied_action_counts[applied_family] = (
+                    int(self._family_state.applied_action_counts.get(applied_family, 0)) + 1
+                )
             return BudgetPolicyDecision(
                 decision_id=uuid.uuid4().hex,
                 mode=mode,
@@ -871,13 +941,19 @@ class AdaptiveBudgetPolicyController:
                     bwk_remaining_token_budget_before - bwk_tokens_charged,
                 )
                 self._bwk_remaining_token_budget = bwk_remaining_token_budget_after
-                budget_denom = max(1, bwk_run_token_budget or bwk_tokens_charged)
-                overspend_tokens = max(0, bwk_tokens_charged - bwk_remaining_token_budget_before)
-                bwk_dual_variable_after = max(
-                    0.0,
-                    float(self._bwk_dual_variable) * float(self.config.decay)
-                    + (float(overspend_tokens) / float(budget_denom)),
-                )
+                if decision.applied_action in self._bwk_cost_counts:
+                    self._bwk_cost_sums[decision.applied_action] += float(bwk_tokens_charged)
+                    self._bwk_cost_counts[decision.applied_action] += 1
+                # POL-04: projected dual step on the pacing constraint. The old update added
+                # max(0, charged - remaining) / budget, which stayed 0 until the budget was
+                # nearly gone, and nothing read the result.
+                target = self._bwk_target_tokens()
+                if target > 0.0:
+                    bwk_dual_variable_after = max(
+                        0.0,
+                        float(self._bwk_dual_variable)
+                        + BWK_DUAL_STEP * (float(bwk_tokens_charged) - target) / target,
+                    )
                 self._bwk_dual_variable = bwk_dual_variable_after
 
             gate_model_updated = False
@@ -923,14 +999,26 @@ class AdaptiveBudgetPolicyController:
             applied_action = str(decision.applied_action)
             behavior_action = applied_action
             behavior_family = str(decision.applied_family)
-            behavior_propensity = 1.0
-            if selected_action == applied_action:
-                behavior_propensity = min(1.0, max(1e-9, float(decision.propensity)))
-                if decision.selected_family and decision.selected_family == behavior_family:
-                    behavior_propensity = min(
-                        1.0,
-                        max(1e-9, behavior_propensity * float(decision.family_propensity)),
-                    )
+            behavior_propensity = core.behavior_propensity(
+                mode=decision.mode,
+                selected=selected_action,
+                behavior=applied_action,
+                propensity=decision.propensity,
+            )
+            if decision.selected_family and decision.selected_family == behavior_family:
+                behavior_propensity = min(
+                    1.0,
+                    max(
+                        1e-9,
+                        behavior_propensity
+                        * core.behavior_propensity(
+                            mode=decision.mode,
+                            selected=decision.selected_family,
+                            behavior=behavior_family,
+                            propensity=decision.family_propensity,
+                        ),
+                    ),
+                )
             model_updated = bool(gate_model_updated or family_model_updated)
             event = BudgetPolicyEvent(
                 run_id=str(run_id),
@@ -1030,6 +1118,7 @@ class AdaptiveBudgetPolicyController:
                 model_updated=model_updated,
                 update_reason=update_reason,
                 nan_replacement_counts=dict(self._nan_counts),
+                state_resets=dict(self._state_resets),
                 created_at_utc=_utc_now(),
                 bwk_run_token_budget=bwk_run_token_budget,
                 bwk_remaining_token_budget_before=bwk_remaining_token_budget_before,
@@ -1039,6 +1128,16 @@ class AdaptiveBudgetPolicyController:
                 bwk_dual_variable_before=bwk_dual_variable_before,
                 bwk_dual_variable_after=bwk_dual_variable_after,
                 bwk_budget_exhausted=bool(bwk_remaining_token_budget_after <= 0),
+                bwk_target_tokens_per_decision=self._bwk_target_tokens(),
+                bwk_cost_estimates=(
+                    self._bwk_cost_estimates()
+                    if self.config.architecture == BUDGET_POLICY_ARCH_BWK_V1
+                    else {}
+                ),
+                effective_evidence={
+                    "gate": core.effective_evidence(self._state, l2=float(self.config.l2)),
+                    "family": core.effective_evidence(self._family_state, l2=float(self.config.l2)),
+                },
             )
             self._append_event(event=event)
             if model_updated or self.config.architecture == BUDGET_POLICY_ARCH_BWK_V1:
@@ -1062,58 +1161,10 @@ class AdaptiveBudgetPolicyController:
         """Initialise or expand A/b matrices when new features appear."""
         if self.config.algorithm not in BUDGET_POLICY_ALGOS:
             return
-        if not state.feature_names:
-            state.feature_names = sorted(str(k) for k in cleaned_features)
-            dim = len(state.feature_names)
-            if dim <= 0:
-                state.feature_names = ["bias"]
-                dim = 1
-            state.A = {
-                action: (np.eye(dim, dtype=float) * float(self.config.l2))
-                for action in state.action_names
-            }
-            state.b = {action: np.zeros((dim,), dtype=float) for action in state.action_names}
-            return
-        expanded_feature_names = sorted(
-            set(state.feature_names) | {str(key) for key in cleaned_features}
-        )
-        if expanded_feature_names != state.feature_names:
-            previous_feature_names = list(state.feature_names)
-            previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-            previous_dim = len(previous_feature_names)
-            new_dim = len(expanded_feature_names)
-            state.feature_names = list(expanded_feature_names)
-            for action in state.action_names:
-                previous_A = state.A.get(action)
-                previous_b = state.b.get(action)
-                next_A = np.eye(new_dim, dtype=float) * float(self.config.l2)
-                next_b = np.zeros((new_dim,), dtype=float)
-                if (
-                    isinstance(previous_A, np.ndarray)
-                    and isinstance(previous_b, np.ndarray)
-                    and previous_A.shape == (previous_dim, previous_dim)
-                    and previous_b.shape == (previous_dim,)
-                ):
-                    for new_row, feature_row in enumerate(expanded_feature_names):
-                        old_row = previous_index.get(feature_row)
-                        if old_row is None:
-                            continue
-                        next_b[new_row] = previous_b[old_row]
-                        for new_col, feature_col in enumerate(expanded_feature_names):
-                            old_col = previous_index.get(feature_col)
-                            if old_col is None:
-                                continue
-                            next_A[new_row, new_col] = previous_A[old_row, old_col]
-                state.A[action] = next_A
-                state.b[action] = next_b
-        dim = len(state.feature_names)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or A.shape != (dim, dim):
-                state.A[action] = np.eye(dim, dtype=float) * float(self.config.l2)
-            if b is None or b.shape != (dim,):
-                state.b[action] = np.zeros((dim,), dtype=float)
+        change = core.ensure_feature_state(state, cleaned_features, l2=float(self.config.l2))
+        model = "family" if state is self._family_state else "gate"
+        for action in change.reset_arms:
+            self._count_state_reset(f"{model}_arm:{action}")
 
     def _feature_vector(
         self,
@@ -1122,65 +1173,27 @@ class AdaptiveBudgetPolicyController:
         cleaned_features: Mapping[str, float],
     ) -> np.ndarray:
         """Build a numpy feature vector aligned with ``feature_names``."""
-        feature_names = state.feature_names or ["bias"]
-        values = np.array(
-            [
-                self._tracked_safe_float(
-                    cleaned_features.get(name, 0.0),
-                    feature_name=name,
-                    default=0.0,
-                )
-                for name in feature_names
-            ],
-            dtype=float,
+        return core.feature_vector(
+            state,
+            cleaned_features,
+            to_float=lambda value, name: self._tracked_safe_float(
+                value, feature_name=name, default=0.0
+            ),
         )
-        return values
 
     def _linucb_scores(self, *, state: LinUCBState, x: np.ndarray) -> dict[str, float]:
         """Compute UCB scores (exploit + alpha * explore) for every action."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "linucb":
             return dict.fromkeys(state.action_names, 0.0)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            exploit, explore, updated_A = _linucb_exploit_explore(
-                A,
-                b,
-                x,
-                l2=float(self.config.l2),
-            )
-            if updated_A is not None:
-                state.A[action] = updated_A
-            scores[action] = exploit + (float(self.config.alpha) * explore)
-        return scores
+        return core.linucb_scores(
+            state, x, l2=float(self.config.l2), alpha=float(self.config.alpha)
+        )
 
     def _thompson_scores(self, *, state: LinUCBState, x: np.ndarray) -> dict[str, float]:
         """Sample θ ~ N(A⁻¹b, A⁻¹) and return θ·x for each action (Thompson Sampling)."""
-        scores: dict[str, float] = {}
         if self.config.algorithm != "thompson":
             return dict.fromkeys(state.action_names, 0.0)
-        seed = self.config.random_seed
-        rng = np.random.default_rng(
-            seed=(seed + state.decisions) if seed is not None else None,
-        )
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None:
-                scores[action] = 0.0
-                continue
-            try:
-                A_inv = np.linalg.solve(A, np.eye(A.shape[0]))
-                theta_hat = A_inv @ b
-                theta_sample = rng.multivariate_normal(theta_hat, A_inv)
-                scores[action] = float(theta_sample @ x)
-            except np.linalg.LinAlgError:
-                scores[action] = 0.0
-        return scores
+        return core.thompson_scores(state, x, seed=self.config.random_seed)
 
     def _update_model(
         self,
@@ -1196,32 +1209,14 @@ class AdaptiveBudgetPolicyController:
         if action not in state.action_names or not state.feature_names:
             return False
         x = self._feature_vector(state=state, cleaned_features=feature_values)
-        self._apply_recency_decay(state=state)
-        A = state.A.get(action)
-        b = state.b.get(action)
-        if A is None or b is None:
-            return False
-        A += np.outer(x, x)
-        b += float(reward) * x
-        state.A[action] = A
-        state.b[action] = b
-        state.updates = int(state.updates) + 1
-        return True
+        self._apply_recency_decay(state=state, action=action)
+        return core.rank_one_update(state, action=action, reward=reward, x=x)
 
-    def _apply_recency_decay(self, *, state: LinUCBState) -> None:
-        """Exponentially discount prior LinUCB evidence when configured."""
-        if float(self.config.decay) >= 1.0 or not state.feature_names:
-            return
-        dim = len(state.feature_names)
-        prior = np.eye(dim, dtype=float) * float(self.config.l2)
-        decay = float(self.config.decay)
-        for action in state.action_names:
-            A = state.A.get(action)
-            b = state.b.get(action)
-            if A is None or b is None or A.shape != (dim, dim) or b.shape != (dim,):
-                continue
-            state.A[action] = (decay * A) + ((1.0 - decay) * prior)
-            state.b[action] = decay * b
+    def _apply_recency_decay(self, *, state: LinUCBState, action: str) -> None:
+        """Discount the updated arm's prior evidence when decay < 1 is configured."""
+        core.apply_recency_decay(
+            state, action=action, decay=float(self.config.decay), l2=float(self.config.l2)
+        )
 
     def _serialize_state(self, state: LinUCBState) -> dict[str, Any]:
         return {
@@ -1231,6 +1226,10 @@ class AdaptiveBudgetPolicyController:
             "updates": int(state.updates),
             "action_counts": {
                 action: int(state.action_counts.get(action, 0)) for action in state.action_names
+            },
+            "applied_action_counts": {
+                action: int(state.applied_action_counts.get(action, 0))
+                for action in state.action_names
             },
             "A": {
                 action: state.A.get(action, np.empty((0, 0), dtype=float)).tolist()
@@ -1281,13 +1280,16 @@ class AdaptiveBudgetPolicyController:
             for key, value in feature_scaling_caps_raw.items():
                 if isinstance(value, (int, float)) and np.isfinite(float(value)):
                     feature_scaling_caps[str(key)] = float(value)
-        action_counts_raw = raw_state.get("action_counts")
-        action_counts = dict.fromkeys(action_names, 0)
-        if isinstance(action_counts_raw, dict):
-            for action in action_names:
-                action_counts[action] = _coerce_nonnegative_int(
-                    action_counts_raw.get(action), default=0
-                )
+        feature_scaling_history, feature_scaling_caps = prune_percentile_state(
+            feature_scaling_history,
+            feature_scaling_caps,
+            min_samples=DEFAULT_POLICY_FEATURE_SCALING_MIN_SAMPLES,
+        )
+        action_counts = core.parse_action_counts(raw_state.get("action_counts"), action_names)
+        # Schema 3 states predate applied counts (POL-24); they start at zero.
+        applied_action_counts = core.parse_action_counts(
+            raw_state.get("applied_action_counts"), action_names
+        )
         if dim <= 0:
             return LinUCBState(
                 action_names=action_names,
@@ -1295,6 +1297,7 @@ class AdaptiveBudgetPolicyController:
                 decisions=decisions,
                 updates=updates,
                 action_counts=action_counts,
+                applied_action_counts=applied_action_counts,
                 A={},
                 b={},
                 feature_scaling_history=feature_scaling_history,
@@ -1321,6 +1324,7 @@ class AdaptiveBudgetPolicyController:
             decisions=decisions,
             updates=updates,
             action_counts=action_counts,
+            applied_action_counts=applied_action_counts,
             A=A_state,
             b=b_state,
             feature_scaling_history=feature_scaling_history,
@@ -1347,6 +1351,8 @@ class AdaptiveBudgetPolicyController:
             "bwk_remaining_token_budget": int(self._bwk_remaining_token_budget),
             "bwk_cumulative_tokens_charged": int(self._bwk_cumulative_tokens_charged),
             "bwk_dual_variable": float(self._bwk_dual_variable),
+            "bwk_cost_sums": {key: float(value) for key, value in self._bwk_cost_sums.items()},
+            "bwk_cost_counts": {key: int(value) for key, value in self._bwk_cost_counts.items()},
             "saved_at_utc": _utc_now(),
         }
 
@@ -1394,8 +1400,9 @@ class AdaptiveBudgetPolicyController:
                 )
                 self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
                 self.load_error = None
+                self._check_loaded_features = True
                 return
-            if schema_version != STATE_SCHEMA_VERSION:
+            if schema_version not in SUPPORTED_STATE_SCHEMA_VERSIONS:
                 raise ValueError("unsupported schema version")
             architecture = str(raw.get("architecture") or BUDGET_POLICY_ARCH_TIER_BINARY)
             if architecture != self.config.architecture:
@@ -1449,7 +1456,18 @@ class AdaptiveBudgetPolicyController:
                     0.0,
                     _coerce_float(raw.get("bwk_dual_variable"), default=0.0),
                 )
+                cost_sums_raw = raw.get("bwk_cost_sums")
+                cost_sums = cost_sums_raw if isinstance(cost_sums_raw, dict) else {}
+                cost_counts = core.parse_action_counts(
+                    raw.get("bwk_cost_counts"), BUDGET_POLICY_ACTIONS
+                )
+                for action in BUDGET_POLICY_ACTIONS:
+                    self._bwk_cost_sums[action] = max(
+                        0.0, _coerce_float(cost_sums.get(action), default=0.0)
+                    )
+                    self._bwk_cost_counts[action] = cost_counts[action]
             self.load_error = None
+            self._check_loaded_features = True
         except Exception as exc:
             self._state = LinUCBState(action_names=BUDGET_POLICY_ACTIONS)
             self._family_state = LinUCBState(action_names=BUDGET_POLICY_FAMILIES)
@@ -1457,6 +1475,8 @@ class AdaptiveBudgetPolicyController:
             self._bwk_remaining_token_budget = int(self._bwk_run_token_budget)
             self._bwk_cumulative_tokens_charged = 0
             self._bwk_dual_variable = 0.0
+            self._bwk_cost_sums = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0.0)
+            self._bwk_cost_counts = dict.fromkeys(BUDGET_POLICY_ACTIONS, 0)
             self.load_error = f"{type(exc).__name__}: {exc}"
 
     def _append_event(self, *, event: BudgetPolicyEvent) -> None:

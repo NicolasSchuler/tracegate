@@ -6,6 +6,8 @@ lightweight equilibrium/update heuristics isolated from the main attempt loop.
 
 from __future__ import annotations
 
+import copy
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import pvariance
@@ -155,6 +157,35 @@ def _default_system_prompts_for_node(node_id: str) -> dict[str, str]:
     return {}
 
 
+TEP_CRITIC_UNPARSED = "unparsed"
+"""Improvement kind of a critic response without a usable score (POL-17)."""
+
+
+def _parse_score(value: Any) -> float | None:
+    """A finite numeric score, or ``None``; accepts numbers and strings like ``"7"`` or
+    ``"7/10"`` (a bare ``float()`` raised on such strings)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        score = float(value)
+    elif isinstance(value, str):
+        text = value.strip().split("/", 1)[0].strip()
+        try:
+            score = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    return score if math.isfinite(score) else None
+
+
+def _parse_score_map(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+    parsed = {str(key): _parse_score(value) for key, value in raw.items()}
+    return {key: value for key, value in parsed.items() if value is not None}
+
+
 @dataclass
 class TepCriticResult:
     overall_score_10: float
@@ -163,37 +194,33 @@ class TepCriticResult:
     task_independent_scores: dict[str, float] = field(default_factory=dict)
     task_dependent_scores: dict[str, float] = field(default_factory=dict)
     summary: str = ""
+    critic_parsed: bool = True
+    """False when the response had no usable ``overall_score_10`` (POL-17). A missing
+    payload used to read as a ``stable`` critique with score 0, which counted as
+    convergence."""
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> TepCriticResult:
         data = payload if isinstance(payload, dict) else {}
-        task_independent_raw = data.get("task_independent_scores")
-        task_dependent_raw = data.get("task_dependent_scores")
         feedback_raw = data.get("actionable_feedback")
+        score = _parse_score(data.get("overall_score_10"))
         improvement_kind = str(data.get("improvement_kind") or "stable").strip().lower()
         if improvement_kind not in TEP_IMPROVEMENT_KINDS:
             improvement_kind = "stable"
+        if score is None:
+            improvement_kind = TEP_CRITIC_UNPARSED
         return cls(
-            overall_score_10=float(data.get("overall_score_10") or 0.0),
+            overall_score_10=score if score is not None else 0.0,
             actionable_feedback=[
                 str(item).strip()
                 for item in (feedback_raw if isinstance(feedback_raw, list) else [])
                 if str(item).strip()
             ],
             improvement_kind=improvement_kind,
-            task_independent_scores={
-                str(key): float(value)
-                for key, value in (
-                    task_independent_raw.items() if isinstance(task_independent_raw, dict) else []
-                )
-            },
-            task_dependent_scores={
-                str(key): float(value)
-                for key, value in (
-                    task_dependent_raw.items() if isinstance(task_dependent_raw, dict) else []
-                )
-            },
+            task_independent_scores=_parse_score_map(data.get("task_independent_scores")),
+            task_dependent_scores=_parse_score_map(data.get("task_dependent_scores")),
             summary=str(data.get("summary") or ""),
+            critic_parsed=score is not None,
         )
 
 
@@ -470,7 +497,13 @@ def should_accept_candidate_update(
     nudged_score: float,
     validation_buffer: list[TepNodeValidationEntry],
 ) -> bool:
-    if float(nudged_score) < float(free_score):
+    """Accept when the candidate surface (*nudged_score*) beats the current one (*free_score*).
+
+    Both scores come from the same critic prompt on two different surfaces, so a tie is
+    no evidence and is rejected (POL-17: the two critiques used to score the same surface,
+    so ``>=`` accepted about half of all updates on noise).
+    """
+    if float(nudged_score) <= float(free_score):
         return False
     if not validation_buffer:
         return True
@@ -559,24 +592,17 @@ def _render_update_prompt(
     *,
     node_id: str,
     actor_surface: dict[str, Any],
-    free_critic: TepCriticResult,
-    nudged_critic: TepCriticResult,
+    critic: TepCriticResult,
     objective_packet: str,
 ) -> str:
     packet = {
         "node_id": node_id,
         "actor_surface": actor_surface,
-        "free_critic": {
-            "overall_score_10": free_critic.overall_score_10,
-            "improvement_kind": free_critic.improvement_kind,
-            "summary": free_critic.summary,
-            "actionable_feedback": list(free_critic.actionable_feedback),
-        },
-        "nudged_critic": {
-            "overall_score_10": nudged_critic.overall_score_10,
-            "improvement_kind": nudged_critic.improvement_kind,
-            "summary": nudged_critic.summary,
-            "actionable_feedback": list(nudged_critic.actionable_feedback),
+        "critic": {
+            "overall_score_10": critic.overall_score_10,
+            "improvement_kind": critic.improvement_kind,
+            "summary": critic.summary,
+            "actionable_feedback": list(critic.actionable_feedback),
         },
         "objective_packet": _truncate_text(objective_packet),
         "constraints": [
@@ -587,7 +613,7 @@ def _render_update_prompt(
     }
     return (
         "Propose a candidate prompt update for this node.\n"
-        "Use the free and nudged critic signals to improve the actor surface.\n"
+        "Use the critic's feedback to improve the actor surface.\n"
         "Return JSON only.\n\n" + json.dumps(packet, indent=2, ensure_ascii=False)
     )
 
@@ -620,9 +646,16 @@ class AdaptiveTepController:
         self.equilibrium_variance_threshold = float(equilibrium_variance_threshold)
         self.latest_traces: dict[str, TepNodeTrace] = {}
 
-    def save(self) -> None:
-        if self.state_path:
+    def save(self) -> str:
+        """Write the state; returns ``""`` or the error (ATT-17: failures were swallowed,
+        so later cases silently started from stale state)."""
+        if not self.state_path:
+            return ""
+        try:
             save_tep_state(state=self.state, path=self.state_path)
+        except (OSError, TypeError, ValueError) as exc:
+            return f"{type(exc).__name__}: {exc}"
+        return ""
 
     def node(self, node_id: str) -> TepNodeState:
         return self.state.node(node_id)
@@ -751,6 +784,48 @@ class AdaptiveTepController:
         }
 
 
+@dataclass
+class _TepCalls:
+    """The LLM endpoint of one post-attempt learning pass, and its call log."""
+
+    patcher: Any
+    context_dir: Path
+    cwd: Path
+    call_metas: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _critique_surface(
+    calls: _TepCalls,
+    *,
+    node_state: TepNodeState,
+    surface: dict[str, Any],
+    packet: dict[str, str],
+    phase: str,
+) -> TepCriticResult:
+    """Score *surface* with the node's critic; *phase* only labels the call."""
+    result = calls.patcher.generate_json(
+        system_prompt=TEP_CRITIC_SYSTEM_PROMPT,
+        prompt=_render_critic_prompt(
+            node_id=node_state.node_id,
+            phase="evaluate",
+            actor_surface=surface,
+            input_summary=str(packet.get("input_summary") or ""),
+            output_summary=str(packet.get("output_summary") or ""),
+            objective_packet=str(packet.get("objective_packet") or ""),
+            task_criteria=node_state.task_criteria,
+        ),
+        context_dir=calls.context_dir,
+        cwd=calls.cwd,
+        schema_name=f"{node_state.node_id}_critic",
+        schema=TEP_CRITIC_JSON_SCHEMA,
+        temperature=node_state.temperature,
+        max_tokens=1024,
+        operation_name=f"tep_{node_state.node_id}_critic_{phase}",
+    )
+    calls.call_metas.append(dict(getattr(result, "meta", None) or {}))
+    return TepCriticResult.from_payload(result.payload)
+
+
 def run_post_attempt_learning(
     *,
     controller: AdaptiveTepController,
@@ -764,7 +839,7 @@ def run_post_attempt_learning(
     if not callable(getattr(patcher, "generate_json", None)):
         return {"enabled": False, "reason": "generate_json_unavailable"}
 
-    call_metas: list[dict[str, Any]] = []
+    calls = _TepCalls(patcher=patcher, context_dir=context_dir, cwd=cwd)
     updates: dict[str, Any] = {
         "enabled": True,
         "beta_before": float(controller.state.beta),
@@ -775,62 +850,31 @@ def run_post_attempt_learning(
         if not node_id:
             continue
         node_state = controller.node(node_id)
-        actor_surface = {
+        current_surface = {
             "system_prompts": dict(node_state.system_prompts),
             "blocks": dict(node_state.actor_blocks),
         }
-        input_summary = str(packet.get("input_summary") or "")
-        output_summary = str(packet.get("output_summary") or "")
         objective_packet = str(packet.get("objective_packet") or "")
-        free_result = patcher.generate_json(
-            system_prompt=TEP_CRITIC_SYSTEM_PROMPT,
-            prompt=_render_critic_prompt(
-                node_id=node_id,
-                phase="free",
-                actor_surface=actor_surface,
-                input_summary=input_summary,
-                output_summary=output_summary,
-                objective_packet=objective_packet,
-                task_criteria=node_state.task_criteria,
-            ),
-            context_dir=context_dir,
-            cwd=cwd,
-            schema_name=f"{node_id}_critic",
-            schema=TEP_CRITIC_JSON_SCHEMA,
-            temperature=node_state.temperature,
-            max_tokens=1024,
-            operation_name=f"tep_{node_id}_critic_free",
+        # POL-17: a paired comparison. The critic scores the current surface, the updater
+        # proposes a change from that critique, and the same critic prompt scores the
+        # candidate surface. The two critiques used to score the same surface under a
+        # "free"/"nudged" label, so accepting the higher one was a coin flip.
+        free_critic = _critique_surface(
+            calls, node_state=node_state, surface=current_surface, packet=packet, phase="current"
         )
-        call_metas.append(dict(getattr(free_result, "meta", None) or {}))
-        nudged_result = patcher.generate_json(
-            system_prompt=TEP_CRITIC_SYSTEM_PROMPT,
-            prompt=_render_critic_prompt(
-                node_id=node_id,
-                phase="nudged",
-                actor_surface=actor_surface,
-                input_summary=input_summary,
-                output_summary=output_summary,
-                objective_packet=objective_packet,
-                task_criteria=node_state.task_criteria,
-            ),
-            context_dir=context_dir,
-            cwd=cwd,
-            schema_name=f"{node_id}_critic_nudged",
-            schema=TEP_CRITIC_JSON_SCHEMA,
-            temperature=node_state.temperature,
-            max_tokens=1024,
-            operation_name=f"tep_{node_id}_critic_nudged",
-        )
-        call_metas.append(dict(getattr(nudged_result, "meta", None) or {}))
-        free_critic = TepCriticResult.from_payload(free_result.payload)
-        nudged_critic = TepCriticResult.from_payload(nudged_result.payload)
+        if not free_critic.critic_parsed:
+            updates["node_updates"][node_id] = {
+                "accepted": False,
+                "reason": "critic_unparsed",
+                "critic_parsed": False,
+            }
+            continue
         update_result = patcher.generate_json(
             system_prompt=TEP_UPDATE_SYSTEM_PROMPT,
             prompt=_render_update_prompt(
                 node_id=node_id,
-                actor_surface=actor_surface,
-                free_critic=free_critic,
-                nudged_critic=nudged_critic,
+                actor_surface=current_surface,
+                critic=free_critic,
                 objective_packet=objective_packet,
             ),
             context_dir=context_dir,
@@ -841,7 +885,36 @@ def run_post_attempt_learning(
             max_tokens=1536,
             operation_name=f"tep_{node_id}_update",
         )
-        call_metas.append(dict(getattr(update_result, "meta", None) or {}))
+        calls.call_metas.append(dict(getattr(update_result, "meta", None) or {}))
+        candidate_state = copy.deepcopy(node_state)
+        apply_update_payload(node_state=candidate_state, payload=update_result.payload)
+        candidate_surface = {
+            "system_prompts": dict(candidate_state.system_prompts),
+            "blocks": dict(candidate_state.actor_blocks),
+        }
+        if candidate_surface == current_surface:
+            updates["node_updates"][node_id] = {
+                "accepted": False,
+                "reason": "no_candidate_change",
+                "critic_parsed": True,
+                "free_score": free_critic.overall_score_10,
+            }
+            continue
+        nudged_critic = _critique_surface(
+            calls,
+            node_state=node_state,
+            surface=candidate_surface,
+            packet=packet,
+            phase="candidate",
+        )
+        if not nudged_critic.critic_parsed:
+            updates["node_updates"][node_id] = {
+                "accepted": False,
+                "reason": "critic_unparsed",
+                "critic_parsed": False,
+                "free_score": free_critic.overall_score_10,
+            }
+            continue
         decision = controller.apply_candidate_update(
             node_id=node_id,
             case_id=case_id,
@@ -852,6 +925,7 @@ def run_post_attempt_learning(
         )
         updates["node_updates"][node_id] = {
             **decision,
+            "critic_parsed": True,
             "free_improvement_kind": free_critic.improvement_kind,
             "nudged_improvement_kind": nudged_critic.improvement_kind,
             "free_summary": free_critic.summary,
@@ -859,7 +933,7 @@ def run_post_attempt_learning(
         }
     updates["beta_after"] = float(controller.state.beta)
     # POL-02: every critic/update call is a real LLM call the attempt must pay for.
-    updates["llm_call_metas"] = call_metas
+    updates["llm_call_metas"] = calls.call_metas
     return updates
 
 

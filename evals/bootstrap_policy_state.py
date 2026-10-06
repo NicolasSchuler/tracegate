@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import argparse
 import glob
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 
 from . import _json as json
+from . import linucb_core as core
 from ._policy_utils import utc_now as _utc_now
 from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ACTIONS,
@@ -25,6 +26,7 @@ from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCH_TIER_BINARY,
     BUDGET_POLICY_ARCHITECTURES,
     BUDGET_POLICY_FAMILIES,
+    BWK_DUAL_STEP,
 )
 from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ACTIONS as BUDGET_GATE_ACTIONS,
@@ -40,47 +42,19 @@ from .adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
 from .eval_policy_features import CASE_LABEL_FEATURE_NAMES, drop_case_label_features
+from .policy_event_log import LoadedPolicyEvent, event_key, load_policy_events
 from .policy_feature_scaling import (
     DEFAULT_POLICY_FEATURE_SCALING_PROFILE,
+    is_percentile_feature_scaling_profile,
     normalize_feature_scaling_profile,
 )
 
 PolicyKind = Literal["online", "budget"]
 
 
-@dataclass(frozen=True)
-class LoadedPolicyEvent:
-    """One parsed policy event plus its source location."""
-
-    payload: dict[str, Any]
-    src: str
-    line_no: int
-
-
 @dataclass
-class ReplayState:
-    """Minimal serializable LinUCB replay state."""
-
-    action_names: tuple[str, ...]
-    feature_names: list[str] = field(default_factory=list)
-    decisions: int = 0
-    updates: int = 0
-    action_counts: dict[str, int] = field(default_factory=dict)
-    A: dict[str, np.ndarray] = field(default_factory=dict)
-    b: dict[str, np.ndarray] = field(default_factory=dict)
-    feature_scaling_history: dict[str, list[float]] = field(default_factory=dict)
-    feature_scaling_caps: dict[str, float] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        names = tuple(str(name) for name in self.action_names)
-        if not names:
-            names = ("default",)
-        self.action_names = names
-        normalized_counts = dict.fromkeys(names, 0)
-        for key, value in dict(self.action_counts).items():
-            if key in normalized_counts:
-                normalized_counts[key] = _safe_int(value, default=0)
-        self.action_counts = normalized_counts
+class ReplayState(core.LinUCBState):
+    """Serializable LinUCB replay state (the shared core state)."""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,7 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help=(
             "Path or glob to adaptive helper-policy / budget-policy JSONL event files. "
-            "Repeatable; replay order follows expanded argument order and file line order."
+            "Repeatable; events are replayed in chronological order (created_at_utc, run, "
+            "then log position) whatever the argument order."
         ),
     )
     parser.add_argument(
@@ -148,6 +123,27 @@ def main(argv: list[str] | None = None) -> int:
             "only to reproduce historical runs that learned from them."
         ),
     )
+    parser.add_argument(
+        "--exclude-case-ids",
+        default="",
+        help=(
+            "Case IDs whose events are not replayed: comma-separated, or @file with one ID per "
+            "line. Exclude the cases the warm-started run will be evaluated on (POL-15)."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-run-ids",
+        default="",
+        help="Run IDs whose events are not replayed: comma-separated, or @file (POL-15).",
+    )
+    parser.add_argument(
+        "--target-case-ids",
+        default="",
+        help=(
+            "Case IDs of the run this state will warm-start: comma-separated, or @file. "
+            "Replayed events on these cases trigger a target_case_overlap warning."
+        ),
+    )
     args = parser.parse_args(argv)
 
     expanded = _expand_paths(args.events)
@@ -161,10 +157,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Input error: {exc}")
         return 2
 
+    try:
+        excluded_cases = _id_set(args.exclude_case_ids)
+        excluded_runs = _id_set(args.exclude_run_ids)
+        target_cases = _id_set(args.target_case_ids)
+    except OSError as exc:
+        print(f"Input error: {exc}")
+        return 2
+    kept = [
+        event
+        for event in events
+        if str(event.payload.get("case_id") or "") not in excluded_cases
+        and str(event.payload.get("run_id") or "") not in excluded_runs
+    ]
+    excluded_events = len(events) - len(kept)
+    events = kept
+
     if not events:
         print("No valid policy events found.")
         _print_input_errors(input_errors)
         return 1
+
+    overlap = sorted(target_cases & {str(event.payload.get("case_id") or "") for event in events})
+    if overlap:
+        print(
+            f"WARNING: {len(overlap)} replayed case(s) are also target cases "
+            f"(e.g. {', '.join(overlap[:3])}); the warm-started policy will have seen the cases "
+            "it is evaluated on. Pass --exclude-case-ids to drop them."
+        )
 
     try:
         requested_kind = str(args.policy_kind or "auto").strip().lower()
@@ -191,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_input_errors(input_errors)
         return 2
 
+    payload["bootstrap_excluded_events"] = excluded_events
+    payload["bootstrap_target_case_overlap"] = len(overlap)
+    if overlap:
+        payload["bootstrap_warning_codes"] = sorted(
+            {*payload.get("bootstrap_warning_codes", []), "target_case_overlap"}
+        )
+        summary["warnings"] = sorted({*summary.get("warnings", []), "target_case_overlap"})
     output_path = Path(str(args.output_state)).expanduser()
     _write_json_atomic(output_path, payload)
 
@@ -204,6 +231,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {warning}")
     _print_input_errors(input_errors)
     return 0
+
+
+def _id_set(raw: str) -> set[str]:
+    """IDs from a comma-separated string, or from ``@path`` with one ID per line."""
+    text = str(raw or "").strip()
+    if text.startswith("@"):
+        text = Path(text[1:]).expanduser().read_text(encoding="utf-8").replace("\n", ",")
+    return {item.strip() for item in text.split(",") if item.strip()}
 
 
 def _bootstrap_online_state(
@@ -223,7 +258,7 @@ def _bootstrap_online_state(
     )
     if algorithm not in ONLINE_POLICY_ALGOS:
         raise ValueError(f"unsupported online algorithm for bootstrap: {algorithm!r}")
-    profile = _infer_uniform_profile(events, field="feature_scaling_profile")
+    profile = _replayable_profile(events, field="feature_scaling_profile")
     decay = _infer_uniform_float(
         events,
         field="configured_decay",
@@ -250,13 +285,16 @@ def _bootstrap_online_state(
             )
         else:
             warnings.append("invalid_selected_action_skipped")
+        _count_applied(state, payload.get("applied_action"))
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
         if not keep_case_label_features:
             masked_features = drop_case_label_features(feature_values)
             if len(masked_features) != len(feature_values):
                 warnings.append("case_label_features_dropped")
             feature_values = masked_features
-        _ensure_feature_state(state=state, cleaned_features=feature_values, l2=l2)
+        _ensure_feature_state(
+            state=state, cleaned_features=feature_values, l2=l2, warnings=warnings
+        )
         _update_feature_scaling_caps(
             state=state,
             raw_caps=payload.get("feature_scaling_caps"),
@@ -267,7 +305,7 @@ def _bootstrap_online_state(
         if behavior_action not in ONLINE_POLICY_ACTIONS:
             warnings.append("invalid_behavior_action_skipped")
             continue
-        _apply_recency_decay(state=state, decay=decay, l2=l2)
+        _apply_recency_decay(state=state, action=behavior_action, decay=decay, l2=l2)
         _apply_reward_update(
             state=state,
             action=behavior_action,
@@ -326,7 +364,7 @@ def _bootstrap_budget_state(
     )
     if architecture not in BUDGET_POLICY_ARCHITECTURES:
         raise ValueError(f"unsupported budget architecture for bootstrap: {architecture!r}")
-    profile = _infer_uniform_profile(events, field="feature_scaling_profile")
+    profile = _replayable_profile(events, field="feature_scaling_profile")
     decay = _infer_uniform_float(
         events,
         field="configured_decay",
@@ -350,6 +388,8 @@ def _bootstrap_budget_state(
     bwk_remaining_token_budget = 0
     bwk_cumulative_tokens_charged = 0
     bwk_dual_variable = 0.0
+    bwk_cost_sums: dict[str, float] = dict.fromkeys(BUDGET_GATE_ACTIONS, 0.0)
+    bwk_cost_counts: dict[str, int] = dict.fromkeys(BUDGET_GATE_ACTIONS, 0)
     if architecture == BUDGET_POLICY_ARCH_BWK_V1:
         bwk_run_token_budget = _infer_uniform_positive_int(
             events,
@@ -368,9 +408,12 @@ def _bootstrap_budget_state(
             )
         else:
             warnings.append("invalid_budget_selected_action_skipped")
+        _count_applied(gate_state, payload.get("applied_action"))
 
         feature_values = _coerce_feature_mapping(payload.get("feature_values"))
-        _ensure_feature_state(state=gate_state, cleaned_features=feature_values, l2=l2)
+        _ensure_feature_state(
+            state=gate_state, cleaned_features=feature_values, l2=l2, warnings=warnings
+        )
         _update_feature_scaling_caps(
             state=gate_state,
             raw_caps=payload.get("feature_scaling_caps"),
@@ -389,10 +432,12 @@ def _bootstrap_budget_state(
                 )
             else:
                 warnings.append("invalid_budget_selected_family_skipped")
+            _count_applied(family_state, payload.get("applied_family"))
             _ensure_feature_state(
                 state=family_state,
                 cleaned_features=family_feature_values,
                 l2=l2,
+                warnings=warnings,
             )
             _update_feature_scaling_caps(
                 state=family_state,
@@ -403,7 +448,7 @@ def _bootstrap_budget_state(
         if bool(payload.get("gate_model_updated")):
             behavior_action = str(payload.get("behavior_action") or "")
             if behavior_action in BUDGET_POLICY_ACTIONS:
-                _apply_recency_decay(state=gate_state, decay=decay, l2=l2)
+                _apply_recency_decay(state=gate_state, action=behavior_action, decay=decay, l2=l2)
                 _apply_reward_update(
                     state=gate_state,
                     action=behavior_action,
@@ -416,7 +461,7 @@ def _bootstrap_budget_state(
         if bool(payload.get("family_model_updated")):
             behavior_family = str(payload.get("behavior_family") or "")
             if behavior_family in BUDGET_POLICY_FAMILIES:
-                _apply_recency_decay(state=family_state, decay=decay, l2=l2)
+                _apply_recency_decay(state=family_state, action=behavior_family, decay=decay, l2=l2)
                 _apply_reward_update(
                     state=family_state,
                     action=behavior_family,
@@ -437,13 +482,28 @@ def _bootstrap_budget_state(
             remaining_before = bwk_remaining_token_budget
             bwk_cumulative_tokens_charged += charged
             bwk_remaining_token_budget = max(0, remaining_before - charged)
-            denom = max(1, bwk_run_token_budget or charged)
-            overspend_tokens = max(0, charged - remaining_before)
-            bwk_dual_variable = max(
-                0.0,
-                (float(bwk_dual_variable) * float(decay))
-                + (float(overspend_tokens) / float(denom)),
-            )
+            applied_action = str(payload.get("applied_action") or "")
+            if applied_action in bwk_cost_counts:
+                bwk_cost_sums[applied_action] += float(charged)
+                bwk_cost_counts[applied_action] += 1
+            if "bwk_target_tokens_per_decision" in payload:
+                # Event schema 7+: the pacing dual step (POL-04).
+                target = _safe_float(payload.get("bwk_target_tokens_per_decision"), default=0.0)
+                if target > 0.0:
+                    bwk_dual_variable = max(
+                        0.0,
+                        float(bwk_dual_variable)
+                        + BWK_DUAL_STEP * (float(charged) - target) / target,
+                    )
+            else:
+                # Older logs used the overspend rule; replay it so logged values reconcile.
+                denom = max(1, bwk_run_token_budget or charged)
+                overspend_tokens = max(0, charged - remaining_before)
+                bwk_dual_variable = max(
+                    0.0,
+                    (float(bwk_dual_variable) * float(decay))
+                    + (float(overspend_tokens) / float(denom)),
+                )
             after_logged = _safe_int(
                 payload.get("bwk_remaining_token_budget_after"),
                 default=bwk_remaining_token_budget,
@@ -479,6 +539,8 @@ def _bootstrap_budget_state(
         "bwk_remaining_token_budget": int(bwk_remaining_token_budget),
         "bwk_cumulative_tokens_charged": int(bwk_cumulative_tokens_charged),
         "bwk_dual_variable": float(bwk_dual_variable),
+        "bwk_cost_sums": dict(bwk_cost_sums),
+        "bwk_cost_counts": dict(bwk_cost_counts),
         "saved_at_utc": _utc_now(),
         "bootstrap_kind": "budget",
         "bootstrap_events_replayed": len(events),
@@ -500,67 +562,12 @@ def _expand_paths(items: list[str]) -> list[str]:
 def _load_policy_events(
     paths: list[str], *, strict_input: bool
 ) -> tuple[list[LoadedPolicyEvent], dict[str, int]]:
-    input_errors = {
-        "files_unreadable": 0,
-        "json_lines_invalid": 0,
-        "records_skipped": 0,
-        "duplicate_events_seen": 0,
-        "duplicate_events_resolved": 0,
-    }
-    deduped: dict[tuple[str, str, str, int, str], LoadedPolicyEvent] = {}
-    for src in paths:
-        src_path = Path(str(src))
-        try:
-            lines = src_path.read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
-            input_errors["files_unreadable"] += 1
-            if strict_input:
-                raise ValueError(f"{src}: unable to read ({exc})") from exc
-            continue
-        for line_no, raw_line in enumerate(lines, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                input_errors["json_lines_invalid"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: invalid JSON ({exc})") from exc
-                continue
-            if not isinstance(payload, dict):
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: JSON root is not an object")
-                continue
-            key = _event_key(payload)
-            if key is None:
-                input_errors["records_skipped"] += 1
-                if strict_input:
-                    raise ValueError(f"{src}:{line_no}: missing run/case/condition/attempt")
-                continue
-            loaded = LoadedPolicyEvent(payload=payload, src=str(src), line_no=line_no)
-            if key in deduped:
-                input_errors["duplicate_events_seen"] += 1
-                deduped.pop(key, None)
-            deduped[key] = loaded
-    input_errors["duplicate_events_resolved"] = input_errors["duplicate_events_seen"]
-    return list(deduped.values()), input_errors
+    """Chronologically ordered, deduplicated events (the shared loader, POL-18)."""
+    return load_policy_events(paths, strict_input=strict_input)
 
 
 def _event_key(payload: dict[str, Any]) -> tuple[str, str, str, int, str] | None:
-    run_id = str(payload.get("run_id") or "").strip()
-    case_id = str(payload.get("case_id") or "").strip()
-    condition = str(payload.get("condition") or "").strip()
-    attempt = _safe_int(payload.get("attempt"), default=-1)
-    if not run_id or not case_id or not condition or attempt < 0:
-        return None
-    decision_id = str(payload.get("decision_id") or "").strip()
-    if not decision_id:
-        decision_id = str(payload.get("created_at_utc") or "").strip()
-    if not decision_id:
-        decision_id = "unknown"
-    return run_id, case_id, condition, attempt, decision_id
+    return event_key(payload)
 
 
 def _detect_policy_kind(events: list[LoadedPolicyEvent], *, requested_kind: str) -> PolicyKind:
@@ -652,6 +659,22 @@ def _infer_uniform_string(
     if len(observed) > 1:
         raise ValueError(f"mixed {field} values in event logs: {sorted(observed)!r}")
     return next(iter(observed))
+
+
+def _replayable_profile(events: list[LoadedPolicyEvent], *, field: str) -> str:
+    """The scaling profile to bootstrap; ``percentile_v1`` is refused (POL-14).
+
+    Percentile caps are fitted from raw-value history that event logs don't contain, so a
+    replayed state would resume in a different feature space from the one its ``A`` and
+    ``b`` were built in. Warm-start such runs from their saved state file instead.
+    """
+    profile = _infer_uniform_profile(events, field=field)
+    if is_percentile_feature_scaling_profile(profile):
+        raise ValueError(
+            f"refusing to bootstrap {profile} state: its scaling caps can't be rebuilt from "
+            "event logs; warm-start from the run's saved state file instead"
+        )
+    return profile
 
 
 def _infer_uniform_profile(events: list[LoadedPolicyEvent], *, field: str) -> str:
@@ -751,75 +774,23 @@ def _ensure_feature_state(
     state: ReplayState,
     cleaned_features: dict[str, float],
     l2: float,
+    warnings: list[str] | None = None,
 ) -> None:
-    if not state.feature_names:
-        state.feature_names = sorted(str(key) for key in cleaned_features)
-        dim = len(state.feature_names)
-        if dim <= 0:
-            state.feature_names = ["bias"]
-            dim = 1
-        state.A = {action: (np.eye(dim, dtype=float) * float(l2)) for action in state.action_names}
-        state.b = {action: np.zeros((dim,), dtype=float) for action in state.action_names}
-        return
-    expanded_feature_names = sorted(set(state.feature_names) | {str(k) for k in cleaned_features})
-    if expanded_feature_names != state.feature_names:
-        previous_feature_names = list(state.feature_names)
-        previous_index = {name: idx for idx, name in enumerate(previous_feature_names)}
-        previous_dim = len(previous_feature_names)
-        new_dim = len(expanded_feature_names)
-        state.feature_names = list(expanded_feature_names)
-        for action in state.action_names:
-            previous_A = state.A.get(action)
-            previous_b = state.b.get(action)
-            next_A = np.eye(new_dim, dtype=float) * float(l2)
-            next_b = np.zeros((new_dim,), dtype=float)
-            if (
-                isinstance(previous_A, np.ndarray)
-                and isinstance(previous_b, np.ndarray)
-                and previous_A.shape == (previous_dim, previous_dim)
-                and previous_b.shape == (previous_dim,)
-            ):
-                for new_row, feature_row in enumerate(expanded_feature_names):
-                    old_row = previous_index.get(feature_row)
-                    if old_row is None:
-                        continue
-                    next_b[new_row] = previous_b[old_row]
-                    for new_col, feature_col in enumerate(expanded_feature_names):
-                        old_col = previous_index.get(feature_col)
-                        if old_col is None:
-                            continue
-                        next_A[new_row, new_col] = previous_A[old_row, old_col]
-            state.A[action] = next_A
-            state.b[action] = next_b
-    dim = len(state.feature_names)
-    for action in state.action_names:
-        matrix = state.A.get(action)
-        vector = state.b.get(action)
-        if matrix is None or matrix.shape != (dim, dim):
-            state.A[action] = np.eye(dim, dtype=float) * float(l2)
-        if vector is None or vector.shape != (dim,):
-            state.b[action] = np.zeros((dim,), dtype=float)
+    """Expand the replay model; flag events that lack known features or reset an arm (POL-21)."""
+    if warnings is not None and core.missing_features(state, cleaned_features):
+        warnings.append("feature_set_changed_across_events")
+    change = core.ensure_feature_state(state, cleaned_features, l2=float(l2))
+    if warnings is not None and change.reset_arms:
+        warnings.append("arm_reset_to_prior")
 
 
-def _apply_recency_decay(*, state: ReplayState, decay: float, l2: float) -> None:
-    if float(decay) >= 1.0 or not state.feature_names:
-        return
-    dim = len(state.feature_names)
-    prior = np.eye(dim, dtype=float) * float(l2)
-    for action in state.action_names:
-        matrix = state.A.get(action)
-        vector = state.b.get(action)
-        if matrix is None or vector is None or matrix.shape != (dim, dim) or vector.shape != (dim,):
-            continue
-        state.A[action] = (float(decay) * matrix) + ((1.0 - float(decay)) * prior)
-        state.b[action] = float(decay) * vector
+def _apply_recency_decay(*, state: ReplayState, action: str, decay: float, l2: float) -> None:
+    core.apply_recency_decay(state, action=action, decay=float(decay), l2=float(l2))
 
 
 def _feature_vector(*, state: ReplayState, feature_values: dict[str, float]) -> np.ndarray:
-    feature_names = state.feature_names or ["bias"]
-    return np.array(
-        [_safe_float(feature_values.get(name, 0.0), default=0.0) for name in feature_names],
-        dtype=float,
+    return core.feature_vector(
+        state, feature_values, to_float=lambda value, _name: _safe_float(value, default=0.0)
     )
 
 
@@ -830,14 +801,8 @@ def _apply_reward_update(
     reward: float,
     feature_values: dict[str, float],
 ) -> None:
-    matrix = state.A.get(action)
-    vector = state.b.get(action)
-    if matrix is None or vector is None:
-        return
     x = _feature_vector(state=state, feature_values=feature_values)
-    state.A[action] = matrix + np.outer(x, x)
-    state.b[action] = vector + (float(reward) * x)
-    state.updates = int(state.updates) + 1
+    core.rank_one_update(state, action=action, reward=reward, x=x)
 
 
 def _update_feature_scaling_caps(*, state: ReplayState, raw_caps: Any) -> None:
@@ -851,6 +816,13 @@ def _update_feature_scaling_caps(*, state: ReplayState, raw_caps: Any) -> None:
             state.feature_scaling_caps[str(key)] = float(numeric)
 
 
+def _count_applied(state: ReplayState, raw_action: object) -> None:
+    """Count the logged applied action (POL-24); events without one are skipped."""
+    action = str(raw_action or "")
+    if action in state.applied_action_counts:
+        state.applied_action_counts[action] += 1
+
+
 def _serialize_replay_state(state: ReplayState) -> dict[str, Any]:
     return {
         "feature_names": list(state.feature_names),
@@ -858,6 +830,9 @@ def _serialize_replay_state(state: ReplayState) -> dict[str, Any]:
         "updates": int(state.updates),
         "action_counts": {
             action: int(state.action_counts.get(action, 0)) for action in state.action_names
+        },
+        "applied_action_counts": {
+            action: int(state.applied_action_counts.get(action, 0)) for action in state.action_names
         },
         "A": {
             action: state.A.get(action, np.empty((0, 0), dtype=float)).tolist()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from evals.adaptive_budget_online_policy import (
@@ -46,6 +47,11 @@ from evals.eval_types import (
     ADAPTIVE_LOCAL_REWARD_SUCCESS_HINT,
     AdaptiveBudgetControlProfile,
     PreGateResult,
+)
+from evals.policy_feature_scaling import (
+    INTERACTION_FEATURE_FACTORS,
+    is_count_like_feature,
+    scale_feature_mapping,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -191,14 +197,13 @@ class TestOnlineFeatureVector:
             **_online_feature_kwargs(attempt=5, max_attempts=5)
         )
         assert features["attempt_frac"] == pytest.approx(1.0)
-        assert features["attempts_remaining_frac"] == pytest.approx(0.0)
+        assert "attempts_remaining_frac" not in features  # always 1 - attempt_frac (POL-06)
 
     def test_attempt_frac_first_attempt(self) -> None:
         features = _adaptive_online_feature_vector(
             **_online_feature_kwargs(attempt=1, max_attempts=4)
         )
         assert features["attempt_frac"] == pytest.approx(0.25)
-        assert features["attempts_remaining_frac"] == pytest.approx(0.75)
 
     def test_timed_out_flag(self) -> None:
         feat_on = _adaptive_online_feature_vector(**_online_feature_kwargs(timed_out=True))
@@ -290,13 +295,39 @@ class TestOnlineFeatureVector:
             assert features["pregate_exception_is_syntax"] == 1.0, exc_type
 
     def test_last_helper_action_one_hot(self) -> None:
+        # skip_helper is the reference level since POL-06 (no feature of its own); this
+        # test used to expect all ten levels.
+        assert "last_helper_action_skip_helper" not in _adaptive_online_feature_vector(
+            **_online_feature_kwargs()
+        )
         for action in ONLINE_POLICY_ACTIONS:
             features = _adaptive_online_feature_vector(
                 **_online_feature_kwargs(last_helper_action_executed=action)
             )
             for a in ONLINE_POLICY_ACTIONS:
+                if a == "skip_helper":
+                    continue
                 expected = 1.0 if a == action else 0.0
                 assert features[f"last_helper_action_{a}"] == expected
+
+    def test_bias_is_not_a_linear_combination_of_varying_features(self) -> None:
+        """POL-06: ``bias`` equalled the sum of the ten one-hot levels, and
+        ``attempts_remaining_frac`` was ``1 - attempt_frac``."""
+        rows = [
+            _adaptive_online_feature_vector(
+                **_online_feature_kwargs(
+                    last_helper_action_executed=action, attempt=attempt, max_attempts=4
+                )
+            )
+            for action in ONLINE_POLICY_ACTIONS
+            for attempt in (1, 2, 3, 4)
+        ]
+        varying = [
+            name for name in rows[0] if name != "bias" and len({row[name] for row in rows}) > 1
+        ]
+        columns = ["bias", *varying]
+        design = np.array([[row[name] for name in columns] for row in rows])
+        assert np.linalg.matrix_rank(design) == len(columns)
 
     def test_interaction_profile_adds_curated_online_features(self) -> None:
         features = _adaptive_online_feature_vector(
@@ -310,9 +341,21 @@ class TestOnlineFeatureVector:
                 feature_scaling_profile="v1_interactions",
             )
         )
-        assert features["attempt_frac_x_stagnation_streak"] == pytest.approx(1.5)
-        assert features["pregate_score_x_snapshot_available"] == pytest.approx(0.5)
-        assert features["helper_calls_used_x_helper_low_yield_ratio"] == pytest.approx(3.0)
+        # POL-19: products of v1-scaled factors, under names that aren't count-like. They
+        # used to multiply raw values (1.5, 0.5, 3.0) as attempt_frac_x_stagnation_streak,
+        # pregate_score_x_snapshot_available and helper_calls_used_x_helper_low_yield_ratio.
+        stagnation_scaled = math.log1p(2) / math.log1p(10)
+        helper_calls_scaled = math.log1p(4) / math.log1p(8)
+        assert features["ix_attempt_frac_x_stagnation"] == pytest.approx(0.75 * stagnation_scaled)
+        assert features["ix_pregate_score_x_snapshot_available"] == pytest.approx(0.5)
+        assert features["ix_helper_calls_used_x_low_yield_ratio"] == pytest.approx(
+            helper_calls_scaled * 0.75
+        )
+        assert "attempt_frac_x_stagnation_streak" not in features
+        scaled = scale_feature_mapping(features, profile="v1_interactions")
+        for name in INTERACTION_FEATURE_FACTORS:
+            assert not is_count_like_feature(name)
+            assert scaled[name] == features[name]
 
     def test_bug_source_imported(self) -> None:
         features_hc = _adaptive_online_feature_vector(
@@ -398,6 +441,17 @@ class TestBudgetFeatureVector:
     def test_bias_is_one(self) -> None:
         features = _adaptive_budget_feature_vector(**_budget_feature_kwargs())
         assert features["bias"] == 1.0
+
+    def test_attempt_progress_is_one_feature(self) -> None:
+        """POL-06: ``attempts_remaining_frac`` was always ``1 - attempt_frac``."""
+        rows = [
+            _adaptive_budget_feature_vector(
+                **_budget_feature_kwargs(attempt=attempt, max_attempts=4)
+            )
+            for attempt in (1, 2, 3, 4)
+        ]
+        assert "attempts_remaining_frac" not in rows[0]
+        assert [row["attempt_frac"] for row in rows] == [0.25, 0.5, 0.75, 1.0]
 
     def test_tier_frac_at_max(self) -> None:
         features = _adaptive_budget_feature_vector(
@@ -1163,7 +1217,8 @@ class TestBuildControlProfile:
         )
         assert profile.openai_max_tokens == 0
 
-    def test_dense_ladder_defers_discrete_widening_at_first_coarse_jump(self) -> None:
+    def test_dense_ladder_widens_discrete_limits_by_one_at_first_coarse_jump(self) -> None:
+        """POL-10: any step above base widens by at least 1 (this used to defer to 0)."""
         profile = _build_adaptive_budget_control_profile(
             tier_index=2,
             base_tier_index=0,
@@ -1180,9 +1235,9 @@ class TestBuildControlProfile:
             is_openai_patcher=True,
         )
         assert profile.propose_budget_multiplier == pytest.approx(1.2)
-        assert profile.helper_max_calls == 5
-        assert profile.stage_a_max_requests == 2
-        assert profile.context_compaction_max_calls == 1
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
+        assert profile.context_compaction_max_calls == 2
 
     def test_dense_ladder_caps_discrete_widening_at_plus_two(self) -> None:
         profile = _build_adaptive_budget_control_profile(
@@ -1255,7 +1310,9 @@ class TestBuildFamilyProfile:
         # context_level=1 → delta=1
         assert profile.helper_max_calls == 6
 
-    def test_dense_context_family_keeps_discrete_limits_flat_until_later_levels(self) -> None:
+    def test_dense_context_family_widens_discrete_limits_from_the_first_step(self) -> None:
+        """POL-10: the context family used to keep its discrete limits flat until later
+        levels, so with max_ups_per_case=1 it changed nothing."""
         profile = _build_adaptive_budget_family_profile(
             time_level=0,
             tokens_level=0,
@@ -1273,10 +1330,33 @@ class TestBuildFamilyProfile:
             base_response_mode="",
             is_openai_patcher=True,
         )
-        assert profile.helper_max_calls == 5
-        assert profile.stage_a_max_requests == 2
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
         assert profile.stage_a_max_chars == 12000
-        assert profile.context_compaction_max_calls == 1
+        assert profile.context_compaction_max_calls == 2
+
+    def test_default_ladder_context_family_first_step_changes_discrete_limits(self) -> None:
+        """POL-10 regression: default ladder, one step up (max_ups_per_case=1)."""
+        profile = _build_adaptive_budget_family_profile(
+            time_level=0,
+            tokens_level=0,
+            context_level=1,
+            base_tier_index=0,
+            tier_multipliers=[1.0, 1.1, 1.2, 1.35, 1.5],
+            base_propose_budget_sec=100.0,
+            base_openai_max_tokens=4096,
+            base_helper_max_calls=5,
+            base_stage_a_max_requests=2,
+            base_stage_a_max_chars=10000,
+            base_retry_history_max_chars=5000,
+            base_context_compaction_max_calls=1,
+            context_compaction_enabled=True,
+            base_response_mode="",
+            is_openai_patcher=True,
+        )
+        assert profile.helper_max_calls == 6
+        assert profile.stage_a_max_requests == 3
+        assert profile.context_compaction_max_calls == 2
 
     def test_two_rung_context_family_only_widens_discrete_limits_by_one(self) -> None:
         profile = _build_adaptive_budget_family_profile(
@@ -1351,7 +1431,10 @@ class TestBudgetTierHelpers:
 
     def test_discrete_widening_delta_caps_at_plus_two(self) -> None:
         assert _adaptive_budget_discrete_widening_delta(level=1, base_level=0, max_level=1) == 1
-        assert _adaptive_budget_discrete_widening_delta(level=2, base_level=0, max_level=6) == 0
+        # POL-10: at least 1 above base (level 2 of 6 used to give 0).
+        assert _adaptive_budget_discrete_widening_delta(level=2, base_level=0, max_level=6) == 1
+        assert _adaptive_budget_discrete_widening_delta(level=1, base_level=0, max_level=4) == 1
+        assert _adaptive_budget_discrete_widening_delta(level=0, base_level=0, max_level=4) == 0
         assert _adaptive_budget_discrete_widening_delta(level=4, base_level=0, max_level=6) == 1
         assert _adaptive_budget_discrete_widening_delta(level=6, base_level=0, max_level=6) == 2
 

@@ -2079,7 +2079,7 @@ def _make_full_setup_args() -> MagicMock:
     ns.adaptive_online_save_every = 10
     ns.adaptive_online_decay = 1.0
     ns.adaptive_online_feature_scaling_profile = "none"
-    ns.adaptive_online_action_score_biases = "search_only=-0.50,frame_only=-0.25"
+    ns.adaptive_online_action_score_biases = "search_only=-0.10,frame_only=-0.05"
     ns.adaptive_online_state_path = "/dev/null"
     ns.adaptive_online_events_path = "/dev/null"
     ns.adaptive_budget_policy_mode = "off"
