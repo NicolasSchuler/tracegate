@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+from evals import eval_evidence
 from evals.eval_evidence import (
     RESTRICTED_ACTION_NO_VALID_REQUESTS,
     build_fallback_context_bundle,
@@ -76,10 +79,22 @@ def test_att21_request_budget_zero_executes_no_request(tmp_path: Path) -> None:
     assert data.reason == "request_budget_zero"
 
 
-def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(tmp_path: Path) -> None:
+def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _workdir(tmp_path / "work")
     secret = tmp_path / "secret.py"
     secret.write_text("TOKEN = 'leak'\n", "utf-8")
+
+    read_paths: list[Path] = []
+    real_read = eval_evidence._read_text_limited
+
+    def _spy_read(path: Path, *, max_chars: int) -> str | None:
+        read_paths.append(path)
+        return real_read(path, max_chars=max_chars)
+
+    monkeypatch.setattr(eval_evidence, "_read_text_limited", _spy_read)
+
     for bad in ("../secret.py", str(secret), "/etc/passwd"):
         data = build_fallback_context_bundle(
             root=root,
@@ -92,3 +107,7 @@ def test_att20_fallback_bundle_ignores_paths_outside_the_workdir(tmp_path: Path)
         )
         assert "leak" not in data.text
         assert all(".." not in str(block.get("path")) for block in data.blocks)
+    # ATT-20: neighbor discovery used to open the crash path before validating it, so
+    # assert the outside file was never read rather than merely absent from the result.
+    outside = [path for path in read_paths if not path.resolve().is_relative_to(root.resolve())]
+    assert not outside, outside

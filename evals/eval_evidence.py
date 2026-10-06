@@ -646,8 +646,31 @@ def build_fallback_context_bundle(
     Heuristically selects crash-file, failing-test, and import-neighbor
     files up to *max_total_chars*.
     """
+    allowed_paths = (
+        {
+            normalized
+            for line in file_index_lines
+            if (normalized := _normalize_context_rel_path(str(line))) is not None
+        }
+        if file_index_lines is not None
+        else None
+    )
+    root_resolved = root.resolve()
+
+    def _confined_rel_path(raw_path: str | None) -> str | None:
+        """ATT-20: accept a candidate only if it stays inside *root* and the allow-list."""
+        if not raw_path:
+            return None
+        rel = _normalize_context_rel_path(str(raw_path))
+        if rel is None or (allowed_paths is not None and rel not in allowed_paths):
+            return None
+        if not (root / rel).resolve().is_relative_to(root_resolved):
+            return None
+        return rel
+
     candidate_paths: list[str] = []
-    crash_file = _crash_file_from_snapshot(snapshot)
+    # ATT-20: validate the crash path before anything reads it, including neighbor discovery.
+    crash_file = _confined_rel_path(_crash_file_from_snapshot(snapshot))
     if crash_file is not None:
         candidate_paths.append(crash_file)
 
@@ -675,24 +698,11 @@ def build_fallback_context_bundle(
     evidence_items: list[dict[str, Any]] = []
     seen_evidence_ids: set[str] = set()
     total_chars = 0
-    allowed_paths = (
-        {
-            normalized
-            for line in file_index_lines
-            if (normalized := _normalize_context_rel_path(str(line))) is not None
-        }
-        if file_index_lines is not None
-        else None
-    )
-    root_resolved = root.resolve()
     for rel_path in candidate_paths:
-        # ATT-20: snapshot paths can be absolute or contain "..", so validate each one.
-        rel = _normalize_context_rel_path(rel_path)
-        if rel is None or (allowed_paths is not None and rel not in allowed_paths):
+        rel = _confined_rel_path(rel_path)
+        if rel is None:
             continue
         target = root / rel
-        if not target.resolve().is_relative_to(root_resolved):
-            continue
         if not target.exists() or not target.is_file():
             continue
         remaining_chars = max_total_chars - total_chars
