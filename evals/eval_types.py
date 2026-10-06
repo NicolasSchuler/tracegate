@@ -274,9 +274,9 @@ _CONTAINER_ACTIVE_STATES = {"running", "restarting", "paused"}
 RUN_EVAL_CONFIG_SECTION = "run_eval"
 RUN_EVAL_CONFIG_LOCK_SCHEMA_VERSION = 1
 RUN_EVAL_LOCKFILE_REDACTED = "***REDACTED***"
-RUN_EVAL_SECRET_CONFIG_LITERAL_KEYS = {"openai_api_key"}
+RUN_EVAL_SECRET_CONFIG_LITERAL_KEYS = {"openai_api_key", "adaptive_decision_model_api_key"}
 RUN_EVAL_SECRET_CONFIG_ENV_KEYS = {"openai_api_key_env"}
-RUN_EVAL_LOCKFILE_REDACTED_KEYS = {"openai_api_key"}
+RUN_EVAL_LOCKFILE_REDACTED_KEYS = {"openai_api_key", "adaptive_decision_model_api_key"}
 EVAL_RECORD_TYPE_ATTEMPT = "attempt"
 EVAL_RECORD_TYPE_INFRA_EVENT = "infra_event"
 
@@ -633,6 +633,8 @@ class AdaptiveRuntimeConfig:
     adaptive_online_policy_algo: str = "linucb"
     adaptive_online_feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     adaptive_online_action_score_biases: str = DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES
+    adaptive_online_include_case_labels: bool = False
+    adaptive_lite_snapshot_mode: str = "replace"
     adaptive_budget_policy_controller: Any | None = None
     adaptive_budget_policy_mode: str = "on"
     adaptive_budget_policy_algo: str = "linucb"
@@ -800,6 +802,8 @@ class RunConditionInputs:
     adaptive_online_policy_algo: str = "linucb"
     adaptive_online_feature_scaling_profile: str = DEFAULT_POLICY_FEATURE_SCALING_PROFILE
     adaptive_online_action_score_biases: str = DEFAULT_ADAPTIVE_ONLINE_ACTION_SCORE_BIASES
+    adaptive_online_include_case_labels: bool = False
+    adaptive_lite_snapshot_mode: str = "replace"
     adaptive_budget_policy_controller: Any | None = None
     adaptive_budget_policy_mode: str = "on"
     adaptive_budget_policy_algo: str = "linucb"
@@ -958,6 +962,8 @@ class RunConditionInputs:
             adaptive_online_policy_algo=adaptive.adaptive_online_policy_algo,
             adaptive_online_feature_scaling_profile=adaptive.adaptive_online_feature_scaling_profile,
             adaptive_online_action_score_biases=adaptive.adaptive_online_action_score_biases,
+            adaptive_online_include_case_labels=adaptive.adaptive_online_include_case_labels,
+            adaptive_lite_snapshot_mode=adaptive.adaptive_lite_snapshot_mode,
             adaptive_budget_policy_controller=adaptive.adaptive_budget_policy_controller,
             adaptive_budget_policy_mode=adaptive.adaptive_budget_policy_mode,
             adaptive_budget_policy_algo=adaptive.adaptive_budget_policy_algo,
@@ -1073,6 +1079,8 @@ class RunConditionInputs:
             adaptive_online_policy_algo=self.adaptive_online_policy_algo,
             adaptive_online_feature_scaling_profile=self.adaptive_online_feature_scaling_profile,
             adaptive_online_action_score_biases=self.adaptive_online_action_score_biases,
+            adaptive_online_include_case_labels=self.adaptive_online_include_case_labels,
+            adaptive_lite_snapshot_mode=self.adaptive_lite_snapshot_mode,
             adaptive_budget_policy_controller=self.adaptive_budget_policy_controller,
             adaptive_budget_policy_mode=self.adaptive_budget_policy_mode,
             adaptive_budget_policy_algo=self.adaptive_budget_policy_algo,

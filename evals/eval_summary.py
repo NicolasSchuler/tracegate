@@ -15,6 +15,7 @@ from evals.analyze_results import (
     _derive_case_condition_rows,
     _is_external_baseline_condition,
     _load_and_group_records,
+    _ope_target_order,
     _print_input_errors,
     _records_by_case_condition,
     _summarize_bucket,
@@ -444,7 +445,7 @@ def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]
     targets_raw = ope.get("targets")
     targets = targets_raw if isinstance(targets_raw, dict) else {}
     parts: list[str] = []
-    for target_name in ordered_targets:
+    for target_name in _ope_target_order(ope, ordered_targets=ordered_targets):
         target = targets.get(target_name)
         if not isinstance(target, dict):
             continue

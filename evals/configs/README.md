@@ -45,6 +45,11 @@ See [`evals/README.md`](../README.md) for full eval documentation.
 | `openai_adaptive_probe_traceback_first.template.toml` | `layered_adaptive_llm` | Probe preset: adaptive traceback-first reveal mode |
 | `openai_adaptive_probe_snapshot_pruning_heuristic.template.toml` | `layered_adaptive_llm` | Probe preset: heuristic prompt-facing snapshot pruning |
 | `openai_adaptive_probe_tep_full.template.toml` | `layered_adaptive_llm` | Probe preset: full-mode TEP prompt-state adaptation |
+| `openai_adaptive_probe_decision_model_shadow.template.toml` | `layered_adaptive_llm` | Probe preset: System-1 decision model logged next to LinUCB (run first; feeds the decision-model OPE targets) |
+| `openai_adaptive_probe_decision_model_policy.template.toml` | `layered_adaptive_llm` | Probe preset: decision model selects the helper action (`evidence_v1`) |
+| `openai_adaptive_probe_decision_model_policy_atomic.template.toml` | `layered_adaptive_llm` | Probe preset: decision model answers diagnostic questions, code maps them to an action (`evidence_atomic_v1`) |
+| `openai_adaptive_probe_decision_model_features.template.toml` | `layered_adaptive_llm` | Probe preset: six decision-model diagnostic answers as LinUCB features |
+| `openai_adaptive_probe_decision_model_prior.template.toml` | `layered_adaptive_llm` | Probe preset: decision-model-guided warm-up plus a fading score prior on LinUCB |
 
 Files named `*.template.toml` must be copied and customised before use (set
 `run_id`, policy state paths, etc.). The `*.latest.toml` file is ready to use
@@ -53,6 +58,22 @@ after setting `run_id`.
 Shared adaptive templates now ship with two paper-facing defaults:
 - helper score priors: `online_action_score_biases = "search_only=-1.00,frame_only=-0.50"`
 - conservative budget ladder: `budget_policy_tiers = "1.0,1.1,1.2,1.35,1.5"` with `budget_policy_max_ups_per_case = 1`
+
+Two policy-input defaults changed in 2026-10 and are recorded in the run configuration:
+- `online_include_case_labels = false`: `case.json` labels are no longer helper-policy features.
+- `lite_snapshot_mode = "replace"`: under `adaptive_reveal_mode = "full"` the lite snapshot
+  actions replace the full snapshot section (`"supplement"` restores the old behavior).
+
+The decision-model presets need the GPU sidecar (`just decision-model-up`, see
+`docs/local_docker_eval_runbook.md`) and set, under `[run_eval.adaptive]`:
+
+```toml
+[run_eval.adaptive]
+online_policy_mode = "on"          # policy/features/prior roles need "on"
+decision_model_role = "policy"     # off | shadow | policy | features | prior
+decision_model_profile = "evidence_v1"
+decision_model_url = "http://127.0.0.1:8090"  # or $TRACEGATE_DECISION_MODEL_URL
+```
 
 For `tier_binary`, that dense ladder does not advance via literal `+1` rung steps. The effective promotion path is `1.0 -> 1.2 -> 1.5 -> max tier`, with fallback to the next larger configured tier if one of those targets is absent.
 
@@ -163,7 +184,7 @@ Common table prefixes:
 | `[run_eval]` | Top-level: patcher backend, conditions, parallelism (`jobs`), attempts (`k`), case selection |
 | `[run_eval.openai]` | Model endpoint: `base_url`, `model`, `http2`, response mode, timeouts, retry policy |
 | `[run_eval.context]` | Prompt compaction: mode, scope, target size |
-| `[run_eval.adaptive]` | Helper & budget online policies: algorithm, hyperparameters, state/event paths |
+| `[run_eval.adaptive]` | Helper & budget online policies: algorithm, hyperparameters, state/event paths, decision-model role and sidecar (`decision_model_*`), policy-input switches |
 | `[run_eval.patch]` | Patch sanitisation and verifier settings |
 | `[run_eval.syntax]` | Syntax preflight checks before patch application |
 | `[run_eval.container]` | Execution backend knobs such as `image`, `network`, and resource limits |

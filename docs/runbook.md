@@ -349,6 +349,18 @@ The container derives runtime CPU threads from visible cores. With the default
 The shipped image also defaults to `-ub 2048 --no-mmap` via
 `LLAMA_UBATCH_SIZE=2048` and `LLAMA_NO_MMAP=1`.
 
+### Optional: System-1 decision-model sidecar
+
+Needed only for `--adaptive-decision-model-role` runs (details:
+`docs/local_docker_eval_runbook.md` and `docs/adaptive_online_policy_design.md`).
+
+```bash
+pueue add -- just decision-model-build
+pueue add -- env GPU=1 CLEF_REVISION=<commit-sha> just decision-model-up
+just decision-model-health      # 503 while loading
+pueue add -- just decision-model-smoke
+```
+
 ### Optional: Blackwell vLLM helper
 
 ```bash
@@ -534,6 +546,18 @@ uv run python -m evals.run_eval \
 
 # via config
 uv run python -m evals.run_eval --config evals/configs/openai_adaptive.template.toml
+```
+
+With the System-1 decision model (sidecar running; start with `shadow`, then compare the
+decision-model OPE targets before live roles):
+
+```bash
+pueue add -- uv run python -m evals.run_eval \
+  --config evals/configs/openai_adaptive_probe_decision_model_shadow.template.toml \
+  --run-id dm-shadow-001
+
+# offline probe: score the decision model's answers against case labels, no repair budget
+pueue add -- uv run python -m evals.decision_model.probe --executor local --split dev --jobs 4 --report
 ```
 
 ### External baselines (Python direct)

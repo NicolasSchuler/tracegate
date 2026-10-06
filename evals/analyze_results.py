@@ -15,6 +15,8 @@ import glob
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,7 +24,13 @@ import numpy as np
 from sklearn.linear_model import RidgeCV
 
 from . import _json as json
-from .adaptive_online_policy import ONLINE_POLICY_ACTIONS
+from .adaptive_online_policy import (
+    ACTION_INVOKE_HELPER,
+    ACTION_SKIP_HELPER,
+    ONLINE_POLICY_ACTIONS,
+)
+from .decision_model.policy import atomic_action_from_answers
+from .decision_model.schema import AtomicThresholds, ParsedAnswers, get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +130,23 @@ ADAPTIVE_OPE_RIDGE_ALPHA = 1e-3
 ADAPTIVE_OPE_RIDGE_ALPHAS = (0.001, 0.01, 0.1, 1.0, 10.0, 100.0)
 ADAPTIVE_OPE_ESTIMATOR_AGREEMENT_ABS_TOL = 0.05
 ADAPTIVE_OPE_ESTIMATOR_AGREEMENT_REL_TOL = 0.2
+ADAPTIVE_OPE_SHADOW_POLICY_MODE = "shadow"
+DECISION_MODEL_ADVICE_STATUS_OK = "ok"
+DECISION_MODEL_TARGET_GREEDY = "decision_model_greedy"
+DECISION_MODEL_TARGET_STOCHASTIC = "decision_model_stochastic"
+DECISION_MODEL_TARGET_ATOMIC = "decision_model_atomic"
+# Thresholds of the atomic profile, applied offline to aux answers logged by other profiles.
+DECISION_MODEL_ATOMIC_THRESHOLDS = get_profile("evidence_atomic_v1").atomic or AtomicThresholds()
+# Target name -> derivation kind for the per-sample decision-model policies.  These are only
+# emitted when at least one sample carries usable advice, so runs without a decision model keep
+# their historical OPE output.
+DECISION_MODEL_TARGET_KINDS: tuple[tuple[str, str], ...] = (
+    (DECISION_MODEL_TARGET_GREEDY, "greedy"),
+    (DECISION_MODEL_TARGET_STOCHASTIC, "stochastic"),
+    (DECISION_MODEL_TARGET_ATOMIC, "atomic"),
+)
+# Ties in the greedy target and the baseline fallback resolve in controller action order.
+_ONLINE_ACTION_RANK = {action: index for index, action in enumerate(ONLINE_POLICY_ACTIONS)}
 EXTERNAL_BASELINE_CONDITIONS = frozenset({"ldb", "intervenor", "tracecoder", "lambda_rlm", "rlm"})
 # Minimum per-action sample count required for cross-validated alpha selection.
 # Below this threshold we fall back to ADAPTIVE_OPE_RIDGE_ALPHA.
@@ -4029,7 +4054,12 @@ def _adaptive_ope_samples(
     """Extract off-policy evaluation samples from raw attempt records.
 
     Each sample contains (action, propensity, reward, features,
-    feature_scaling_profile) for use in IPS, SNIPS, and DR estimators.
+    feature_scaling_profile) for use in IPS, SNIPS, and DR estimators, plus the feasible
+    action set and any decision-model advice needed by the per-sample targets.
+
+    Shadow-mode rows are corrected at read time: the executed action is the deterministic
+    baseline there, so its behavior propensity is 1.0 regardless of what the controller
+    logged (older logs recorded the bandit's propensity, which inflates IPS weights).
     """
     samples: list[dict[str, Any]] = []
     for record in records:
@@ -4096,10 +4126,20 @@ def _adaptive_ope_samples(
                 patch_meta_dict,
                 key=f"{prefix}_propensity",
             )
-        propensity = _sanitize_propensity(
+        logged_propensity = _sanitize_propensity(
             behavior_propensity_raw,
             floor=ADAPTIVE_OPE_RAW_PROPENSITY_FLOOR,
         )
+        policy_mode = str(
+            _metadata_with_fallback(
+                attempt_meta_dict,
+                patch_meta_dict,
+                key=f"{prefix}_policy_mode",
+            )
+            or ""
+        ).strip()
+        shadow_mode = policy_mode == ADAPTIVE_OPE_SHADOW_POLICY_MODE
+        propensity = 1.0 if shadow_mode else logged_propensity
 
         features_raw = _metadata_with_fallback(
             attempt_meta_dict,
@@ -4122,9 +4162,76 @@ def _adaptive_ope_samples(
                 "reward": reward,
                 "features": feature_values,
                 "feature_scaling_profile": feature_scaling_profile,
+                "propensity_shadow_corrected": shadow_mode and logged_propensity < 1.0,
+                **_ope_sample_policy_context(
+                    attempt_meta_dict,
+                    patch_meta_dict,
+                    prefix=prefix,
+                    valid_actions=valid_actions,
+                ),
             }
         )
     return samples
+
+
+def _ope_sample_policy_context(
+    attempt_meta_dict: dict[str, Any],
+    patch_meta_dict: dict[str, Any],
+    *,
+    prefix: str,
+    valid_actions: set[str],
+) -> dict[str, Any]:
+    """Feasible action set and decision-model advice for one OPE sample.
+
+    Rows written before the decision model existed (and every budget-policy row) simply
+    yield an empty advice block, which keeps the decision-model targets out of the summary.
+    """
+    available_raw = _metadata_with_fallback(
+        attempt_meta_dict,
+        patch_meta_dict,
+        key=f"{prefix}_available_actions",
+    )
+    available_actions: list[str] = []
+    if isinstance(available_raw, (list, tuple)):
+        for item in available_raw:
+            action = str(item).strip()
+            if action in valid_actions and action not in available_actions:
+                available_actions.append(action)
+    dm_probs_raw = _metadata_with_fallback(
+        attempt_meta_dict,
+        patch_meta_dict,
+        key=f"{prefix}_dm_action_probs",
+    )
+    return {
+        "available_actions": available_actions,
+        "dm_status": str(
+            _metadata_with_fallback(attempt_meta_dict, patch_meta_dict, key=f"{prefix}_dm_status")
+            or ""
+        ).strip(),
+        "dm_action_probs": _coerce_feature_values(dm_probs_raw),
+        "dm_atomic_action": str(
+            _metadata_with_fallback(
+                attempt_meta_dict,
+                patch_meta_dict,
+                key=f"{prefix}_dm_atomic_action",
+            )
+            or ""
+        ).strip(),
+        "dm_traceback_sufficient": _as_float_or_none(
+            _metadata_with_fallback(
+                attempt_meta_dict,
+                patch_meta_dict,
+                key=f"{prefix}_dm_traceback_sufficient",
+            )
+        ),
+        "dm_missing_information": _coerce_feature_values(
+            _metadata_with_fallback(
+                attempt_meta_dict,
+                patch_meta_dict,
+                key=f"{prefix}_dm_missing_information",
+            )
+        ),
+    }
 
 
 def _metadata_with_fallback(
@@ -4298,6 +4405,17 @@ def _adaptive_ope_summary(
             ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
             propensity_floor=trimmed_propensity_floor,
         )
+    targets.update(
+        _decision_model_targets(
+            samples=samples,
+            settings=StochasticTargetOpeSettings(
+                action_space=action_space,
+                min_action_support=support_threshold,
+                ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
+                propensity_floor=trimmed_propensity_floor,
+            ),
+        )
+    )
     return {
         "sample_count": len(samples),
         "action_counts": action_counts,
@@ -4322,7 +4440,13 @@ def _adaptive_ope_summary(
         "ridge_alpha": ADAPTIVE_OPE_RIDGE_ALPHA,
         "feature_scaling_profiles": feature_scaling_profiles,
         "mean_reward": _mean([float(sample.get("reward") or 0.0) for sample in samples]),
-        "target_order": list(target_policies),
+        "shadow_corrected_samples": sum(
+            1 for sample in samples if bool(sample.get("propensity_shadow_corrected"))
+        ),
+        "decision_model_sample_count": sum(
+            1 for sample in samples if _decision_model_advice_ok(sample)
+        ),
+        "target_order": list(targets),
         "targets": targets,
     }
 
@@ -4643,6 +4767,337 @@ def _doubly_robust_estimate(
             )
         correction = (reward - behavior_hat) / propensity if action == target_action else 0.0
         terms.append(target_hat + correction)
+    return float(_mean(terms) or 0.0)
+
+
+@dataclass(frozen=True)
+class StochasticTargetOpeSettings:
+    """Estimator settings shared by the per-sample (stochastic) OPE targets."""
+
+    action_space: set[str]
+    min_action_support: int
+    ridge_alpha: float
+    propensity_floor: float
+
+
+def _decision_model_advice_ok(sample: Mapping[str, Any]) -> bool:
+    """Whether a sample carries usable decision-model advice."""
+    return str(sample.get("dm_status") or "") == DECISION_MODEL_ADVICE_STATUS_OK
+
+
+def _ordered_actions(actions: Iterable[str]) -> list[str]:
+    """Order actions by the controller's action order, with unknown actions last."""
+    unknown_rank = len(_ONLINE_ACTION_RANK)
+    return sorted(
+        {str(action) for action in actions},
+        key=lambda action: (_ONLINE_ACTION_RANK.get(action, unknown_rank), action),
+    )
+
+
+def _sample_available_actions(
+    sample: Mapping[str, Any],
+    *,
+    action_space: set[str],
+) -> list[str]:
+    """Feasible actions logged for a sample, falling back to the full action space."""
+    raw = sample.get("available_actions")
+    if isinstance(raw, (list, tuple)):
+        logged = [str(action) for action in raw if str(action) in action_space]
+        if logged:
+            return _ordered_actions(logged)
+    return _ordered_actions(action_space)
+
+
+def _ope_baseline_action(available_actions: Sequence[str]) -> str:
+    """Baseline action used when advice is missing, mirroring the controller's fallback."""
+    for action in (ACTION_INVOKE_HELPER, ACTION_SKIP_HELPER):
+        if action in available_actions:
+            return action
+    return str(available_actions[0]) if available_actions else ""
+
+
+def _one_hot_distribution(action: str, available_actions: Sequence[str]) -> dict[str, float]:
+    """Target distribution placing all mass on *action*."""
+    return {name: (1.0 if name == action else 0.0) for name in available_actions}
+
+
+def _derived_atomic_action(sample: Mapping[str, Any], available: Sequence[str]) -> str:
+    """Atomic mapping applied to logged aux answers; empty when none were logged.
+
+    Only ``evidence_atomic_v1`` maps in code at decision time; other profiles with aux questions
+    log the answers but no mapped action. Clef answers a profile's questions jointly, so aux
+    answers logged next to the main question approximate what the atomic profile would answer.
+    """
+    sufficient = _as_float_or_none(sample.get("dm_traceback_sufficient"))
+    raw_missing = sample.get("dm_missing_information")
+    missing = _coerce_feature_values(raw_missing)
+    if sufficient is None and not missing:
+        return ""
+    action, _reason = atomic_action_from_answers(
+        ParsedAnswers(traceback_sufficient=sufficient, missing_information=missing),
+        available_actions=available,
+        thresholds=DECISION_MODEL_ATOMIC_THRESHOLDS,
+    )
+    return action
+
+
+def _decision_model_target_distribution(
+    sample: Mapping[str, Any],
+    *,
+    kind: str,
+    action_space: set[str],
+) -> dict[str, float]:
+    """Per-sample target distribution for one decision-model target *kind*.
+
+    ``greedy`` is the arg-max over the advice probabilities restricted to the feasible
+    actions, ``stochastic`` renormalizes them, and ``atomic`` follows the atomic profile's
+    mapped action (derived from the logged aux answers when another profile was used).
+    Missing or failed advice falls back to the baseline action.
+    """
+    available = _sample_available_actions(sample, action_space=action_space)
+    if not available:
+        return {}
+    baseline = _one_hot_distribution(_ope_baseline_action(available), available)
+    if not _decision_model_advice_ok(sample):
+        return baseline
+    if kind == "atomic":
+        atomic_action = str(sample.get("dm_atomic_action") or "").strip()
+        if not atomic_action:
+            atomic_action = _derived_atomic_action(sample, available)
+        if atomic_action in available:
+            return _one_hot_distribution(atomic_action, available)
+        return baseline
+    raw_probs = sample.get("dm_action_probs")
+    probs = raw_probs if isinstance(raw_probs, dict) else {}
+    masses = {
+        action: max(0.0, _as_float_or_none(probs.get(action, 0.0)) or 0.0) for action in available
+    }
+    total = sum(masses.values())
+    if total <= 0.0:
+        return baseline
+    if kind == "greedy":
+        best = available[0]
+        for action in available[1:]:
+            if masses[action] > masses[best]:
+                best = action
+        return _one_hot_distribution(best, available)
+    return {action: (mass / total) for action, mass in masses.items()}
+
+
+def _decision_model_targets(
+    *,
+    samples: list[dict[str, Any]],
+    settings: StochasticTargetOpeSettings,
+) -> dict[str, Any]:
+    """Decision-model OPE targets; empty when no sample carries usable advice."""
+    if not any(_decision_model_advice_ok(sample) for sample in samples):
+        return {}
+    targets: dict[str, Any] = {}
+    for target_name, kind in DECISION_MODEL_TARGET_KINDS:
+        target_distributions = [
+            _decision_model_target_distribution(
+                sample,
+                kind=kind,
+                action_space=settings.action_space,
+            )
+            for sample in samples
+        ]
+        targets[target_name] = _stochastic_target_ope(
+            samples=samples,
+            target_distributions=target_distributions,
+            settings=settings,
+        )
+    return targets
+
+
+def _target_importance_weight(
+    sample: Mapping[str, Any],
+    distribution: Mapping[str, float],
+    *,
+    propensity_floor: float,
+) -> float:
+    """Importance weight ``pi(a_i | x_i) / mu_i`` for one sample."""
+    target_probability = _as_float_or_none(distribution.get(str(sample.get("action") or ""), 0.0))
+    if target_probability is None or target_probability <= 0.0:
+        return 0.0
+    behavior_propensity = _sanitize_propensity(sample.get("propensity"), floor=propensity_floor)
+    return float(target_probability) / behavior_propensity
+
+
+def _mean_target_action_probabilities(
+    target_distributions: list[dict[str, float]],
+) -> dict[str, float]:
+    """Mean target probability per action across samples (zero where infeasible)."""
+    total = len(target_distributions)
+    if total <= 0:
+        return {}
+    sums: dict[str, float] = {}
+    for distribution in target_distributions:
+        for action, probability in distribution.items():
+            sums[action] = sums.get(action, 0.0) + float(probability)
+    return {action: (sums[action] / float(total)) for action in _ordered_actions(sums)}
+
+
+def _stochastic_target_ope(
+    *,
+    samples: list[dict[str, Any]],
+    target_distributions: list[dict[str, float]],
+    settings: StochasticTargetOpeSettings,
+) -> dict[str, Any]:
+    """IPS / SNIPS / ESS / DR for a target that is a distribution per sample."""
+    total = len(samples)
+    matched = 0
+    weighted_reward_sum = 0.0
+    weight_sum = 0.0
+    weight_sq_sum = 0.0
+    for sample, distribution in zip(samples, target_distributions, strict=True):
+        weight = _target_importance_weight(
+            sample,
+            distribution,
+            propensity_floor=settings.propensity_floor,
+        )
+        if weight <= 0.0:
+            continue
+        matched += 1
+        weighted_reward_sum += weight * float(sample.get("reward") or 0.0)
+        weight_sum += weight
+        weight_sq_sum += weight * weight
+    ips = (weighted_reward_sum / float(total)) if (total > 0 and matched > 0) else None
+    snips = (weighted_reward_sum / weight_sum) if weight_sum > 0.0 else None
+    ess = ((weight_sum * weight_sum) / weight_sq_sum) if weight_sq_sum > 0.0 else None
+    dr, dr_reason = _stratified_stochastic_doubly_robust_estimate(
+        samples=samples,
+        target_distributions=target_distributions,
+        settings=settings,
+    )
+    result: dict[str, Any] = {
+        "target_kind": "stochastic",
+        "ips": ips,
+        "snips": snips,
+        "dr": dr,
+        "effective_sample_size": ess,
+        "matched_samples": matched,
+        "total_samples": total,
+        "support_rate": ((matched / float(total)) if total > 0 else None),
+        "support_warning": _support_warning_for_target(
+            matched_samples=matched,
+            total_samples=total,
+            min_action_support=settings.min_action_support,
+        ),
+        "dr_supported": dr is not None,
+        "dr_reason": dr_reason if dr is None else "",
+        "mean_action_probabilities": _mean_target_action_probabilities(target_distributions),
+    }
+    result.update(_estimator_agreement_summary(result))
+    return result
+
+
+def _stratified_stochastic_doubly_robust_estimate(
+    *,
+    samples: list[dict[str, Any]],
+    target_distributions: list[dict[str, float]],
+    settings: StochasticTargetOpeSettings,
+) -> tuple[float | None, str]:
+    """Stratified DR for a per-sample target, reusing the deterministic reward models.
+
+    Like the deterministic estimator this stratifies by feature-scaling profile and
+    weight-averages the stratum estimates.  DR is unsupported as soon as one action that
+    receives target mass in a stratum has no reward model there.
+    """
+    total = len(samples)
+    if total <= 0:
+        return None, "no_samples"
+    buckets: dict[str, list[tuple[dict[str, Any], dict[str, float]]]] = {}
+    for sample, distribution in zip(samples, target_distributions, strict=True):
+        profile = _feature_scaling_profile_bucket(sample.get("feature_scaling_profile"))
+        buckets.setdefault(profile, []).append((sample, distribution))
+
+    weighted_dr_sum = 0.0
+    for profile in sorted(buckets):
+        bucket_samples = [sample for sample, _distribution in buckets[profile]]
+        bucket_distributions = [distribution for _sample, distribution in buckets[profile]]
+        feature_names, models = _fit_ridge_action_models(
+            samples=bucket_samples,
+            action_space=settings.action_space,
+            min_action_support=settings.min_action_support,
+            ridge_alpha=settings.ridge_alpha,
+        )
+        reason = _stochastic_dr_support_reason(
+            target_distributions=bucket_distributions,
+            models=models,
+            action_counts=_action_counts_for_samples(
+                samples=bucket_samples,
+                action_space=settings.action_space,
+            ),
+            min_action_support=settings.min_action_support,
+        )
+        if reason:
+            return None, reason
+        weighted_dr_sum += len(bucket_samples) * _stochastic_doubly_robust_estimate(
+            samples=bucket_samples,
+            target_distributions=bucket_distributions,
+            feature_names=feature_names,
+            models=models,
+            propensity_floor=settings.propensity_floor,
+        )
+    return weighted_dr_sum / float(total), ""
+
+
+def _stochastic_dr_support_reason(
+    *,
+    target_distributions: list[dict[str, float]],
+    models: dict[str, np.ndarray],
+    action_counts: dict[str, int],
+    min_action_support: int,
+) -> str:
+    """Reason why DR is unsupported for one stratum, or ``""`` when it is supported."""
+    weighted_actions = {
+        action
+        for distribution in target_distributions
+        for action, probability in distribution.items()
+        if float(probability) > 0.0
+    }
+    for action in _ordered_actions(weighted_actions):
+        if action in models:
+            continue
+        if int(action_counts.get(action, 0)) < int(min_action_support):
+            return "insufficient_action_support"
+        return "missing_action_model"
+    return ""
+
+
+def _stochastic_doubly_robust_estimate(
+    *,
+    samples: list[dict[str, Any]],
+    target_distributions: list[dict[str, float]],
+    feature_names: list[str],
+    models: dict[str, np.ndarray],
+    propensity_floor: float,
+) -> float:
+    """Single-stratum DR estimate for a per-sample target distribution."""
+    terms: list[float] = []
+    for sample, distribution in zip(samples, target_distributions, strict=True):
+        features_raw = sample.get("features")
+        features = features_raw if isinstance(features_raw, dict) else {}
+        direct = 0.0
+        for action, probability in distribution.items():
+            if float(probability) <= 0.0:
+                continue
+            direct += float(probability) * _predict_action_reward(
+                features=features,
+                feature_names=feature_names,
+                beta=models[action],
+            )
+        weight = _target_importance_weight(sample, distribution, propensity_floor=propensity_floor)
+        correction = 0.0
+        if weight > 0.0:
+            behavior_hat = _predict_action_reward(
+                features=features,
+                feature_names=feature_names,
+                beta=models[str(sample.get("action") or "")],
+            )
+            correction = weight * (float(sample.get("reward") or 0.0) - behavior_hat)
+        terms.append(direct + correction)
     return float(_mean(terms) or 0.0)
 
 
@@ -5522,12 +5977,31 @@ def _print_input_errors(input_errors: Any) -> None:
         )
 
 
+def _ope_target_order(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]) -> list[str]:
+    """Target names to render, preferring the summary's own ``target_order``.
+
+    Falling back to *ordered_targets* keeps summaries written before ``target_order``
+    existed renderable; trailing targets missing from the order (decision-model targets in
+    a hand-built summary, for example) are appended in insertion order.
+    """
+    raw_order = ope.get("target_order")
+    order = (
+        [str(name) for name in raw_order]
+        if isinstance(raw_order, list) and raw_order
+        else list(ordered_targets)
+    )
+    targets_raw = ope.get("targets")
+    if isinstance(targets_raw, dict):
+        order.extend(str(name) for name in targets_raw if str(name) not in order)
+    return order
+
+
 def _format_ope_targets(ope: dict[str, Any], *, ordered_targets: tuple[str, ...]) -> str:
     """Format OPE target estimates into a one-line summary string."""
     targets_raw = ope.get("targets")
     targets = targets_raw if isinstance(targets_raw, dict) else {}
     parts: list[str] = []
-    for target_name in ordered_targets:
+    for target_name in _ope_target_order(ope, ordered_targets=ordered_targets):
         target = targets.get(target_name)
         if not isinstance(target, dict):
             continue

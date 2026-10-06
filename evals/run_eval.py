@@ -245,6 +245,10 @@ _ACTIVE_BUDGET_POLICY_CONTROLLER: AdaptiveBudgetPolicyController | None = None
 
 
 import evals.eval_containers as _eval_containers_mod  # noqa: E402
+from evals.decision_model.config import (  # noqa: E402
+    add_decision_model_arguments,
+    add_policy_input_arguments,
+)
 from evals.eval_config import (  # noqa: E402
     _apply_toml_configs_to_args,
     _default_openai_api_key,
@@ -2679,6 +2683,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Dependency version capture mode for run_metadata.",
     )
     add_execution_arguments(parser, default_executor=DEFAULT_EXECUTOR)
+    add_decision_model_arguments(parser)
+    add_policy_input_arguments(parser)
     args = parser.parse_args(argv_tokens)
     from evals.eval_main_flow import run_main_flow
 

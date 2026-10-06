@@ -112,6 +112,68 @@ Notes:
   unless you override `LLAMA_THREADS` or `LLAMA_THREADS_BATCH`.
 - `curl http://127.0.0.1:12000/v1/models` is the quickest readiness check.
 
+### Optional: System-1 decision model (Cloudflare Clef)
+
+Only needed for `--adaptive-decision-model-role` runs. The harness talks to any
+SystemOne-compatible endpoint (`GET /health`, `POST /v1/systemone`); there are two ways to serve
+`clef-flash`.
+
+**llama-swap / llama.cpp (preferred on a shared GPU host).** llama.cpp serves Clef natively
+since release `b11371` (PR #29831; the `/v1/systemone` endpoint came with PR #29818), from the
+GGUFs in `ggml-org/Clef-Flash-GGUF` (Q4_K_M 6.5 GB, Q8_0 9.7 GB, BF16 18.2 GB). Merge
+`evals/docker/decision_model/llama-swap.snippet.yaml` into the llama-swap config (its `groups:`
+block belongs at the top level, next to `models:`) and make sure the image's llama.cpp is at
+least `b11371`: pin `LLAMA_CPP_REF` to a tag or rebuild with `--no-cache`, because a plain
+rebuild with `master` reuses Docker's cached clone layer. Then use the passthrough route with one
+of the llama-swap API keys:
+
+```bash
+export TRACEGATE_DECISION_MODEL_API_KEY=<llama-swap key>
+export TRACEGATE_DECISION_MODEL_URL=http://127.0.0.1:9292/upstream/clef-flash-q4
+just decision-model-health   # the first call waits while llama-swap loads the model
+just decision-model-smoke    # p50/p95 latency at ~1k/2k/4k tokens
+```
+
+- `run_eval_docker.sh` passes the key to the harness as `--adaptive-decision-model-api-key`
+  (redacted in lockfiles), never as an environment variable inside the container. Config files
+  may not contain the key.
+- The preflight health check waits up to 300 s for a cold entry; afterwards each decision uses
+  `--adaptive-decision-model-timeout-sec` (10 s).
+- llama.cpp's Clef support is text-only and decodes one sequence per batch (`--parallel 1`).
+
+**PyTorch sidecar (reference implementation).** `evals/docker/decision_model/` runs the model
+card's own code, which makes it the reference for parity checks against llama.cpp. In bf16 it
+needs roughly 20–24 GB free at 8k context (the weights alone are about 18 GB; Cloudflare quotes
+41 GB at 64k context). Pin the model revision:
+
+```bash
+just decision-model-build
+GPU=1 CLEF_REVISION=<commit-sha> just decision-model-up   # detached, port 8090
+just decision-model-health                                # 503 while the model still loads
+just decision-model-smoke
+```
+
+- `CLEF_QUANTIZATION=nf4` loads the backbone in 4-bit (bitsandbytes NF4; about 8.6 GB of VRAM on
+  an RTX PRO 6000 with an 8k context) while the joint head and `lm_head` stay in bf16;
+  `int8` and the default `none` (bf16, about 20 GB) are the alternatives.
+- The container runs as the invoking user with their supplementary groups (`RUN_AS_USER`), so a
+  group-writable shared HF cache (`HF_CACHE_DIR=/shared/cache/huggingface`) stays writable and
+  nothing in it ends up root-owned.
+- `run_decision_model.sh` options: `GPU`, `PORT` (8090), `BIND_ADDR` (`127.0.0.1`; the
+  endpoint is unauthenticated, so use `0.0.0.0` only when the harness runs on another trusted
+  host), `HF_CACHE_DIR`, `CLEF_MODEL_ID`, `CLEF_REVISION`, `CLEF_MAX_LENGTH` (8192),
+  `DETACH=0` for the foreground.
+- Linear-attention CUDA kernels are optional at build time
+  (`--build-arg INSTALL_LINEAR_ATTENTION_KERNELS=1`); the server logs a warning when
+  transformers would fall back to the slower path.
+
+**Both ways.** The harness finds the endpoint via `--adaptive-decision-model-url`,
+`[run_eval.adaptive] decision_model_url`, or `TRACEGATE_DECISION_MODEL_URL` (default
+`http://127.0.0.1:8090`). `run_eval_docker.sh` forwards the variable, rewrites a localhost URL
+for the container, and uses host networking on Linux when the URL is local. An enabled role
+health-checks the endpoint before the first unit and stops the run with a clear error when it is
+down or still loading.
+
 ## 2. Run a smoke test first
 
 Fast smoke using the Docker wrapper:

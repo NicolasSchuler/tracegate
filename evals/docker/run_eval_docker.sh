@@ -38,6 +38,9 @@
 #   Z_API / OPENAI_API_KEY / LLMDEBUG_EVAL_OPENAI_API_KEY
 #                                  Used to synthesize --openai-api-key when omitted
 #                                  (falls back to `local` when all are blank)
+#   TRACEGATE_DECISION_MODEL_API_KEY
+#                                  Used to synthesize --adaptive-decision-model-api-key
+#                                  when omitted (decision model behind llama-swap apiKeys)
 #
 # Implementation note:
 #   The wrapper uses `docker create` + `docker start -a` instead of `docker run`
@@ -125,7 +128,7 @@ DOCKER_USER="${LLMDEBUG_EVAL_DOCKER_USER:-$DEFAULT_DOCKER_USER}"
 # OpenAI credentials are passed via CLI flags (only when needed) so that
 # benchmarked test code cannot read them from the environment.
 for var in LLMDEBUG_EVAL_PATCH_CMD LLMDEBUG_EVAL_PATCH_CMD_TIMEOUT_SEC \
-           LLMDEBUG_EVAL_PATCH_CMD_SHELL HF_HOME; do
+           LLMDEBUG_EVAL_PATCH_CMD_SHELL HF_HOME TRACEGATE_DECISION_MODEL_URL; do
     if [[ -n "${!var:-}" ]]; then
         DOCKER_ARGS+=(-e "$var=${!var}")
     fi
@@ -582,6 +585,64 @@ _config_openai_value_from_files() {
     ' "$@" | tail -n 1
 }
 
+# Same shape as _config_openai_value_from_files, for the [run_eval.adaptive] sub-table.
+# _config_value_from_files deliberately ignores sub-tables (patcher/baseline keys must not be
+# picked up from them), so sub-table lookups get their own reader.
+_config_adaptive_value_from_files() {
+    local leaf_key="$1"
+    shift
+    if [[ $# -eq 0 ]]; then
+        return 1
+    fi
+
+    awk -v wanted="$leaf_key" '
+        function trim(text) {
+            sub(/^[[:space:]]+/, "", text)
+            sub(/[[:space:]]+$/, "", text)
+            return text
+        }
+        function strip_quotes(text) {
+            if ((text ~ /^".*"$/) || (text ~ /^'\''.*'\''$/)) {
+                return substr(text, 2, length(text) - 2)
+            }
+            return text
+        }
+        FNR == 1 {
+            section = ""
+        }
+        {
+            line = $0
+            sub(/[[:space:]]*#.*/, "", line)
+            line = trim(line)
+            if (line == "") {
+                next
+            }
+            if (line ~ /^\[/) {
+                section = line
+                gsub(/^\[/, "", section)
+                gsub(/\]$/, "", section)
+                section = trim(section)
+                gsub(/-/, "_", section)
+                section = tolower(section)
+                next
+            }
+            split(line, parts, "=")
+            key = trim(parts[1])
+            gsub(/-/, "_", key)
+            key = tolower(key)
+            value = trim(substr(line, index(line, "=") + 1))
+
+            if ((section == "run_eval.adaptive" || section == "adaptive") && key == wanted) {
+                print strip_quotes(value)
+                next
+            }
+            if ((section == "" || section == "run_eval") && key == ("adaptive_" wanted)) {
+                print strip_quotes(value)
+            }
+        }
+    ' "$@" | tail -n 1
+}
+
 _docker_has_network_flag() {
     local expect_value=0
     local arg
@@ -672,6 +733,7 @@ CONFIG_BASELINE_PYTHON="$(_config_value_from_files baseline_python "${RAW_CONFIG
 CONFIG_OPENAI_API_KEY_ENV="$(_config_value_from_files openai_api_key_env "${RAW_CONFIG_PATHS[@]}" || true)"
 CONFIG_OPENAI_BASE_URL="$(_config_openai_value_from_files base_url "${RAW_CONFIG_PATHS[@]}" || true)"
 CONFIG_OPENAI_MODEL="$(_config_openai_value_from_files model "${RAW_CONFIG_PATHS[@]}" || true)"
+CONFIG_DECISION_MODEL_URL="$(_config_adaptive_value_from_files decision_model_url "${RAW_CONFIG_PATHS[@]}" || true)"
 
 PATCHER="${CLI_PATCHER:-$CONFIG_PATCHER}"
 PATCHER="${PATCHER:-command}"
@@ -757,6 +819,25 @@ if [[ "$PATCHER" == "openai" || $BASELINE_MODE -eq 1 ]]; then
     fi
 fi
 
+# Lift the decision-model sidecar URL from [run_eval.adaptive] (or the environment) into a CLI
+# arg so localhost translation can rewrite the effective value. The flag wins over the
+# forwarded TRACEGATE_DECISION_MODEL_URL env var inside the container.
+if ! _arg_present --adaptive-decision-model-url "${EVAL_ARGS[@]}"; then
+    if [[ -n "${CONFIG_DECISION_MODEL_URL:-}" ]]; then
+        EVAL_ARGS+=(--adaptive-decision-model-url "$CONFIG_DECISION_MODEL_URL")
+    elif [[ -n "${TRACEGATE_DECISION_MODEL_URL:-}" ]]; then
+        EVAL_ARGS+=(--adaptive-decision-model-url "$TRACEGATE_DECISION_MODEL_URL")
+    fi
+fi
+
+# Like the OpenAI key, a decision-model API key (e.g. for llama-swap apiKeys) reaches the harness
+# only as a CLI flag, never as an environment variable inside the container.
+if ! _arg_present --adaptive-decision-model-api-key "${EVAL_ARGS[@]}"; then
+    if [[ -n "${TRACEGATE_DECISION_MODEL_API_KEY:-}" ]]; then
+        EVAL_ARGS+=(--adaptive-decision-model-api-key "$TRACEGATE_DECISION_MODEL_API_KEY")
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # Auto-build the selected image if it doesn't exist, is stale, or rebuild requested
 # ---------------------------------------------------------------------------
@@ -801,21 +882,41 @@ if [[ -n "$IMAGE_BUILD_REASON" ]]; then
     echo ">>> Build complete."
 fi
 
-# Localhost API URL handling for Docker networking
-OPENAI_BASE_URL_EFFECTIVE="$(_arg_value --openai-base-url "${EVAL_ARGS[@]}" || true)"
-if [[ -n "${OPENAI_BASE_URL_EFFECTIVE:-}" ]] \
-    && printf "%s" "$OPENAI_BASE_URL_EFFECTIVE" | grep -qE '(127\.0\.0\.1|localhost)'; then
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        NEW_OPENAI_BASE_URL="$(printf "%s" "$OPENAI_BASE_URL_EFFECTIVE" | sed -E 's/(127\.0\.0\.1|localhost)/host.docker.internal/g')"
-        if [[ "$NEW_OPENAI_BASE_URL" != "$OPENAI_BASE_URL_EFFECTIVE" ]]; then
-            echo ">>> NOTE: Translating localhost URL for Docker access" >&2
-            echo ">>>   $OPENAI_BASE_URL_EFFECTIVE -> $NEW_OPENAI_BASE_URL" >&2
-            _replace_or_append_arg --openai-base-url "$NEW_OPENAI_BASE_URL"
-        fi
-    elif ! _docker_has_network_flag; then
-        echo ">>> NOTE: Detected localhost API URL, using --network host" >&2
-        DOCKER_ARGS+=(--network host)
+# Localhost API URL handling for Docker networking. Returns success when the caller has to add
+# host networking (Linux); on Darwin the URL is rewritten in place instead.
+_translate_localhost_url_arg() {
+    local flag="$1"
+    local current=""
+    local translated=""
+
+    current="$(_arg_value "$flag" "${EVAL_ARGS[@]}" || true)"
+    if [[ -z "${current:-}" ]] \
+        || ! printf "%s" "$current" | grep -qE '(127\.0\.0\.1|localhost)'; then
+        return 1
     fi
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        return 0
+    fi
+
+    translated="$(printf "%s" "$current" | sed -E 's/(127\.0\.0\.1|localhost)/host.docker.internal/g')"
+    if [[ "$translated" != "$current" ]]; then
+        echo ">>> NOTE: Translating localhost URL for Docker access" >&2
+        echo ">>>   $current -> $translated" >&2
+        _replace_or_append_arg "$flag" "$translated"
+    fi
+    return 1
+}
+
+NEEDS_HOST_NETWORK=0
+for url_flag in --openai-base-url --adaptive-decision-model-url; do
+    if _translate_localhost_url_arg "$url_flag"; then
+        NEEDS_HOST_NETWORK=1
+    fi
+done
+if [[ $NEEDS_HOST_NETWORK -eq 1 ]] && ! _docker_has_network_flag; then
+    echo ">>> NOTE: Detected localhost API URL, using --network host" >&2
+    DOCKER_ARGS+=(--network host)
 fi
 
 # Force local executor (the whole point of this container). Pass the selected

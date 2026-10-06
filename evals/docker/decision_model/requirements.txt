@@ -1,0 +1,26 @@
+# Runtime dependencies of the Clef decision-model sidecar (see Dockerfile).
+#
+# torch and transformers are installed by the Dockerfile instead of this file so that the CUDA
+# wheel index and both version pins stay build args:
+#   torch==2.11.0         ARG TORCH_VERSION, --index-url https://download.pytorch.org/whl/cu128
+#   transformers==5.10.2  ARG TRANSFORMERS_VERSION (the version the model card was tested with)
+#
+# UNVERIFIED: every pin below was picked from upstream release notes, not from a build on the
+# eval server's card. Re-resolve them during the first build and commit what actually works.
+
+# snapshot_download() in server.py and in the model card's load_release_model().
+# Stay on the 1.x line: huggingface_hub 2.x swaps the HTTP stack and drops APIs that
+# transformers 5.10 still uses.
+huggingface_hub==1.33.0
+
+# load_release_model() reads joint_head.safetensors through safetensors.torch.load_file().
+safetensors==0.8.0
+
+# Required by transformers' `device_map={"": <device>}` loading path.
+accelerate==1.15.0
+
+# AutoProcessor for the multimodal Qwen3.5 backbone imports PIL even though the sidecar only
+# ever sends text states.
+pillow==12.0.0
+# Optional 4-bit/8-bit backbone weights (CLEF_QUANTIZATION=nf4|int8); CUDA 12.8 wheels.
+bitsandbytes==0.50.2

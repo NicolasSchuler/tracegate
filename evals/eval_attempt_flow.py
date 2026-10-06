@@ -70,6 +70,13 @@ from evals.attempt_verification import (
     evaluate_syntax_preflight,
     make_syntax_preflight_state,
 )
+from evals.decision_model.runtime import (
+    AdviceRequest,
+    advise_for_attempt,
+    binding_of,
+    record_advice_state,
+)
+from evals.decision_model.state import DecisionStateInputs, redact_terms_for_unit
 from evals.eval_attempt_support import (
     _adaptive_gate_should_invoke_helper,
     _adaptive_helper_outcome_for_attempt,
@@ -188,6 +195,8 @@ from evals.eval_policy_features import (
     _apply_adaptive_budget_profile_to_patcher,
     _build_adaptive_budget_control_profile,
     _build_adaptive_budget_family_profile,
+    drop_case_label_features,
+    lite_action_replaces_snapshot,
 )
 from evals.eval_policy_online import (
     AdaptiveOnlineMetadataUpdate,
@@ -1244,6 +1253,8 @@ def run_one_condition_impl(
         resolved_inputs.adaptive_online_feature_scaling_profile
     )
     adaptive_online_action_score_biases = resolved_inputs.adaptive_online_action_score_biases
+    adaptive_online_include_case_labels = bool(resolved_inputs.adaptive_online_include_case_labels)
+    adaptive_lite_snapshot_mode = str(resolved_inputs.adaptive_lite_snapshot_mode)
     adaptive_budget_policy_controller = resolved_inputs.adaptive_budget_policy_controller
     adaptive_budget_policy_mode = resolved_inputs.adaptive_budget_policy_mode
     adaptive_budget_policy_algo = resolved_inputs.adaptive_budget_policy_algo
@@ -2689,6 +2700,7 @@ def run_one_condition_impl(
         helper_decision_reason = "not_adaptive_condition"
         adaptive_context_requested = False
         adaptive_snapshot_included = False
+        adaptive_lite_replaced_snapshot = False
         adaptive_snapshot_lite_included = False
         adaptive_snapshot_attempt1_denied = False
         adaptive_snapshot_attempt1_denied_reason = ""
@@ -3311,6 +3323,8 @@ def run_one_condition_impl(
                 case_bug_source=case.bug_source,
                 feature_scaling_profile=normalized_adaptive_online_feature_scaling_profile,
             )
+            if not adaptive_online_include_case_labels:
+                online_policy_features_raw = drop_case_label_features(online_policy_features_raw)
             online_policy_features_scaled = scale_feature_mapping(
                 online_policy_features_raw,
                 profile=normalized_adaptive_online_feature_scaling_profile,
@@ -3374,11 +3388,88 @@ def run_one_condition_impl(
                     and len(helper_available_actions) > 1
                 )
                 if online_policy_eligible and adaptive_online_policy_controller is not None:
+                    decide_kwargs: dict[str, Any] = {
+                        "feature_values": online_policy_features_raw,
+                        "default_action": helper_action_default,
+                        "available_actions": helper_available_actions,
+                        "unavailable_action_reasons": helper_unavailable_action_reasons,
+                    }
+                    # System-1 decision model: queried outside the controller lock, only when
+                    # the policy itself is consulted (layer-1 constraints already applied).
+                    decision_model_binding = binding_of(adaptive_online_policy_controller)
+                    decision_model_advice = None
+                    if decision_model_binding is not None:
+                        _emit_progress(
+                            "decision_model_query",
+                            _progress_payload(
+                                owner="harness",
+                                phase_label="harness: decision model",
+                                note="querying decision model",
+                                attempt=int(attempt),
+                                max_attempts=int(k),
+                            ),
+                        )
+                        redact_paths, redact_tokens = redact_terms_for_unit(
+                            workdirs=(str(Path(workdir).resolve()), str(workdir)),
+                            case_id=case.case_id,
+                            condition=condition.value,
+                            run_id=str(run_id),
+                        )
+                        decision_model_advice = advise_for_attempt(
+                            decision_model_binding,
+                            AdviceRequest(
+                                state_inputs=DecisionStateInputs(
+                                    stdout=current.stdout,
+                                    stderr=current.stderr,
+                                    timed_out=bool(current.timed_out),
+                                    snapshot=snapshot,
+                                    attempt=int(attempt),
+                                    max_attempts=int(k),
+                                    previous_failure_context=previous_failure_context,
+                                    retry_history_turns=tuple(retry_history_turns),
+                                    pregate=(
+                                        pregate_result if adaptive_informativeness_pregate else None
+                                    ),
+                                    helper_calls_remaining=(
+                                        None
+                                        if adaptive_budget_unlimited
+                                        else max(
+                                            0, effective_helper_budget_limit - helper_calls_used
+                                        )
+                                    ),
+                                    compaction_calls_remaining=(
+                                        max(
+                                            0,
+                                            effective_context_compaction_max_calls
+                                            - context_compaction_calls_used,
+                                        )
+                                        if normalized_context_compaction_mode != "off"
+                                        else 0
+                                    ),
+                                    failure_signature_repeat=bool(failure_signature_repeat),
+                                    last_helper_action=str(last_helper_action_executed or ""),
+                                    reveal_mode=normalized_adaptive_reveal_mode,
+                                    redact_paths=redact_paths,
+                                    redact_tokens=redact_tokens,
+                                ),
+                                available_actions=tuple(helper_available_actions),
+                                lite_snapshot_mode=adaptive_lite_snapshot_mode,
+                            ),
+                        )
+                        decide_kwargs["advice"] = decision_model_advice
                     online_policy_decision = adaptive_online_policy_controller.decide(
-                        feature_values=online_policy_features_raw,
-                        default_action=helper_action_default,
-                        available_actions=helper_available_actions,
-                        unavailable_action_reasons=helper_unavailable_action_reasons,
+                        **decide_kwargs
+                    )
+                    record_advice_state(
+                        decision_model_binding,
+                        decision=online_policy_decision,
+                        advice=decision_model_advice,
+                        context={
+                            "run_id": str(run_id),
+                            "case_id": case.case_id,
+                            "condition": condition.value,
+                            "attempt": int(attempt),
+                        },
                     )
                     online_policy_features_scaled = dict(online_policy_decision.feature_values)
                     online_policy_mode_for_attempt = online_policy_decision.mode
@@ -4109,6 +4200,18 @@ def run_one_condition_impl(
             snapshot_lite_context = _format_snapshot_index_section(stage_b_snapshot)
 
         include_snapshot_in_prompt = bool(reveal_policy["include_snapshot"])
+        adaptive_lite_replaced_snapshot = bool(
+            include_snapshot_in_prompt
+            and is_adaptive_llm_discretion
+            and lite_action_replaces_snapshot(
+                action=helper_action_executed,
+                reveal_mode=normalized_adaptive_reveal_mode,
+                lite_context=snapshot_lite_context,
+                lite_snapshot_mode=adaptive_lite_snapshot_mode,
+            )
+        )
+        if adaptive_lite_replaced_snapshot:
+            include_snapshot_in_prompt = False
         stage_b_snapshot_for_prompt = stage_b_snapshot if include_snapshot_in_prompt else None
         stage_b_snapshot_prompt_text = (
             snapshot_prompt_text if stage_b_snapshot_for_prompt is not None else ""
@@ -4776,6 +4879,7 @@ def run_one_condition_impl(
         attempt_metadata["adaptive_reveal_applied"] = adaptive_reveal_applied
         attempt_metadata["adaptive_reveal_trigger"] = adaptive_reveal_trigger
         attempt_metadata["adaptive_reveal_triggers"] = list(adaptive_reveal_triggers)
+        attempt_metadata["adaptive_lite_replaced_snapshot"] = adaptive_lite_replaced_snapshot
         attempt_metadata["snapshot_frame_pruning_mode"] = normalized_snapshot_frame_pruning_mode
         attempt_metadata["snapshot_frame_pruning_applied"] = bool(
             snapshot_pruning_metadata.get("applied")
@@ -5091,6 +5195,7 @@ def run_one_condition_impl(
         patch_meta["adaptive_reveal_applied"] = adaptive_reveal_applied
         patch_meta["adaptive_reveal_trigger"] = adaptive_reveal_trigger
         patch_meta["adaptive_reveal_triggers"] = list(adaptive_reveal_triggers)
+        patch_meta["adaptive_lite_replaced_snapshot"] = adaptive_lite_replaced_snapshot
         patch_meta["snapshot_frame_pruning_mode"] = normalized_snapshot_frame_pruning_mode
         patch_meta["snapshot_frame_pruning_applied"] = bool(
             snapshot_pruning_metadata.get("applied")

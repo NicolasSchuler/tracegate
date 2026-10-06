@@ -26,12 +26,38 @@ from pathlib import Path
 from typing import Any
 
 from . import _json as json
-from .adaptive_budget_online_policy import EVENT_SCHEMA_VERSION as BUDGET_EVENT_SCHEMA_VERSION
 from .adaptive_online_policy import EVENT_SCHEMA_VERSION as ONLINE_EVENT_SCHEMA_VERSION
 
 POLICY_EVENT_SCHEMA_VERSION = ONLINE_EVENT_SCHEMA_VERSION
-SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS = frozenset(
-    {ONLINE_EVENT_SCHEMA_VERSION, BUDGET_EVENT_SCHEMA_VERSION}
+# Accepted schema versions are declared per policy kind instead of derived from the controllers'
+# current EVENT_SCHEMA_VERSION, so that reading older logs is an explicit decision: helper events
+# are read at v4 (pre decision model) and v5 (with the ``decision_model`` block), budget events at
+# v4.  ``tests/test_evals_export_policy_dataset.py`` pins the live controller versions against
+# these sets, so a controller bump fails loudly here instead of silently dropping v4 logs.
+SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS = frozenset({4, 5})
+SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS = frozenset({4})
+SUPPORTED_POLICY_EVENT_SCHEMA_VERSIONS = (
+    SUPPORTED_ONLINE_EVENT_SCHEMA_VERSIONS | SUPPORTED_BUDGET_EVENT_SCHEMA_VERSIONS
+)
+
+_DM_STRING_FIELDS = (
+    "role",
+    "status",
+    "profile",
+    "model",
+    "top_action",
+    "atomic_action",
+    "state_sha256",
+)
+_DM_FLOAT_FIELDS = ("top_prob", "margin", "entropy", "latency_ms")
+_DM_OPTIONAL_FLOAT_FIELDS = ("traceback_sufficient", "fix_confidence")
+_DM_INT_FIELDS = ("input_tokens",)
+DECISION_MODEL_SCALAR_COLUMNS = (
+    *(f"dm_{name}" for name in _DM_STRING_FIELDS),
+    *(f"dm_{name}" for name in _DM_FLOAT_FIELDS),
+    *(f"dm_{name}" for name in _DM_OPTIONAL_FLOAT_FIELDS),
+    *(f"dm_{name}" for name in _DM_INT_FIELDS),
+    "dm_prior_beta",
 )
 
 
@@ -232,6 +258,7 @@ def _events_to_rows(*, events: list[dict[str, Any]], min_propensity: float) -> l
             )
         }
     )
+    dm_prob_actions, dm_missing_options = _decision_model_expansions(events)
     rows: list[dict[str, Any]] = []
     for event in events:
         propensity = _safe_float(event.get("propensity"), default=1.0)
@@ -330,8 +357,88 @@ def _events_to_rows(*, events: list[dict[str, Any]], min_propensity: float) -> l
                 family_feature_dict.get(feature_name),
                 default=0.0,
             )
+        row.update(
+            _decision_model_row_fields(
+                event,
+                prob_actions=dm_prob_actions,
+                missing_options=dm_missing_options,
+            )
+        )
         rows.append(row)
     return rows
+
+
+def _decision_model_block(event: dict[str, Any]) -> dict[str, Any]:
+    """Return the event's ``decision_model`` block (empty for v4 / no-decision-model events)."""
+    block = event.get("decision_model")
+    return block if isinstance(block, dict) else {}
+
+
+def _decision_model_expansions(events: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """Union of decision-model action-probability and missing-information option names."""
+    prob_actions: set[str] = set()
+    missing_options: set[str] = set()
+    for event in events:
+        block = _decision_model_block(event)
+        action_probs = block.get("action_probs")
+        if isinstance(action_probs, dict):
+            prob_actions.update(str(name) for name in action_probs)
+        missing_information = block.get("missing_information")
+        if isinstance(missing_information, dict):
+            missing_options.update(str(name) for name in missing_information)
+    return sorted(prob_actions), sorted(missing_options)
+
+
+def _decision_model_row_fields(
+    event: dict[str, Any],
+    *,
+    prob_actions: list[str],
+    missing_options: list[str],
+) -> dict[str, Any]:
+    """Flatten one event's ``decision_model`` block into CSV columns.
+
+    Events without the block (schema v4, or runs with the decision model off) get empty
+    values everywhere so that "no advice" stays distinguishable from a zero probability.
+    """
+    dynamic_columns = [
+        *(f"dm_p_{action}" for action in prob_actions),
+        *(f"dm_missing_{option}" for option in missing_options),
+    ]
+    block = _decision_model_block(event)
+    if not block:
+        return dict.fromkeys((*DECISION_MODEL_SCALAR_COLUMNS, *dynamic_columns), "")
+    effect = block.get("effect")
+    effect_dict = effect if isinstance(effect, dict) else {}
+    action_probs = block.get("action_probs")
+    action_probs_dict = action_probs if isinstance(action_probs, dict) else {}
+    missing_information = block.get("missing_information")
+    missing_dict = missing_information if isinstance(missing_information, dict) else {}
+    row: dict[str, Any] = {f"dm_{name}": str(block.get(name) or "") for name in _DM_STRING_FIELDS}
+    for name in _DM_FLOAT_FIELDS:
+        row[f"dm_{name}"] = _safe_float(block.get(name), default=0.0)
+    for name in _DM_OPTIONAL_FLOAT_FIELDS:
+        row[f"dm_{name}"] = _optional_float_cell(block.get(name))
+    for name in _DM_INT_FIELDS:
+        row[f"dm_{name}"] = _safe_int(block.get(name), default=0)
+    row["dm_prior_beta"] = _optional_float_cell(effect_dict.get("prior_beta"))
+    for action in prob_actions:
+        row[f"dm_p_{action}"] = _safe_float(action_probs_dict.get(action), default=0.0)
+    for option in missing_options:
+        row[f"dm_missing_{option}"] = _safe_float(missing_dict.get(option), default=0.0)
+    return row
+
+
+def _optional_float_cell(value: Any) -> float | str:
+    """Render an optional numeric field: the float value, or ``""`` when absent."""
+    if value is None:
+        return ""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if parsed != parsed:  # NaN check
+        return ""
+    return parsed
 
 
 def _write_rows(*, rows: list[dict[str, Any]], output_path: Path) -> None:

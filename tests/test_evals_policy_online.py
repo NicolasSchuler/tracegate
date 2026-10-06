@@ -283,6 +283,21 @@ class TestBehaviorFields:
         assert action == "none"
         assert propensity == 1.0
 
+    def test_shadow_mode_behavior_is_deterministic(self) -> None:
+        """Shadow mode executes the baseline, so the coincident selection has probability 1."""
+        decision = _make_policy_decision(
+            mode="shadow",
+            selected_action=ACTION_INVOKE_HELPER,
+            applied_action=ACTION_INVOKE_HELPER,
+            propensity=0.1,
+        )
+        action, propensity = _adaptive_online_behavior_fields(
+            decision=decision,
+            behavior_action=ACTION_INVOKE_HELPER,
+        )
+        assert action == ACTION_INVOKE_HELPER
+        assert propensity == 1.0
+
 
 # ── _adaptive_online_update_suppression_reason ───────────────────────────
 

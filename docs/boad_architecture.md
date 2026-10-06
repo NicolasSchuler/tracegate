@@ -135,6 +135,28 @@ TS provides natural exploration through posterior sampling, eliminating the need
 for explicit epsilon-greedy exploration. It reuses the same A/b matrix
 infrastructure as LinUCB, including state persistence and event-log bootstrap.
 
+### System-1 Decision-Model Advice (implemented)
+
+A pretrained System-1 decision model (SystemOne API, e.g. Cloudflare clef-flash in a GPU
+sidecar) can advise the evidence-level policy without changing the 3-layer structure: it runs
+at layer 2, after the pregate and hard constraints, sees only the feasible actions, and leaves
+Stage-A request filtering untouched. It reads a redacted, bounded rendering of the failure that
+the numeric bandit features cannot express, and returns a probability per action plus
+diagnostic answers.
+```bash
+--adaptive-decision-model-role shadow|policy|features|prior
+```
+
+- `shadow` logs its answers next to the bandit's decisions (for OPE).
+- `policy` lets it select (an argmax or tempered distribution mixed with epsilon, or an atomic
+  mapping of diagnostic answers to an action in code).
+- `features` and `prior` keep the bandit as the learner: diagnostic answers become features, or
+  the decision model's distribution guides warm-up and a fading score prior. This targets the
+  bandit's cold start, which matters because the shipped template makes roughly one helper
+  decision per case.
+
+See `docs/adaptive_online_policy_design.md` ("Decision-model advice").
+
 ### Level 3: Strategy Policy (future)
 
 Following the OPTS framework (ACL 2025, arxiv:2503.01163), a third bandit level

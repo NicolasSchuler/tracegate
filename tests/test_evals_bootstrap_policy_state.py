@@ -1752,3 +1752,92 @@ def test_main_returns_1_when_glob_yields_no_files(tmp_path: Path) -> None:
         ]
     )
     assert exit_code == 1  # "No valid policy events found."
+
+
+# --- case-label feature mask on replay ---
+
+
+def _bootstrap_online_with_case_labels(tmp_path: Path, *, extra_argv: list[str]) -> dict:  # type: ignore[type-arg]
+    events_path = tmp_path / "labelled_events.jsonl"
+    _write_jsonl(
+        events_path,
+        [
+            _minimal_online_event(
+                decision_id="d1",
+                behavior_action=ACTION_INVOKE_HELPER,
+                selected_action=ACTION_INVOKE_HELPER,
+                feature_values={
+                    "bias": 1.0,
+                    "attempt_frac": 0.5,
+                    "case_difficulty_ord": 2.0,
+                    "case_snapshot_dependency_ord": 1.0,
+                    "case_bug_source_imported": 1.0,
+                },
+            )
+        ],
+    )
+    output_path = tmp_path / f"out_{len(extra_argv)}.json"
+    exit_code = bootstrap_policy_state_main(
+        [
+            "--policy-kind",
+            "online",
+            "--events",
+            str(events_path),
+            "--output-state",
+            str(output_path),
+            *extra_argv,
+        ]
+    )
+    assert exit_code == 0
+    return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def test_bootstrap_online_drops_case_label_features_by_default(tmp_path: Path) -> None:
+    """Replay masks the oracle case-label features, matching the runtime default."""
+    payload = _bootstrap_online_with_case_labels(tmp_path, extra_argv=[])
+
+    assert payload["feature_names"] == ["attempt_frac", "bias"]
+    assert payload["bootstrap_case_label_features_kept"] is False
+    assert "case_label_features_dropped" in payload["bootstrap_warning_codes"]
+    for matrix in payload["A"].values():
+        assert np.array(matrix).shape == (2, 2)
+
+
+def test_bootstrap_online_keeps_case_label_features_on_request(tmp_path: Path) -> None:
+    """--keep-case-label-features reproduces historical runs that learned the labels."""
+    payload = _bootstrap_online_with_case_labels(
+        tmp_path, extra_argv=["--keep-case-label-features"]
+    )
+
+    assert payload["feature_names"] == [
+        "attempt_frac",
+        "bias",
+        "case_bug_source_imported",
+        "case_difficulty_ord",
+        "case_snapshot_dependency_ord",
+    ]
+    assert payload["bootstrap_case_label_features_kept"] is True
+    assert payload["bootstrap_warning_codes"] == []
+
+
+def test_bootstrap_online_without_case_labels_emits_no_mask_warning(tmp_path: Path) -> None:
+    """Logs that never carried case labels replay without the mask warning."""
+    events_path = tmp_path / "unlabelled_events.jsonl"
+    _write_jsonl(events_path, [_minimal_online_event(behavior_action=ACTION_SKIP_HELPER)])
+    output_path = tmp_path / "out_unlabelled.json"
+
+    exit_code = bootstrap_policy_state_main(
+        [
+            "--policy-kind",
+            "online",
+            "--events",
+            str(events_path),
+            "--output-state",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["feature_names"] == ["bias"]
+    assert payload["bootstrap_warning_codes"] == []

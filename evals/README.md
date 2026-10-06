@@ -1158,7 +1158,11 @@ Key flags:
 - `--adaptive-online-init-state-path <path>`: warm-start online controller weights from an existing compatible state JSON while still saving to the run-scoped `--adaptive-online-state-path`. This is for warm starts, not exact run continuation.
 - `--adaptive-online-state-path <path>`: policy state JSON path (default `evals/artifacts/policies/<run_id>.json`).
 - `--adaptive-online-events-path <path>`: policy event log JSONL path (default `evals/results/<run_id>.adaptive_policy.jsonl`).
-- `python -m evals.bootstrap_policy_state --events <jsonl> --output-state <json>`: reconstruct a warm-start compatible controller state from historical event logs when a saved state JSON is unavailable.
+- `python -m evals.bootstrap_policy_state --events <jsonl> --output-state <json>`: reconstruct a warm-start compatible controller state from historical event logs when a saved state JSON is unavailable. Case-label features are dropped from replayed logs unless `--keep-case-label-features` is given.
+- `--adaptive-online-include-case-labels` / `--no-adaptive-online-include-case-labels`: feed the `case.json` difficulty/snapshot-dependency/bug-source labels to the helper policy as features. Off by default since 2026-10: the labels are not observable at deployment time.
+- `--adaptive-lite-snapshot-mode replace|supplement`: with `--adaptive-reveal-mode full`, `replace` (default) makes `snapshot_lite`, `frame_locals_lite` and `snapshot_full_lite` replace the full snapshot section in the patch prompt; `supplement` restores the old behavior of adding them on top. Rows record `adaptive_lite_replaced_snapshot`.
+- `--adaptive-decision-model-role off|shadow|policy|features|prior`: consult a SystemOne-compatible System-1 decision model (for example Cloudflare clef-flash served by llama.cpp through llama-swap, or the `evals/docker/decision_model/` PyTorch sidecar) for `layered_adaptive_llm` helper decisions. `shadow` logs only; `policy` lets it select; `features` adds six diagnostic LinUCB features; `prior` guides warm-up and adds a fading score prior. `policy`/`features`/`prior` require `--adaptive-online-policy-mode on`. See `docs/adaptive_online_policy_design.md`.
+- `--adaptive-decision-model-url <url>` (default `$TRACEGATE_DECISION_MODEL_URL` or `http://127.0.0.1:8090`), `--adaptive-decision-model-api-key <key>` (default `$TRACEGATE_DECISION_MODEL_API_KEY`; bearer token for gateways such as llama-swap, redacted in lockfiles and rejected in config files), `--adaptive-decision-model-name <name>` (`clef-flash`), `--adaptive-decision-model-profile evidence_v1|evidence_v1_noaux|evidence_v1_text|evidence_v1_nohints|evidence_atomic_v1`, `--adaptive-decision-model-timeout-sec <float>` (`10`), `--adaptive-decision-model-temperature <float>` (`0` = argmax), `--adaptive-decision-model-prior-beta` / `--adaptive-decision-model-prior-anneal-updates` / `--adaptive-decision-model-warmup-mix` (`0.5` / `50` / `0.3`), `--adaptive-decision-model-log-state full|hash` (`full` writes rendered states to `<artifacts_root>/decision_model_states.jsonl`). The sidecar is health-checked before the first unit runs. Results carry `adaptive_online_dm_*` fields and policy events schema v5 carries a `decision_model` block.
 - `--prompt-order-mode current|crash_first|evidence_last`: reorder the shared Stage-B prompt sections without changing evidence membership.
 - `--adaptive-reveal-mode full|traceback_first`: either send full adaptive evidence immediately or start from traceback/failure-signature/snapshot-index-only prompting and reveal more only on explicit triggers.
 - `--snapshot-frame-pruning-mode off|heuristic`: heuristically trim prompt-facing snapshot frames while always keeping the crash frame and adjacent user-code frames.
@@ -1221,6 +1225,10 @@ around the adaptive template for the roadmap experiments:
 - `openai_adaptive_probe_warm_start.template.toml`: explicit init-state reuse.
 - `openai_adaptive_probe_bwk_v1.template.toml`: explicit-token-budget
   `bwk_v1` smoke path.
+- `openai_adaptive_probe_decision_model_{shadow,policy,policy_atomic,features,prior}.template.toml`:
+  System-1 decision-model roles (`policy_atomic` uses the `evidence_atomic_v1` profile). They
+  need the decision-model sidecar (`just decision-model-up`); run `shadow` first and compare
+  the decision-model OPE targets before live roles.
 
 These presets intentionally pin `jobs = 1` so online-controller event logs stay
 case-ordered and directly comparable.
@@ -1393,9 +1401,41 @@ uv run python -m evals.export_policy_dataset \
   --output-csv evals/results/adaptive_policy_dataset.csv
 ```
 
-`evals.export_policy_dataset` now enforces strict adaptive policy event schema validation
-(`schema_version=3`). Older `*.adaptive_policy.jsonl` artifacts are intentionally
-unsupported and should be regenerated with the current harness before CSV export.
+`evals.export_policy_dataset` enforces strict adaptive policy event schema validation: helper
+events must be `schema_version` 4 or 5 and budget events 4. Older artifacts are intentionally
+unsupported and should be regenerated with the current harness before CSV export. Version 5
+helper events add decision-model columns (`dm_role`, `dm_status`, `dm_top_action`,
+`dm_top_prob`, `dm_margin`, `dm_entropy`, `dm_atomic_action`, `dm_traceback_sufficient`,
+`dm_fix_confidence`, `dm_latency_ms`, `dm_prior_beta`, ... plus `dm_p_<action>` and
+`dm_missing_<option>`); events without a decision-model block leave them empty.
+
+When rows carry decision-model advice, `analyze_results` OPE also reports
+`decision_model_greedy`, `decision_model_stochastic` and `decision_model_atomic` targets (the
+atomic target re-applies the `evidence_atomic_v1` thresholds to logged aux answers when the run
+used another profile), and `shadow_corrected_samples` counts old shadow-mode rows whose behavior
+propensity was corrected to 1.0 at read time.
+
+### Offline decision-model probe
+
+`python -m evals.decision_model.probe` measures how well the decision model judges our failures
+without any repair-model budget. For each case it runs the failing test once with snapshot
+capture, builds the attempt-1 decision state exactly like the live harness (redacted, no case
+metadata), queries the sidecar, and scores the diagnostic answers against the `case.json`
+labels, next to the heuristic pregate on the same cases:
+
+```bash
+uv run python -m evals.decision_model.probe --executor local --split dev --jobs 4 --report
+uv run python -m evals.decision_model.probe --executor local --dry-run --limit 20 --report  # no sidecar
+```
+
+- Cases are split deterministically by case family (the id without `_easy|_medium|_hard`):
+  about 1 in 5 families is `test`. Tune profile wording and thresholds on `dev` only.
+- `--rename-option-keys` checks option-order bias by renaming the action option ids on the wire.
+- The default executor follows `--executor` (default `testcontainers`), so pass
+  `--executor local` for local runs, as with `validate_cases`.
+- Output: one JSONL record per case under `evals/artifacts/decision_model_probe/` plus a JSON
+  report (AUROC against `snapshot_dependency`, Spearman of `fix_confidence` vs difficulty,
+  action mix per category, calibration bins, latency).
 
 By default (`--patch-verifier-scope adaptive_only`), adaptive conditions run a pre-apply patch
 verifier. Low-relevance adaptive patches are rejected before apply with note

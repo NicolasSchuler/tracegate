@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from evals import eval_main_support as legacy
+from evals.decision_model.config import decision_model_settings_from_args
+from evals.decision_model.runtime import check_decision_model_health
 from evals.eval_main_setup import MainFlowCliError, MainSetupState
 from evals.eval_types import (
     DEFAULT_CONTAINER_CLEANUP_STALE_GRACE_SEC,
@@ -119,6 +121,12 @@ def prepare_main_resume(
     resumed_completed_units = {key for key in existing_completed_units if key in planned_unit_keys}
     skipped_units = len(resumed_completed_units)
     remaining_units = total_units - skipped_units
+
+    if remaining_units > 0:
+        decision_model_error = check_decision_model_health(decision_model_settings_from_args(args))
+        if decision_model_error:
+            _release_lock(run_results_lock)
+            raise MainFlowCliError(f"Environment check failed: {decision_model_error}")
 
     if remaining_units > 0 and setup.execution_config.executor == "testcontainers":
         ok, message = legacy.check_testcontainers_runtime_available()

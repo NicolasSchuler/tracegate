@@ -281,13 +281,15 @@ eval framework, and adaptive online learning.
  │  "Should I use the helper, and  │  │  "Should I increase the resource    │
  │   if so, which strategy?"       │  │   budget for this attempt?"         │
  │                                 │  │                                     │
- │  8 Arms (actions):              │  │  2 Arms (actions):                  │
+ │  10 Arms (actions):             │  │  2 Arms (actions):                  │
  │  ├─ skip_helper                 │  │  ├─ keep_budget                     │
  │  ├─ invoke_helper               │  │  └─ increase_budget                 │
  │  ├─ frame_only                  │  │                                     │
  │  ├─ file_only                   │  │  Controls: timeout multiplier,      │
  │  ├─ search_only                 │  │  max tokens, helper call limit,     │
  │  ├─ snapshot_lite               │  │  stage A request limits             │
+ │  ├─ frame_locals_lite           │  │                                     │
+ │  ├─ snapshot_full_lite          │  │                                     │
  │  ├─ compact_then_patch          │  │                                     │
  │  └─ retry_helper_strict_json    │  │                                     │
  └────────────────┬────────────────┘  └───────────────────┬─────────────────┘
@@ -312,7 +314,7 @@ eval framework, and adaptive online learning.
  │                              ├─ helper_topup_used/remaining_frac      │
  │  Stagnation signals:         └─ last_helper_need_more_context         │
  │  ├─ stagnation_streak                                                 │
- │  └─ adaptive_no_progress_    Case metadata:                           │
+ │  └─ adaptive_no_progress_    Case metadata (opt-in, off by default):  │
  │       streak                 ├─ case_difficulty_ord (0/0.5/1)         │
  │                              ├─ case_snapshot_dependency_ord           │
  │  Context compaction:         └─ case_bug_source_imported              │
@@ -481,6 +483,13 @@ eval framework, and adaptive online learning.
                                                      well for hard cases
                                                      after stagnation
 ```
+
+With a System-1 decision model attached (`--adaptive-decision-model-role`), the `policy` role
+replaces the selection above (`decision_model_greedy`, `decision_model_sample`,
+`decision_model_atomic`, `decision_model_epsilon`, or `decision_model_unavailable` when the
+sidecar fails), and the `prior` role replaces warm-up sampling (`decision_model_guided_warmup`)
+before adding a fading score prior to the greedy ranking. Thompson sampling's greedy picks are
+labeled `thompson_greedy`. See `docs/adaptive_online_policy_design.md`.
 
 ---
 

@@ -22,6 +22,8 @@ from .attempt_metadata import (
     AttemptMetadataRequest,
     _build_attempt_metadata_request_from_legacy_values,
 )
+from .decision_model.config import decision_model_run_config
+from .decision_model.policy import decision_model_metadata_fields
 from .eval_config import _execution_config_payload, build_execution_config_from_args
 from .eval_evidence import _xxh3_128_jsonlike, _xxh3_128_text
 from .eval_types import (
@@ -314,6 +316,7 @@ def _build_patcher_config(*, args: argparse.Namespace, patcher_name: str) -> dic
         "context_compaction_max_calls": int(args.context_compaction_max_calls),
         "prompt_order_mode": str(getattr(args, "prompt_order_mode", "current")),
         "adaptive_reveal_mode": str(getattr(args, "adaptive_reveal_mode", "full")),
+        **decision_model_run_config(args),
         "snapshot_frame_pruning_mode": str(getattr(args, "snapshot_frame_pruning_mode", "off")),
         "openai_auto_context_window": bool(getattr(args, "openai_auto_context_window", False)),
         **_native_openai_compat_settings_from_args(args=args),
@@ -940,6 +943,8 @@ def _empty_attempt_metadata(*, attempt: int) -> dict[str, Any]:
         "adaptive_online_updated": False,
         "adaptive_online_update_reason": "",
         "adaptive_online_event_logged": False,
+        **decision_model_metadata_fields(None),
+        "adaptive_lite_replaced_snapshot": False,
         "adaptive_budget_policy_mode": "off",
         "adaptive_budget_policy_algo": "",
         "adaptive_budget_policy_architecture": "tier_binary",

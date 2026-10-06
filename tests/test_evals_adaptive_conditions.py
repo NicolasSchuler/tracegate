@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -47,6 +48,11 @@ from evals.adaptive_online_policy import (
 from evals.adaptive_online_policy import (
     STATE_SCHEMA_VERSION as ONLINE_STATE_SCHEMA_VERSION,
 )
+from evals.decision_model.config import DecisionModelPolicyConfig
+from evals.decision_model.policy import DecisionModelAdvice, DecisionModelBinding
+from evals.decision_model.runtime import DecisionStateSink
+from evals.decision_model.schema import ParsedAnswers, get_profile
+from evals.decision_model.state import build_decision_state
 from evals.eval_types import _filter_context_request_payload_for_action
 from evals.lambda_rlm_backend import LambdaRLMDecompositionResult
 from evals.patchers.base import (
@@ -1565,6 +1571,7 @@ def _run_adaptive_action_case(
     snapshot_payload: dict[str, object] | None = None,
     include_snapshot: bool = True,
     extra_run_kwargs: dict[str, object] | None = None,
+    decision_model: DecisionModelBinding | None = None,
 ) -> tuple[list[dict[str, object]], Path]:
     case = _make_case(tmp_path)
     workdir = tmp_path / f"{run_id}_workdir"
@@ -1573,6 +1580,7 @@ def _run_adaptive_action_case(
     controller, events_path = _preferred_action_online_controller(
         tmp_path, mode="on", preferred_action=preferred_action
     )
+    controller.decision_model = decision_model
 
     monkeypatch.setattr(
         run_eval,
@@ -1804,9 +1812,11 @@ def test_adaptive_llm_discretion_snapshot_lite_injects_snapshot_index_without_he
     assert attempt_meta["adaptive_helper_invoked"] is False
     assert attempt_meta["adaptive_helper_calls_used_after_attempt"] == 0
     assert attempt_meta["adaptive_helper_outcome"] == "materialized"
+    assert attempt_meta["adaptive_lite_replaced_snapshot"] is True
     assert "Compact snapshot index:" in patcher.patch_prompts[0]
     assert "=== llmdebug Snapshot Index ===" in patcher.patch_prompts[0]
-    assert "=== llmdebug Snapshot ===" not in patcher.patch_prompts[0]
+    # Under full reveal the lite section replaces the full debug snapshot (lite replaces).
+    assert "=== llmdebug Debug Snapshot ===" not in patcher.patch_prompts[0]
 
 
 @pytest.mark.parametrize(
@@ -1838,8 +1848,142 @@ def test_adaptive_llm_discretion_lite_snapshot_actions_credit_materialized_conte
     assert attempt_meta["adaptive_helper_invoked"] is False
     assert attempt_meta["adaptive_helper_calls_used_after_attempt"] == 0
     assert attempt_meta["adaptive_helper_outcome"] == "materialized"
+    assert attempt_meta["adaptive_lite_replaced_snapshot"] is True
     assert "Compact snapshot index:" in patcher.patch_prompts[0]
     assert expected_section in patcher.patch_prompts[0]
+    # The full debug snapshot is replaced, so its header appears at most once (from the lite
+    # section itself for snapshot_full_lite).
+    expected_header_count = 1 if preferred_action == ACTION_SNAPSHOT_FULL_LITE else 0
+    assert patcher.patch_prompts[0].count("=== llmdebug Debug Snapshot ===") == (
+        expected_header_count
+    )
+
+
+def test_adaptive_llm_discretion_lite_snapshot_supplement_mode_keeps_full_snapshot(
+    tmp_path, monkeypatch
+) -> None:
+    """The legacy supplement mode adds the lite section on top of the full snapshot."""
+    patcher = _AdaptiveActionCapturePatcher()
+
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_FRAME_LOCALS_LITE,
+        run_id="run-frame-locals-lite-supplement",
+        extra_run_kwargs={"adaptive_lite_snapshot_mode": "supplement"},
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+
+    assert attempt_meta["adaptive_helper_action_executed"] == ACTION_FRAME_LOCALS_LITE
+    assert attempt_meta["adaptive_lite_replaced_snapshot"] is False
+    assert "=== llmdebug Crash Frame ===" in patcher.patch_prompts[0]
+    assert "=== llmdebug Debug Snapshot ===" in patcher.patch_prompts[0]
+
+
+def test_adaptive_llm_discretion_lite_snapshot_traceback_first_never_replaces(
+    tmp_path, monkeypatch
+) -> None:
+    """Replacement only applies under full reveal; traceback_first keeps its own reveal logic."""
+    patcher = _AdaptiveActionCapturePatcher()
+
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_FRAME_LOCALS_LITE,
+        run_id="run-frame-locals-lite-traceback-first",
+        extra_run_kwargs={"adaptive_reveal_mode": "traceback_first"},
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+
+    assert attempt_meta["adaptive_lite_replaced_snapshot"] is False
+    assert "=== llmdebug Crash Frame ===" in patcher.patch_prompts[0]
+
+
+class _RecordingAdvisor:
+    def __init__(self, advice: DecisionModelAdvice) -> None:
+        self.advice = advice
+        self.requests: list[Any] = []
+
+    def advise(self, request: Any) -> DecisionModelAdvice:
+        self.requests.append(request)
+        return self.advice
+
+
+def test_adaptive_llm_discretion_decision_model_policy_role_drives_helper_action(
+    tmp_path, monkeypatch
+) -> None:
+    """The policy role overrides LinUCB's preference and logs to rows, events and states."""
+    patcher = _AdaptiveActionCapturePatcher()
+    advisor = _RecordingAdvisor(
+        DecisionModelAdvice(
+            status="ok",
+            profile="evidence_v1",
+            answers=ParsedAnswers(action_probs={ACTION_FILE_ONLY: 0.9, ACTION_SKIP_HELPER: 0.1}),
+            state_sha256="sha",
+            state_text='{"0_note":"state"}',
+        )
+    )
+    states_path = tmp_path / "decision_model_states.jsonl"
+    binding = DecisionModelBinding(
+        config=DecisionModelPolicyConfig(role="policy"),
+        advisor=advisor,
+        state_sink=DecisionStateSink(states_path),
+    )
+
+    records, events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-decision-model-policy",
+        decision_model=binding,
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+    assert attempt_meta["adaptive_helper_action_executed"] == ACTION_FILE_ONLY
+    assert attempt_meta["adaptive_online_decision_strategy"] == "decision_model_greedy"
+    assert attempt_meta["adaptive_online_dm_role"] == "policy"
+    assert attempt_meta["adaptive_online_dm_status"] == "ok"
+    assert attempt_meta["adaptive_online_dm_top_action"] == ACTION_FILE_ONLY
+
+    request = advisor.requests[0]
+    assert request.state_inputs.attempt == 1
+    assert request.state_inputs.reveal_mode == "full"
+    assert ACTION_FILE_ONLY in request.available_actions
+    assert "run-decision-model-policy" in request.state_inputs.redact_tokens
+    built = build_decision_state(request.state_inputs, profile=get_profile("evidence_v1"))
+    assert "run-decision-model-policy" not in built.rendered
+    assert str(tmp_path) not in built.rendered
+
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert events[0]["schema_version"] == 5
+    assert events[0]["decision_model"]["role"] == "policy"
+    states = [json.loads(line) for line in states_path.read_text(encoding="utf-8").splitlines()]
+    assert states[0]["decision_id"] == attempt_meta["adaptive_online_decision_id"]
+    assert states[0]["case_id"] == records[0]["case_id"]
+
+
+def test_adaptive_llm_discretion_without_decision_model_keeps_dm_defaults(
+    tmp_path, monkeypatch
+) -> None:
+    patcher = _AdaptiveActionCapturePatcher()
+
+    records, _events_path = _run_adaptive_action_case(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        patcher=patcher,
+        preferred_action=ACTION_SKIP_HELPER,
+        run_id="run-no-decision-model",
+    )
+
+    attempt_meta = records[0]["attempt_metadata"]
+    assert attempt_meta["adaptive_online_decision_strategy"] == "linucb_greedy"
+    assert attempt_meta["adaptive_online_dm_role"] == "off"
+    assert attempt_meta["adaptive_online_dm_status"] == ""
 
 
 def test_adaptive_llm_discretion_snapshot_lite_not_credited_when_budget_drops_it(
@@ -5247,9 +5391,16 @@ def test_adaptive_stagnation_override_forces_helper_after_policy_skip(
     assert events[1]["behavior_propensity"] == 1.0
 
 
-def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
-    tmp_path, monkeypatch
-) -> None:
+_CASE_LABEL_FEATURES = {
+    "case_difficulty_ord",
+    "case_snapshot_dependency_ord",
+    "case_bug_source_imported",
+}
+
+
+def _run_online_feature_vector_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **run_kwargs: Any
+) -> list[dict[str, Any]]:
     case = _make_case(tmp_path)
     workdir = tmp_path / "workdir_adaptive_online_features"
     context_dir = tmp_path / "context_adaptive_online_features"
@@ -5270,7 +5421,7 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
         run_eval, "read_latest_snapshot", lambda *_args, **_kwargs: (_snapshot_payload(), None)
     )
 
-    records = run_eval.run_one_condition(
+    return run_eval.run_one_condition(
         case=case,
         condition=run_eval.Condition.LAYERED_ADAPTIVE_LLM,
         workdir=workdir,
@@ -5282,7 +5433,14 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
         include_files_context=False,
         force_patch_attempt=False,
         adaptive_informativeness_pregate=True,
+        **run_kwargs,
     )
+
+
+def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
+    tmp_path, monkeypatch
+) -> None:
+    records = _run_online_feature_vector_case(tmp_path, monkeypatch)
 
     assert len(records) == 2
     feature_vector_1 = records[0]["attempt_metadata"]["adaptive_online_feature_vector"]
@@ -5303,9 +5461,6 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
         "last_helper_need_more_context",
         "last_helper_invalid_response",
         "last_helper_declined",
-        "case_difficulty_ord",
-        "case_snapshot_dependency_ord",
-        "case_bug_source_imported",
         "pregate_exception_is_assertion",
         "pregate_exception_is_timeout",
         "pregate_exception_is_syntax",
@@ -5314,14 +5469,27 @@ def test_adaptive_online_feature_vector_includes_extended_and_lagged_signals(
     assert expected_keys.issubset(feature_vector_2.keys())
     raw_feature_vector_1 = records[0]["attempt_metadata"]["adaptive_online_feature_vector_raw"]
     assert expected_keys.issubset(raw_feature_vector_1.keys())
+    # Oracle case labels (case.json) are masked by default, in every logged copy.
+    assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_1.keys())
+    assert _CASE_LABEL_FEATURES.isdisjoint(feature_vector_2.keys())
+    assert _CASE_LABEL_FEATURES.isdisjoint(raw_feature_vector_1.keys())
     assert feature_vector_1["attempts_remaining_frac"] == 0.5
     assert feature_vector_2["attempts_remaining_frac"] == 0.0
-    assert feature_vector_1["case_difficulty_ord"] == 0.0
-    assert feature_vector_1["case_snapshot_dependency_ord"] == 0.5
-    assert feature_vector_1["case_bug_source_imported"] == 0.0
     assert feature_vector_1["pregate_exception_is_assertion"] == 1.0
     assert feature_vector_1["last_helper_invalid_response"] == 0.0
     assert feature_vector_2["last_helper_invalid_response"] == 1.0
+
+
+def test_adaptive_online_feature_vector_case_labels_are_opt_in(tmp_path, monkeypatch) -> None:
+    records = _run_online_feature_vector_case(
+        tmp_path, monkeypatch, adaptive_online_include_case_labels=True
+    )
+
+    feature_vector_1 = records[0]["attempt_metadata"]["adaptive_online_feature_vector"]
+    assert _CASE_LABEL_FEATURES.issubset(feature_vector_1.keys())
+    assert feature_vector_1["case_difficulty_ord"] == 0.0
+    assert feature_vector_1["case_snapshot_dependency_ord"] == 0.5
+    assert feature_vector_1["case_bug_source_imported"] == 0.0
 
 
 def test_adaptive_online_policy_logging_failure_does_not_abort_attempt(

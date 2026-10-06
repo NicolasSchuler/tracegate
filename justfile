@@ -147,6 +147,22 @@ eval-select-failed run_id condition="base_repair" max_attempt="2":
 eval-adaptive-online-failed source_run_id rescue_run_id:
     bash evals/docker/run_eval_docker.sh --patcher openai --openai-base-url "${OPENAI_BASE_URL:-http://127.0.0.1:12000/v1}" --config evals/configs/openai_adaptive.template.toml --run-id {{rescue_run_id}} --case-list-file evals/artifacts/case_lists/{{source_run_id}}.failed.txt --adaptive-online-state-path evals/artifacts/policies/{{rescue_run_id}}.json --adaptive-online-events-path evals/results/{{rescue_run_id}}.adaptive_policy.jsonl
 
+# Build the System-1 decision-model sidecar image (CUDA host only)
+decision-model-build:
+    docker build -t "${DECISION_MODEL_IMAGE:-tracegate-decision-model:latest}" evals/docker/decision_model
+
+# Start the decision-model sidecar container (CUDA host only)
+decision-model-up:
+    bash evals/docker/decision_model/run_decision_model.sh
+
+# Query the decision-model sidecar health endpoint
+decision-model-health:
+    curl -fsS ${TRACEGATE_DECISION_MODEL_API_KEY:+-H "Authorization: Bearer $TRACEGATE_DECISION_MODEL_API_KEY"} "${TRACEGATE_DECISION_MODEL_URL:-http://127.0.0.1:8090}/health" && echo
+
+# Latency smoke test (1k/2k/4k-token states) against a running decision-model sidecar
+decision-model-smoke:
+    uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} python scripts/decision_model_smoke.py
+
 # Core summary for a single eval run (strict schema-v5)
 eval-summary run_id:
     uv run ${PYTHON_VERSION:+--python "$PYTHON_VERSION"} python -m evals.eval_summary {{run_id}}

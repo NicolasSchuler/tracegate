@@ -1,0 +1,57 @@
+# llama-swap entries that serve Cloudflare's Clef-Flash decision model natively with llama.cpp,
+# from the GGUFs in ggml-org/Clef-Flash-GGUF (Q4_K_M 6.5 GB, Q8_0 9.7 GB, BF16 18.2 GB). Merge
+# into the server's llama-swap config (for example /opt/llama/config.yaml); with --watch-config
+# the change is picked up without a restart, but a reload restarts the running models.
+#
+# Requirements:
+#   - llama-server from llama.cpp b11371 or later: PR #29831 (merge 99b95488cac0) adds the Clef
+#     architecture and PR #29818 the POST /v1/systemone endpoint. When the llama-swap image
+#     builds llama.cpp from LLAMA_CPP_REF, pin a tag (e.g. LLAMA_CPP_REF: "b11371") or rebuild
+#     with --no-cache; a plain rebuild with "master" reuses the cached clone layer and keeps the
+#     old commit.
+#   - A `server` macro such as `llama-server --port ${PORT} --host 127.0.0.1 -ngl 99`.
+#   - llama.cpp's Clef support is text-only and decodes one sequence per batch (--parallel 1).
+#
+# llama-swap routes the endpoints it knows by the request's "model" field; the
+# /upstream/<model>/ passthrough forwards any path. Clients call, with one of the apiKeys as
+# bearer token:
+#   POST http://<host>:9292/upstream/clef-flash-q4/v1/systemone
+#   GET  http://<host>:9292/upstream/clef-flash-q4/health
+# The harness takes the key from TRACEGATE_DECISION_MODEL_API_KEY (run_eval_docker.sh passes it
+# as --adaptive-decision-model-api-key, never as an environment variable in the container):
+#   TRACEGATE_DECISION_MODEL_API_KEY=<key> bash evals/docker/run_eval_docker.sh ... \
+#     --adaptive-decision-model-url http://127.0.0.1:9292/upstream/clef-flash-q4
+#
+# The first request after a (re)load blocks until llama-server is ready (healthCheckTimeout);
+# the harness preflight waits up to 300 s. `-hf` follows the repo's main branch; to pin a
+# revision, download the file (hf download ggml-org/Clef-Flash-GGUF <file> --revision <sha>)
+# and pass `-m <path>` instead. The PyTorch sidecar in this directory (server.py) stays the
+# reference implementation for parity checks.
+
+models:
+  clef-flash-q4:
+    name: "Clef-Flash decision model (Q4_K_M, /v1/systemone)"
+    cmd: |
+      ${server} --ctx-size 8192 --parallel 1
+      -hf ggml-org/Clef-Flash-GGUF:Q4_K_M
+  clef-flash-bf16:
+    name: "Clef-Flash decision model (BF16 reference, /v1/systemone)"
+    cmd: |
+      ${server} --ctx-size 8192 --parallel 1
+      -hf ggml-org/Clef-Flash-GGUF:BF16
+
+# Top level, next to `models:` (nested under `models:` it would be parsed as a model named
+# "groups" and the reload fails). Chat models stay in the implicit default group, so their
+# swapping is unchanged:
+#   swap: true         one Clef variant at a time
+#   exclusive: false   loading Clef does not unload the chat model
+#   persistent: true   swapping chat models never unloads Clef
+# (A config must use either groups or matrix, not both.)
+groups:
+  decision-models:
+    swap: true
+    exclusive: false
+    persistent: true
+    members:
+      - clef-flash-q4
+      - clef-flash-bf16

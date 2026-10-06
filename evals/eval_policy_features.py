@@ -15,7 +15,12 @@ from .adaptive_budget_online_policy import (
     BUDGET_POLICY_ARCH_TIER_BINARY,
     BUDGET_POLICY_FAMILIES,
 )
-from .adaptive_online_policy import ONLINE_POLICY_ACTIONS
+from .adaptive_online_policy import (
+    ACTION_FRAME_LOCALS_LITE,
+    ACTION_SNAPSHOT_FULL_LITE,
+    ACTION_SNAPSHOT_LITE,
+    ONLINE_POLICY_ACTIONS,
+)
 from .eval_types import (
     ADAPTIVE_AUX_REWARD_COMPACTION_EFFICIENCY_WEIGHT_DEFAULT,
     ADAPTIVE_AUX_REWARD_EVIDENCE_NOVELTY_WEIGHT_DEFAULT,
@@ -41,6 +46,42 @@ def _nonnegative_int(value: Any, *, default: int = 0) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return max(0, int(default))
+
+
+# Dataset labels from case.json (not observable at deployment time); masked by default.
+CASE_LABEL_FEATURE_NAMES = (
+    "case_difficulty_ord",
+    "case_snapshot_dependency_ord",
+    "case_bug_source_imported",
+)
+LITE_SNAPSHOT_ACTIONS = frozenset(
+    {ACTION_SNAPSHOT_LITE, ACTION_FRAME_LOCALS_LITE, ACTION_SNAPSHOT_FULL_LITE}
+)
+
+
+def drop_case_label_features(features: Mapping[str, float]) -> dict[str, float]:
+    """Return *features* without the oracle case-label features."""
+    return {name: value for name, value in features.items() if name not in CASE_LABEL_FEATURE_NAMES}
+
+
+def lite_action_replaces_snapshot(
+    *,
+    action: str,
+    reveal_mode: str,
+    lite_context: str,
+    lite_snapshot_mode: str,
+) -> bool:
+    """Whether a lite action's section replaces the full snapshot in the Stage-B prompt.
+
+    Under ``full`` reveal the full snapshot section is always present, so a lite action only
+    changes the evidence when its compact section replaces that section (``replace`` mode).
+    """
+    return (
+        action in LITE_SNAPSHOT_ACTIONS
+        and bool(str(lite_context or "").strip())
+        and str(reveal_mode) != "traceback_first"
+        and str(lite_snapshot_mode) == "replace"
+    )
 
 
 def _adaptive_online_feature_vector(
