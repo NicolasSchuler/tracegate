@@ -285,16 +285,10 @@ def stored_rca_attempt_ids(out_dir: str | Path, attempt_ids: list[str]) -> set[s
     # Chunked to stay under SQLite's bound-parameter limit.
     for start in range(0, len(wanted), _ID_QUERY_CHUNK):
         chunk = wanted[start : start + _ID_QUERY_CHUNK]
-        placeholders = ",".join("?" * len(chunk))
-        (rows,) = _read_rows(
-            out_dir,
-            (
-                (
-                    f"SELECT attempt_id FROM rca_attempts WHERE attempt_id IN ({placeholders})",
-                    tuple(chunk),
-                ),
-            ),
-        )
+        marks = ",".join("?" * len(chunk))
+        # Only "?" markers are interpolated; the ids themselves are bound parameters.
+        sql = f"SELECT attempt_id FROM rca_attempts WHERE attempt_id IN ({marks})"  # nosec B608
+        (rows,) = _read_rows(out_dir, ((sql, tuple(chunk)),))
         found.update(str(row[0]) for row in rows)
     return found
 
