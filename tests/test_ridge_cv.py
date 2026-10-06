@@ -369,10 +369,29 @@ def test_sta11_crossfit_models_never_see_their_own_fold() -> None:
 
 
 def test_sta11_summary_reports_the_alphas_actually_used() -> None:
-    from evals.analyze_results import ADAPTIVE_OPE_RIDGE_ALPHAS, _adaptive_ope_summary
+    """STA-11: the summary reported the fallback alpha, not RidgeCV's choices.
 
+    codex 2-3#5: a subset assertion against the candidate grid also passed for empty
+    alpha lists and for the fallback, which is itself a grid member. This compares the
+    summary with the alphas the DR fold models really used and requires a non-fallback
+    choice.
+    """
+    from evals.analyze_results import (
+        ADAPTIVE_OPE_RIDGE_ALPHA,
+        ADAPTIVE_OPE_RIDGE_ALPHAS,
+        _adaptive_ope_summary,
+        _crossfit_reward_models,
+    )
+
+    # A tiny, weakly informative feature against a large unrelated reward, so RidgeCV
+    # prefers heavy regularization over the 1e-3 fallback. Deterministic, no RNG.
     samples = [
-        _ope_sample(action, float(i), float(i) * (2.0 if action == "a" else 1.0))
+        _case_ope_sample(
+            f"c{i}",
+            action,
+            ((i * 7) % 11) / 1000.0,
+            float(((i * 13) % 17) - 8) * (2.0 if action == "a" else 1.0),
+        )
         for i in range(30)
         for action in ("a", "b")
     ]
@@ -385,10 +404,23 @@ def test_sta11_summary_reports_the_alphas_actually_used() -> None:
             propensity_floor=0.01,
         ),
     )
+    crossfit = _crossfit_reward_models(
+        samples=samples,
+        action_space={"a", "b"},
+        min_action_support=2,
+        ridge_alpha=ADAPTIVE_OPE_RIDGE_ALPHA,
+    )
+    expected = {action: sorted(set(alphas)) for action, alphas in sorted(crossfit.alphas.items())}
+
     assert summary["dr_crossfit_folds"] == 5
-    assert set(summary["ridge_alphas_selected"]) == {"a", "b"}
-    for alphas in summary["ridge_alphas_selected"].values():
-        assert set(alphas) <= set(ADAPTIVE_OPE_RIDGE_ALPHAS)  # RidgeCV choices, 24+ samples
+    assert expected  # the fold models did fit something
+    assert summary["ridge_alphas_selected"] == expected
+    for alphas in expected.values():
+        assert alphas, "an action reported no selected alpha"
+        assert set(alphas) <= set(ADAPTIVE_OPE_RIDGE_ALPHAS)
+    # RidgeCV really chose, instead of the summary echoing the hardcoded fallback.
+    chosen = {alpha for alphas in expected.values() for alpha in alphas}
+    assert chosen - {ADAPTIVE_OPE_RIDGE_ALPHA}
     assert summary["targets"]["always_a"]["dr_supported"] is True
 
 
