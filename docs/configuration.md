@@ -241,6 +241,12 @@ subclass that cannot be rebuilt is rendered as its type name around the redacted
 This structural pass never relies on the text patterns below, because a custom `redact`
 tuple need not contain them.
 
+The same redaction covers everything passed through `extra`, including the reserved
+`trace` and `eval`/`eval_outcome` payloads that become the snapshot's top-level `trace`
+and `eval` blocks. Redaction fails closed: if it raises for a payload, that payload
+(the whole context, or the `trace` or `eval` block) is omitted from the snapshot and a
+`_capture_warnings` entry says so, rather than writing it unredacted.
+
 `llmdebug.PII_PATTERNS` additionally covers, inside text such as a log line, an exception
 message or a `repr`: URL userinfo (`postgres://user:pw@host` and `https://TOKEN@host`
 become `…://[REDACTED]@host`; an over-long or truncation-cut authority is redacted whole,

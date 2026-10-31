@@ -547,6 +547,38 @@ def _try_log_context(cfg: SnapshotConfig, warnings: list[str]) -> Any:
         return None
 
 
+def _redact_payload(
+    label: str,
+    payload: Any,
+    redactors: list[Pattern[str]],
+    cfg: SnapshotConfig,
+    warnings: list[str],
+) -> Any:
+    """Redact one caller-supplied snapshot payload, failing closed on error.
+
+    Args:
+        label: Payload name used in the warning (``"context"``, ``"trace"``, ``"eval"``).
+        payload: JSON-like data to redact; ``None`` is passed through.
+        redactors: Compiled patterns; an empty list means no redaction is active.
+        cfg: Config supplying ``redact_keys``.
+        warnings: Buffer that receives a warning when the payload is dropped.
+
+    Returns:
+        The redacted payload, or ``None`` when redaction raised. An unredacted payload
+        is never returned while redaction is active.
+    """
+    if payload is None or not redactors:
+        return payload
+    try:
+        return redact_jsonlike(payload, redactors, redact_keys=bool(cfg.redact_keys))
+    except Exception as e:
+        _warn(
+            warnings,
+            f"{label} redaction failed: {type(e).__name__}: {e}; {label} omitted from snapshot",
+        )
+        return None
+
+
 def _redact_context(
     context_payload: dict[str, Any],
     redactors: list[Pattern[str]],
@@ -567,16 +599,11 @@ def _redact_context(
     """
     if not context_payload or not redactors:
         return context_payload
-    try:
-        cleaned = redact_jsonlike(context_payload, redactors, redact_keys=bool(cfg.redact_keys))
-    except Exception as e:
-        _warn(
-            warnings,
-            f"context redaction failed: {type(e).__name__}: {e}; context omitted from snapshot",
-        )
+    cleaned = _redact_payload("context", context_payload, redactors, cfg, warnings)
+    if cleaned is None:
         return {}
     if isinstance(cleaned, dict):
-        return cleaned
+        return cast(dict[str, Any], cleaned)
     _warn(warnings, "context redaction returned non-dict payload; context omitted from snapshot")
     return {}
 
@@ -591,7 +618,7 @@ def _collect_context(
 
     Returns:
         A ``(context, trace_payload, eval_payload)`` tuple; the last two come from the
-        reserved ``trace`` and ``eval`` keys of *extra*.
+        reserved ``trace`` and ``eval`` keys of *extra* and are redacted like the context.
     """
     context_payload: dict[str, Any] = {}
     if cfg.include_env:
@@ -613,6 +640,8 @@ def _collect_context(
     if extra_context:
         context_payload.update(extra_context)
     context_payload = _redact_context(context_payload, redactors, cfg, warnings)
+    trace_payload = _redact_payload("trace", trace_payload, redactors, cfg, warnings)
+    eval_payload = _redact_payload("eval", eval_payload, redactors, cfg, warnings)
     return context_payload, trace_payload, eval_payload
 
 

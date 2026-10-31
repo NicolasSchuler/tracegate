@@ -156,7 +156,8 @@ def redact_jsonlike(
     Args:
         value: JSON-like data; tuples become lists and sets become stably sorted lists.
         redactors: Compiled patterns; an empty list disables name-based redaction too.
-        redact_keys: Also redact dict keys; colliding keys get ``#2``-style suffixes.
+        redact_keys: Also redact dict keys (non-string keys are stringified first);
+            colliding keys get ``#2``-style suffixes.
 
     Returns:
         A redacted copy of *value*.
@@ -183,7 +184,7 @@ def redact_jsonlike(
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():
-            redacted_key = redact_text(key, redactors) if redact_keys else key
+            redacted_key = redact_text(str(key), redactors) if redact_keys else key
             redacted_item: JsonLike
             if redactors and is_sensitive_name(str(key)):
                 redacted_item = REDACTED
