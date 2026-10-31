@@ -1,6 +1,7 @@
 """Build the patcher selected by ``--patcher``.
 
-Also resolves the OpenAI context window for a run."""
+Also resolves the OpenAI context window for a run.
+"""
 
 from __future__ import annotations
 

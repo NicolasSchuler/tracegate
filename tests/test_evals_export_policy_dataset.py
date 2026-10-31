@@ -523,8 +523,10 @@ def test_event_key_falls_back_to_unknown() -> None:
 # (covered via dedup: duplicate events resolve to last-writer-wins)
 # ---------------------------------------------------------------------------
 def test_duplicate_events_resolved_to_first(tmp_path) -> None:
-    """Duplicate events (same key) are deduplicated; the first occurrence in chronological
-    order wins (POL-18; this used to keep the last one)."""
+    """Duplicate events (same key) are deduplicated; the first in chronological order wins.
+
+    POL-18: this used to keep the last one.
+    """
     base = {
         "schema_version": POLICY_EVENT_SCHEMA_VERSION,
         "run_id": "r",

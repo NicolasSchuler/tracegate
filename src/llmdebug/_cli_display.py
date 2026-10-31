@@ -59,7 +59,10 @@ def _stdout_is_tty() -> bool:
 
 
 def _get_console() -> Any | None:  # pyright: ignore[reportUnusedFunction] — used by cli.py
-    """Return a Rich Console if available, else None."""
+    """Return a Rich console for an interactive stdout, else None.
+
+    ``None`` means plain-text output: Rich is not installed or stdout is not a TTY.
+    """
     if HAS_RICH and _stdout_is_tty():
         return Console(stderr=False, no_color=(os.getenv("NO_COLOR") is not None))
     return None
@@ -162,7 +165,7 @@ def _print_selected_frame(
 
 
 def _print_remaining_frames_hint(snapshot: dict[str, Any], console: Any) -> None:
-    """Show a hint when crash-only mode hides additional frames."""
+    """Show a hint on interactive terminals when crash-only mode hides frames."""
     all_frames_obj = snapshot.get("frames", [])
     all_frames: list[Any] = (
         cast(list[Any], all_frames_obj) if isinstance(all_frames_obj, list) else cast(list[Any], [])
@@ -256,7 +259,7 @@ def _print_frame_rich(
     *,
     show_locals: bool = True,
 ) -> None:
-    """Print a single stack frame with Rich rendering (separate source and locals panels for ``frames``)."""
+    """Print a single stack frame as a Rich source panel followed by a locals table."""
     file_rel = frame_file_label(frame)
     line = frame.get("line", "?")
     func = frame.get("function", "?")

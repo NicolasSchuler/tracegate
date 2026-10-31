@@ -317,7 +317,7 @@ def test_generation_settings_env_carries_only_set_values() -> None:
 def test_untracked_tree_digest_marks_missing_oversized_and_unreadable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1e#10: content for normal files, stable markers for the awkward ones."""
+    """Codex 1e#10: content for normal files, stable markers for the awkward ones."""
     from baselines import adapter_base
     from baselines.adapter_base import _untracked_tree_digest
 
@@ -341,7 +341,7 @@ def test_untracked_tree_digest_marks_missing_oversized_and_unreadable(
 
 
 def test_repair_deadline_clamps_to_the_remaining_budget() -> None:
-    """codex 1e#3: one deadline per run_repair bounds every blocking step."""
+    """Codex 1e#3: one deadline per run_repair bounds every blocking step."""
     import time
 
     from baselines.adapter_base import RepairDeadline
@@ -369,7 +369,7 @@ def test_repair_deadline_clamps_to_the_remaining_budget() -> None:
 
 
 def test_effective_generation_reports_adapter_overrides() -> None:
-    """codex 1e#7: the record follows the knob that actually won."""
+    """Codex 1e#7: the record follows the knob that actually won."""
     from baselines.adapter_base import BaselineGenerationSettings
 
     class _OverridingAdapter(_DummyAdapter):

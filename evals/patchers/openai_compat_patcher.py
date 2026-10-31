@@ -1311,6 +1311,10 @@ class OpenAICompatPatcher(Patcher):
             cwd: Working directory of the case under repair.  Used by the
                 ``"edits"`` strategy to resolve relative file paths and to
                 enforce that no edit escapes the case directory.
+            system_prompt_override: System prompt that replaces the built-in one
+                in every strategy and retry (the adaptive TEP controller supplies
+                its evolved patch-proposer prompt here). ``None`` or an empty
+                string keeps the built-in prompts.
 
         Returns:
             A :class:`~evals.patchers.base.PatchResult` containing:

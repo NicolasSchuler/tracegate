@@ -434,7 +434,6 @@ def request_validation_compat_error_from_exception(
         An ``OpenAICompatResponseError`` when the exception matches a known
         request-level compatibility failure, otherwise ``None``.
     """
-
     raw_error = _exception_text(exc)
     if not _REQUEST_PREFILL_THINKING_CONFLICT_RE.search(raw_error):
         return None
@@ -464,7 +463,6 @@ def build_request_validation_retry_plan(
     base_url: str = "",
 ) -> OpenAICompatRetryPlan | None:
     """Build a bounded retry plan for known OpenAI-compatible request mismatches."""
-
     compat_exc = request_validation_compat_error_from_exception(
         exc,
         request_meta=request_meta,
@@ -506,7 +504,6 @@ def request_validation_compatibility_error_message(
     raw_error: str = "",
 ) -> str:
     """Build actionable guidance for known request-validation compat failures."""
-
     profile = request_meta.compat_profile_applied
     details = [
         "OpenAI-compatible request was rejected before generation because assistant "

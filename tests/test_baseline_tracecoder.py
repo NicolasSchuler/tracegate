@@ -226,7 +226,7 @@ class TestCaseConverter:
         assert "Reference tests (test_buggy.py):\n" + test_code.rstrip() in prompt
 
     def test_build_prompt_compacts_the_summary_not_the_test_source(self) -> None:
-        """codex 1a#2, 1e#8: the budget clamps the summary; test_buggy.py stays whole (BAS-07)."""
+        """Codex 1a#2, 1e#8: the budget clamps the summary; test_buggy.py stays whole (BAS-07)."""
         repeated_asserts = "\n".join(
             f"    assert multiply({idx}, {idx + 1}) == {idx * (idx + 1)}" for idx in range(2000)
         )
@@ -2274,7 +2274,7 @@ class TestParseImplementationOutput:
 def test_run_repair_prompt_keeps_late_assertions_and_retry_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1a#2, 1e#8: through run_repair, neither the test tail nor the retry section is cut."""
+    """Codex 1a#2, 1e#8: through run_repair, neither the test tail nor the retry section is cut."""
     from evals.patchers.baseline_patcher import _inject_retry_context
 
     case_dir = tmp_path / "long_case"

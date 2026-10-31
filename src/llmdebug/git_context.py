@@ -16,7 +16,11 @@ from .config import GitDirtyMode
 
 
 class _GitError:
-    """Sentinel to distinguish 'command failed' from 'not applicable'."""
+    """Sentinel to distinguish 'command failed' from 'not applicable'.
+
+    Attributes:
+        reason: Short description of the failure, such as ``"timeout"``.
+    """
 
     __slots__ = ("reason",)
 
@@ -26,7 +30,18 @@ class _GitError:
 
 @dataclass(frozen=True)
 class _GitContextCacheEntry:
-    """Small in-process cache for git context lookups."""
+    """Small in-process cache for git context lookups.
+
+    Attributes:
+        expires_at: ``time.monotonic()`` deadline after which the entry is stale.
+        cwd: Working directory when the entry was stored.
+        repo_root: Repository root, or None if the cwd was not in a repository.
+        git_dir: Resolved git directory, used to detect a changed repository.
+        head_mtime_ns: Modification time of ``HEAD`` when stored.
+        index_mtime_ns: Modification time of the index when stored.
+        dirty_cached: Dirty status when stored, reused by ``dirty_mode="cached"``.
+        context_static: The context without its ``dirty`` key, or None.
+    """
 
     expires_at: float
     cwd: str | None
@@ -51,7 +66,8 @@ def _run_git_command(
     """Run a git command with timeout.
 
     Returns:
-        stdout string on success, _GitError on failure.
+        The stripped stdout on exit code 0; otherwise a ``_GitError`` naming the
+        failure (non-zero exit, timeout, missing git, or another ``OSError``).
     """
     cmd = ["git"]
     if repo_root:
@@ -84,7 +100,7 @@ def _run_git_command_rc(
     timeout: float = 2.0,
     repo_root: str | None = None,
 ) -> int | _GitError:
-    """Run a git command and return process exit code."""
+    """Run a git command and return its exit code, or a ``_GitError`` if it cannot run."""
     cmd = ["git"]
     if repo_root:
         cmd.extend(["-C", repo_root])
@@ -108,6 +124,7 @@ def _run_git_command_rc(
 
 
 def _resolve_cwd() -> str | None:
+    """Return the resolved current working directory, or None if it cannot be read."""
     try:
         return str(Path.cwd().resolve())
     except (OSError, RuntimeError, ValueError):
@@ -115,6 +132,7 @@ def _resolve_cwd() -> str | None:
 
 
 def _path_within_repo(path: str, repo_root: str) -> bool:
+    """Return whether *path* resolves to a location inside *repo_root*."""
     try:
         Path(path).resolve().relative_to(Path(repo_root).resolve())
     except (OSError, RuntimeError, ValueError):
@@ -123,6 +141,7 @@ def _path_within_repo(path: str, repo_root: str) -> bool:
 
 
 def _resolve_git_dir(repo_root: str) -> Path | None:
+    """Return the git directory of *repo_root*, following a ``.git`` file's ``gitdir:``."""
     git_entry = Path(repo_root) / ".git"
     try:
         if git_entry.is_dir():
@@ -151,11 +170,16 @@ def _resolve_git_dir(repo_root: str) -> Path | None:
 
 
 def _git_signal_mtimes(repo_root: str) -> tuple[str | None, int | None, int | None]:
+    """Return the git directory and the mtimes of its ``HEAD`` and ``index`` files.
+
+    These signals invalidate the git context cache when the repository changes.
+    """
     git_dir = _resolve_git_dir(repo_root)
     if git_dir is None:
         return None, None, None
 
     def _mtime_ns(path: Path) -> int | None:
+        """Return the mtime of *path* in nanoseconds, or None if it cannot be read."""
         try:
             return path.stat().st_mtime_ns
         except OSError:
@@ -221,6 +245,7 @@ def _detect_dirty_status(repo_root: str) -> bool | None:
 def _hydrate_context_with_dirty(
     context_static: dict[str, Any], *, repo_root: str
 ) -> dict[str, Any]:
+    """Return a copy of *context_static* with a freshly detected ``dirty`` status."""
     context = deepcopy(context_static)
 
     dirty = _detect_dirty_status(repo_root)
@@ -234,6 +259,15 @@ def _hydrate_context_with_dirty(
 
 
 def _load_cached_git_context(*, dirty_mode: GitDirtyMode) -> tuple[bool, dict[str, Any] | None]:
+    """Look up the cached git context for the current working directory.
+
+    The entry is used only while its TTL lasts, the cwd stays in the same
+    repository, and ``HEAD`` and the index are unchanged.
+
+    Returns:
+        ``(hit, context)``: whether the cache answered and, on a hit, the context
+        (None for a non-repository directory) with ``dirty`` set per *dirty_mode*.
+    """
     now = time.monotonic()
     with _GIT_CONTEXT_CACHE_LOCK:
         entry = _git_context_cache
@@ -278,6 +312,7 @@ def _store_git_context_cache(
     *,
     repo_root: str | None,
 ) -> None:
+    """Cache *context* for the current cwd, keeping its ``dirty`` value separately."""
     cwd = _resolve_cwd()
     git_dir, head_mtime_ns, index_mtime_ns = (None, None, None)
     dirty_cached: bool | None = None
@@ -307,6 +342,7 @@ def _store_git_context_cache(
 
 
 def _remaining_budget(deadline: float) -> float:
+    """Return the seconds left before *deadline*, never negative."""
     return max(0.0, deadline - time.monotonic())
 
 
@@ -319,6 +355,14 @@ def _run_git_budgeted(
     per_cmd_timeout_sec: float,
     deadline: float,
 ) -> str | None:
+    """Run a git command within the remaining time budget.
+
+    Failures, including an exhausted budget, are appended to *warnings* under
+    *label*.
+
+    Returns:
+        The command's stdout, or None if it did not run or failed.
+    """
     remaining = _remaining_budget(deadline)
     if remaining <= 0:
         warnings.append(f"{label}: budget exhausted")
@@ -333,6 +377,7 @@ def _run_git_budgeted(
 
 
 def _extract_crash_frame(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the snapshot's crash frame, else its first frame, else None."""
     frames = snapshot.get("frames")
     if not isinstance(frames, list) or not frames:
         return None
@@ -352,6 +397,7 @@ def _extract_crash_frame(snapshot: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _extract_crash_line(crash_frame: dict[str, Any]) -> int | None:
+    """Return the crash frame's line as a positive int, or None if unusable."""
     line_raw = crash_frame.get("line")
     if isinstance(line_raw, int):
         line = line_raw
@@ -370,6 +416,15 @@ def _resolve_repo_relative_file(
     *,
     repo_root: str,
 ) -> tuple[str | None, bool]:
+    """Resolve the crash frame's file relative to *repo_root*.
+
+    Prefers the frame's ``file_rel`` and falls back to its absolute ``file``.
+
+    Returns:
+        ``(path, in_repo)``: the repo-relative POSIX path with True, or the raw
+        path with False when it lies outside the repository; ``(None, False)``
+        when the frame names no file.
+    """
     repo_root_path = Path(repo_root).resolve()
 
     file_rel_raw = crash_frame.get("file_rel")
@@ -397,6 +452,12 @@ def _resolve_repo_relative_file(
 
 
 def _parse_blame_porcelain(text: str, line: int) -> dict[str, Any] | None:
+    """Parse ``git blame --porcelain`` output for one line into metadata.
+
+    Returns:
+        A dict with ``line``, ``commit``, and when present ``author``,
+        ``author_time`` (UTC ISO 8601), and ``summary``; None if no commit was found.
+    """
     if not text:
         return None
 
@@ -444,6 +505,7 @@ _HEAD_INFO_FORMAT = "%h%n%H%n%D"
 
 
 def _parse_shortstat(line: str) -> tuple[int, int, int]:
+    """Parse a ``--shortstat`` line into ``(files_changed, insertions, deletions)``."""
     m = _SHORTSTAT_RE.search(line)
     if m is None:
         return 0, 0, 0
@@ -455,6 +517,7 @@ def _parse_shortstat(line: str) -> tuple[int, int, int]:
 
 
 def _parse_recent_commits(log_text: str) -> list[dict[str, Any]]:
+    """Parse separator-delimited ``git log --shortstat`` output into commit dicts."""
     if not log_text:
         return []
 
@@ -503,6 +566,10 @@ def _parse_recent_commits(log_text: str) -> list[dict[str, Any]]:
 
 
 def _parse_numstat(text: str) -> dict[str, Any]:
+    """Sum ``--numstat`` output into file, insertion, and deletion counts plus ``touched``.
+
+    Binary files count as changed but add no line counts.
+    """
     files_changed = 0
     insertions = 0
     deletions = 0
@@ -535,7 +602,8 @@ def _parse_head_info_from_log(
     """Parse HEAD info from ``git log -1 --format=%h%n%H%n%D`` output.
 
     Returns:
-        (commit_short, commit_full, branch, detached)
+        ``(commit_short, commit_full, branch, detached)``; *branch* is ``"HEAD"``
+        and *detached* is True when HEAD points at no branch.
     """
     lines = log_output.split("\n", 2)
     commit_short = lines[0].strip() or None
@@ -562,6 +630,7 @@ def _candidate_repo_dirs(snapshot: dict[str, Any], *, out_dir: str) -> list[str]
     seen: set[str] = set()
 
     def _add(raw_path: str | Path | None, *, from_file: bool = False) -> None:
+        """Append the resolved directory of *raw_path* unless it is empty or seen."""
         if raw_path is None:
             return
         raw_text = str(raw_path).strip()
@@ -614,6 +683,12 @@ def _discover_repo_root(
     per_cmd_timeout_sec: float,
     deadline: float,
 ) -> str | None:
+    """Find the snapshot's repository root by trying each candidate directory in order.
+
+    Returns:
+        The first root ``git rev-parse --show-toplevel`` reports, or None (with a
+        warning) when no candidate works or the budget runs out.
+    """
     candidates = _candidate_repo_dirs(snapshot, out_dir=out_dir)
     if not candidates:
         warnings.append("repo root: no discovery candidates")
@@ -656,7 +731,24 @@ def get_enhanced_git_context(
     This is intentionally metadata-only and budgeted:
     - crash-line blame metadata (no code hunk)
     - recent commit metadata + shortstats
-    - crash-file diffstat metadata
+    - crash-file diffstat metadata (how the HEAD commit changed the crash file)
+
+    The repository is discovered from the crash frame's file, *out_dir* and its
+    parent, and the snapshot's recorded cwd, in that order.
+
+    Args:
+        snapshot: The snapshot dict whose crash frame and environment are used.
+        out_dir: Snapshot output directory, also a repository discovery hint.
+        max_commits: Number of recent commits to list (at least 1).
+        per_cmd_timeout_sec: Timeout for each git command, capped by what remains of
+            the total budget.
+        total_budget_sec: Wall-clock budget for all git commands combined.
+
+    Returns:
+        A dict with ``repo_root`` and, where available, ``head`` (commit, branch,
+        detached and dirty state), ``crash_file`` (repo-relative path, line, and
+        blame), ``crash_file_diffstat``, ``recent_commits``, and ``_git_warnings``
+        for steps that failed or ran out of budget. None if no repository was found.
     """
     warnings: list[str] = []
     deadline = time.monotonic() + max(total_budget_sec, 0.0)
@@ -769,18 +861,33 @@ def get_enhanced_git_context(
 
 
 def get_git_context(*, dirty_mode: GitDirtyMode = "always") -> dict[str, Any] | None:
-    """Capture git repository context.
+    """Capture git repository context for the current working directory.
+
+    Results are cached in-process for about a second; the cache is bypassed when
+    the cwd leaves the repository or ``HEAD`` or the index changes.
+
+    Args:
+        dirty_mode: How to determine the ``dirty`` flag: ``"always"`` re-checks the
+            working tree on every call, ``"cached"`` reuses the status from a cache
+            hit, and ``"off"`` skips the check and omits the key.
 
     Returns:
-        Dict with commit, branch, dirty status, or None if not in a git repo.
+        A dict with ``commit``, ``commit_full``, ``branch`` (``detached`` when HEAD
+        is detached), ``dirty``, and ``_git_warnings`` if HEAD lookup failed; or
+        None if not in a git repo or nothing could be read.
 
-    Example output:
-        {
-            "commit": "abc123",
-            "commit_full": "abc123def456...",
-            "branch": "main",
-            "dirty": True
-        }
+    Raises:
+        ValueError: If *dirty_mode* is not ``"always"``, ``"cached"``, or ``"off"``.
+
+    Example:
+        A typical result::
+
+            {
+                "commit": "abc123",
+                "commit_full": "abc123def456...",
+                "branch": "main",
+                "dirty": True
+            }
     """
     if dirty_mode not in {"always", "cached", "off"}:
         raise ValueError("dirty_mode must be 'always', 'cached', or 'off'")

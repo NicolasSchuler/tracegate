@@ -58,7 +58,20 @@ _CLEANUP_THRESHOLD = 1000
 
 
 class _RateLimiter:
-    """Sliding-window rate limiter per error signature. Thread-safe."""
+    """Thread-safe sliding-window rate limiter keyed by error signature.
+
+    A signature is ``(exception type, file, line)``. Once a signature reaches
+    *max_captures* within *window_seconds*, further captures are refused. The first
+    refusal writes a notice to stderr; the notice re-arms once the signature's
+    window has fully drained.
+
+    Args:
+        max_captures: Captures allowed per signature within one window.
+        window_seconds: Length of the sliding window in seconds.
+
+    Raises:
+        ValueError: If *max_captures* is below 1 or *window_seconds* is not positive.
+    """
 
     def __init__(self, max_captures: int, window_seconds: float) -> None:
         if max_captures < 1:
@@ -72,14 +85,27 @@ class _RateLimiter:
         self._suppressed: set[tuple[str, str, int]] = set()
 
     def _cleanup_expired(self, now: float) -> None:
-        """Remove buckets whose entire window has expired. Must hold _lock."""
+        """Remove buckets whose timestamps have all expired.
+
+        The caller must hold ``_lock``.
+        """
         expired = [k for k, ts in self._buckets.items() if all(now - t >= self._window for t in ts)]
         for k in expired:
             del self._buckets[k]
             self._suppressed.discard(k)
 
     def allow(self, exc_type: str, file: str, line: int) -> bool:
-        """Return True if this error signature hasn't exceeded the rate limit."""
+        """Record a capture for this error signature if it is under the rate limit.
+
+        Args:
+            exc_type: Exception type name.
+            file: File of the innermost traceback frame.
+            line: Line number of the innermost traceback frame.
+
+        Returns:
+            True if the capture is allowed (and counted against the window); False if
+            the signature has reached its limit.
+        """
         key = (exc_type, file, line)
         now = time.monotonic()
         with self._lock:
@@ -121,7 +147,19 @@ def _capture_safely(
     *,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Capture exception into a snapshot, swallowing any errors. Never raises."""
+    """Capture *exc* into a snapshot, swallowing any error; never raises.
+
+    The innermost traceback frame provides the rate-limit signature, so captures
+    beyond the limit are skipped. Capture failures are always written to stderr.
+
+    Args:
+        name: Snapshot name.
+        exc: The exception to capture.
+        tb: The exception's traceback.
+        cfg: Snapshot configuration.
+        limiter: Rate limiter shared by the installing hook or middleware.
+        extra: Additional context stored with the snapshot, such as hook metadata.
+    """
     try:
         # Extract signature from last traceback frame for rate limiting
         frames = tb_mod.extract_tb(tb)
@@ -153,7 +191,30 @@ def _build_production_config(
     debug: bool = False,
     **config_overrides: Any,
 ) -> SnapshotConfig:
-    """Build a SnapshotConfig with production-safe defaults."""
+    """Build a SnapshotConfig with production-safe defaults.
+
+    Keeps at most 10 frames and source for the crash frame only. When *pii_safe* is
+    set and no profile is given, the ``"prod"`` redaction profile is used.
+
+    Args:
+        out_dir: Snapshot output directory.
+        pii_safe: Default to the ``"prod"`` profile and forbid a ``redact`` override.
+        redaction_profile: Named redaction profile; may instead be passed in
+            *config_overrides*, but not both.
+        include_git: Include git context.
+        include_array_stats: Include array statistics in local summaries.
+        lock_timeout: File-lock timeout in seconds when writing snapshots.
+        debug: Report capture warnings through the diagnostics logger.
+        **config_overrides: Additional :class:`SnapshotConfig` fields; the
+            ``redact*`` fields override the profile's settings.
+
+    Returns:
+        The resolved snapshot configuration.
+
+    Raises:
+        ValueError: If the redaction profile is given twice, or ``redact`` is
+            overridden while *pii_safe* is True.
+    """
     profile_override = config_overrides.pop("redaction_profile", None)
     if redaction_profile is not None and profile_override is not None:
         raise ValueError(
@@ -210,7 +271,7 @@ def _build_production_config(
 
 
 def _is_intentional_exit(exc: BaseException) -> bool:
-    """Whether an exception is an intentional exit, without probing the instance.
+    """Return whether *exc* is an intentional exit, without probing the instance.
 
     ``isinstance`` reads ``exc.__class__``, so an object whose ``__getattribute__``
     raises took the whole hook down before it could delegate to the original handler
@@ -224,13 +285,14 @@ def _make_excepthook(
     cfg: SnapshotConfig,
     limiter: _RateLimiter,
 ) -> Callable[..., Any]:
-    """Create sys.excepthook replacement."""
+    """Create a ``sys.excepthook`` replacement that captures, then delegates."""
 
     def hook(
         exc_type: type[BaseException],
         exc_value: BaseException,
         exc_tb: Any,
     ) -> None:
+        """Capture an unhandled exception, then call the original excepthook."""
         # Don't capture intentional exits
         if not _is_intentional_exit(exc_value):
             _capture_safely(
@@ -251,9 +313,10 @@ def _make_threading_hook(
     cfg: SnapshotConfig,
     limiter: _RateLimiter,
 ) -> Callable[..., Any]:
-    """Create threading.excepthook replacement."""
+    """Create a ``threading.excepthook`` replacement that captures, then delegates."""
 
     def hook(args: Any) -> None:
+        """Capture a thread crash, then call the original hook if there was one."""
         exc_value = args.exc_value
         exc_tb = args.exc_traceback
         if exc_value is not None and exc_tb is not None and not _is_intentional_exit(exc_value):
@@ -277,9 +340,10 @@ def _make_unraisable_hook(
     cfg: SnapshotConfig,
     limiter: _RateLimiter,
 ) -> Callable[..., Any]:
-    """Create sys.unraisablehook replacement."""
+    """Create a ``sys.unraisablehook`` replacement that captures, then delegates."""
 
     def hook(unraisable: Any) -> None:
+        """Capture an unraisable exception, then call the original hook."""
         exc = unraisable.exc_value
         tb = unraisable.exc_traceback
         if exc is not None and tb is not None and not _is_intentional_exit(exc):
@@ -306,9 +370,10 @@ def _make_asyncio_handler(
     cfg: SnapshotConfig,
     limiter: _RateLimiter,
 ) -> Callable[..., Any]:
-    """Create asyncio exception handler."""
+    """Create an asyncio exception handler that captures, then delegates."""
 
     def handler(loop: Any, context: dict[str, Any]) -> None:
+        """Capture the context's exception, then call the original or default handler."""
         exc = context.get("exception")
         if exc is not None:
             tb = exc.__traceback__
@@ -383,9 +448,10 @@ def install_hooks(
         out_dir: Snapshot output directory.
         max_captures_per_minute: Rate limit per unique error signature
             (type + file + line).  A sliding 60-second window is used.
-        pii_safe: When ``True`` (the default), apply built-in PII
-            redaction patterns and default to the ``"prod"`` redaction
-            profile if no explicit *redaction_profile* is given.
+        pii_safe: When ``True`` (the default), use the ``"prod"``
+            redaction profile (built-in PII patterns plus traceback and
+            exception-string redaction) unless *redaction_profile* names
+            another, and reject a custom ``redact`` override.
         redaction_profile: Named redaction profile — ``"dev"``,
             ``"ci"``, or ``"prod"``.  Overrides the profile that
             *pii_safe* would select.
@@ -395,8 +461,9 @@ def install_hooks(
             local-variable summaries.
         lock_timeout: File-lock timeout in seconds when writing snapshot
             files (keep short for production to avoid blocking).
-        debug: When ``True``, print capture-failure diagnostics to
-            stderr.
+        debug: When ``True``, report capture warnings through the
+            ``llmdebug.diagnostics`` logger (stderr by default). Capture
+            failures are written to stderr regardless.
         hooks: Which hooks to install.  Valid names: ``"excepthook"``,
             ``"threading"``, ``"unraisable"``, ``"asyncio"``.
             Default: all except ``"asyncio"`` (asyncio requires a
@@ -407,8 +474,10 @@ def install_hooks(
 
     Raises:
         ValueError: If *hooks* contains an invalid name, if *redact*
-            is passed while *pii_safe* is ``True``, or if a custom
-            redaction pattern is not a valid regular expression.
+            is passed while *pii_safe* is ``True``, if *redaction_profile*
+            is not a known profile, if a custom redaction pattern is not a
+            valid regular expression, or if *max_captures_per_minute* is
+            below 1.
 
     Example::
 

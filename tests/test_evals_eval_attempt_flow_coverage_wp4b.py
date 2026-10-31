@@ -445,7 +445,7 @@ class TestTransportRecoveryPaths:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """codex 1f#9 / ATT-12: both propose calls must see the same controller guidance."""
+        """Codex 1f#9 / ATT-12: both propose calls must see the same controller guidance."""
         from evals.adaptive_controller_packet import ADAPTIVE_CONTROLLER_SIDECAR_FILENAMES
         from evals.patchers.base import PatchResult
 

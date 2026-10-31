@@ -62,14 +62,17 @@ _FULL_CSS = (
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
+    """Return *value* if it is a dict, else an empty dict."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
 def _as_list(value: Any) -> list[Any]:
+    """Return *value* if it is a list, else an empty list."""
     return cast(list[Any], value) if isinstance(value, list) else []
 
 
 def _select_frame(frames: list[Any], crash_idx: int) -> dict[str, Any]:
+    """Return the crash frame, else the first dict frame, else an empty dict."""
     if 0 <= crash_idx < len(frames) and isinstance(frames[crash_idx], dict):
         return cast(dict[str, Any], frames[crash_idx])
     for frame in frames:
@@ -79,7 +82,7 @@ def _select_frame(frames: list[Any], crash_idx: int) -> dict[str, Any]:
 
 
 def _is_notebook(ipython: Any) -> bool:
-    """Detect Jupyter notebook vs terminal IPython."""
+    """Return whether *ipython* is a Jupyter notebook kernel rather than terminal IPython."""
     return type(ipython).__name__ == "ZMQInteractiveShell"
 
 
@@ -94,7 +97,10 @@ def _display_html_or_text(
     html_fn: Callable[[], str],
     text_fn: Callable[[], str],
 ) -> None:
-    """Display HTML in notebooks, plain text in terminals."""
+    """Display HTML in notebooks and plain text in terminals.
+
+    Falls back to text when ``IPython.display`` cannot be imported.
+    """
     if _is_notebook(ipython):
         try:
             from IPython.display import HTML, display  # pyright: ignore[reportUnknownVariableType]
@@ -107,7 +113,10 @@ def _display_html_or_text(
 
 
 def _display_markdown_or_text(ipython: Any, text: str) -> None:
-    """Display Markdown in notebooks, plain text in terminals."""
+    """Display Markdown in notebooks and plain text in terminals.
+
+    Falls back to text when ``IPython.display`` cannot be imported.
+    """
     if _is_notebook(ipython):
         try:
             from IPython.display import (  # pyright: ignore[reportUnknownVariableType]
@@ -123,7 +132,7 @@ def _display_markdown_or_text(ipython: Any, text: str) -> None:
 
 
 def _exc_summary(snapshot: dict[str, Any]) -> tuple[str, str, str, int | str]:
-    """Extract (exc_type, exc_message, crash_file, crash_line) from snapshot."""
+    """Return ``(exc_type, exc_message, crash_file, crash_line)`` for *snapshot*."""
     exc = _as_dict(snapshot.get("exception"))
     exc_type = str(exc.get("type") or "UnknownError")
     exc_msg = str(exc.get("message") or "")
@@ -138,7 +147,7 @@ def _exc_summary(snapshot: dict[str, Any]) -> tuple[str, str, str, int | str]:
 
 
 def _format_snapshot_banner_html(snapshot: dict[str, Any]) -> str:
-    """Compact HTML banner (~4 lines) shown after every cell error."""
+    """Render the compact HTML banner (~4 lines) shown after a cell error."""
     exc_type, exc_msg, crash_file, crash_line = _exc_summary(snapshot)
     # Truncate long messages
     if len(exc_msg) > 120:
@@ -155,7 +164,7 @@ def _format_snapshot_banner_html(snapshot: dict[str, Any]) -> str:
 
 
 def _format_snapshot_banner_text(snapshot: dict[str, Any]) -> str:
-    """Plain text banner for terminal IPython."""
+    """Render the plain-text banner shown after a cell error in terminal IPython."""
     exc_type, exc_msg, crash_file, crash_line = _exc_summary(snapshot)
     if len(exc_msg) > 100:
         exc_msg = exc_msg[:97] + "..."
@@ -169,7 +178,7 @@ def _format_snapshot_banner_text(snapshot: dict[str, Any]) -> str:
 def _parse_snapshot_display_data(
     snapshot: dict[str, Any],
 ) -> tuple[dict[str, Any], list[Any], int]:
-    """Extract common display fields from a snapshot payload."""
+    """Return the exception dict, frame list, and crash-frame index of *snapshot*."""
     exc = _as_dict(snapshot.get("exception"))
     frames = _as_list(snapshot.get("frames"))
     crash_idx_raw = snapshot.get("crash_frame_index", 0)
@@ -178,7 +187,7 @@ def _parse_snapshot_display_data(
 
 
 def _html_crash_frame_parts(frames: list[Any], crash_idx: int) -> list[str]:
-    """Return HTML parts for the crash frame + locals section."""
+    """Return HTML parts for the crash frame and its first 20 locals."""
     if not frames:
         return []
     fr0 = _select_frame(frames, crash_idx)
@@ -231,7 +240,7 @@ def _html_jupyter_part(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _format_full_snapshot_html(snapshot: dict[str, Any]) -> str:
-    """Rich HTML display for %llmdebug show in notebooks."""
+    """Render the full snapshot as HTML for ``%llmdebug show`` in notebooks."""
     exc, frames, crash_idx = _parse_snapshot_display_data(snapshot)
     parts = [
         f'<div style="{_FULL_CSS}">',
@@ -245,7 +254,7 @@ def _format_full_snapshot_html(snapshot: dict[str, Any]) -> str:
 
 
 def _text_crash_frame_lines(frames: list[Any], crash_idx: int) -> list[str]:
-    """Return text lines for the crash frame + locals section."""
+    """Return text lines for the crash frame and its first 20 locals."""
     if not frames:
         return []
     fr0 = _select_frame(frames, crash_idx)
@@ -282,7 +291,7 @@ def _text_jupyter_line(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _format_full_snapshot_text(snapshot: dict[str, Any]) -> str:
-    """Plain text/markdown display for terminal IPython."""
+    """Render the full snapshot as Markdown text for terminal IPython."""
     exc, frames, crash_idx = _parse_snapshot_display_data(snapshot)
     lines: list[str] = [
         f"## {exc.get('type') or 'UnknownError'!s}",
@@ -295,7 +304,7 @@ def _format_full_snapshot_text(snapshot: dict[str, Any]) -> str:
 
 
 def _format_local_value(val: Any) -> str:
-    """Format a local variable value for display."""
+    """Format a local variable value for display, truncating plain values to 100 chars."""
     if isinstance(val, dict):
         val_d = cast(dict[str, Any], val)
         # Array-like objects
@@ -329,6 +338,7 @@ def _make_wrapped_showtraceback(
     """Create a wrapped showtraceback that captures snapshots after errors."""
 
     def wrapped_showtraceback(*args: Any, **kwargs: Any) -> None:
+        """Show the traceback via the original, then capture and display a banner."""
         # Always call the original first — user sees normal traceback
         original(*args, **kwargs)
 
@@ -357,7 +367,11 @@ def _make_wrapped_showtraceback(
 
 
 def _extract_jupyter_context(ipython: Any) -> dict[str, Any]:
-    """Extract Jupyter-specific context from the IPython shell."""
+    """Extract Jupyter-specific context from the IPython shell.
+
+    Records the execution count and the latest cell source, truncated to 500
+    characters, or ``cell_source_error`` if the history lookup fails.
+    """
     ctx: dict[str, Any] = {}
 
     try:
@@ -384,7 +398,7 @@ def _extract_jupyter_context(ipython: Any) -> dict[str, Any]:
 
 
 def _display_snapshot_banner(ipython: Any, out_dir: str) -> None:
-    """Display a compact snapshot banner after an error."""
+    """Display the banner for the latest snapshot in *out_dir*, if there is one."""
     from .output import get_latest_snapshot
 
     snapshot = get_latest_snapshot(out_dir)
@@ -404,7 +418,10 @@ def _display_snapshot_banner(ipython: Any, out_dir: str) -> None:
 
 
 def _register_magics(ipython: Any) -> None:
-    """Register the %llmdebug magic command. Imports IPython only when called."""
+    """Register the ``%llmdebug`` magic command on *ipython*.
+
+    IPython is imported only when this is called.
+    """
     from IPython.core.magic import (  # pyright: ignore[reportUnknownVariableType]
         Magics,
         line_magic,  # pyright: ignore[reportUnknownVariableType]
@@ -413,14 +430,24 @@ def _register_magics(ipython: Any) -> None:
 
     @magics_class
     class LLMDebugMagics(Magics):  # type: ignore[misc]
+        """IPython magics class that provides the ``%llmdebug`` line magic."""
+
         @property
         def _shell(self) -> Any:
-            """Typed accessor — IPython stubs vary across versions."""
+            """Return the shell typed as ``Any``, since IPython stubs vary across versions."""
             return self.shell  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
         @line_magic
         def llmdebug(self, line: str) -> None:  # type: ignore[override]
-            """LLMDebug magic command. Usage: %llmdebug [subcommand]"""
+            """Run a ``%llmdebug`` subcommand; usage: ``%llmdebug [subcommand]``.
+
+            Subcommands are ``show`` (the default), ``list``, ``diff``, ``install``,
+            ``uninstall``, and ``config``; anything else prints the help text.
+
+            Args:
+                line: The text after ``%llmdebug``; its first word selects the
+                    subcommand.
+            """
             parts = line.strip().split(None, 1)
             subcmd = parts[0] if parts else "show"
 
@@ -572,16 +599,28 @@ def install(
     Idempotent — safe to call multiple times.
 
     Args:
-        ipython: IPython shell instance. Auto-detected if None.
+        ipython: IPython shell to hook; detected with ``get_ipython()`` if None.
         out_dir: Snapshot output directory.
-        max_captures_per_minute: Rate limit per unique error signature.
-        pii_safe: Enable built-in PII redaction patterns.
-        redaction_profile: Built-in redaction profile override.
+        max_captures_per_minute: Captures allowed per unique error signature
+            (exception type, file, line) in a sliding 60-second window.
+        pii_safe: Default to the ``"prod"`` redaction profile (built-in PII patterns
+            plus traceback and exception-string redaction) and reject a custom
+            ``redact`` override.
+        redaction_profile: Named redaction profile (``"dev"``, ``"ci"``, or
+            ``"prod"``) that overrides the one *pii_safe* selects.
         include_git: Include git context (disabled by default).
         include_array_stats: Include array shape/stats (enabled for data science).
         lock_timeout: File lock timeout in seconds.
-        debug: Print capture failures to stderr.
+        debug: Report capture warnings through the ``llmdebug.diagnostics`` logger
+            (stderr by default); capture failures are written to stderr regardless.
         **config_overrides: Additional SnapshotConfig fields.
+
+    Raises:
+        RuntimeError: If *ipython* is None and IPython is not installed or no
+            IPython session is active.
+        ValueError: If the redaction settings are invalid or conflict (such as
+            ``redact`` passed while *pii_safe* is True) or *max_captures_per_minute*
+            is below 1.
     """
     global _installed, _original_showtraceback, _cfg, _limiter, _ipython_ref
 
@@ -638,7 +677,8 @@ def install(
 def uninstall() -> None:
     """Remove llmdebug from the current IPython session.
 
-    Idempotent — safe to call multiple times.
+    Restores the original ``showtraceback``; the ``%llmdebug`` magic stays
+    registered. Idempotent — safe to call multiple times.
     """
     global _installed, _original_showtraceback, _cfg, _limiter, _ipython_ref
 
@@ -663,10 +703,19 @@ def uninstall() -> None:
 
 
 def load_ipython_extension(ipython: Any) -> None:
-    """Called by ``%load_ext llmdebug``."""
+    """Install llmdebug when IPython runs ``%load_ext llmdebug``.
+
+    Args:
+        ipython: The IPython shell loading the extension.
+    """
     install(ipython)
 
 
 def unload_ipython_extension(ipython: Any) -> None:
-    """Called by ``%unload_ext llmdebug``."""
+    """Uninstall llmdebug when IPython runs ``%unload_ext llmdebug``.
+
+    Args:
+        ipython: The IPython shell unloading the extension; unused, because
+            :func:`uninstall` restores the shell recorded at install time.
+    """
     uninstall()

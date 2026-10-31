@@ -23,12 +23,28 @@ _WAL_VERIFIED_PATHS: set[str] = set()
 
 
 def state_db_path(out_dir: str | Path) -> Path:
-    """Return the SQLite database path for a snapshot output directory."""
+    """Return the SQLite database path for a snapshot output directory.
+
+    Args:
+        out_dir: Snapshot output directory.
+
+    Returns:
+        The path of the state database inside *out_dir*.
+    """
     return Path(out_dir) / STATE_DB_FILENAME
 
 
 def state_db_exists(out_dir: str | Path) -> bool:
-    """Whether the state database exists. Read helpers never create it (RCA-02)."""
+    """Return whether the state database exists.
+
+    Read helpers never create it (RCA-02).
+
+    Args:
+        out_dir: Snapshot output directory.
+
+    Returns:
+        True when the database file exists.
+    """
     return state_db_path(out_dir).is_file()
 
 
@@ -52,12 +68,13 @@ def _enable_wal_mode(
 
 
 def _journal_mode(conn: sqlite3.Connection) -> str:
+    """Return the connection's journal mode in lowercase, or an empty string."""
     row = conn.execute("PRAGMA journal_mode").fetchone()
     return str(row[0]).lower() if row else ""
 
 
 def _file_identity(db_path: Path) -> str:
-    """A key that changes when the file at *db_path* is replaced, not just renamed."""
+    """Return a key that changes when the file at *db_path* is replaced, not just renamed."""
     try:
         stat = db_path.stat()
     except OSError:
@@ -96,6 +113,7 @@ def _ensure_wal_mode(conn: sqlite3.Connection, *, db_path: Path, created: bool) 
 def _configure_connection(
     conn: sqlite3.Connection, *, db_path: Path, created: bool = False
 ) -> None:
+    """Apply the busy timeout, WAL mode, and synchronous and temp-store pragmas."""
     busy_timeout = read_env_int(
         "LLMDEBUG_DB_BUSY_TIMEOUT_MS",
         _BUSY_TIMEOUT_MS,
@@ -108,7 +126,7 @@ def _configure_connection(
 
 
 def _create_schema_v1(conn: sqlite3.Connection) -> None:
-    """Version 1: the tables and indexes as they existed before versioning (RCA-11).
+    """Create schema version 1, the tables and indexes from before versioning (RCA-11).
 
     ``IF NOT EXISTS`` keeps this a no-op on databases created by earlier releases,
     which all have ``user_version`` 0.
@@ -166,12 +184,19 @@ STATE_DB_SCHEMA_VERSION = len(_SCHEMA_MIGRATIONS)
 
 
 def _schema_version(conn: sqlite3.Connection) -> int:
+    """Return the database's ``PRAGMA user_version`` (0 for an unversioned database)."""
     row = conn.execute("PRAGMA user_version").fetchone()
     return int(row[0]) if row else 0
 
 
 def _require_known_schema(conn: sqlite3.Connection) -> None:
-    """Refuse a database written by a newer llmdebug (RCA-11). Reads check this too."""
+    """Refuse a database written by a newer llmdebug (RCA-11).
+
+    Reads check this too.
+
+    Raises:
+        RuntimeError: If the stored schema version is newer than this llmdebug supports.
+    """
     version = _schema_version(conn)
     if version > STATE_DB_SCHEMA_VERSION:
         raise RuntimeError(
@@ -208,7 +233,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 @contextmanager
 def open_state_db(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
-    """Open the state DB connection with schema initialization."""
+    """Open the state DB connection with schema initialization.
+
+    Creates the directory and database when missing, applies the connection pragmas and
+    schema migrations, commits when the block exits normally, and always closes the
+    connection.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+
+    Yields:
+        A writable connection to the state database.
+
+    Raises:
+        RuntimeError: If the database was written by a newer llmdebug with a schema this
+            version doesn't know.
+    """
     path = state_db_path(out_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     created = not path.exists()
@@ -231,6 +271,12 @@ def open_state_db_readonly(out_dir: str | Path) -> Iterator[sqlite3.Connection]:
     and ``PRAGMA user_version`` write to the database and its ``-wal``/``-shm`` sidecars,
     which also makes reading a legacy (unversioned) database in a non-writable directory
     fail instead of returning the records it holds.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+
+    Yields:
+        A read-only connection to the existing state database.
     """
     # Absolute: `as_uri()` rejects a relative path, and ``out_dir`` is usually relative
     # (the CLI default is ".llmdebug").
@@ -267,16 +313,30 @@ def _read_rows(
 
 
 def count_rca_records(out_dir: str | Path) -> int:
-    """Return the number of persisted RCA attempt records for ``out_dir``."""
+    """Return the number of persisted RCA attempt records for ``out_dir``.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+
+    Returns:
+        The row count; 0 when the database or table does not exist.
+    """
     (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM rca_attempts", ()),))
     return int(rows[0][0]) if rows else 0
 
 
 def stored_rca_attempt_ids(out_dir: str | Path, attempt_ids: list[str]) -> set[str]:
-    """Which of *attempt_ids* already have a stored row.
+    """Return which of *attempt_ids* already have a stored row.
 
     The migration lets stored rows win over pending JSONL copies, so merged reads need
     to know about every conflicting id, not just the ones on the page they fetched.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        attempt_ids: Candidate attempt IDs; duplicates and empty strings are ignored.
+
+    Returns:
+        The subset of *attempt_ids* present in the ``rca_attempts`` table.
     """
     wanted = [value for value in dict.fromkeys(attempt_ids) if value]
     if not wanted:
@@ -294,6 +354,7 @@ def stored_rca_attempt_ids(out_dir: str | Path, attempt_ids: list[str]) -> set[s
 
 
 def _require_text_field(record: Mapping[str, Any], key: str) -> str:
+    """Return the stripped text of a required field, raising ``ValueError`` if absent or blank."""
     raw_value = record.get(key)
     if raw_value is None:
         raise ValueError(f"RCA record missing required field: {key}")
@@ -304,6 +365,7 @@ def _require_text_field(record: Mapping[str, Any], key: str) -> str:
 
 
 def _rca_row(record: Mapping[str, Any]) -> tuple[str, str, str, str, str, str, str]:
+    """Return the indexed column values and JSON payload for one RCA record."""
     payload = json.dumps(record, ensure_ascii=False, sort_keys=True)
     return (
         _require_text_field(record, "attempt_id"),
@@ -317,6 +379,7 @@ def _rca_row(record: Mapping[str, Any]) -> tuple[str, str, str, str, str, str, s
 
 
 def _prune_rca_records(conn: sqlite3.Connection, *, max_records: int) -> None:
+    """Delete all but the newest *max_records* RCA rows; ``0`` or less keeps every row."""
     if max_records <= 0:
         return
     conn.execute(
@@ -336,8 +399,17 @@ def _prune_rca_records(conn: sqlite3.Connection, *, max_records: int) -> None:
 def append_rca_record(out_dir: str | Path, record: Mapping[str, Any], *, max_records: int) -> None:
     """Insert or replace one RCA record, then prune to the retention limit.
 
-    Records are retained in ``updated_at DESC, rowid DESC`` order. Validation
-    errors for missing required fields raise ``ValueError`` before any write.
+    Records are retained in ``updated_at DESC, rowid DESC`` order.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        record: RCA attempt record; it replaces any stored row with the same
+            ``attempt_id``.
+        max_records: Number of newest rows to keep after the write; ``0`` or less
+            keeps every row.
+
+    Raises:
+        ValueError: If a required field is missing or blank; raised before any write.
     """
     row = _rca_row(record)
     with open_state_db(out_dir) as conn:
@@ -364,6 +436,18 @@ def append_rca_records_bulk(
 
     A record whose ``attempt_id`` is already stored replaces it, or is skipped with
     ``keep_existing=True`` (a merge where the stored row wins).
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        records: RCA attempt records to write.
+        max_records: Number of newest rows to keep after the write; ``0`` or less
+            keeps every row.
+        keep_existing: Whether stored rows win over incoming records with the same
+            ``attempt_id``.
+
+    Raises:
+        ValueError: If any record has a missing or blank required field; raised before
+            any write.
     """
     if not records:
         return
@@ -383,6 +467,7 @@ def append_rca_records_bulk(
 
 
 def _decode_payload_rows(rows: list[tuple[str]]) -> list[dict[str, Any]]:
+    """Decode JSON payload rows, skipping malformed and non-object payloads."""
     decoded: list[dict[str, Any]] = []
     for (payload_json,) in rows:
         try:
@@ -397,10 +482,18 @@ def _decode_payload_rows(rows: list[tuple[str]]) -> list[dict[str, Any]]:
 def fetch_latest_rca_record(
     out_dir: str | Path, *, session_id: str | None = None
 ) -> dict[str, Any] | None:
-    """Return the newest decodable RCA record for the directory or session.
+    """Return the newest RCA record for the directory or session.
 
-    Newest is defined by ``updated_at DESC, rowid DESC``. Returns ``None`` when
-    no matching row exists or when stored payloads fail JSON decoding.
+    Newest is defined by ``updated_at DESC, rowid DESC``. Only the newest row is read,
+    so an undecodable newest payload yields ``None`` rather than an older record.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        session_id: Session to filter on; ``None`` or empty considers every session.
+
+    Returns:
+        The newest record, or ``None`` when no matching row exists or its payload
+        fails JSON decoding.
     """
     sql = "SELECT payload_json FROM rca_attempts"
     params: tuple[Any, ...] = ()
@@ -423,6 +516,14 @@ def fetch_rca_history_records(
 
     ``limit <= 0`` means "all matching records". Rows with malformed JSON are
     skipped so one corrupt entry does not break history inspection.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        session_id: Session to filter on; ``None`` or empty considers every session.
+        limit: Maximum number of rows to read.
+
+    Returns:
+        Decoded RCA records, newest first.
     """
     sql = "SELECT payload_json FROM rca_attempts"
     params: list[Any] = []
@@ -438,7 +539,14 @@ def fetch_rca_history_records(
 
 
 def upsert_snapshot_record(out_dir: str | Path, record: dict[str, Any]) -> None:
-    """Insert or replace one snapshot index row for CLI/MCP lookup."""
+    """Insert or replace one snapshot index row for CLI/MCP lookup.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        record: Index entry with ``path``, ``mtime``, ``name``, ``exc_type``,
+            ``exc_message``, ``file``, and ``line``; missing keys get placeholder
+            values.
+    """
     with open_state_db(out_dir) as conn:
         conn.execute(
             """
@@ -458,7 +566,14 @@ def upsert_snapshot_record(out_dir: str | Path, record: dict[str, Any]) -> None:
 
 
 def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
-    """Delete snapshot index rows for the provided on-disk paths."""
+    """Delete snapshot index rows for the provided on-disk paths.
+
+    Does nothing when *paths* is empty or the database does not exist.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        paths: Snapshot file paths whose index rows should be removed.
+    """
     if not paths or not state_db_exists(out_dir):
         return
     with open_state_db(out_dir) as conn:
@@ -466,7 +581,14 @@ def remove_snapshot_records(out_dir: str | Path, paths: list[str]) -> None:
 
 
 def count_snapshot_records(out_dir: str | Path) -> int:
-    """Return the number of snapshot index rows (0 without a database)."""
+    """Return the number of snapshot index rows (0 without a database).
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+
+    Returns:
+        The number of rows in the snapshot index.
+    """
     (rows,) = _read_rows(out_dir, (("SELECT COUNT(*) FROM snapshots", ()),))
     return int(rows[0][0]) if rows else 0
 
@@ -481,6 +603,14 @@ def list_snapshot_records(
 
     When ``search`` is provided, matching is case-insensitive across the stored
     name, exception type/message, and file fields.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        limit: Maximum number of rows; ``None`` or ``0`` or less returns all of them.
+        search: Substring to match; ``None`` or blank disables filtering.
+
+    Returns:
+        Snapshot index entries, newest first.
     """
     sql = """
         SELECT path, mtime, name, exc_type, exc_message, file, line
@@ -507,6 +637,7 @@ def list_snapshot_records(
 
 
 def _snapshot_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Convert snapshot index rows into dicts keyed by column name."""
     return [
         {
             "path": str(path),
@@ -526,6 +657,13 @@ def snapshot_index_window(out_dir: str | Path, *, limit: int) -> tuple[int, list
 
     Retention runs on every capture; one connection instead of two keeps the healthy-index
     check cheaper than the filesystem scan it replaces (CAP-15).
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        limit: Maximum number of newest rows to return.
+
+    Returns:
+        The total row count and the newest *limit* index entries, newest first.
     """
     count_rows, rows = _read_rows(
         out_dir,
@@ -542,7 +680,12 @@ def snapshot_index_window(out_dir: str | Path, *, limit: int) -> tuple[int, list
 
 
 def replace_snapshot_records(out_dir: str | Path, records: list[dict[str, Any]]) -> None:
-    """Replace the entire snapshot index with the provided record set."""
+    """Replace the entire snapshot index with the provided record set.
+
+    Args:
+        out_dir: Snapshot output directory that holds the database.
+        records: Index entries to store; an empty list clears the index.
+    """
     with open_state_db(out_dir) as conn:
         conn.execute("DELETE FROM snapshots")
         if records:

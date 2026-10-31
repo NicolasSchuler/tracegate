@@ -1044,7 +1044,7 @@ class TestValidateGeneratedCaseInvalidMetadata:
         assert "invalid difficulty" in msg
 
     def test_missing_difficulty(self, tmp_path: Path) -> None:
-        """difficulty key absent → None not in VALID_DIFFICULTIES."""
+        """An absent difficulty key → None not in VALID_DIFFICULTIES."""
         case_dir = _make_valid_case(tmp_path / "no_diff")
         meta = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
         del meta["difficulty"]

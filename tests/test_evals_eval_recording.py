@@ -1282,7 +1282,7 @@ class TestBuildModelMetadata:
     """Lines 1264-1308."""
 
     def test_openai_patcher(self) -> None:
-        """openai patcher → full openai metadata."""
+        """An openai patcher → full openai metadata."""
         patcher = MagicMock()
         patcher.name = "openai"
         patcher.base_url = "https://api.openai.com/v1"

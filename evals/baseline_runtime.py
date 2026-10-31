@@ -1,6 +1,7 @@
 """Baseline selection and external baseline runtimes.
 
-Upstream repos, interpreters, runtime manifests and which conditions a run uses."""
+Upstream repos, interpreters, runtime manifests and which conditions a run uses.
+"""
 
 from __future__ import annotations
 

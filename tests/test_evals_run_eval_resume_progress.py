@@ -1591,8 +1591,10 @@ def test_resume_rejects_a_run_from_an_earlier_policy_defaults_version(
 def test_resume_rejects_pre_remediation_records_without_a_fingerprint(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """A v6-or-older run carries no settings fingerprint, so it cannot be resumed into a
-    v7 run — not even with `--allow-settings-drift` (codex 3-1#4, 1d#4)."""
+    """A v6-or-older run has no settings fingerprint, so it cannot resume into a v7 run.
+
+    Not even `--allow-settings-drift` allows it (codex 3-1#4, 1d#4).
+    """
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(run_eval, "_REPO_ROOT", repo_root)
@@ -1837,7 +1839,7 @@ def test_resume_of_a_pre_remediation_run_is_rejected(tmp_path, monkeypatch, caps
 def test_resume_rejects_a_run_from_an_earlier_attempt_accounting_version(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    """codex 1f#8: the attempt-counting/cost contract is part of the settings fingerprint.
+    """Codex 1f#8: the attempt-counting/cost contract is part of the settings fingerprint.
 
     A run recorded before the remediation counted attempts and costs differently (unscored
     retry-gate blocks, discarded gate usage, TEP learning outside the attempt's totals), so

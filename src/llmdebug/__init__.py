@@ -1,4 +1,22 @@
-"""Structured debug snapshots for LLM-assisted debugging."""
+"""Structured debug snapshots for LLM-assisted debugging.
+
+The package root exports the capture entry points and their configuration:
+
+- ``debug_snapshot`` and ``snapshot_section``: decorator and context manager that
+  write a snapshot when the wrapped code raises, then re-raise.
+- ``install_hooks`` and ``uninstall_hooks``: process-wide exception hooks that
+  capture uncaught exceptions; ``PII_PATTERNS`` holds the built-in redaction regexes.
+- ``SnapshotConfig`` with its option types ``DetailLevel``, ``GitDirtyMode``,
+  ``LocalsMode``, ``OutputFormat``, and ``SourceMode``; ``RedactionProfile`` and
+  ``resolve_redaction_policy`` for redaction presets.
+- ``get_latest_snapshot`` and ``filter_snapshot``: read the newest snapshot and
+  reduce a snapshot to a detail level.
+- ``enable_log_capture``: record recent log lines for inclusion in snapshots.
+- ``LLMDebugWSGIMiddleware`` and ``LLMDebugASGIMiddleware``: web middleware,
+  imported lazily on first access.
+- ``load_jupyter``, ``load_ipython_extension``, and ``unload_ipython_extension``:
+  IPython/Jupyter integration.
+"""
 
 from __future__ import annotations
 
@@ -82,6 +100,7 @@ def _maybe_warn_about_unredacted_defaults(
     redact_traceback: bool | None,
     redact_exception_strings: bool | None,
 ) -> None:
+    """Warn once per process when a capture API received no redaction settings."""
     global _unredacted_default_warning_emitted
     if _unredacted_default_warning_emitted:
         return
@@ -99,6 +118,7 @@ def _maybe_warn_about_unredacted_defaults(
 
 
 def _warn_once_about_legacy_capture_kwargs(*, api: str, stacklevel: int) -> None:
+    """Emit the flat-kwargs ``DeprecationWarning`` at most once per public API name."""
     if api in _legacy_capture_kwargs_warning_emitted:
         return
     warnings.warn(
@@ -116,7 +136,12 @@ def _resolve_snapshot_config(
     legacy_kwargs: dict[str, Any],
     stacklevel: int,
 ) -> SnapshotConfig:
-    """Resolve capture config from config-first or legacy kwargs."""
+    """Resolve capture config from config-first or legacy kwargs.
+
+    Raises:
+        TypeError: If both forms are given, ``config`` is not a ``SnapshotConfig``,
+            or a legacy kwarg is not a ``SnapshotConfig`` field.
+    """
     if config is not None and legacy_kwargs:
         legacy_keys = ", ".join(sorted(legacy_kwargs))
         raise TypeError(
@@ -223,9 +248,14 @@ def debug_snapshot(
     config: SnapshotConfig | None = None,
     **legacy_kwargs: Any,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator that captures debug snapshots on exception.
+    """Return a decorator that captures a debug snapshot when the function raises.
 
-    Usage:
+    The wrapped function re-raises the original exception after the capture. A
+    failing capture is reported on stderr and never replaces the original error.
+    Passing flat capture kwargs emits a ``DeprecationWarning`` once, and a capture
+    configured without any redaction settings emits a ``UserWarning`` once.
+
+    Example:
         cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="ci")
         @debug_snapshot(config=cfg)
         def main():
@@ -234,13 +264,22 @@ def debug_snapshot(
     Args:
         name: Snapshot name. Defaults to the decorated function name.
         config: Preferred capture settings object.
-        legacy_kwargs: Deprecated flat capture kwargs matching
+        **legacy_kwargs: Deprecated flat capture kwargs matching
             :class:`SnapshotConfig` fields. Use ``config=SnapshotConfig(...)``
             instead.
 
+    Returns:
+        A decorator that wraps a function with snapshot capture.
+
+    Raises:
+        TypeError: If both ``config`` and legacy kwargs are given, ``config`` is
+            not a :class:`SnapshotConfig`, or a legacy kwarg is not a
+            :class:`SnapshotConfig` field.
+
     Note:
-        include_coverage: Coverage toggle for pytest-plugin enrichment when pytest-cov is active.
-            Decorator/context-manager captures do not currently attach coverage data.
+        ``include_coverage`` is reserved for pytest-plugin enrichment when
+        pytest-cov is active. Decorator captures do not currently attach
+        coverage data.
     """
     cfg = _resolve_snapshot_config(
         api="debug_snapshot",
@@ -250,10 +289,12 @@ def debug_snapshot(
     )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        """Wrap *fn* so an exception it raises is captured, then re-raised."""
         snap_name = name or fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Call the wrapped function, capturing a snapshot before re-raising."""
             try:
                 return fn(*args, **kwargs)
             except Exception as e:
@@ -272,16 +313,32 @@ def snapshot_section(
     config: SnapshotConfig | None = None,
     **legacy_kwargs: Any,
 ):
-    """Context manager that captures debug snapshots on exception.
+    """Capture a debug snapshot when the ``with`` block raises.
 
-    Usage:
+    The original exception is re-raised after the capture. A failing capture is
+    reported on stderr and never replaces the original error.
+
+    Example:
         cfg = SnapshotConfig(out_dir=".llmdebug", redaction_profile="prod")
         with snapshot_section("data_loading", config=cfg):
             ...
 
+    Args:
+        section_name: Snapshot name recorded for exceptions raised in the block.
+        config: Preferred capture settings object.
+        **legacy_kwargs: Deprecated flat capture kwargs matching
+            :class:`SnapshotConfig` fields, accepted temporarily for backward
+            compatibility. Use ``config=SnapshotConfig(...)`` instead.
+
+    Yields:
+        Control to the body of the ``with`` block; no value is bound.
+
+    Raises:
+        TypeError: If both ``config`` and legacy kwargs are given, ``config`` is
+            not a :class:`SnapshotConfig`, or a legacy kwarg is not a
+            :class:`SnapshotConfig` field.
+
     Note:
-        ``legacy_kwargs`` temporarily accepts flat :class:`SnapshotConfig`
-        fields for backward compatibility. Prefer ``config=SnapshotConfig(...)``.
         ``include_coverage`` is reserved for pytest-plugin enrichment when
         pytest-cov is active. Context-manager captures do not currently attach
         coverage data.
@@ -303,7 +360,15 @@ def load_jupyter(**kwargs: Any) -> None:
     """Install llmdebug into the current IPython/Jupyter session.
 
     Convenience wrapper around :func:`jupyter_plugin.install`.
-    Requires the ``jupyter`` extra: ``pip install 'llmdebug[jupyter]'``
+    Requires the ``jupyter`` extra: ``pip install 'llmdebug[jupyter]'``.
+
+    Args:
+        **kwargs: Options forwarded to :func:`jupyter_plugin.install`, such as
+            ``ipython``, ``out_dir``, ``redaction_profile``, or extra
+            :class:`SnapshotConfig` fields.
+
+    Raises:
+        RuntimeError: If IPython is not installed.
     """
     try:
         from .jupyter_plugin import install
@@ -315,20 +380,40 @@ def load_jupyter(**kwargs: Any) -> None:
 
 
 def load_ipython_extension(ipython: Any) -> None:
-    """IPython extension entry point for ``%load_ext llmdebug``."""
+    """Install llmdebug when IPython runs ``%load_ext llmdebug``.
+
+    Args:
+        ipython: Active IPython shell supplied by IPython.
+    """
     from .jupyter_plugin import load_ipython_extension as _load
 
     _load(ipython)
 
 
 def unload_ipython_extension(ipython: Any) -> None:
-    """IPython extension entry point for ``%unload_ext llmdebug``."""
+    """Uninstall llmdebug when IPython runs ``%unload_ext llmdebug``.
+
+    Args:
+        ipython: Active IPython shell supplied by IPython; the uninstall does not
+            use it.
+    """
     from .jupyter_plugin import unload_ipython_extension as _unload
 
     _unload(ipython)
 
 
 def __getattr__(name: str) -> Any:
+    """Import the web middleware classes lazily on first attribute access.
+
+    Args:
+        name: Attribute requested from the package module.
+
+    Returns:
+        The requested middleware class, cached in the module globals.
+
+    Raises:
+        AttributeError: If *name* is not a lazily exported attribute.
+    """
     if name in ("LLMDebugASGIMiddleware", "LLMDebugWSGIMiddleware"):
         from .middleware import LLMDebugASGIMiddleware, LLMDebugWSGIMiddleware
 

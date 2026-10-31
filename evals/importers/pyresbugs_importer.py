@@ -85,6 +85,10 @@ def _infer_exception(fault_acronym: str, faulty_code: str, test_type: str) -> st
     """Infer expected exception type from fault acronym and code.
 
     Args:
+        fault_acronym: ODC fault-type acronym of the bug, e.g. ``"MIA"`` for a
+            missing import.
+        faulty_code: Buggy source; if it does not compile, the compile error's
+            type name is returned.
         test_type: "import" if test only does import, "call" if it calls function.
     """
     # Check if the code has a syntax error.

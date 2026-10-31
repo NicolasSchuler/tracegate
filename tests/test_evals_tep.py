@@ -788,10 +788,13 @@ class TestLoadTepStateFallbacks:
         assert state.beta == pytest.approx(1.0)
 
     def test_fixes_nonpositive_validation_buffer_size(self, tmp_path) -> None:
-        """When the persisted validation_buffer_size is -1 (negative), load_tep_state
-        replaces it with the provided validation_buffer_size argument.
-        from_dict uses ``int(value or 4)`` so 0 becomes 4 before the fix-up fires;
-        use -1 to get past from_dict and trigger the fix-up branch."""
+        """A persisted validation_buffer_size of -1 is replaced on load.
+
+        load_tep_state replaces the negative value with the provided
+        validation_buffer_size argument. from_dict uses ``int(value or 4)`` so 0 becomes
+        4 before the fix-up fires; use -1 to get past from_dict and trigger the fix-up
+        branch.
+        """
         import json as _json
 
         state_path = tmp_path / "tep.json"

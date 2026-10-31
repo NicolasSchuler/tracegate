@@ -1,4 +1,4 @@
-"""Export adaptive policy decision/outcome event logs to flat CSV for model training.
+r"""Export adaptive policy decision/outcome event logs to flat CSV for model training.
 
 Converts the structured JSONL events from adaptive policy runs
 (``--adaptive-online-events-path``) into a denormalized CSV suitable for
@@ -8,9 +8,9 @@ signals.
 
 Usage::
 
-    python -m evals.export_policy_dataset \\
-        --events evals/results/run1.adaptive_policy.jsonl \\
-        --events evals/results/run2.adaptive_policy.jsonl \\
+    python -m evals.export_policy_dataset \
+        --events evals/results/run1.adaptive_policy.jsonl \
+        --events evals/results/run2.adaptive_policy.jsonl \
         --output-csv evals/artifacts/policy_training_data.csv
 
 Supports both helper-policy and budget-policy event schema versions via

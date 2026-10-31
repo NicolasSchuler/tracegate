@@ -138,8 +138,11 @@ class TestDebugbenchInferException:
 
 
 class TestDebugbenchImportPipeline:
-    """Cover import_debugbench write + validate paths (lines 220-221, 233-236, 253-254,
-    268-269, 277-278, 283-285, 309-310, 314-315, 321-322, 345-363)."""
+    """Cover import_debugbench write + validate paths.
+
+    Lines 220-221, 233-236, 253-254, 268-269, 277-278, 283-285, 309-310, 314-315, 321-322,
+    345-363.
+    """
 
     def _setup_monkeypatch(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(

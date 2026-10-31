@@ -500,8 +500,11 @@ class TestNormalizeContextRelPath:
 
 
 class TestExecuteContextRequests:
-    """Cover lines 386, 392, 395, 429, 432, 445, 449, 480, 503-504, 511,
-    520, 536, 543, 553-554, 563, 572."""
+    """Cover execute_context_requests.
+
+    Lines 386, 392, 395, 429, 432, 445, 449, 480, 503-504, 511, 520, 536, 543, 553-554,
+    563, 572.
+    """
 
     def test_search_request_with_matches(self, tmp_path: Path) -> None:
         from evals.eval_evidence import execute_context_requests

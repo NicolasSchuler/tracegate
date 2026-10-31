@@ -417,7 +417,6 @@ class BaselineAdapter(ABC):
 
     def contract(self) -> BaselineContract:
         """Return machine-readable metadata for this adapter contract."""
-
         return BaselineContract(
             baseline_name=self.name,
             repair_scope_policy="adapter_defined",

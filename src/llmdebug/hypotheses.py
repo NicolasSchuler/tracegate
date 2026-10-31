@@ -23,7 +23,16 @@ _ARRAY_KEYS = ("__array__", "__dataframe__", "__series__")
 
 @dataclass(frozen=True)
 class Hypothesis:
-    """A ranked debugging hypothesis derived from snapshot patterns."""
+    """A ranked debugging hypothesis derived from snapshot patterns.
+
+    Attributes:
+        confidence: Detector confidence from 0.0 to 1.0; results are ranked by it.
+        pattern: Machine-readable pattern ID, such as ``"empty_array"`` or
+            ``"shape_mismatch"``.
+        description: Human-readable explanation of the suspected cause.
+        evidence: Data points from the snapshot that support the hypothesis.
+        suggestion: The recommended next debugging step.
+    """
 
     confidence: float  # 0.0-1.0
     pattern: str  # machine-readable: "empty_array", "shape_mismatch", etc.
@@ -42,6 +51,7 @@ _detectors: list[Callable[[dict[str, Any]], list[Hypothesis]]] = []
 def _register_detector(
     fn: Callable[[dict[str, Any]], list[Hypothesis]],
 ) -> Callable[[dict[str, Any]], list[Hypothesis]]:
+    """Add *fn* to the detector registry and return it unchanged (decorator)."""
     _detectors.append(fn)
     return fn
 
@@ -52,7 +62,7 @@ def _register_detector(
 
 
 def _get_crash_frame(snapshot: dict[str, Any]) -> FrameDict | None:
-    """Extract the crash frame from a snapshot."""
+    """Return the snapshot's crash frame, else its first frame, else None."""
     view = cast(SnapshotDict, snapshot)
     frames_obj = view.get("frames")
     if not isinstance(frames_obj, list) or not frames_obj:
@@ -67,7 +77,7 @@ def _get_crash_frame(snapshot: dict[str, Any]) -> FrameDict | None:
 
 
 def _get_locals(frame: FrameDict) -> dict[str, Any]:
-    """Get locals from a frame, filtering pytest internals."""
+    """Return a frame's locals without pytest's ``@py_`` assertion-rewrite temporaries."""
     locals_dict = frame.get("locals", {})
     if not isinstance(locals_dict, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
         return {}
@@ -75,7 +85,7 @@ def _get_locals(frame: FrameDict) -> dict[str, Any]:
 
 
 def _is_array_summary(value: Any) -> bool:
-    """Check if a value is an array/dataframe/series summary."""
+    """Return whether *value* is an array, dataframe, or series summary."""
     if not isinstance(value, dict):
         return False
     d = cast(dict[str, Any], value)
@@ -83,7 +93,7 @@ def _is_array_summary(value: Any) -> bool:
 
 
 def _get_shape(value: Any) -> list[int] | None:
-    """Extract shape from an array summary."""
+    """Return the integer shape list of an array summary, or None if it has none."""
     if isinstance(value, dict):
         d = cast(dict[str, Any], value)
         shape = d.get("shape")
@@ -93,7 +103,7 @@ def _get_shape(value: Any) -> list[int] | None:
 
 
 def _truncate(s: str, max_len: int = 80) -> str:
-    """Safe string truncation."""
+    """Truncate *s* to *max_len* characters, ending with ``...`` when cut."""
     s = str(s)
     if len(s) <= max_len:
         return s
@@ -101,7 +111,7 @@ def _truncate(s: str, max_len: int = 80) -> str:
 
 
 def _exc_type(snapshot: dict[str, Any]) -> str:
-    """Get the exception type name."""
+    """Return the snapshot's exception type name, or an empty string."""
     exc = snapshot.get("exception", {})
     if not isinstance(exc, dict):
         return ""
@@ -109,7 +119,7 @@ def _exc_type(snapshot: dict[str, Any]) -> str:
 
 
 def _exc_message(snapshot: dict[str, Any]) -> str:
-    """Get the exception message."""
+    """Return the snapshot's exception message, or an empty string."""
     exc = snapshot.get("exception", {})
     if not isinstance(exc, dict):
         return ""
@@ -310,7 +320,7 @@ def _detect_nan_inf(snapshot: dict[str, Any]) -> list[Hypothesis]:  # pyright: i
 
 @_register_detector
 def _detect_type_mismatch(snapshot: dict[str, Any]) -> list[Hypothesis]:  # pyright: ignore[reportUnusedFunction]
-    """Detect TypeError with type info in message."""
+    """Detect a TypeError whose message names the type of a crash-frame local."""
     if _exc_type(snapshot) != "TypeError":
         return []
     exc_msg = _exc_message(snapshot)
@@ -471,6 +481,14 @@ def generate_hypotheses(
     of them (CAP-16); ``max_per_pattern=1`` reproduces that behaviour.
 
     Detector exceptions are silently swallowed to ensure the engine never crashes.
+
+    Args:
+        snapshot: The snapshot dict to analyse.
+        max_per_pattern: Maximum hypotheses kept per pattern; values below 1 are
+            treated as 1.
+
+    Returns:
+        The kept hypotheses, highest confidence first; ties keep detector order.
     """
     results: list[Hypothesis] = []
     seen: set[tuple[str, str]] = set()
@@ -495,7 +513,15 @@ def generate_hypotheses(
 
 
 def format_hypotheses_text(hypotheses: list[Hypothesis]) -> str:
-    """Format hypotheses as markdown text for CLI/MCP output."""
+    """Format hypotheses as Markdown text for CLI/MCP output.
+
+    Args:
+        hypotheses: Hypotheses to render, in display order.
+
+    Returns:
+        One numbered section per hypothesis with its confidence, description,
+        evidence, and suggestion, or a fixed notice when *hypotheses* is empty.
+    """
     if not hypotheses:
         return "No hypotheses generated — the snapshot may lack sufficient data."
 

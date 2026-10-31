@@ -32,7 +32,16 @@ _VOLATILE_TEXT: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def normalize_failure_text(text: str) -> str:
-    """Replace run-specific values (addresses, tmp paths, ids, numbers) with placeholders."""
+    """Replace run-specific values (addresses, tmp paths, ids, numbers) with placeholders.
+
+    Args:
+        text: Exception message or output tail to normalize.
+
+    Returns:
+        The text with UUIDs, memory addresses, absolute paths, long hex IDs, and any
+        remaining numbers replaced by ``<uuid>``, ``<addr>``, ``<path>``, ``<hex>``,
+        and ``<n>``.
+    """
     for pattern, placeholder in _VOLATILE_TEXT:
         text = pattern.sub(placeholder, text)
     return text
@@ -100,6 +109,19 @@ def build_failure_signature(
     output tail are replaced first (:func:`normalize_failure_text`), so a failure that
     repeats with a new address, tmp path or count keeps its signature and stall detection
     can fire. ``normalize=False`` gives the raw signature used before RCA-12.
+
+    Args:
+        snapshot: Captured snapshot; when present, the signature hashes its exception
+            type and message, crash-frame location, and pytest node ID.
+        stdout: Captured standard output, used only without a snapshot and when
+            *stderr* is empty.
+        stderr: Captured standard error; without a snapshot, the last three non-empty
+            lines of the preferred output are hashed.
+        normalize: Whether to replace run-specific values before hashing.
+
+    Returns:
+        ``<ExceptionType>:<hash>`` for a snapshot, or ``TextFailure:<hash>`` for text
+        output.
     """
     if snapshot:
         return _signature_from_snapshot(normalize_snapshot_view(snapshot), normalize=normalize)
@@ -112,7 +134,16 @@ def derive_session_id(
     out_dir: str,
     fallback: str = "global",
 ) -> str:
-    """Derive stable session id from out_dir + pytest nodeid/name when available."""
+    """Derive a stable session ID from *out_dir* and the pytest node ID or name.
+
+    Args:
+        snapshot: Snapshot whose pytest node ID, or else its name, scopes the session.
+        out_dir: Snapshot directory; a hash of its resolved path prefixes the ID.
+        fallback: Scope used when the snapshot provides neither node ID nor name.
+
+    Returns:
+        A session ID of the form ``<path-hash>::<scope>``.
+    """
     resolved = str(Path(out_dir).resolve())
     path_hash = xxh64_hexdigest_text(resolved)[:8]
     scope = fallback

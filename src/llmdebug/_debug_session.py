@@ -1,4 +1,4 @@
-"""DebugSession schema helpers.
+"""Build and read DebugSession snapshot envelopes.
 
 Provides write/read compatibility between the new versioned DebugSession
 envelope and the legacy flat snapshot view consumed by existing tools.
@@ -15,12 +15,20 @@ DEBUG_SESSION_KIND = "llmdebug.debug_session"
 def split_extra_context(
     extra: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], Any | None, Any | None]:
-    """Split capture extra payload into context, trace, and eval sections.
+    """Split a capture ``extra`` payload into context, trace, and eval sections.
 
     Three-way split: "trace" is the optional trace/diagnostic payload,
     "eval" (or its alias "eval_outcome") is the eval-outcome overlay, and the
     remainder is generic context. When both "eval" and "eval_outcome" are
     given, "eval" wins and "eval_outcome" stays in the context.
+
+    Args:
+        extra: Caller-supplied extra payload; ``None`` or empty yields empty sections.
+
+    Returns:
+        A ``(context, trace_payload, eval_payload)`` tuple. ``context`` is a shallow
+        copy of *extra* without the extracted keys; the other two are ``None`` when
+        absent.
     """
     if not extra:
         return {}, None, None
@@ -45,6 +53,18 @@ def build_debug_session(
 
     Wraps a snapshot + session metadata + optional context/trace/eval
     in a schema-versioned DebugSession payload.
+
+    Args:
+        name: Human-readable capture label stored in the session metadata.
+        timestamp_utc: ISO-8601 UTC capture timestamp stored in the session metadata.
+        llmdebug_version: Library version stored in the session metadata.
+        snapshot: Core snapshot payload placed under the ``snapshot`` key.
+        context: Generic extra context; omitted from the envelope when empty.
+        trace_payload: Optional trace/diagnostic payload; omitted when ``None``.
+        eval_payload: Optional eval-outcome overlay; omitted when ``None``.
+
+    Returns:
+        The DebugSession envelope carrying the current schema version and kind.
     """
     payload: dict[str, Any] = {
         "schema_version": DEBUG_SESSION_SCHEMA_VERSION,
@@ -66,7 +86,15 @@ def build_debug_session(
 
 
 def is_debug_session_payload(data: dict[str, Any]) -> bool:
-    """Return True when *data* looks like a DebugSession envelope."""
+    """Return whether *data* looks like a DebugSession envelope.
+
+    Args:
+        data: Parsed snapshot payload of unknown shape.
+
+    Returns:
+        ``True`` when *data* has dict ``session`` and ``snapshot`` sections and either
+        the DebugSession ``kind`` or, when ``kind`` is absent, a ``2.x`` schema version.
+    """
     if not isinstance(data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
         return False
     session = data.get("session")
@@ -86,7 +114,16 @@ def is_debug_session_payload(data: dict[str, Any]) -> bool:
 def normalize_snapshot_view(data: dict[str, Any]) -> dict[str, Any]:
     """Normalize DebugSession payloads to the legacy flat snapshot view.
 
-    Legacy snapshots are returned unchanged.
+    Legacy snapshots are returned unchanged. For envelopes, keys are layered in
+    order, later layers overriding earlier ones: session name and timestamp, the
+    inner snapshot fields, ``context`` entries, then the library version, ``trace``,
+    and ``eval``. Unknown top-level keys are kept when they do not collide.
+
+    Args:
+        data: Snapshot payload in either the flat or the DebugSession envelope shape.
+
+    Returns:
+        A flat snapshot dict; the input object itself when it is not an envelope.
     """
     if not is_debug_session_payload(data):
         return data
@@ -154,6 +191,13 @@ def coerce_crash_frame_index(snapshot: dict[str, Any]) -> int:
 
     Falls back to the first dict frame when the stored index is missing,
     invalid, out-of-range, or points to a non-dict frame.
+
+    Args:
+        snapshot: Flat snapshot view holding ``frames`` and ``crash_frame_index``.
+
+    Returns:
+        A valid index into ``frames``, or ``0`` when there are no frames or no
+        dict frame.
     """
     frames = snapshot.get("frames")
     if not isinstance(frames, list) or not frames:

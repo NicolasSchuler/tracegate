@@ -37,9 +37,14 @@ from .state_db import (
 
 @contextmanager
 def _directory_lock(out_dir: Path, timeout: float) -> Iterator[bool]:
-    """Acquire lock for output directory operations.
+    """Acquire the output-directory lock for the duration of the block.
 
-    Yields True if lock acquired, False if timeout.
+    Args:
+        out_dir: Directory holding the ``.llmdebug.lock`` file.
+        timeout: Seconds to wait for the lock.
+
+    Yields:
+        True if the lock was acquired, False on timeout.
     """
     lock = FileLock(out_dir / ".llmdebug.lock", timeout=timeout)
     try:
@@ -58,11 +63,11 @@ _UNSAFE_NAME_CHAR = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def _snapshot_file_name(name: str) -> str:
-    """Filesystem-safe form of a snapshot name: ``[A-Za-z0-9._-]``, at most 120 characters.
+    """Return a filesystem-safe snapshot name of ``[A-Za-z0-9._-]``, at most 120 characters.
 
     A longer name (e.g. a parametrized pytest node ID) is cut and suffixed with a hash of
-    the full name, so distinct long names stay distinguishable. The payload keeps the
-    original name.
+    the full name, so distinct long names stay distinguishable. An empty name becomes
+    ``snapshot``. The payload keeps the original name.
     """
     safe = _UNSAFE_NAME_CHAR.sub("_", name) or "snapshot"
     if len(safe) <= _SNAPSHOT_NAME_MAX_CHARS:
@@ -72,17 +77,20 @@ def _snapshot_file_name(name: str) -> str:
 
 
 def _timestamp() -> str:
-    """Generate timestamp string."""
+    """Return the current UTC time as a ``YYYYMMDDTHHMMSSZ`` string."""
     return dt.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _update_latest_symlink(out_dir: Path, target_name: str, ext: str = ".json") -> None:
-    """Update latest symlink/copy.
+    """Point ``latest<ext>`` at the new snapshot and remove the other format's pointer.
+
+    POSIX swaps in a symlink atomically; Windows atomically replaces a copy. Failures
+    are reported as warnings.
 
     Args:
-        out_dir: Output directory
-        target_name: Name of the target file
-        ext: File extension for latest file (default: .json)
+        out_dir: Output directory.
+        target_name: File name of the new snapshot inside *out_dir*.
+        ext: Extension of the latest pointer (``.json`` or ``.toon``).
     """
     latest = out_dir / f"latest{ext}"
     target = out_dir / target_name
@@ -123,7 +131,11 @@ def _update_latest_symlink(out_dir: Path, target_name: str, ext: str = ".json") 
 
 
 def _delete_snapshot_artifacts(snapshot: Path) -> bool:
-    """Delete a snapshot file and its traceback sidecar."""
+    """Delete a snapshot file and its traceback sidecar.
+
+    Returns:
+        False if the snapshot file could not be removed; sidecar failures only warn.
+    """
     try:
         snapshot.unlink(missing_ok=True)
     except Exception as e:
@@ -155,7 +167,11 @@ def _remove_deleted_snapshot_records(out_dir: Path, deleted_paths: list[str]) ->
 def _cleanup_indexed_snapshots(
     out_dir: Path, indexed: list[dict[str, Any]], max_snapshots: int
 ) -> bool:
-    """Remove overflow snapshots using the persisted index ordering."""
+    """Remove overflow snapshots using the persisted index ordering.
+
+    Returns:
+        True if the index was over the limit and cleanup ran, False otherwise.
+    """
     if len(indexed) <= max_snapshots:
         return False
 
@@ -175,7 +191,7 @@ def _cleanup_indexed_snapshots(
 
 
 def _is_own_snapshot_file(out_dir: Path, path: Path) -> bool:
-    """Whether *path* is a snapshot file directly inside *out_dir* (not a symlink).
+    """Return whether *path* is a snapshot file directly inside *out_dir* (not a symlink).
 
     The index is data in a shared directory, so a row can name anything: an embedded
     NUL raises ``ValueError`` and a symlink loop ``RuntimeError`` on some supported
@@ -249,7 +265,23 @@ def _cleanup_old_snapshots(out_dir: Path, max_snapshots: int) -> None:
 
 
 def write_bundle(payload: dict[str, Any], cfg: SnapshotConfig) -> Path:
-    """Write snapshot bundle to disk in configured format."""
+    """Write a snapshot bundle to disk in the configured format.
+
+    The snapshot is written atomically and indexed, its traceback goes to a
+    ``.traceback.txt`` sidecar, and, under the directory lock, the ``latest`` pointer
+    is updated and snapshots beyond ``max_snapshots`` are pruned.
+
+    Args:
+        payload: DebugSession envelope or legacy flat snapshot payload.
+        cfg: Config supplying ``out_dir``, ``output_format``, ``lock_timeout``, and
+            ``max_snapshots``.
+
+    Returns:
+        Path of the written snapshot file.
+
+    Raises:
+        ValueError: If ``cfg.output_format`` is not a supported format.
+    """
     out_dir = Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -334,18 +366,22 @@ def get_latest_snapshot(
     """Read the latest snapshot if it exists, auto-detecting format.
 
     If both latest.json and latest.toon exist (e.g. stale leftovers from
-    a previous run), prefers the newest by mtime. Automatically expands
-    compact JSON keys to full keys for compatibility.
+    a previous run), prefers the newest by mtime and falls back to the other if it
+    cannot be read. A pointer resolving outside *out_dir* is ignored. Automatically
+    expands compact JSON keys to full keys for compatibility.
 
     Args:
-        out_dir: Output directory containing snapshots
-        detail: Optional detail level filter ("crash", "full", "context").
-                None means no filtering (returns full snapshot).
+        out_dir: Output directory containing snapshots.
+        detail: Optional detail level filter (``"crash"``, ``"full"``, ``"context"``).
+            ``None`` means no filtering (returns the full snapshot).
         normalize: If True (default), normalize DebugSession payloads into the
-                legacy flat snapshot view. If False, return raw expanded payload.
+            legacy flat snapshot view. If False, return the raw expanded payload.
 
     Returns:
-        Snapshot data with full keys, or None if not found
+        Snapshot data with full keys, or ``None`` if no readable snapshot is found.
+
+    Raises:
+        ValueError: If *detail* is given with ``normalize=False``.
     """
     if detail is not None and not normalize:
         raise ValueError("detail filter requires normalize=True")

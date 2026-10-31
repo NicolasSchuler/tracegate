@@ -66,7 +66,8 @@ def build_rca_attempt_record(
         - **failure_signature** / **repeat_count**: Signature tracking.
         - **repair_streak**: Consecutive unproductive repair attempts on this
           signature; drives stall detection.
-        - **evidence_refs**: Merged list of all evidence references.
+        - **evidence_refs**: Merged, deduplicated evidence references (at most
+          16; earlier references win).
         - **hypothesis** / **hypothesis_delta**: Current hypothesis text
           and whether it changed from the previous attempt.
         - **experiment_plan** / **proposed_change_summary**: Current plan
@@ -79,8 +80,12 @@ def build_rca_attempt_record(
         - **next_required**: Suggested next steps from the gate or state.
         - **exploratory** / **exploration_budget_remaining**: Exploration
           tracking.
-        - **transition_history**: Chronological list of state transitions.
+        - **transition_history**: Chronological list of state transitions,
+          capped at the 32 most recent.
         - **created_at** / **updated_at**: Timestamps.
+
+    Raises:
+        ValueError: If ``request.action`` is not a valid RCA action.
     """
     normalized_mode = normalize_gate_mode(request.gate_mode)
     normalized_action = normalize_action(request.action)

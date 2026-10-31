@@ -19,7 +19,15 @@ SNAPSHOT_SUFFIXES = frozenset({".json", ".toon"})
 
 
 def is_snapshot_name(name: str) -> bool:
-    """Whether a file name is a snapshot (not ``latest.*``, not a ``.tmp`` write)."""
+    """Return whether a file name denotes a snapshot file.
+
+    Args:
+        name: Bare file name, without directory components.
+
+    Returns:
+        ``True`` for ``.json``/``.toon`` names that are neither a ``latest.*`` pointer
+        nor an in-progress ``.tmp`` write.
+    """
     return (
         Path(name).suffix in SNAPSHOT_SUFFIXES
         and not name.startswith("latest")
@@ -28,20 +36,34 @@ def is_snapshot_name(name: str) -> bool:
 
 
 def traceback_sidecar(snapshot_path: Path) -> Path:
-    """The ``.traceback.txt`` file written next to a snapshot.
+    """Return the path of the ``.traceback.txt`` file written next to a snapshot.
 
     Replaces only the final suffix: snapshot names keep dots (``test_mod.py``), and
     ``with_suffix("").with_suffix(...)`` cut the name at the first of them (CAP-05).
+
+    Args:
+        snapshot_path: Path of the snapshot file.
+
+    Returns:
+        Sibling path named ``<snapshot stem>.traceback.txt``.
     """
     return snapshot_path.with_name(f"{snapshot_path.stem}.traceback.txt")
 
 
 def is_confined_to(path: Path, out_dir: str | Path) -> bool:
-    """Whether *path* still sits inside *out_dir* after following symlinks (RCA-02).
+    """Return whether *path* still sits inside *out_dir* after following symlinks (RCA-02).
 
     MCP callers only get to name a directory, so everything read from inside it -- the
     ``latest.*`` pointer and the files a scan finds -- has to be checked too, or a
     symlink planted in an allowed directory reads an arbitrary file.
+
+    Args:
+        path: Candidate file path, possibly a symlink.
+        out_dir: Directory the resolved path must stay within.
+
+    Returns:
+        ``True`` when the resolved path is inside the resolved *out_dir*; ``False``
+        otherwise, including when resolution fails.
     """
     try:
         return path.resolve().is_relative_to(Path(out_dir).resolve())
@@ -50,11 +72,18 @@ def is_confined_to(path: Path, out_dir: str | Path) -> bool:
 
 
 def snapshot_files(out_dir: str | Path) -> list[Path]:
-    """Snapshot files directly in *out_dir*; empty if it can't be listed.
+    """List the snapshot files directly inside *out_dir*.
 
     Uses one directory scan, so no file is opened or parsed. Symlinks are resolved
     (and dropped when they leave *out_dir*); plain entries cannot escape, so the
     capture-path callers pay nothing extra for the check.
+
+    Args:
+        out_dir: Snapshot directory to scan (not recursively).
+
+    Returns:
+        Paths of the snapshot files in scan order; empty if the directory cannot be
+        listed.
     """
     try:
         with os.scandir(out_dir) as entries:
@@ -70,7 +99,7 @@ def snapshot_files(out_dir: str | Path) -> list[Path]:
 
 
 def index_covers_disk(out_dir: str | Path) -> bool:
-    """Whether every snapshot file on disk has an index row.
+    """Return whether every snapshot file on disk has an index row.
 
     Index writes are best-effort, so the index can miss files (for example under
     pytest-xdist contention), and a listing that cannot trust the index has to rescan
@@ -78,6 +107,14 @@ def index_covers_disk(out_dir: str | Path) -> bool:
     for a deleted file balances out a missing row for a new one, and a reader that
     stopped at its limit before reaching the stale row never pruned it, so the newer
     snapshot stayed hidden for good (RCA-03).
+
+    Args:
+        out_dir: Snapshot directory whose files and index are compared.
+
+    Returns:
+        ``True`` when the directory has no snapshot files or every resolved file path
+        appears in the index; ``False`` when a file is missing from the index or the
+        index cannot be read.
     """
     disk_paths = {str(path.resolve()) for path in snapshot_files(out_dir)}
     if not disk_paths:
@@ -90,7 +127,18 @@ def index_covers_disk(out_dir: str | Path) -> bool:
 
 
 def index_entry_from_payload(snapshot_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    """Build the index row for a snapshot from its in-memory payload."""
+    """Build the index row for a snapshot from its in-memory payload.
+
+    Args:
+        snapshot_path: Path of the written snapshot file; supplies the row path and
+            modification time.
+        payload: Snapshot payload in either the flat or the DebugSession envelope shape.
+
+    Returns:
+        Index row with the resolved path, mtime (``0.0`` when the file cannot be
+        stat-ed), capture name, exception type, exception message truncated to 80
+        characters, and the first frame's file label and line.
+    """
     view = normalize_snapshot_view(payload)
     exc = cast(dict[str, Any], view.get("exception") or {})
     frames_raw = view.get("frames")

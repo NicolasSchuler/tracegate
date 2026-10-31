@@ -313,8 +313,11 @@ class TestOnlineFeatureVector:
                 assert features[f"last_helper_action_{a}"] == expected
 
     def test_bias_is_not_a_linear_combination_of_varying_features(self) -> None:
-        """POL-06: ``bias`` equalled the sum of the ten one-hot levels, and
-        ``attempts_remaining_frac`` was ``1 - attempt_frac``."""
+        """POL-06: two features were exact linear combinations of others.
+
+        ``bias`` equalled the sum of the ten one-hot levels, and ``attempts_remaining_frac``
+        was ``1 - attempt_frac``.
+        """
         rows = [
             _adaptive_online_feature_vector(
                 **_online_feature_kwargs(
@@ -1313,8 +1316,10 @@ class TestBuildFamilyProfile:
         assert profile.helper_max_calls == 6
 
     def test_dense_context_family_widens_discrete_limits_from_the_first_step(self) -> None:
-        """POL-10: the context family used to keep its discrete limits flat until later
-        levels, so with max_ups_per_case=1 it changed nothing."""
+        """POL-10: the context family used to keep its discrete limits flat until later levels.
+
+        So with max_ups_per_case=1 it changed nothing.
+        """
         profile = _build_adaptive_budget_family_profile(
             time_level=0,
             tokens_level=0,

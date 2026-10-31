@@ -1,5 +1,8 @@
-"""Tests for evals.eval_main_setup — covers _namespace_arg, _find_similar_existing_run_ids,
-_append_similar_run_id_warning, and validation helper gaps."""
+"""Tests for evals.eval_main_setup.
+
+Covers _namespace_arg, _find_similar_existing_run_ids, _append_similar_run_id_warning,
+and validation helper gaps.
+"""
 
 from __future__ import annotations
 

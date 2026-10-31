@@ -148,7 +148,7 @@ def test_cli_without_rows_returns_one(tmp_path: Path, capsys) -> None:
 
 
 def test_corrected_headline_excludes_unsupported_baseline_cases(tmp_path: Path) -> None:
-    """codex 2-4#1 / BAS-01: an unsupported LDB case was a corrected failure."""
+    """Codex 2-4#1 / BAS-01: an unsupported LDB case was a corrected failure."""
     records = [
         _rec("c1", "base_repair", True),
         _rec("c2", "base_repair", True),
@@ -175,7 +175,7 @@ def test_corrected_headline_excludes_unsupported_baseline_cases(tmp_path: Path) 
 
 
 def test_legacy_pairwise_count_uses_run_level_chi_square(tmp_path: Path) -> None:
-    """codex 2-4#2: the "uncorrected" count came from the corrected case-level tests."""
+    """Codex 2-4#2: the "uncorrected" count came from the corrected case-level tests."""
     records: list[dict[str, Any]] = []
     for run_id in ("r1", "r2", "r3"):
         for idx in range(7):  # B-only successes
@@ -203,7 +203,7 @@ def test_legacy_pairwise_count_uses_run_level_chi_square(tmp_path: Path) -> None
 
 
 def test_full_reveal_audit_skips_runs_without_adaptive_attempts(tmp_path: Path) -> None:
-    """codex 2-4#6: base_repair-only runs were flagged for ATT-06."""
+    """Codex 2-4#6: base_repair-only runs were flagged for ATT-06."""
     base_only = _rec("c1", "base_repair", False)
     adaptive = _rec("c2", "layered_adaptive_llm", False, run_id="r2")
     for record in (base_only, adaptive):
@@ -218,7 +218,7 @@ def test_full_reveal_audit_skips_runs_without_adaptive_attempts(tmp_path: Path) 
 
 
 def test_audits_count_deduplicated_attempts(tmp_path: Path) -> None:
-    """codex 2-4#5: resumed duplicate rows were flagged twice."""
+    """Codex 2-4#5: resumed duplicate rows were flagged twice."""
     touching = {"patch_touches_tests": True}
     records = [
         _rec("c1", "base_repair", True, patch_meta=dict(touching)),
@@ -239,7 +239,7 @@ def test_audits_count_deduplicated_attempts(tmp_path: Path) -> None:
 
 
 def test_audit_reports_partial_input(tmp_path: Path, capsys) -> None:
-    """codex 2-4#4: malformed rows and unreadable files made a partial audit look complete."""
+    """Codex 2-4#4: malformed rows and unreadable files made a partial audit look complete."""
     path = tmp_path / "partial.jsonl"
     path.write_text(
         json.dumps(_rec("c1", "base_repair", True)) + "\n{not json}\n",

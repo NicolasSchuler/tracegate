@@ -1,4 +1,4 @@
-"""Snapshot diffing — compare two debug snapshots to show what changed.
+"""Compare two debug snapshots to show what changed.
 
 Pure logic module with zero external dependencies. Used by CLI and MCP server.
 """
@@ -23,10 +23,12 @@ _ARRAY_KEYS = ("__array__", "__dataframe__", "__series__")
 # fields (SnapshotDiffResult.old_git/new_git), so a caller mutating one corrupted every
 # later diff (CAP-14).
 def _as_dict(value: Any) -> dict[str, Any]:
+    """Return *value* when it is a dict, otherwise a new empty dict."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
 def _as_list(value: Any) -> list[Any]:
+    """Return *value* when it is a list, otherwise a new empty list."""
     return cast(list[Any], value) if isinstance(value, list) else []
 
 
@@ -37,6 +39,7 @@ def _text_or_empty(value: Any) -> str:
 
 
 def _frame_file_value(frame: Mapping[str, Any]) -> str:
+    """Return the frame's relative file path, falling back to the absolute path or ``?``."""
     file_rel = frame.get("file_rel")
     if isinstance(file_rel, str) and file_rel:
         return file_rel
@@ -52,7 +55,17 @@ HypothesisDeltaKind = Literal["unknown", "unchanged", "refined", "replaced", "ad
 
 @dataclass(frozen=True)
 class ExceptionDiff:
-    """Difference summary for exception identity and high-level category."""
+    """Difference summary for exception identity and high-level category.
+
+    Attributes:
+        changed: ``True`` when the type, message, or error category differs.
+        old_type: Exception class name in the old snapshot.
+        new_type: Exception class name in the new snapshot.
+        old_message: Exception message in the old snapshot.
+        new_message: Exception message in the new snapshot.
+        old_category: Error category identifier in the old snapshot, or ``""``.
+        new_category: Error category identifier in the new snapshot, or ``""``.
+    """
 
     changed: bool
     old_type: str
@@ -65,7 +78,13 @@ class ExceptionDiff:
 
 @dataclass(frozen=True)
 class LocationDiff:
-    """Difference summary for the selected crash location."""
+    """Difference summary for the selected crash location.
+
+    Attributes:
+        changed: ``True`` when the two crash locations differ.
+        old_location: Old crash frame as ``"file:line in function"``, or ``"?"``.
+        new_location: New crash frame as ``"file:line in function"``, or ``"?"``.
+    """
 
     changed: bool
     old_location: str  # "file.py:42 in func_name"
@@ -74,7 +93,19 @@ class LocationDiff:
 
 @dataclass(frozen=True)
 class LocalChange:
-    """Single local-variable change detected between two snapshots."""
+    """Single local-variable change detected between two snapshots.
+
+    Attributes:
+        kind: Change category: ``modified``, ``added``, ``removed``, ``type_changed``,
+            or ``shape_changed``.
+        name: Local variable name.
+        old_value: Serialized old value; the old shape for ``shape_changed``.
+        new_value: Serialized new value; the new shape for ``shape_changed``.
+        old_type: Old type name from ``locals_meta``; the old dtype for
+            ``shape_changed``.
+        new_type: New type name from ``locals_meta``; the new dtype for
+            ``shape_changed``.
+    """
 
     kind: ChangeKind
     name: str
@@ -86,7 +117,13 @@ class LocalChange:
 
 @dataclass(frozen=True)
 class LocalsDiff:
-    """Grouped local-variable diff plus count of unchanged entries."""
+    """Grouped local-variable diff plus count of unchanged entries.
+
+    Attributes:
+        changes: Removed, then added, then changed shared locals, each group
+            sorted by name.
+        unchanged_count: Number of shared locals whose values compare equal.
+    """
 
     changes: tuple[LocalChange, ...] = ()
     unchanged_count: int = 0
@@ -94,7 +131,14 @@ class LocalsDiff:
 
 @dataclass(frozen=True)
 class EvidenceDelta:
-    """High-level change in evidence surface between two attempts."""
+    """High-level change in evidence surface between two attempts.
+
+    Attributes:
+        new_frames: Frame identifiers (``"file:line in function"``) present only
+            in the new snapshot, sorted.
+        dropped_frames: Frame identifiers present only in the old snapshot, sorted.
+        message_changed: ``True`` when the exception message differs.
+    """
 
     new_frames: tuple[str, ...] = ()
     dropped_frames: tuple[str, ...] = ()
@@ -103,7 +147,16 @@ class EvidenceDelta:
 
 @dataclass(frozen=True)
 class ChangeDelta:
-    """Touched-file/function summary derived from git metadata."""
+    """Touched-file/function summary derived from the two snapshots' stack frames.
+
+    Each dimension is the sorted symmetric difference of the values seen across all
+    frames. When both sets match but the crash location moved, the two crash
+    frames' values are used instead.
+
+    Attributes:
+        touched_files: File labels that appear in only one snapshot's frames.
+        touched_functions: Function names that appear in only one snapshot's frames.
+    """
 
     touched_files: tuple[str, ...] = ()
     touched_functions: tuple[str, ...] = ()
@@ -111,7 +164,13 @@ class ChangeDelta:
 
 @dataclass(frozen=True)
 class VerificationDelta:
-    """Change in downstream verification status between snapshots."""
+    """Change in downstream verification status between snapshots.
+
+    Attributes:
+        old_status: Verification status of the old snapshot, or ``"unknown"``.
+        new_status: Verification status of the new snapshot, or ``"unknown"``.
+        status_changed: ``True`` when the two statuses differ.
+    """
 
     old_status: str = "unknown"
     new_status: str = "unknown"
@@ -120,7 +179,28 @@ class VerificationDelta:
 
 @dataclass(frozen=True)
 class SnapshotDiffResult:
-    """Structured diff result consumed by CLI and MCP presentation layers."""
+    """Structured diff result consumed by CLI and MCP presentation layers.
+
+    Attributes:
+        exception: Exception type, message, and category comparison.
+        location: Crash-location comparison.
+        locals_diff: Local-variable comparison between the two crash frames.
+        git_changed: ``True`` when the recorded git commits differ.
+        old_git: Git metadata of the old snapshot.
+        new_git: Git metadata of the new snapshot.
+        old_name: Capture name of the old snapshot.
+        new_name: Capture name of the new snapshot.
+        same_test: ``True`` when both snapshots carry the same pytest node id
+            (including when neither has one).
+        failure_signature_same: ``True`` when exception type, message, and crash
+            location all match.
+        evidence_delta: Frames gained or dropped and whether the message changed.
+        change_delta: Files and functions touched between the two stacks.
+        hypothesis_delta: How the recorded root-cause hypothesis changed:
+            ``unknown`` (neither has one), ``unchanged``, ``added``, ``removed``,
+            ``refined`` (new text contains the old), or ``replaced``.
+        verification_delta: Change in verification status.
+    """
 
     exception: ExceptionDiff
     location: LocationDiff
@@ -147,7 +227,15 @@ def diff_exception(
     old_exc: dict[str, Any] | ExceptionDict,
     new_exc: dict[str, Any] | ExceptionDict,
 ) -> ExceptionDiff:
-    """Compare exception type, message, and error category."""
+    """Compare exception type, message, and error category.
+
+    Args:
+        old_exc: Exception summary from the old snapshot.
+        new_exc: Exception summary from the new snapshot.
+
+    Returns:
+        The field-by-field comparison; missing fields compare as empty strings.
+    """
     old_exc_t = _as_dict(old_exc)
     new_exc_t = _as_dict(new_exc)
     old_type = _text_or_empty(old_exc_t.get("type", ""))
@@ -183,7 +271,18 @@ def diff_location(
     old_crash_idx: int,
     new_crash_idx: int,
 ) -> LocationDiff:
-    """Compare crash location between two snapshots."""
+    """Compare crash location between two snapshots.
+
+    Args:
+        old_frames: Frames of the old snapshot.
+        new_frames: Frames of the new snapshot.
+        old_crash_idx: Index of the crash frame in *old_frames*.
+        new_crash_idx: Index of the crash frame in *new_frames*.
+
+    Returns:
+        Both locations as ``"file:line in function"``; a location is ``"?"`` when
+        its index is out of range or does not point at a dict frame.
+    """
     old_loc = (
         _format_location(old_frames[old_crash_idx])
         if old_frames
@@ -229,6 +328,7 @@ def _diff_removed(
     old_locals: dict[str, Any],
     old_meta: dict[str, Any],
 ) -> list[LocalChange]:
+    """Return ``removed`` changes for locals present only in the old frame."""
     return [
         LocalChange(
             kind="removed",
@@ -248,6 +348,7 @@ def _diff_added(
     new_locals: dict[str, Any],
     new_meta: dict[str, Any],
 ) -> list[LocalChange]:
+    """Return ``added`` changes for locals present only in the new frame."""
     return [
         LocalChange(
             kind="added",
@@ -322,7 +423,17 @@ def diff_locals(
     old_frame: Any,
     new_frame: Any,
 ) -> LocalsDiff:
-    """Compare local variables between two crash frames."""
+    """Compare local variables between two crash frames.
+
+    Pytest assertion-rewrite temporaries (names starting with ``@py_``) are ignored.
+
+    Args:
+        old_frame: Crash frame of the old snapshot; non-dict values count as empty.
+        new_frame: Crash frame of the new snapshot; non-dict values count as empty.
+
+    Returns:
+        Removed, added, and changed locals plus the count of unchanged ones.
+    """
     old_fd = _as_dict(old_frame)
     new_fd = _as_dict(new_frame)
     old_locals = _as_dict(old_fd.get("locals"))
@@ -349,6 +460,7 @@ def diff_locals(
 
 
 def _frame_id(frame: Mapping[str, Any]) -> str:
+    """Return the ``"file:line in function"`` identifier of a frame."""
     file_rel = _frame_file_value(frame)
     func = _text_or_empty(frame.get("function", "?")) or "?"
     line = frame.get("line", "?")
@@ -359,6 +471,7 @@ def _diff_evidence(
     old_view: dict[str, Any],
     new_view: dict[str, Any],
 ) -> EvidenceDelta:
+    """Compare the frame identifier sets and exception messages of two views."""
     old_frames = _as_list(old_view.get("frames"))
     new_frames = _as_list(new_view.get("frames"))
     old_ids = {
@@ -379,6 +492,7 @@ def _diff_evidence(
 
 
 def _coerce_crash_idx(view: dict[str, Any]) -> int:
+    """Return a safe crash-frame index for a snapshot view, or 0 without frames."""
     frames = _as_list(view.get("frames"))
     if not frames:
         return 0
@@ -426,6 +540,7 @@ def _diff_change_delta(
     *,
     location_changed: bool,
 ) -> ChangeDelta:
+    """Return the files and functions touched between the two views' stacks."""
     old_frames = _as_list(old_view.get("frames"))
     new_frames = _as_list(new_view.get("frames"))
     old_cfi = _coerce_crash_idx(old_view)
@@ -450,6 +565,7 @@ def _diff_change_delta(
 
 
 def _extract_hypothesis(view: dict[str, Any]) -> str:
+    """Return the top-level or RCA hypothesis text, or ``""`` when absent."""
     hyp = view.get("hypothesis")
     if isinstance(hyp, str):
         return hyp
@@ -463,6 +579,7 @@ def _extract_hypothesis(view: dict[str, Any]) -> str:
 
 
 def _classify_hypothesis_delta(old_value: str, new_value: str) -> HypothesisDeltaKind:
+    """Classify how the hypothesis text changed, ignoring surrounding whitespace."""
     old = old_value.strip()
     new = new_value.strip()
     if not old and not new:
@@ -479,6 +596,7 @@ def _classify_hypothesis_delta(old_value: str, new_value: str) -> HypothesisDelt
 
 
 def _extract_verification_status(view: dict[str, Any]) -> str:
+    """Return the top-level or RCA verification status, or ``"unknown"``."""
     vr_raw = view.get("verification_result")
     if isinstance(vr_raw, dict):
         status = str(cast(dict[str, Any], vr_raw).get("status") or "").strip()
@@ -496,6 +614,7 @@ def _extract_verification_status(view: dict[str, Any]) -> str:
 
 
 def _failure_signature(view: dict[str, Any]) -> str:
+    """Return ``"type|message|crash location"`` identifying a failure."""
     exc = _as_dict(view.get("exception"))
     exc_type = _text_or_empty(exc.get("type", ""))
     exc_msg = _text_or_empty(exc.get("message", ""))
@@ -508,7 +627,16 @@ def _failure_signature(view: dict[str, Any]) -> str:
 
 
 def diff_snapshots(old: dict[str, Any], new: dict[str, Any]) -> SnapshotDiffResult:
-    """Compare two full snapshots and return a structured diff."""
+    """Compare two full snapshots and return a structured diff.
+
+    Args:
+        old: Earlier snapshot, in either the flat or the DebugSession envelope shape.
+        new: Later snapshot, in either the flat or the DebugSession envelope shape.
+
+    Returns:
+        The exception, location, crash-frame locals, git, test-identity, evidence,
+        change, hypothesis, and verification comparisons.
+    """
     old_view = normalize_snapshot_view(old)
     new_view = normalize_snapshot_view(new)
     old_view_t = cast(SnapshotDict, old_view)
@@ -589,7 +717,16 @@ def _truncate(value: Any, max_len: int = 80) -> str:
 
 
 def structured_diff_summary(result: SnapshotDiffResult) -> dict[str, Any]:
-    """Return machine-oriented structured diff summary for prompts/MCP."""
+    """Return machine-oriented structured diff summary for prompts/MCP.
+
+    Args:
+        result: Diff produced by :func:`diff_snapshots`.
+
+    Returns:
+        A JSON-compatible dict with ``attempt_prev``/``attempt_curr`` names, the
+        failure-signature flag, and the evidence, change, hypothesis, and
+        verification deltas.
+    """
     return {
         "attempt_prev": result.old_name,
         "attempt_curr": result.new_name,
@@ -653,6 +790,7 @@ def _fmt_local_change_line(c: LocalChange) -> str:
 
 
 def _fmt_locals_section(ld: LocalsDiff) -> str | None:
+    """Render the locals section, or ``None`` when the crash frames had no locals."""
     if not ld.changes and ld.unchanged_count == 0:
         return None
     lines = ["## Locals (crash frame)"]
@@ -663,6 +801,7 @@ def _fmt_locals_section(ld: LocalsDiff) -> str | None:
 
 
 def _fmt_git_section(result: SnapshotDiffResult) -> str | None:
+    """Render the git commit change, or ``None`` when the commit is unchanged."""
     if not result.git_changed:
         return None
     old_commit = result.old_git.get("commit", "?")
@@ -683,6 +822,7 @@ def _fmt_structured_section(result: SnapshotDiffResult) -> str:
 
 
 def _has_structured_changes(result: SnapshotDiffResult) -> bool:
+    """Return whether any evidence, change, hypothesis, verification, or test delta exists."""
     if result.evidence_delta.new_frames or result.evidence_delta.dropped_frames:
         return True
     if result.evidence_delta.message_changed:
@@ -699,7 +839,15 @@ def _has_structured_changes(result: SnapshotDiffResult) -> bool:
 
 
 def format_diff_text(result: SnapshotDiffResult) -> str:
-    """Render a SnapshotDiffResult as structured text for MCP/CLI fallback."""
+    """Render a SnapshotDiffResult as structured text for MCP/CLI fallback.
+
+    Args:
+        result: Diff produced by :func:`diff_snapshots`.
+
+    Returns:
+        Markdown-style sections for the exception, crash location, locals, git, and
+        structured deltas, or a one-line notice when nothing changed.
+    """
     if (
         not result.exception.changed
         and not result.location.changed

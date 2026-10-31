@@ -574,7 +574,7 @@ class TestSnapshotFidelity:
 
     @pytest.mark.skipif(not _toons_installed(), reason="toons not installed")
     def test_compact_keys_roundtrip_with_toon(self) -> None:
-        """compact -> TOON -> decode -> expand = original."""
+        """A compact -> TOON -> decode -> expand round trip returns the original."""
         from evals.toon_llm_encoder import decode_for_llm, encode_for_llm
 
         original: dict[str, Any] = {

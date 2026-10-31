@@ -17,9 +17,13 @@ LOGGER_NAME = "llmdebug.diagnostics"
 
 
 class _StderrHandler(logging.Handler):
-    """Writes ``llmdebug: <level>: <message>`` to whatever ``sys.stderr`` is at emit time."""
+    """Logging handler that writes ``llmdebug: <level>: <message>`` to stderr.
+
+    ``sys.stderr`` is looked up at emit time, so later redirections are honoured.
+    """
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Write *record* to the current stderr, routing failures to ``handleError``."""
         try:
             sys.stderr.write(f"llmdebug: {record.levelname.lower()}: {record.getMessage()}\n")
         except Exception:
@@ -30,6 +34,10 @@ _HANDLER_NAME = "llmdebug.diagnostics.stderr"
 
 
 def _configure_logger() -> logging.Logger:
+    """Return the diagnostics logger, attaching the stderr handler at most once.
+
+    Sets the level to WARNING when it is unset and stops propagation to the root logger.
+    """
     logger = logging.getLogger(LOGGER_NAME)
     # Found by name, not class: a re-imported module defines a new _StderrHandler class,
     # and an isinstance check would add a second handler and print every warning twice.
@@ -47,12 +55,25 @@ logger = _configure_logger()
 
 
 def emit_warning(message: str) -> None:
-    """Emit a standardized llmdebug warning (stderr by default; see the module docstring)."""
+    """Log *message* as an llmdebug warning on the diagnostics logger.
+
+    By default it is written to stderr as ``llmdebug: warning: <message>``; see the
+    module docstring for how to retarget or silence it.
+
+    Args:
+        message: The warning text, logged verbatim.
+    """
     logger.warning("%s", message)
 
 
 def emit_debug(message: str) -> None:
-    """Record a diagnostic at DEBUG level; hidden unless the ``llmdebug`` logger is lowered."""
+    """Log *message* at DEBUG level on the diagnostics logger.
+
+    Hidden unless the ``llmdebug.diagnostics`` logger's level is lowered to DEBUG.
+
+    Args:
+        message: The diagnostic text, logged verbatim.
+    """
     logger.debug("%s", message)
 
 
@@ -63,6 +84,10 @@ def emit_capture_diagnostics(messages: list[str]) -> None:
     logger neither silenced nor retargeted them. They go through the logger now, at
     WARNING so the debug flag still shows them with the default level -- and only when
     DEBUG is off, because each one was already logged there as it was recorded.
+
+    Args:
+        messages: Capture warnings collected for one snapshot; each is logged with a
+            ``capture:`` prefix.
     """
     if logger.isEnabledFor(logging.DEBUG):
         return

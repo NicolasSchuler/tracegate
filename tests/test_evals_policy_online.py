@@ -181,8 +181,11 @@ class TestDelayedRescueBonus:
     def test_no_bonus_unless_helper_evidence_reaches_the_success_prompt(
         self, helper_ids: list[str], prompt_ids: list[str]
     ) -> None:
-        """POL-11: timing alone used to earn the bonus (case_difficulty and
-        case_snapshot_dependency were accepted but never read; they are gone)."""
+        """POL-11: timing alone used to earn the bonus.
+
+        case_difficulty and case_snapshot_dependency were accepted but never read; they are
+        gone.
+        """
         bonus = _adaptive_online_delayed_rescue_bonus(
             origin_attempt=1,
             resolved_attempt=2,
@@ -650,7 +653,7 @@ class TestFinalizeOnlineAttemptUpdateReasons:
         assert meta["adaptive_online_update_reason"] == "no_decision_emitted"
 
     def test_controller_unavailable_reason(self) -> None:
-        """decision present but controller is None → policy_controller_unavailable."""
+        """A decision is present but the controller is None → policy_controller_unavailable."""
         decision = _make_policy_decision()
         meta: dict[str, Any] = {}
         patch: dict[str, Any] = {}
@@ -878,7 +881,7 @@ class TestFinalizeOnlineAttemptWithController:
         return _FakeController()
 
     def test_non_deferred_happy_path(self) -> None:
-        """decision + controller present, no defer → records outcome."""
+        """A decision and controller are present, no defer → records outcome."""
         decision = _make_policy_decision()
         controller = self._make_fake_controller()
         meta: dict[str, Any] = {}

@@ -62,7 +62,6 @@ PINNED_REPOS: dict[str, PinnedRepo] = {
 
 def get_pinned_repo(key: str) -> PinnedRepo:
     """Return pinned repo metadata for *key*."""
-
     normalized_key = str(key or "").strip()
     try:
         return PINNED_REPOS[normalized_key]
@@ -72,13 +71,11 @@ def get_pinned_repo(key: str) -> PinnedRepo:
 
 def get_pinned_repo_commit(key: str) -> str:
     """Return the pinned commit hash for *key*."""
-
     return get_pinned_repo(key).commit
 
 
 def get_expected_env_client_compatibility(key: str) -> str:
     """Return the canonical ``_COMPATIBLE_WITH`` string for an env-client shim."""
-
     repo = get_pinned_repo(key)
     label = repo.env_client_label
     if not label:

@@ -8,18 +8,24 @@ from typing import Any
 
 
 def get_async_context() -> dict[str, Any] | None:
-    """Capture asyncio context if currently in an async execution.
+    """Capture asyncio task context when called inside a running event loop.
 
     Returns:
-        Dict with current task info and other running tasks, or None if not async.
+        A dict with the current task's name (``current_task``) and coroutine name
+        (``current_coro``), ``total_tasks``, up to 10 other task names
+        (``other_tasks``, plus ``other_tasks_truncated`` when more exist), and
+        ``_async_warnings`` if a lookup failed. None when no event loop is running
+        or nothing could be read.
 
-    Example output:
-        {
-            "current_task": "process_data",
-            "current_coro": "process_data",
-            "total_tasks": 5,
-            "other_tasks": ["fetch_data", "write_output", ...]
-        }
+    Example:
+        A typical result::
+
+            {
+                "current_task": "process_data",
+                "current_coro": "process_data",
+                "total_tasks": 5,
+                "other_tasks": ["fetch_data", "write_output", ...]
+            }
     """
     try:
         loop = asyncio.get_running_loop()
@@ -72,9 +78,16 @@ def get_async_context() -> dict[str, Any] | None:
 
 
 def is_coroutine_frame(frame: types.FrameType) -> bool:
-    """Check if a frame belongs to a coroutine.
+    """Return whether *frame* belongs to a native coroutine.
 
-    Uses the CO_COROUTINE flag (0x80) to detect coroutine frames.
+    Uses the ``CO_COROUTINE`` flag (0x80) on the frame's code object.
+
+    Args:
+        frame: The frame to inspect.
+
+    Returns:
+        True for a coroutine frame; False otherwise, including when the code flags
+        cannot be read.
     """
     try:
         # CO_COROUTINE = 0x80

@@ -1,4 +1,4 @@
-"""Pure snapshot loading logic, shared by CLI and MCP server.
+"""Load, list, and resolve snapshots for the CLI and MCP server.
 
 No click/rich/display dependencies — raises standard exceptions on error.
 """
@@ -26,7 +26,13 @@ from .state_db import (
 
 
 def _load_snapshot_file_raw(path: Path) -> SnapshotDict:
-    """Load a snapshot file as raw expanded dict (no session normalization)."""
+    """Load a snapshot file as raw expanded dict (no session normalization).
+
+    Raises:
+        FileNotFoundError: If *path* does not exist.
+        ImportError: If *path* is a TOON file and the TOON decoder is unavailable.
+        ValueError: If the file cannot be decoded or does not hold a JSON object.
+    """
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
@@ -56,15 +62,35 @@ def _load_snapshot_file_raw(path: Path) -> SnapshotDict:
 def load_snapshot_from_file(path: Path) -> dict[str, Any]:
     """Load and auto-expand a single snapshot file.
 
+    Args:
+        path: Snapshot file in JSON, compact JSON, or TOON format.
+
+    Returns:
+        The snapshot normalized to the legacy flat view, with compact keys expanded.
+
     Raises:
         FileNotFoundError: If path doesn't exist.
         ImportError: If TOON format without toons package.
+        ValueError: If the file cannot be decoded or does not hold a JSON object.
     """
     return normalize_snapshot_view(cast(dict[str, Any], _load_snapshot_file_raw(path)))
 
 
 def load_snapshot_from_file_raw(path: Path) -> dict[str, Any]:
-    """Load and auto-expand a single snapshot file without normalization."""
+    """Load and auto-expand a single snapshot file without normalization.
+
+    Args:
+        path: Snapshot file in JSON, compact JSON, or TOON format.
+
+    Returns:
+        The stored payload with compact keys expanded, keeping a DebugSession
+        envelope intact.
+
+    Raises:
+        FileNotFoundError: If path doesn't exist.
+        ImportError: If TOON format without toons package.
+        ValueError: If the file cannot be decoded or does not hold a JSON object.
+    """
     return cast(dict[str, Any], _load_snapshot_file_raw(path))
 
 
@@ -91,9 +117,14 @@ def load_snapshot(path: str | None, out_dir: str, *, _trust_path: bool = False) 
         _trust_path: If False (default), validate that path is within out_dir.
             Set True only for trusted internal callers.
 
+    Returns:
+        The snapshot normalized to the legacy flat view.
+
     Raises:
-        FileNotFoundError: If no snapshots found.
-        ValueError: If path is outside the snapshot directory.
+        FileNotFoundError: If the explicit path does not exist or, without a path,
+            no snapshots are found.
+        ValueError: If path is outside the snapshot directory or the file cannot be
+            decoded.
     """
     if path is not None:
         p = Path(path)
@@ -109,7 +140,24 @@ def load_snapshot(path: str | None, out_dir: str, *, _trust_path: bool = False) 
 def load_snapshot_raw(
     path: str | None, out_dir: str, *, _trust_path: bool = False
 ) -> dict[str, Any]:
-    """Load a raw snapshot payload without DebugSession normalization."""
+    """Load a raw snapshot payload without DebugSession normalization.
+
+    Args:
+        path: Explicit path to snapshot file, or None for latest.
+        out_dir: Snapshot directory.
+        _trust_path: If False (default), validate that path is within out_dir.
+            Set True only for trusted internal callers.
+
+    Returns:
+        The stored payload with compact keys expanded, keeping a DebugSession
+        envelope intact.
+
+    Raises:
+        FileNotFoundError: If the explicit path does not exist or, without a path,
+            no snapshots are found.
+        ValueError: If path is outside the snapshot directory or the file cannot be
+            decoded.
+    """
     if path is not None:
         p = Path(path)
         if not _trust_path:
@@ -122,10 +170,12 @@ def load_snapshot_raw(
 
 
 def _has_snapshot_files(out_path: Path) -> bool:
+    """Return whether *out_path* directly contains at least one snapshot file."""
     return bool(snapshot_files(out_path))
 
 
 def _normalize_line_value(value: Any) -> Any:
+    """Convert a digit-only line string from the index back to an int."""
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.isdigit():
@@ -134,6 +184,7 @@ def _normalize_line_value(value: Any) -> Any:
 
 
 def _normalize_mtime_value(value: Any) -> float | None:
+    """Return *value* as a finite float mtime, or ``None`` when it is unusable."""
     try:
         mtime = float(value)
     except (TypeError, ValueError):
@@ -144,6 +195,7 @@ def _normalize_mtime_value(value: Any) -> float | None:
 
 
 def _latest_pointer_path(out_dir: str) -> Path | None:
+    """Return the newer confined ``latest.json``/``latest.toon`` file, if any."""
     out_path = Path(out_dir)
     latest_json = out_path / "latest.json"
     latest_toon = out_path / "latest.toon"
@@ -170,6 +222,13 @@ def _entries_from_index(
     limit: int | None = None,
     search: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool, bool]:
+    """Read listing entries from the snapshot index, pruning rows for vanished files.
+
+    Returns:
+        A ``(entries, index_ok, index_read_failed)`` tuple. ``index_ok`` is ``True``
+        when the index was read (even if empty); ``index_read_failed`` is ``True``
+        when reading it raised.
+    """
     query_limit = None
     if limit is not None and limit > 0:
         # Over-fetch from DB to compensate for stale index entries (deleted files).
@@ -220,6 +279,7 @@ def _entries_from_index(
 
 
 def _matches_snapshot_search(entry: dict[str, Any], search: str | None) -> bool:
+    """Return whether *search* occurs case-insensitively in the entry's metadata."""
     query = str(search or "").strip().lower()
     if not query:
         return True
@@ -233,6 +293,7 @@ def _matches_snapshot_search(entry: dict[str, Any], search: str | None) -> bool:
 
 
 def _scan_snapshot_entries(out_dir: str) -> tuple[list[dict[str, Any]], int]:
+    """Parse every snapshot file newest-first; return the entries and the skip count."""
     candidates: list[tuple[float, Path]] = []
     for path in snapshot_files(out_dir):
         try:
@@ -267,6 +328,7 @@ def _scan_snapshot_entries(out_dir: str) -> tuple[list[dict[str, Any]], int]:
 
 
 def _refresh_snapshot_index(out_dir: str, entries: list[dict[str, Any]]) -> None:
+    """Replace the index rows with *entries*, warning instead of raising on failure."""
     try:
         replace_snapshot_records(
             out_dir,
@@ -295,12 +357,19 @@ def find_all_snapshots(
 ) -> list[dict[str, Any]]:
     """Scan output dir, return snapshot metadata sorted newest-first.
 
+    The snapshot index is used while it covers every file on disk; otherwise the
+    directory is scanned and an existing index is rebuilt from the scan.
+
     Args:
         out_dir: Snapshot output directory.
-        limit: Optional max entries to return. If None, returns all.
-        search: Optional case-insensitive metadata substring filter.
+        limit: Optional max entries to return. If None or not positive, returns all.
+        search: Optional case-insensitive substring filter over the name, exception
+            type, exception message, and file label.
 
-    Returns [] if dir doesn't exist. Silently skips corrupted files.
+    Returns:
+        Metadata dicts with ``path``, ``mtime``, ``name``, ``exc_type``,
+        ``exc_message``, ``file``, and ``line`` keys; ``[]`` if the directory does
+        not exist. Corrupted files are skipped with a warning.
     """
     out_path = Path(out_dir)
     if not out_path.is_dir():
@@ -352,7 +421,27 @@ def resolve_snapshot_ref_path(
     *,
     _trust_path: bool = False,
 ) -> Path:
-    """Resolve a snapshot reference to a concrete snapshot file path."""
+    """Resolve a snapshot reference to a concrete snapshot file path.
+
+    Args:
+        ref: ``None`` or ``"latest"`` for the newest snapshot (preferring the
+            ``latest.*`` pointer file), ``"previous"`` for the second newest,
+            ``"#N"`` for the Nth newest (1-based), or a file path.
+        out_dir: Snapshot directory.
+        all_snapshots: Pre-computed newest-first listing to index into instead of
+            scanning *out_dir* again.
+        _trust_path: If False (default), validate that a file path is within
+            out_dir. Set True only for trusted internal callers.
+
+    Returns:
+        Path of the referenced snapshot file.
+
+    Raises:
+        FileNotFoundError: If no snapshot matches ``latest``/``previous`` or the
+            file path does not exist.
+        ValueError: If ``#N`` is malformed or out of range, or the file path is
+            outside the snapshot directory.
+    """
     if ref is None or ref == "latest":
         latest_pointer = _latest_pointer_path(out_dir)
         if latest_pointer is not None:
@@ -410,9 +499,19 @@ def resolve_snapshot_ref(
     - "#N" → Nth snapshot from list (1-based)
     - file path → load directly
 
+    Args:
+        ref: Snapshot reference in one of the forms above.
+        out_dir: Snapshot directory.
+        all_snapshots: Pre-computed newest-first listing to index into instead of
+            scanning *out_dir* again.
+
+    Returns:
+        The referenced snapshot normalized to the legacy flat view.
+
     Raises:
         FileNotFoundError: If the referenced snapshot doesn't exist.
-        ValueError: If the reference is out of range.
+        ValueError: If the reference is malformed or out of range, the path is
+            outside the snapshot directory, or the file cannot be decoded.
     """
     path = resolve_snapshot_ref_path(ref, out_dir, all_snapshots)
     return load_snapshot_from_file(path)

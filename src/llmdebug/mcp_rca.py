@@ -39,7 +39,21 @@ _logger = logging.getLogger("llmdebug.mcp")
 
 @dataclass(frozen=True)
 class RCAAdvanceContext:
-    """Normalized inputs for one manual RCA advancement request."""
+    """Normalized inputs for one manual RCA advancement request.
+
+    Attributes:
+        snapshot: Snapshot that identity was derived from, or ``None`` when the caller
+            supplied both session and signature or no snapshot could be loaded.
+        session_id: Resolved RCA session ID.
+        failure_signature: Resolved failure signature.
+        evidence_refs: Evidence refs split from the comma-separated input.
+        verification_result: Verification status and checks, or ``None`` when no
+            status was given.
+        hypothesis: Stripped hypothesis, or ``None`` when blank.
+        experiment_plan: Stripped experiment plan, or ``None`` when blank.
+        proposed_change_summary: Stripped change summary, or ``None`` when blank.
+        override_reason: Stripped strict-gate override reason, or ``None`` when blank.
+    """
 
     snapshot: dict[str, Any] | None
     session_id: str
@@ -54,7 +68,30 @@ class RCAAdvanceContext:
 
 @dataclass(frozen=True)
 class RCAAdvanceToolRequest:
-    """Raw MCP tool inputs for one manual RCA advancement request."""
+    """Raw MCP tool inputs for one manual RCA advancement request.
+
+    Attributes:
+        action: RCA action to perform.
+        out_dir: Snapshot directory that holds the RCA store.
+        session_id: RCA session; derived from the snapshot when empty.
+        snapshot_path: Snapshot file used to derive the session and signature.
+        failure_signature: Stable failure fingerprint; derived when empty.
+        evidence_refs: Comma-separated evidence references.
+        hypothesis: Root-cause hypothesis; empty keeps the previous one.
+        experiment_plan: Experiment plan; empty keeps the previous one.
+        proposed_change_summary: Summary of the proposed change; empty keeps the
+            previous one.
+        verification_status: Verification outcome such as ``pass`` or ``fail``; empty
+            records no new result.
+        verification_checks: Comma-separated verification check descriptions.
+        gate_mode: Gate mode override; empty uses ``LLMDEBUG_RCA_GATE_MODE`` or
+            ``soft``.
+        exploratory: Whether the step is exploratory, which allows a strict-gate
+            override.
+        override_reason: Justification for a strict-gate override.
+        response_format: ``text`` or ``json``.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+    """
 
     action: str
     out_dir: str = ".llmdebug"
@@ -83,6 +120,7 @@ class RCAInputError(ValueError):
 
 
 def _split_csv_values(raw: str) -> list[str]:
+    """Split comma-separated input into stripped, non-empty values."""
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
@@ -93,6 +131,15 @@ def _resolve_snapshot(
     session_id: str,
     failure_signature: str,
 ) -> dict[str, Any] | None:
+    """Load the snapshot that identifies a manual RCA advance, when one is needed.
+
+    An explicit *snapshot_path* is loaded; with neither session nor signature the
+    latest snapshot is tried; with both, no snapshot is needed.
+
+    Raises:
+        SnapshotLoadError: If *snapshot_path* is given but cannot be loaded.
+        RCAInputError: If only one of *session_id* and *failure_signature* is given.
+    """
     if snapshot_path:
         try:
             return load_snapshot(snapshot_path, out_dir)
@@ -115,6 +162,7 @@ def _resolve_snapshot(
 
 
 def _verification_result(status: str, checks: str) -> dict[str, Any] | None:
+    """Build a verification result from a status and checks; ``None`` without a status."""
     normalized_status = status.strip()
     if not normalized_status:
         return None
@@ -125,6 +173,7 @@ def _verification_result(status: str, checks: str) -> dict[str, Any] | None:
 
 
 def _strip_or_none(raw: str) -> str | None:
+    """Return the stripped text, or ``None`` when it is blank."""
     normalized = raw.strip()
     return normalized or None
 
@@ -133,7 +182,22 @@ def resolve_rca_advance_context(
     *,
     request: RCAAdvanceToolRequest,
 ) -> RCAAdvanceContext:
-    """Resolve normalized RCA context from MCP tool string inputs."""
+    """Resolve normalized RCA context from MCP tool string inputs.
+
+    Explicit session and signature values win; empty ones are derived from the
+    resolved snapshot (session fallback ``manual``).
+
+    Args:
+        request: Raw tool inputs.
+
+    Returns:
+        The normalized context for the RCA attempt.
+
+    Raises:
+        SnapshotLoadError: If ``request.snapshot_path`` is given but cannot be loaded.
+        RCAInputError: If, without a snapshot path, only one of session ID and
+            failure signature is given.
+    """
     snapshot = _resolve_snapshot(
         out_dir=request.out_dir,
         snapshot_path=request.snapshot_path,
@@ -165,7 +229,16 @@ def resolve_rca_advance_context(
 
 
 def effective_gate_mode(gate_mode: str | None) -> str:
-    """Resolve RCA gate mode from param or env, defaulting to "soft"."""
+    """Resolve RCA gate mode from param or env, defaulting to "soft".
+
+    Args:
+        gate_mode: Requested gate mode; ``None`` or empty uses
+            ``LLMDEBUG_RCA_GATE_MODE``.
+
+    Returns:
+        ``off``, ``soft``, or ``strict``; ``soft`` when the resolved value is not one
+        of them.
+    """
     candidate = (gate_mode or os.getenv("LLMDEBUG_RCA_GATE_MODE", "soft")).strip().lower()
     if candidate in {"off", "soft", "strict"}:
         return candidate
@@ -173,7 +246,16 @@ def effective_gate_mode(gate_mode: str | None) -> str:
 
 
 def extract_evidence_refs(snapshot: dict[str, Any]) -> list[str]:
-    """Build a list of string evidence references from a snapshot's exception, crash frame, and pytest metadata."""
+    """Build evidence references from a snapshot's exception, crash frame, and pytest node ID.
+
+    Args:
+        snapshot: Loaded snapshot.
+
+    Returns:
+        Refs in the order ``exception:<type>``, ``exception_message:<first 80
+        chars>``, ``crash_frame:<file>:<line>:<function>`` (falling back to the first
+        frame), and ``pytest_nodeid:<nodeid>``; missing parts are skipped.
+    """
     snapshot_t = cast(SnapshotDict, snapshot)
     refs: list[str] = []
     exc = snapshot_t.get("exception", {})
@@ -211,7 +293,18 @@ def advance_rca(
     *,
     request: RCASnapshotAdvanceRequest,
 ) -> RCAAttemptRecord | None:
-    """Attempt an RCA state advance, returning None on failure."""
+    """Attempt an RCA state advance, returning None on failure.
+
+    The session ID (fallback ``mcp``) and failure signature are derived from the
+    snapshot or fallback output; the values on ``request.attempt`` are ignored. The
+    gate mode is resolved with :func:`effective_gate_mode`. Failures are logged.
+
+    Args:
+        request: Snapshot, output directory, and attempt inputs.
+
+    Returns:
+        The persisted attempt record, or ``None`` when the update failed.
+    """
     try:
         session_id = derive_session_id(request.snapshot, out_dir=request.out_dir, fallback="mcp")
         signature = build_failure_signature(
@@ -247,7 +340,17 @@ def advance_rca_with_snapshot_refs(
     request: RCASnapshotAdvanceRequest,
     extra_evidence_refs: list[str] | None = None,
 ) -> RCAAttemptRecord | None:
-    """Like ``advance_rca`` but auto-extracts evidence refs from the snapshot."""
+    """Advance RCA like :func:`advance_rca`, auto-extracting evidence refs from the snapshot.
+
+    The extracted refs plus *extra_evidence_refs* replace ``request.attempt.evidence_refs``.
+
+    Args:
+        request: Snapshot, output directory, and attempt inputs.
+        extra_evidence_refs: Additional refs appended after the snapshot's refs.
+
+    Returns:
+        The persisted attempt record, or ``None`` when the update failed.
+    """
     refs = extract_evidence_refs(request.snapshot) if isinstance(request.snapshot, dict) else []
     if extra_evidence_refs:
         refs.extend(extra_evidence_refs)
@@ -282,7 +385,16 @@ def render_rca_update_failed(
     response_format: str,
     evidence_schema: str,
 ) -> str:
-    """Render a standardized RCA update failure error response."""
+    """Render a standardized RCA update failure error response.
+
+    Args:
+        tool: Name of the MCP tool whose RCA update failed.
+        response_format: ``json`` for the error envelope, ``text`` for the bare message.
+        evidence_schema: Requested evidence schema for the envelope.
+
+    Returns:
+        The rendered ``RCA_STATE_UPDATE_ERROR`` response.
+    """
     return render_tool_error(
         tool=tool,
         response_format=response_format,
@@ -305,7 +417,20 @@ def handle_rca_status(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Implementation of llmdebug_rca_status."""
+    """Return the latest RCA attempt for the ``llmdebug_rca_status`` MCP tool.
+
+    Args:
+        out_dir: Snapshot directory that holds the RCA store.
+        session_id: Session to look up; when empty, it is derived from
+            *snapshot_path* if given, else the latest attempt overall is returned.
+        snapshot_path: Snapshot used to derive the session ID.
+        response_format: ``text`` or ``json``.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+
+    Returns:
+        The latest attempt as JSON text or a JSON envelope, or an error response (a
+        bare message in text mode when no attempt exists).
+    """
     format_error = validate_response_format(response_format)
     if format_error is not None:
         return render_invalid_response_format_error(
@@ -373,7 +498,19 @@ def handle_rca_history(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Implementation of llmdebug_rca_history."""
+    """Return RCA history for the ``llmdebug_rca_history`` MCP tool.
+
+    Args:
+        out_dir: Snapshot directory that holds the RCA store.
+        session_id: Session to filter on; empty includes every session.
+        limit: Maximum number of attempts; must be at least 1.
+        response_format: ``text`` or ``json``.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+
+    Returns:
+        The attempts, newest first, as JSON text or a JSON envelope, or an error
+        response (a bare message in text mode when no attempt exists).
+    """
     format_error = validate_response_format(response_format)
     if format_error is not None:
         return render_invalid_response_format_error(
@@ -439,7 +576,16 @@ def handle_rca_advance(
     *,
     request: RCAAdvanceToolRequest,
 ) -> str:
-    """Implementation of llmdebug_rca_advance."""
+    """Advance the RCA state machine for the ``llmdebug_rca_advance`` MCP tool.
+
+    Args:
+        request: Raw tool inputs.
+
+    Returns:
+        The new attempt record as JSON text or a JSON envelope, or an error response
+        when an argument is invalid, the snapshot cannot be loaded, or the RCA update
+        fails.
+    """
     format_error = validate_response_format(request.response_format)
     if format_error is not None:
         return render_invalid_response_format_error(

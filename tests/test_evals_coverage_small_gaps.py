@@ -234,8 +234,10 @@ class TestAdaptiveOnlinePolicyGaps:
         assert config.feature_scaling_profile == DEFAULT_POLICY_FEATURE_SCALING_PROFILE
 
     def test_scale_features_keeps_a_frozen_cap(self) -> None:
-        """POL-09: a feature with a frozen cap records no more history (this test used to
-        check truncation of an ever-growing history)."""
+        """POL-09: a feature with a frozen cap records no more history.
+
+        This test used to check truncation of an ever-growing history.
+        """
         from evals.adaptive_online_policy import (
             AdaptiveOnlinePolicyController,
             OnlinePolicyConfig,

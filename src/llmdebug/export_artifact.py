@@ -1,4 +1,4 @@
-"""Shareable export artifacts for snapshots and RCA state."""
+"""Build shareable JSON, HTML, and bundle export artifacts for snapshots and RCA state."""
 
 from __future__ import annotations
 
@@ -30,12 +30,21 @@ _EXCEPTION_STRING_KEYS = {"message", "args", "notes", "note"}
 
 
 def default_export_path(*, snapshot_path: Path, fmt: str) -> Path:
-    """Return a stable default export path next to the source snapshot."""
+    """Return a stable default export path next to the source snapshot.
+
+    Args:
+        snapshot_path: Snapshot file being exported.
+        fmt: Export format; ``"html"`` selects ``.html``, anything else ``.json``.
+
+    Returns:
+        Sibling path named ``<snapshot stem>.report.html`` or ``.report.json``.
+    """
     suffix = ".html" if fmt == "html" else ".json"
     return snapshot_path.with_name(f"{snapshot_path.stem}.report{suffix}")
 
 
 def _path_basename(value: Any) -> str:
+    """Return the last POSIX- or Windows-style path component of *value*."""
     text = str(value or "").strip().rstrip("/\\")
     if not text:
         return ""
@@ -51,6 +60,7 @@ def _looks_like_filesystem_path(value: Any) -> bool:
 
 
 def _sanitize_redacted_locator(value: Any, *, fallback: str = "") -> Any:
+    """Reduce a path-like locator to its basename; keep non-path refs such as ``#2``."""
     text = str(value or "").strip()
     if not text:
         return fallback or None
@@ -60,6 +70,7 @@ def _sanitize_redacted_locator(value: Any, *, fallback: str = "") -> Any:
 
 
 def _sanitize_redacted_export_metadata(payload: dict[str, Any]) -> None:
+    """Strip local directory paths from the source and comparison metadata in place."""
     source = payload.get("source")
     if isinstance(source, dict):
         source_dict = cast(JsonDict, source)
@@ -86,10 +97,12 @@ def _sanitize_redacted_export_metadata(payload: dict[str, Any]) -> None:
 
 
 def _utc_now() -> str:
+    """Return the current UTC time as second-precision ISO-8601 with a ``Z`` suffix."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _crash_frame(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return the crash frame, falling back to the first frame or an empty dict."""
     frames_raw = snapshot.get("frames")
     frames = cast(list[Any], frames_raw) if isinstance(frames_raw, list) else cast(list[Any], [])
     if not frames:
@@ -103,6 +116,7 @@ def _crash_frame(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_frame_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return per-frame index, crash flag, location, function, and rendered text."""
     out: list[dict[str, Any]] = []
     frames_raw = snapshot.get("frames")
     frames = cast(list[Any], frames_raw) if isinstance(frames_raw, list) else cast(list[Any], [])
@@ -131,6 +145,7 @@ def _comparison_payload(
     compare_snapshot: dict[str, Any] | None,
     snapshot: dict[str, Any],
 ) -> dict[str, Any] | None:
+    """Diff the comparison snapshot against *snapshot*, or return None without one."""
     if compare_snapshot is None or compare_path is None:
         return None
     diff = diff_snapshots(compare_snapshot, snapshot)
@@ -144,9 +159,11 @@ def _comparison_payload(
 
 
 def _find_retry_summaries(value: Any) -> list[dict[str, Any]]:
+    """Collect ``retry_summary``/``retry_summaries`` dicts at any depth, deduplicated."""
     found: list[dict[str, Any]] = []
 
     def _walk(node: Any) -> None:
+        """Append retry summaries found in *node* and its descendants to ``found``."""
         if isinstance(node, dict):
             node_dict = cast(JsonDict, node)
             explicit_summary = node_dict.get("retry_summary")
@@ -191,7 +208,30 @@ def build_export_payload(
     export_mode: ExportMode = "full",
     export_redaction_profile: RedactionProfile | None = None,
 ) -> dict[str, Any]:
-    """Build a shareable export payload for JSON/HTML reports."""
+    """Build a shareable export payload for JSON/HTML reports.
+
+    Args:
+        snapshot: Snapshot normalized to the legacy flat view.
+        raw_payload: Snapshot as stored on disk; exported only when it differs from
+            *snapshot* (for example a DebugSession envelope) and searched for retry
+            summaries.
+        snapshot_path: Path of the exported snapshot file.
+        out_dir: Snapshot directory; scopes the session ID and the RCA lookup.
+        snapshot_ref: Reference the caller used to select the snapshot; recorded as
+            ``"latest"`` when omitted.
+        compare_ref: Reference used to select the comparison snapshot.
+        compare_path: Path of the comparison snapshot; required for a comparison.
+        compare_snapshot: Earlier snapshot to diff against; required for a
+            comparison.
+        export_mode: Mode label recorded in the payload; this function does not
+            redact (see :func:`apply_export_redaction`).
+        export_redaction_profile: Redaction profile label recorded in the payload.
+
+    Returns:
+        A ``llmdebug.export`` payload with source metadata, session ID, failure
+        signature, exception, crash frame, rendered frames, retry summaries, the
+        optional comparison, and the session's RCA status and last 20 history records.
+    """
     session_id = derive_session_id(snapshot, out_dir=out_dir, fallback="export")
     failure_signature = build_failure_signature(snapshot)
     crash_frame = _crash_frame(snapshot)
@@ -233,6 +273,7 @@ def build_export_payload(
 
 
 def _restore_path_value(redacted: Any, original: Any, *, key_name: str) -> None:
+    """Copy every *key_name* value from *original* back into *redacted*, recursively."""
     if isinstance(redacted, dict) and isinstance(original, dict):
         redacted_dict = cast(JsonDict, redacted)
         original_dict = cast(JsonDict, original)
@@ -250,6 +291,7 @@ def _restore_path_value(redacted: Any, original: Any, *, key_name: str) -> None:
 
 
 def _restore_exception_text_fields(redacted: Any, original: Any) -> None:
+    """Restore exception message, args, and notes (and their causes) from *original*."""
     if isinstance(redacted, dict) and isinstance(original, dict):
         redacted_dict = cast(JsonDict, redacted)
         original_dict = cast(JsonDict, original)
@@ -286,7 +328,27 @@ def apply_export_redaction(
     export_mode: ExportMode,
     redaction_profile: str | None,
 ) -> dict[str, Any]:
-    """Return a redacted export payload without mutating the source payload."""
+    """Return a redacted export payload without mutating the source payload.
+
+    Outside ``redacted`` mode the payload is deep-copied and labelled ``full``.
+    In ``redacted`` mode the profile's patterns are applied, traceback and
+    exception text are restored when the profile does not redact them, and local
+    paths are reduced to file names in the source and comparison metadata.
+
+    Args:
+        payload: Export payload from :func:`build_export_payload`.
+        export_mode: ``"redacted"`` (any case) to redact; any other value exports
+            full fidelity.
+        redaction_profile: Redaction profile name; ``ci`` or ``prod`` is required
+            in redacted mode.
+
+    Returns:
+        A new payload with ``export_mode`` and ``export_redaction_profile`` set.
+
+    Raises:
+        ValueError: If the profile name is invalid, or if redacted mode is requested
+            with a profile that defines no redaction patterns.
+    """
     normalized_mode = str(export_mode or "full").strip().lower()
     normalized_profile = normalize_redaction_profile(redaction_profile)
     if normalized_mode != "redacted":
@@ -325,7 +387,21 @@ def build_export_bundle_manifest(
     compare_payload: dict[str, Any] | None = None,
     compare_artifact_filename: str | None = None,
 ) -> dict[str, Any]:
-    """Build a self-contained manifest for bundle exports."""
+    """Build a self-contained manifest for bundle exports.
+
+    Args:
+        payload: Primary export payload.
+        export_format: Format of the bundled artifacts, such as ``"json"`` or
+            ``"html"``.
+        artifact_filename: File name of the primary artifact inside the bundle.
+        compare_payload: Export payload of the comparison snapshot, if bundled.
+        compare_artifact_filename: File name of the comparison artifact, if bundled.
+
+    Returns:
+        A ``llmdebug.export_bundle`` manifest with export metadata, the primary (and
+        optional comparison) snapshot locators, bundle artifact names, the retry
+        summary count, and RCA presence counts.
+    """
     source = cast(dict[str, Any], payload.get("source") or {})
     retry_summaries = payload.get("retry_summaries")
     retry_summary_count = (
@@ -685,7 +761,15 @@ def _render_export_html_document(
 
 
 def render_export_html(payload: dict[str, Any]) -> str:
-    """Render a single-file HTML export artifact."""
+    """Render a single-file HTML export artifact.
+
+    Args:
+        payload: Export payload, optionally redacted.
+
+    Returns:
+        A standalone HTML document with summary, repro, retry timeline, frames, RCA,
+        comparison, and raw-JSON cards; all payload text is HTML-escaped.
+    """
     source = cast(dict[str, Any], payload.get("source") or {})
     exc = cast(dict[str, Any], payload.get("exception") or {})
     crash_frame = cast(dict[str, Any], payload.get("crash_frame") or {})
@@ -721,7 +805,15 @@ def render_export_html(payload: dict[str, Any]) -> str:
 
 
 def render_bundle_index_html(manifest: dict[str, Any]) -> str:
-    """Render a tiny index page for bundle exports."""
+    """Render a tiny index page for bundle exports.
+
+    Args:
+        manifest: Bundle manifest from :func:`build_export_bundle_manifest`.
+
+    Returns:
+        A standalone HTML page with the bundle metadata and links to the primary
+        artifact, the optional comparison artifact, and ``manifest.json``.
+    """
     artifacts = cast(dict[str, Any], manifest.get("artifacts") or {})
     compare_artifact = str(artifacts.get("compare") or "")
     links = [

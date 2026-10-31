@@ -29,10 +29,10 @@ def generate_oracle_patch(
     fixed: str,
     filename: str = "buggy.py",
 ) -> str:
-    """Generate a unified diff (oracle.patch) from buggy to fixed code.
+    r"""Generate a unified diff (oracle.patch) from buggy to fixed code.
 
     Returns a git-apply-compatible unified diff string. A source without a trailing
-    newline gets the ``\\ No newline at end of file`` marker; the old builder merged the
+    newline gets the ``\ No newline at end of file`` marker; the old builder merged the
     last removed and added lines into one (DAT-10).
     """
     return _build_diff_from_changes([(filename, buggy, fixed)])

@@ -53,7 +53,8 @@ def build_run_metadata_for_run(inputs: RunMetadataInputs) -> RunMetadataAssembly
     Keeps the existing metadata when the settings fingerprint matches (or is
     missing), otherwise starts fresh and links the old fingerprint (ORC-04). Adds
     the baseline adapter, config paths, the resolved lockfile and the patcher
-    settings that only exist at run time. Moved verbatim from ``run_main_flow`` (X-01)."""
+    settings that only exist at run time. Moved verbatim from ``run_main_flow`` (X-01).
+    """
     args = inputs.args
     conditions = inputs.conditions
     config_state = inputs.config_state

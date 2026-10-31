@@ -197,6 +197,8 @@ just bench-capture-compare
 - Keep changes focused and minimal.
 - Add regression tests for bug fixes and behavior changes.
 - Prefer clear, typed APIs for new or changed code paths.
+- Write docstrings in Google style (`Args:`, `Returns:`, `Raises:`, `Attributes:`); Ruff's
+  `D` rules enforce the format, and `src/llmdebug` requires a docstring on every public API.
 - Use `@pytest.mark.integration` for heavy infra/container/stub-server tests.
 - Use `@pytest.mark.baseline_runtime` together with `@pytest.mark.integration`
   when a test requires provisioned baseline repos or `baselines/envs/*` runtimes.

@@ -38,6 +38,7 @@ _REQUIRED_RCA_FIELDS = (
 
 
 def _store_path(out_dir: str) -> Path:
+    """Return the JSONL store path inside *out_dir*."""
     return Path(out_dir) / _RCA_FILE
 
 
@@ -50,6 +51,7 @@ def _store_lock(path: Path) -> Iterator[None]:
 
 
 def _backend() -> RCABackend:
+    """Return the backend chosen by ``LLMDEBUG_RCA_BACKEND``; unknown values mean sqlite."""
     raw = os.getenv(_RCA_BACKEND_ENV, _DEFAULT_BACKEND).strip().lower()
     if raw in {"sqlite", "jsonl"}:
         return cast(RCABackend, raw)
@@ -57,7 +59,12 @@ def _backend() -> RCABackend:
 
 
 def max_rca_records() -> int:
-    """Return configured max retained RCA records (0 means unlimited)."""
+    """Return configured max retained RCA records (0 means unlimited).
+
+    Returns:
+        The ``LLMDEBUG_RCA_MAX_RECORDS`` value, or 5000 when it is unset or not an
+        integer; negative values become 0.
+    """
     raw_value = os.getenv("LLMDEBUG_RCA_MAX_RECORDS", str(_DEFAULT_MAX_RECORDS))
     try:
         value = int(raw_value)
@@ -67,6 +74,10 @@ def max_rca_records() -> int:
 
 
 def _iter_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    """Return the JSON objects in *path*, skipping blank and malformed lines.
+
+    A missing or unreadable file yields an empty list.
+    """
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
@@ -88,6 +99,7 @@ def _iter_jsonl_records(path: Path) -> list[dict[str, Any]]:
 
 
 def _is_valid_rca_record(record: dict[str, Any]) -> bool:
+    """Return whether *record* has a non-blank value for every required field."""
     for key in _REQUIRED_RCA_FIELDS:
         value = record.get(key)
         if value is None or not str(value).strip():
@@ -120,6 +132,7 @@ def _iter_jsonl_lines_reverse(path: Path, *, block_size: int = 8192) -> Iterator
 
 
 def _latest_jsonl_record(path: Path, *, session_id: str | None = None) -> dict[str, Any] | None:
+    """Return the last JSON object in *path*, optionally for one session, or ``None``."""
     if not path.exists():
         return None
     try:
@@ -140,6 +153,7 @@ def _latest_jsonl_record(path: Path, *, session_id: str | None = None) -> dict[s
 
 
 def _append_record(path: Path, record: Mapping[str, Any]) -> None:
+    """Append *record* to the JSONL store under the lock, then trim it to the retention limit."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with _store_lock(path):
         with path.open("a", encoding="utf-8") as handle:
@@ -169,12 +183,15 @@ def _append_record(path: Path, record: Mapping[str, Any]) -> None:
 
 
 def ensure_sqlite_migration(out_dir: str) -> None:
-    """Best-effort one-way migration from JSONL store to sqlite store.
+    """Migrate the JSONL store into the sqlite store once, best effort.
 
     JSONL records are merged by ``attempt_id`` (rows already in sqlite win), then the
     JSONL file is rotated to ``.bak``, so the migration runs once. It used to stop as soon
     as sqlite had any row, leaving the JSONL history unmerged and the file in place, so
     every later read and write paid for the lock and a count query again (RCA-05).
+
+    Args:
+        out_dir: Snapshot directory that holds both stores.
     """
     jsonl_path = _store_path(out_dir)
     if not jsonl_path.exists():
@@ -205,7 +222,7 @@ def ensure_sqlite_migration(out_dir: str) -> None:
 
 
 def _pending_jsonl_records(out_dir: str, session_id: str | None) -> list[dict[str, Any]]:
-    """Valid JSONL rows not migrated to sqlite yet, oldest first (append order).
+    """Return valid JSONL rows not migrated to sqlite yet, oldest first (append order).
 
     Reads never migrate (that would write files), so a merged read has to drop the rows
     whose ``attempt_id`` is already stored: the migration lets the stored copy win, and
@@ -228,6 +245,7 @@ def _pending_jsonl_records(out_dir: str, session_id: str | None) -> list[dict[st
 
 
 def _updated_at(record: Mapping[str, Any]) -> str:
+    """Return the record's ``updated_at`` timestamp, or an empty string when missing."""
     return str(record.get("updated_at") or "")
 
 
@@ -237,7 +255,18 @@ def get_rca_history(
     session_id: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """Load RCA history, newest-first."""
+    """Load RCA history, newest-first.
+
+    The sqlite backend also includes valid JSONL rows that have not been migrated yet.
+
+    Args:
+        out_dir: Snapshot directory that holds the RCA store.
+        session_id: Session to filter on; ``None`` or empty includes every session.
+        limit: Maximum number of records; ``0`` or less returns all of them.
+
+    Returns:
+        RCA attempt records ordered from newest to oldest.
+    """
     if _backend() == "sqlite":
         records = history(out_dir=out_dir, session_id=session_id, limit=limit)
         pending = _pending_jsonl_records(out_dir, session_id)
@@ -260,7 +289,18 @@ def get_rca_history(
 
 
 def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, Any] | None:
-    """Return latest RCA attempt for a session."""
+    """Return latest RCA attempt for a session.
+
+    The sqlite backend also considers valid JSONL rows that have not been migrated yet.
+
+    Args:
+        out_dir: Snapshot directory that holds the RCA store.
+        session_id: Session to look up; ``None`` or empty returns the latest attempt
+            across all sessions.
+
+    Returns:
+        The latest attempt record, or ``None`` when none is stored.
+    """
     if _backend() == "sqlite":
         stored = latest_record(out_dir=out_dir, session_id=session_id)
         pending = _pending_jsonl_records(out_dir, session_id)
@@ -276,7 +316,12 @@ def get_rca_status(*, out_dir: str, session_id: str | None = None) -> dict[str, 
 
 
 def persist_rca_record(*, out_dir: str, record: Mapping[str, Any]) -> None:
-    """Persist one RCA record using the configured backend (migrating JSONL first)."""
+    """Persist one RCA record using the configured backend (migrating JSONL first).
+
+    Args:
+        out_dir: Snapshot directory that holds the RCA store.
+        record: RCA attempt record to write.
+    """
     if _backend() == "sqlite":
         ensure_sqlite_migration(out_dir)
         store_rca_record(record, out_dir=out_dir, max_records=max_rca_records())
@@ -286,5 +331,9 @@ def persist_rca_record(*, out_dir: str, record: Mapping[str, Any]) -> None:
 
 
 def backend_name() -> RCABackend:
-    """Expose backend name for targeted tests/diagnostics."""
+    """Return the active backend name for targeted tests/diagnostics.
+
+    Returns:
+        ``sqlite`` or ``jsonl``, as selected by ``LLMDEBUG_RCA_BACKEND``.
+    """
     return _backend()

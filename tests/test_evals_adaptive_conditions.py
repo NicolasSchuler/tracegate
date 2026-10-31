@@ -6681,8 +6681,10 @@ def test_adaptive_llm_discretion_resolves_delayed_helper_credit_on_next_success(
 def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent(
     tmp_path, monkeypatch
 ) -> None:
-    """POL-11: with one helper call, the success at attempt 2 never sees the helper's
-    evidence. This scenario used to pay the 0.5 bonus on timing alone."""
+    """POL-11: with one helper call, the success at attempt 2 never sees the helper's evidence.
+
+    This scenario used to pay the 0.5 bonus on timing alone.
+    """
     records, patcher, events_path = _run_adaptive_delayed_credit_case(
         tmp_path,
         monkeypatch,
@@ -6708,8 +6710,11 @@ def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_not_resent
 def test_adaptive_llm_discretion_withholds_rescue_bonus_when_evidence_is_budgeted_out(
     tmp_path, monkeypatch
 ) -> None:
-    """POL-11: the helper's evidence is selected for the successful prompt but the prompt
-    budget trims the block out, so the rescue bonus is not earned (codex 3-1#2)."""
+    """POL-11: no rescue bonus when the prompt budget trims the selected helper evidence.
+
+    The helper's evidence is selected for the successful prompt but the prompt budget trims
+    the block out, so the rescue bonus is not earned (codex 3-1#2).
+    """
     records, patcher, events_path = _run_adaptive_delayed_credit_case(
         tmp_path,
         monkeypatch,
@@ -7330,7 +7335,7 @@ class _RetryGateUsagePatcher:
 
 
 def test_att05_retry_gate_block_usage_is_kept_in_the_scored_rows(tmp_path, monkeypatch) -> None:
-    """codex 1f#2: a gate block is unscored but paid for, so its usage must survive."""
+    """Codex 1f#2: a gate block is unscored but paid for, so its usage must survive."""
     case = _make_case(tmp_path)
     workdir = tmp_path / "workdir_retry_gate_usage"
     context_dir = tmp_path / "context_retry_gate_usage"

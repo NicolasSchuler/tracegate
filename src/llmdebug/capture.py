@@ -44,7 +44,7 @@ def _warn(warnings: list[str], message: str) -> None:
 
 
 def _safe_str(value: object) -> str:
-    """``str(value)`` that never raises, like the stdlib ``traceback`` module."""
+    """Return ``str(value)`` without ever raising, like the stdlib ``traceback`` module."""
     try:
         return str(value)
     except Exception as e:
@@ -83,6 +83,13 @@ def _summarize_exception(
     max_depth: int = 2,
     seen: set[int] | None = None,
 ) -> dict[str, Any]:
+    """Summarize *exc* and, up to *max_depth*, its group members, cause, and context.
+
+    Strings are truncated to ``max_str`` and redacted when *redact_strings* is set. A
+    repeated exception is cut with a ``...[CYCLE]`` message; only the top level is
+    categorized.
+    """
+
     def _clean(value: str) -> str:
         text = truncate_str(value, cfg.max_str)
         if redact_strings and redactors:
@@ -187,7 +194,14 @@ def _summarize_exception(
 
 
 def get_env_info(cfg: SnapshotConfig) -> dict[str, Any]:
-    """Collect environment information."""
+    """Collect environment information.
+
+    Args:
+        cfg: Config whose ``max_str`` truncates each ``sys.argv`` entry.
+
+    Returns:
+        Python version, executable, platform, working directory, and ``argv``.
+    """
     argv = []
     try:
         argv = [truncate_str(str(a), cfg.max_str) for a in sys.argv]
@@ -214,6 +228,16 @@ def get_source_snippet(
     exception (CAP-08): IPython cells and ``exec`` sources registered there, and
     zipimport modules (via ``__loader__`` in *module_globals*) work, the snippet matches
     the frame's ``code`` line, and a file is read once rather than once per frame.
+
+    Args:
+        filename: Source file name as recorded in the traceback.
+        lineno: 1-based line to center the snippet on.
+        ctx: Number of context lines before and after *lineno*.
+        module_globals: Frame globals, used by ``linecache`` to find a module loader.
+
+    Returns:
+        ``start``, ``end``, and a ``snippet`` of ``lineno``/``code`` entries, or an
+        empty dict if the source is unavailable.
     """
     try:
         lines = linecache.getlines(filename, module_globals) if filename else []
@@ -235,13 +259,18 @@ def extract_function_args(
 ) -> tuple[list[str], dict[str, Any]] | None:
     """Extract function argument names and values from a frame.
 
-    Returns:
-        Tuple of (arg_names, arg_values) where arg_names is a list of argument
-        names in order, and arg_values is a dict mapping arg names to values.
-        Returns None on error.
+    Args:
+        frame: Frame whose code object defines the signature.
+        f_locals: Already-read ``frame.f_locals``; ``None`` reads it from *frame*.
 
-    Note: varnames layout is
-    [positional-only][positional-or-keyword][keyword-only][*args][**kwargs][locals]
+    Returns:
+        A ``(arg_names, arg_values)`` tuple, or ``None`` on error. ``arg_names`` lists
+        the argument names in order, prefixed with ``*``/``**`` for variadics;
+        ``arg_values`` maps the unprefixed names of still-bound arguments to values.
+
+    Note:
+        The ``co_varnames`` layout is
+        ``[positional-only][positional-or-keyword][keyword-only][*args][**kwargs][locals]``.
     """
     try:
         # One read: on Python 3.10-3.12 every frame.f_locals access rebuilds the dict
@@ -300,7 +329,10 @@ def extract_function_args(
 
 
 def _extract_tb_pairs(tb: types.TracebackType, cfg: SnapshotConfig) -> list[tuple[Any, Any]]:
-    """Walk the traceback and pair tb objects with extracted frame info, applying module filter."""
+    """Walk the traceback and pair tb objects with extracted frame info, applying module filter.
+
+    The crash (innermost) frame is always kept, whatever ``include_modules`` says.
+    """
     extracted = traceback.extract_tb(tb)[-cfg.frames :]
     tb_list: list[Any] = []
     cur = tb
@@ -376,10 +408,11 @@ def _add_locals_meta(
     frame: types.FrameType,
     cfg: SnapshotConfig,
     warnings: list[str],
+    redactors: list[Pattern[str]],
 ) -> None:
-    """Add meta-mode locals to frame_dict."""
+    """Add meta-mode locals to frame_dict, withholding sizes of secret-named locals."""
     local_vars = frame.f_locals  # read once per frame (CAP-12)
-    frame_dict["locals_meta"] = locals_metadata(local_vars, cfg)
+    frame_dict["locals_meta"] = locals_metadata(local_vars, cfg, redactors=redactors)
     try:
         total_locals = len(local_vars)
     except Exception as e:
@@ -392,7 +425,7 @@ def _add_locals_meta(
         arg_info = extract_function_args(frame, local_vars)
         if arg_info:
             arg_names, arg_values = arg_info
-            frame_dict["args_meta"] = locals_metadata(arg_values, cfg)
+            frame_dict["args_meta"] = locals_metadata(arg_values, cfg, redactors=redactors)
             frame_dict["arg_names"] = arg_names
 
 
@@ -443,7 +476,7 @@ def _serialize_frame(
     if cfg.locals_mode == "safe":
         _add_locals_safe(frame_dict, frame, cfg, effective_redactors)
     elif cfg.locals_mode == "meta":
-        _add_locals_meta(frame_dict, frame, cfg, warnings)
+        _add_locals_meta(frame_dict, frame, cfg, warnings, effective_redactors)
 
     return frame_dict
 
@@ -455,11 +488,22 @@ def collect_frames(
     warnings: list[str],
     redactors: list[Pattern[str]] | None = None,
 ) -> list[FrameDict]:
-    """Collect stack frames from traceback."""
+    """Collect stack frames from a traceback.
+
+    Args:
+        tb: Traceback to walk; only the innermost ``cfg.frames`` entries are kept.
+        cfg: Config controlling the module filter, source snippets, and locals capture.
+        warnings: Buffer that receives non-fatal capture warnings.
+        redactors: Compiled patterns; ``None`` compiles ``cfg.redact`` when locals are
+            captured (``safe`` or ``meta`` mode).
+
+    Returns:
+        Serialized frames, crash frame first.
+    """
     effective_redactors = (
         redactors
         if redactors is not None
-        else (compile_redactors(cfg.redact or ()) if cfg.locals_mode == "safe" else [])
+        else (compile_redactors(cfg.redact or ()) if cfg.locals_mode in ("safe", "meta") else [])
     )
     paired = _extract_tb_pairs(tb, cfg)
     total = len(paired)
@@ -471,6 +515,7 @@ def collect_frames(
 
 
 def _try_git_context(cfg: SnapshotConfig, warnings: list[str]) -> Any:
+    """Return git context, or ``None`` with a capture warning on failure."""
     try:
         from .git_context import get_git_context
 
@@ -481,6 +526,7 @@ def _try_git_context(cfg: SnapshotConfig, warnings: list[str]) -> Any:
 
 
 def _try_async_context(warnings: list[str]) -> Any:
+    """Return asyncio task context, or ``None`` with a capture warning on failure."""
     try:
         from .async_context import get_async_context
 
@@ -491,6 +537,7 @@ def _try_async_context(warnings: list[str]) -> Any:
 
 
 def _try_log_context(cfg: SnapshotConfig, warnings: list[str]) -> Any:
+    """Return recent log records, or ``None`` with a capture warning on failure."""
     try:
         from .log_capture import get_recent_logs
 
@@ -506,16 +553,32 @@ def _redact_context(
     cfg: SnapshotConfig,
     warnings: list[str],
 ) -> dict[str, Any]:
+    """Redact the context payload, failing closed when redaction cannot complete.
+
+    Args:
+        context_payload: Assembled env, git, async, log, and extra context.
+        redactors: Compiled patterns; an empty list means no redaction is active.
+        cfg: Config supplying ``redact_keys``.
+        warnings: Buffer that receives a warning when the context is dropped.
+
+    Returns:
+        The redacted payload, or an empty dict when redaction raised or returned a
+        non-dict value. Unredacted context is never written when redaction is active.
+    """
     if not context_payload or not redactors:
         return context_payload
     try:
         cleaned = redact_jsonlike(context_payload, redactors, redact_keys=bool(cfg.redact_keys))
-        if isinstance(cleaned, dict):
-            return cleaned
-        _warn(warnings, "context redaction returned non-dict payload; preserving original context")
     except Exception as e:
-        _warn(warnings, f"context redaction failed: {type(e).__name__}: {e}")
-    return context_payload
+        _warn(
+            warnings,
+            f"context redaction failed: {type(e).__name__}: {e}; context omitted from snapshot",
+        )
+        return {}
+    if isinstance(cleaned, dict):
+        return cleaned
+    _warn(warnings, "context redaction returned non-dict payload; context omitted from snapshot")
+    return {}
 
 
 def _collect_context(
@@ -524,7 +587,12 @@ def _collect_context(
     redactors: list[Pattern[str]],
     extra: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
-    """Assemble context payload (git, async, logs, extra). Returns (context, trace, eval)."""
+    """Assemble the redacted context payload (env, git, async, logs, extra).
+
+    Returns:
+        A ``(context, trace_payload, eval_payload)`` tuple; the last two come from the
+        reserved ``trace`` and ``eval`` keys of *extra*.
+    """
     context_payload: dict[str, Any] = {}
     if cfg.include_env:
         context_payload["env"] = get_env_info(cfg)
@@ -556,19 +624,22 @@ def capture_exception(
     *,
     extra: dict[str, Any] | None = None,
 ) -> Path:
-    """Capture exception details and write snapshot.
+    """Capture exception details and write a snapshot.
 
     Args:
         name: Identifier for this snapshot (e.g. ``"unhandled"``), used in
             the output filename and the debug-session envelope.
         exc: The exception instance to capture.
-        tb: Traceback attached to *exc*, or ``None`` if unavailable.  When
+        tb: Traceback attached to *exc*, or ``None`` if unavailable. When
             ``None`` no stack frames are collected.
         cfg: Snapshot configuration controlling redaction, frame depth,
             locals serialization, and output format.
         extra: Optional dict of additional context merged into the snapshot
-            envelope.  Keys ``"trace"`` and ``"eval"`` (alias ``"eval_outcome"``)
+            envelope. Keys ``"trace"`` and ``"eval"`` (alias ``"eval_outcome"``)
             are reserved and split into their own top-level payloads.
+
+    Returns:
+        Path of the written snapshot file.
     """
     cfg = resolve_snapshot_config(cfg)
     warnings: list[str] = []

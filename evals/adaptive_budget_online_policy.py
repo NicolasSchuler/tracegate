@@ -515,8 +515,10 @@ class AdaptiveBudgetPolicyController:
         return float(self._bwk_run_token_budget) / float(horizon)
 
     def _bwk_cost_estimates(self) -> dict[str, float]:
-        """Mean tokens per applied gate action; an arm not yet observed is assumed to
-        spend the target."""
+        """Mean tokens per applied gate action.
+
+        An arm not yet observed is assumed to spend the target.
+        """
         target = self._bwk_target_tokens()
         return {
             action: (

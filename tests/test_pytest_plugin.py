@@ -642,11 +642,11 @@ def test_pytest_plugin_hook_logs_capture_exception_failures(monkeypatch, capsys)
 
 
 def test_module_reload_covers_module_level_definitions() -> None:
-    """Re-import the plugin module so module-level ``def`` / constant lines
-    execute *under* coverage tracking.
+    """Re-import the plugin module so module-level lines execute *under* coverage tracking.
 
-    Covers lines: 41-42 (_TRUTHY/_FALSY), 45, 54, 66, 74, 81, 89, 105,
-    114, 127, 197, 224, 242, 269, 290, 298, 310, 324, 336, 347-348, 449.
+    Covers the module-level ``def`` / constant lines: 41-42 (_TRUTHY/_FALSY), 45, 54,
+    66, 74, 81, 89, 105, 114, 127, 197, 224, 242, 269, 290, 298, 310, 324, 336, 347-348,
+    449.
     """
     import importlib
 

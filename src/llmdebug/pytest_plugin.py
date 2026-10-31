@@ -43,6 +43,7 @@ _FALSY = {"0", "false", "no", "off"}
 
 
 def _parse_env_bool(raw: str) -> bool | None:
+    """Parse a boolean env-var string, returning None when it is not recognised."""
     value = raw.strip().lower()
     if value in _TRUTHY:
         return True
@@ -55,7 +56,8 @@ def _env_bool(name: str, default: str = "") -> bool:
     """Read a boolean from an environment variable.
 
     Treats ``"1"``, ``"true"``, ``"yes"``, ``"on"`` (case-insensitive) as
-    True; everything else as False.
+    True and everything else as False; *default* is parsed the same way when the
+    variable is unset.
     """
     raw = os.getenv(name)
     candidate = default if raw is None else raw
@@ -64,7 +66,10 @@ def _env_bool(name: str, default: str = "") -> bool:
 
 
 def _env_optional_bool(name: str) -> bool | None:
-    """Read an optional boolean from an environment variable."""
+    """Read an optional boolean from an environment variable.
+
+    Returns None when the variable is unset or its value is not recognised.
+    """
     raw = os.getenv(name)
     if raw is None:
         return None
@@ -79,7 +84,11 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the no_snapshot marker."""
+    """Register the ``no_snapshot`` marker.
+
+    Args:
+        config: The pytest config that receives the marker definition.
+    """
     config.addinivalue_line(
         "markers",
         "no_snapshot: disable llmdebug snapshot capture for this test",
@@ -87,6 +96,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def _record_call_outcome(item: pytest.Item, report: pytest.TestReport) -> None:
+    """Append the call-phase outcome to the item's stash for flaky-test detection."""
     if report.when != "call":
         return
     try:
@@ -97,13 +107,13 @@ def _record_call_outcome(item: pytest.Item, report: pytest.TestReport) -> None:
 
 
 def _parse_include_modules(value: str) -> tuple[str, ...] | None:
-    """Parse comma-separated module filter from env var."""
+    """Parse a comma-separated module filter, returning None if it names no modules."""
     modules = tuple(module.strip() for module in value.split(",") if module.strip())
     return modules or None
 
 
 def _resolve_output_format(raw_value: str) -> OutputFormat:
-    """Map raw string to OutputFormat literal."""
+    """Map a raw string to an ``OutputFormat``, defaulting to ``json_compact``."""
     if raw_value == "json":
         return "json"
     if raw_value == "toon":
@@ -112,7 +122,11 @@ def _resolve_output_format(raw_value: str) -> OutputFormat:
 
 
 def _resolve_git_dirty_mode(raw_value: str) -> GitDirtyMode:
-    """Map raw string to GitDirtyMode literal, raising on invalid."""
+    """Map a raw string to a ``GitDirtyMode``.
+
+    Raises:
+        ValueError: If *raw_value* is not ``always``, ``cached``, or ``off``.
+    """
     if raw_value == "always":
         return "always"
     if raw_value == "cached":
@@ -128,7 +142,13 @@ def _build_snapshot_config_from_env(debug: bool) -> SnapshotConfig:
     """Construct a SnapshotConfig from ``LLMDEBUG_*`` environment variables.
 
     Boolean vars accept 1/true/yes/on (case-insensitive).  Missing vars
-    use defaults matching the library's documented API.
+    use defaults matching the library's documented API. An invalid
+    ``LLMDEBUG_GIT_DIRTY_MODE`` falls back to ``always`` and an invalid
+    ``LLMDEBUG_REDACTION_PROFILE`` to no profile.
+
+    Args:
+        debug: Value for the config's ``debug`` flag; when set, invalid env values
+            are also reported to stderr.
     """
     include_modules_env = os.getenv("LLMDEBUG_INCLUDE_MODULES", "")
     include_modules = _parse_include_modules(include_modules_env)
@@ -199,7 +219,14 @@ def _build_base_pytest_context(
     report: pytest.TestReport,
     cfg: SnapshotConfig,
 ) -> tuple[dict[str, object], Any]:
-    """Build the baseline pytest context dict (nodeid, params, markers)."""
+    """Build the baseline pytest context dict for a test report.
+
+    The dict holds the node ID, outcome, phase, truncated report text and captured
+    output, parametrize values, and a repro command.
+
+    Returns:
+        The context dict and the item's ``callspec`` (None when not parametrized).
+    """
     params = None
     callspec = getattr(item, "callspec", None)
     if callspec is not None:
@@ -226,7 +253,10 @@ def _capture_fixture_context(
     cfg: SnapshotConfig,
     pytest_context: dict[str, object],
 ) -> dict[str, str]:
-    """Capture active fixture names/values, excluding noisy internal fixtures."""
+    """Capture active fixture names/values, excluding noisy internal fixtures.
+
+    Non-empty results are also stored under ``fixtures`` in *pytest_context*.
+    """
     fixture_values: dict[str, str] = {}
     fixture_names = cast(list[str], getattr(item, "fixturenames", []))
     func_args = cast(dict[str, Any], getattr(item, "funcargs", {}))
@@ -244,7 +274,10 @@ def _capture_marker_context(
     cfg: SnapshotConfig,
     pytest_context: dict[str, object],
 ) -> dict[str, dict[str, object] | list[dict[str, object]]]:
-    """Capture pytest markers as structured dicts (skipping parametrize/usefixtures)."""
+    """Capture pytest markers as structured dicts (skipping parametrize/usefixtures).
+
+    Non-empty results are also stored under ``markers`` in *pytest_context*.
+    """
     marker_dict: dict[str, dict[str, object] | list[dict[str, object]]] = {}
     for marker in item.iter_markers():
         if marker.name in {"parametrize", "usefixtures"}:
@@ -271,7 +304,7 @@ def _capture_timeout_context(
     cfg: SnapshotConfig,
     pytest_context: dict[str, object],
 ) -> dict[str, object]:
-    """Capture timeout settings from pytest-timeout if active."""
+    """Capture settings from the closest ``timeout`` marker (pytest-timeout), if any."""
     timeout_marker = item.get_closest_marker("timeout")
     timeout_config: dict[str, object] = {}
     if timeout_marker is None:
@@ -310,7 +343,11 @@ def _capture_xdist_worker(item: pytest.Item, pytest_context: dict[str, object]) 
 def _capture_flaky_metadata(
     item: pytest.Item, pytest_context: dict[str, object]
 ) -> tuple[int, bool] | None:
-    """Capture rerun history for flaky test detection."""
+    """Capture rerun history for flaky test detection.
+
+    Returns:
+        ``(rerun_count, flaky)`` after more than one recorded run, else None.
+    """
     stash_outcomes = item.stash.get(_flaky_key, cast(list[str], []))
     if len(stash_outcomes) <= 1:
         return None
@@ -324,7 +361,7 @@ def _capture_flaky_metadata(
 def _capture_coverage_context(
     item: pytest.Item, tb: types.TracebackType | None, plugin_warnings: list[str]
 ) -> dict[str, Any] | None:
-    """Capture coverage data for the test file from pytest-cov."""
+    """Capture pytest-cov coverage data for the files in the failure's traceback."""
     from .coverage_context import extract_coverage_from_plugin
 
     coverage_data = extract_coverage_from_plugin(item, tb, plugin_warnings)
@@ -338,6 +375,7 @@ def _capture_context_block(
     warning_prefix: str,
     func: Callable[[], Any],
 ) -> None:
+    """Run one context-capture step, recording any exception as a plugin warning."""
     try:
         func()
     except Exception as e:
@@ -348,7 +386,20 @@ def _capture_context_block(
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[Any]
 ) -> Generator[None, Any, None]:
-    """Capture snapshot on test failure."""
+    """Capture a snapshot when a test's call phase fails.
+
+    Runs as a hook wrapper: once pytest has built the report, records the call
+    outcome for flaky detection, then captures unless the failure happened in
+    setup or teardown or the test carries the ``no_snapshot`` marker. Capture
+    failures are reported to stderr only when ``LLMDEBUG_DEBUG`` is set.
+
+    Args:
+        item: The test item being reported.
+        call: Call information for the phase, including the exception on failure.
+
+    Yields:
+        Control to pytest, which sends back the outcome holding the built report.
+    """
     outcome = yield
     report = outcome.get_result()
 
@@ -423,6 +474,7 @@ def pytest_runtest_makereport(
     if cfg.include_coverage:
 
         def _attach_coverage() -> None:
+            """Store coverage for the traceback's files under ``coverage``, if any."""
             coverage_data = _capture_coverage_context(item, tb, _plugin_warnings)
             if coverage_data:
                 pytest_context["coverage"] = coverage_data
@@ -447,6 +499,7 @@ def pytest_runtest_makereport(
 
 
 def _truncate_optional_text(value: object, max_len: int) -> str | None:
+    """Return *value* truncated to *max_len* if it is a string, else None."""
     if not isinstance(value, str):
         return None
     return truncate_str(value, max_len)

@@ -14,13 +14,25 @@ MCP_ROOT_ENV = "LLMDEBUG_MCP_ROOT"
 
 
 def mcp_root() -> Path:
-    """Directory the MCP tools may use: ``$LLMDEBUG_MCP_ROOT``, else the server's cwd."""
+    """Return the directory the MCP tools may use.
+
+    Returns:
+        The resolved ``$LLMDEBUG_MCP_ROOT`` when it is set and non-empty, else the
+        server's current working directory.
+    """
     raw = os.environ.get(MCP_ROOT_ENV, "").strip()
     return Path(raw or os.getcwd()).expanduser().resolve()
 
 
 def resolve_mcp_out_dir(out_dir: str) -> str:
     """Resolve *out_dir* (relative to the MCP root) and return it as an absolute path.
+
+    Args:
+        out_dir: Directory requested by the MCP client; relative paths are taken
+            relative to the MCP root, and ``~`` is expanded.
+
+    Returns:
+        The absolute, symlink-resolved directory path.
 
     Raises:
         ValueError: If the resolved directory, after following symlinks, is outside

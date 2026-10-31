@@ -357,8 +357,10 @@ def _live_progress_payload_for_metrics_sidecar(metrics_sidecar_path: Path) -> di
 
 
 def _case_test_timeout_sec(case_input: Mapping[str, Any], config: BaselineConfig) -> int:
-    """Per-case test timeout; falls back to the process timeout like the other adapters
-    (BAS-12: it used to fall back to 10 s when the case context was missing)."""
+    """Per-case test timeout; falls back to the process timeout like the other adapters.
+
+    BAS-12: it used to fall back to 10 s when the case context was missing.
+    """
     return int(case_input.get("timeout_sec") or 0) or max(1, int(config.process_timeout_sec or 0))
 
 

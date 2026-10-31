@@ -10,7 +10,14 @@ from typing import Any, cast
 
 
 def frame_file_label(frame: Any) -> str:
-    """Return the best available file label for a stack frame."""
+    """Return the best available file label for a stack frame.
+
+    Args:
+        frame: Frame payload; non-dict values are tolerated.
+
+    Returns:
+        ``file_rel`` if set, else the absolute ``file``, else ``"?"``.
+    """
     if not isinstance(frame, dict):
         return "?"
     frame_d: dict[str, Any] = cast(dict[str, Any], frame)
@@ -24,7 +31,15 @@ def frame_file_label(frame: Any) -> str:
 
 
 def build_source_text(source: dict[str, Any], crash_line: int) -> str:
-    """Build a source snippet string with arrow marker on crash line."""
+    """Build a source snippet string with an arrow marker on the crash line.
+
+    Args:
+        source: Frame ``source`` payload whose ``snippet`` lists ``lineno``/``code`` entries.
+        crash_line: Line number to mark with the arrow.
+
+    Returns:
+        Newline-joined ``marker lineno | code`` lines.
+    """
     snippet = source.get("snippet", [])
     lines: list[str] = []
     for entry in snippet:
@@ -36,7 +51,20 @@ def build_source_text(source: dict[str, Any], crash_line: int) -> str:
 
 
 def format_local_value(key: str, value: Any, meta: dict[str, Any] | None) -> tuple[str, str, str]:
-    """Format a single local variable for display. Returns (name, type_str, value_str)."""
+    """Format a single local variable for display.
+
+    Array, DataFrame, and Series summaries render as their shape and dtype; other
+    values are stringified and truncated to 120 characters.
+
+    Args:
+        key: Local variable name.
+        value: Serialized local value.
+        meta: Optional ``locals_meta`` entry; its ``type`` supplies the type label.
+
+    Returns:
+        A ``(name, type_str, value_str)`` tuple. ``type_str`` is the unqualified type
+        name, the array kind (``"array"``, ``"dataframe"``, ``"series"``), or empty.
+    """
     type_str = ""
     if meta:
         type_str = meta.get("type", "")
@@ -62,7 +90,14 @@ def format_local_value(key: str, value: Any, meta: dict[str, Any] | None) -> tup
 
 
 def format_git_head_section(head: Any) -> list[str]:
-    """Format git HEAD info as plain text lines."""
+    """Format git HEAD info as plain text lines.
+
+    Args:
+        head: ``head`` entry of the enhanced git context.
+
+    Returns:
+        Section lines, or an empty list when *head* is not a dict.
+    """
     if not isinstance(head, dict):
         return []
     head_d: dict[str, Any] = cast(dict[str, Any], head)
@@ -80,7 +115,14 @@ def format_git_head_section(head: Any) -> list[str]:
 
 
 def format_crash_file_section(crash_file: Any) -> list[str]:
-    """Format crash file blame/location as plain text lines."""
+    """Format crash file blame/location as plain text lines.
+
+    Args:
+        crash_file: ``crash_file`` entry of the enhanced git context.
+
+    Returns:
+        Section lines, or an empty list when *crash_file* is not a dict.
+    """
     if not isinstance(crash_file, dict):
         return []
     cf: dict[str, Any] = cast(dict[str, Any], crash_file)
@@ -110,7 +152,14 @@ def format_crash_file_section(crash_file: Any) -> list[str]:
 
 
 def format_recent_commits_section(recent_commits: Any) -> list[str]:
-    """Format recent commit metadata as plain text lines."""
+    """Format recent commit metadata as plain text lines.
+
+    Args:
+        recent_commits: ``recent_commits`` list of the enhanced git context.
+
+    Returns:
+        Section lines, or an empty list when there are no commits.
+    """
     if not isinstance(recent_commits, list) or not recent_commits:
         return []
     lines = ["", "## Recent Commits"]
@@ -132,7 +181,14 @@ def format_recent_commits_section(recent_commits: Any) -> list[str]:
 
 
 def format_crash_diffstat_section(diffstat: Any) -> list[str]:
-    """Format crash file diffstat as plain text lines."""
+    """Format crash file diffstat as plain text lines.
+
+    Args:
+        diffstat: ``crash_file_diffstat`` entry of the enhanced git context.
+
+    Returns:
+        Section lines, or an empty list when *diffstat* is not a dict.
+    """
     if not isinstance(diffstat, dict):
         return []
     ds: dict[str, Any] = cast(dict[str, Any], diffstat)
@@ -148,7 +204,14 @@ def format_crash_diffstat_section(diffstat: Any) -> list[str]:
 
 
 def format_git_warnings_section(warnings: Any) -> list[str]:
-    """Format git warning lines."""
+    """Format git warning lines.
+
+    Args:
+        warnings: ``_git_warnings`` list of the enhanced git context.
+
+    Returns:
+        Section lines, or an empty list when there are no warnings.
+    """
     if not isinstance(warnings, list) or not warnings:
         return []
     warnings_l: list[Any] = cast(list[Any], warnings)
@@ -158,7 +221,15 @@ def format_git_warnings_section(warnings: Any) -> list[str]:
 
 
 def format_enhanced_git_context_text(context: dict[str, Any]) -> str:
-    """Render enhanced git metadata as plain text."""
+    """Render enhanced git metadata as plain text.
+
+    Args:
+        context: Enhanced git context with optional ``head``, ``crash_file``,
+            ``recent_commits``, ``crash_file_diffstat``, and ``_git_warnings`` entries.
+
+    Returns:
+        The joined sections, or a placeholder message when no section has content.
+    """
     lines: list[str] = []
     sections = (
         format_git_head_section(context.get("head")),

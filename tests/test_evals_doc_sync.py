@@ -335,21 +335,21 @@ def test_regex_fallback_no_project_section_raises() -> None:
 
 
 def test_regex_fallback_bad_version_format_raises() -> None:
-    """version line that doesn't match the pattern → break → ValueError."""
+    """A version line that doesn't match the pattern → break → ValueError."""
     text = "[project]\nversion = no_quotes\n"
     with pytest.raises(ValueError, match=r"Could not parse project.version"):
         _load_project_version_regex_fallback(text)
 
 
 def test_regex_fallback_empty_version_string_raises() -> None:
-    """version = "" (empty string) → match is None → break → ValueError."""
+    """An empty version string (version = "") → match is None → break → ValueError."""
     text = '[project]\nversion = ""\n'
     with pytest.raises(ValueError, match=r"Could not parse project.version"):
         _load_project_version_regex_fallback(text)
 
 
 def test_regex_fallback_whitespace_only_version_raises() -> None:
-    """version = " " (whitespace only) → strips to empty → break → ValueError."""
+    """A whitespace-only version (version = " ") → strips to empty → break → ValueError."""
     text = '[project]\nversion = " "\n'
     with pytest.raises(ValueError, match=r"Could not parse project.version"):
         _load_project_version_regex_fallback(text)

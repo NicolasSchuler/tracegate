@@ -116,7 +116,8 @@ def select_helper_action(inputs: HelperActionInputs, state: HelperActionState) -
 
     Applies the hard constraints first (informativeness pre-gate, helper budget,
     saturation guard, recovery overrides), then the gated rule or the online policy,
-    and records why. Moved verbatim from the attempt loop (X-01)."""
+    and records why. Moved verbatim from the attempt loop (X-01).
+    """
     _emit_progress = inputs._emit_progress
     _progress_payload = inputs._progress_payload
     adaptive_budget_topup_granted = inputs.adaptive_budget_topup_granted

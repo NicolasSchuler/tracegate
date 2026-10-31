@@ -147,7 +147,7 @@ class TestLessonFromRecord:
         assert lesson.lesson.startswith("fail: reason1")
 
     def test_patch_verifier_rejected_no_reasons(self) -> None:
-        """status + patch_verifier_rejected, no reasons → fallback."""
+        """A failing status plus patch_verifier_rejected, no reasons → fallback."""
         rec: dict[str, Any] = {
             "verification_result": {
                 "status": "fail",
@@ -246,7 +246,7 @@ class TestLessonFromRecord:
         assert _lesson_from_record(rec, max_chars=300) is None
 
     def test_attempt_coerced(self) -> None:
-        """attempt field from verification_result is coerced to int."""
+        """The attempt field from verification_result is coerced to int."""
         rec: dict[str, Any] = {
             "verification_result": {"status": "ok", "attempt": 3},
             "hypothesis": "test",

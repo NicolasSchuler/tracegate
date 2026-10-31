@@ -76,6 +76,7 @@ def run_dir_for_id(layout: SweBenchLayout, run_id: str, *, root: Path | None = N
     """Return the run directory path for a given run ID.
 
     Args:
+        layout: Benchmark layout that names the runs directory.
         run_id: Identifier for the run; validated by :func:`validate_run_id`.
         root: Optional repository root override passed to
             :func:`runs_root`.
@@ -137,6 +138,8 @@ def parse_paired_conditions(layout: SweBenchLayout, raw: str | Iterable[str] | N
     Returns conditions in their canonical order defined by ``VALID_CONDITIONS``.
 
     Args:
+        layout: Benchmark layout; its label names the benchmark in the error
+            message.
         raw: Condition specifier accepted by :func:`parse_conditions`.
 
     Returns:
@@ -524,6 +527,8 @@ def copy_instructions_text(
     and the shell command to execute on the Docker scoring machine.
 
     Args:
+        layout: Benchmark layout supplying the heading label, scoring script,
+            runs directory name, and official-eval output directory.
         run_dir: Root directory of the run; used to build absolute file paths
             displayed in the instructions.
         conditions: Conditions whose predictions files are included in the
@@ -576,6 +581,7 @@ def write_copy_instructions(
     them to :func:`copy_instructions_path`.
 
     Args:
+        layout: Benchmark layout forwarded to :func:`copy_instructions_text`.
         run_dir: Root directory of the run.
         conditions: Conditions forwarded to :func:`copy_instructions_text`.
 
@@ -602,6 +608,8 @@ def write_run_index(
     version ``layout.index_schema``.
 
     Args:
+        layout: Benchmark layout supplying the manifest schema version and the
+            official-eval output directory name.
         run_dir: Root directory of the run.
         run_id: Identifier for the run; embedded verbatim in the manifest.
         conditions: Conditions whose predictions paths are listed in the

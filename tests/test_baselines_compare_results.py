@@ -128,7 +128,7 @@ def _row(run_id: str, case_id: str, condition: str, success: bool, **extra: obje
 
 
 def test_separately_named_runs_still_pair_on_shared_cases() -> None:
-    """codex 2-2#2: a native run and a --baseline run have different run IDs."""
+    """Codex 2-2#2: a native run and a --baseline run have different run IDs."""
     rows = [
         _row("native-run", "case_a", "base_repair", True),
         _row("native-run", "case_b", "base_repair", False),
@@ -165,7 +165,7 @@ def test_replicates_of_separate_runs_pair_by_index() -> None:
 
 
 def test_bas01_unsupported_baseline_rows_are_not_losing_pairs() -> None:
-    """codex 1e#5: the comparison helper counted baseline_supported=False as a failure."""
+    """Codex 1e#5: the comparison helper counted baseline_supported=False as a failure."""
     rows = [
         _row("native-run", "case_a", "base_repair", True),
         _row("ldb-run", "case_a", "ldb", False, baseline_supported=False),
@@ -178,7 +178,7 @@ def test_bas01_unsupported_baseline_rows_are_not_losing_pairs() -> None:
 
 
 def test_load_results_warns_about_dropped_and_mixed_version_records(tmp_path, capsys) -> None:
-    """codex 2-2#5 / 1e#13: compare_results ignored every counter but unreadable files."""
+    """Codex 2-2#5 / 1e#13: compare_results ignored every counter but unreadable files."""
     from baselines.compare_results import _load_results
     from evals import _json as json
     from tests.test_evals_report_run_metrics import _schema_record, _v7_record

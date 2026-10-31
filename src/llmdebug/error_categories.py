@@ -176,14 +176,21 @@ _COMPILED_PATTERNS: dict[str, list[re.Pattern[str]]] = {
 def categorize_exception(exc: BaseException) -> dict[str, Any] | None:
     """Categorize an exception based on type and message patterns.
 
-    Returns:
-        Dict with category name and suggestion, or None if no match.
+    A matching exception type scores 10 and a matching message pattern scores 5; the
+    highest-scoring category wins, with ties broken by ``CATEGORY_PRIORITY``.
 
-    Example output:
-        {
-            "category": "shape_mismatch",
-            "suggestion": "Check array shapes with .shape before operations..."
-        }
+    Args:
+        exc: Exception to classify. An unprintable message falls back to type-only
+            matching.
+
+    Returns:
+        ``{"category": ..., "suggestion": ...}`` for the best match, or ``None`` if no
+        category matches. For example::
+
+            {
+                "category": "shape_mismatch",
+                "suggestion": "Check array/tensor shapes with .shape before operations...",
+            }
     """
     exc_type_name = type(exc).__name__
     try:

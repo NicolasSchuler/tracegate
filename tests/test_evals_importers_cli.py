@@ -286,8 +286,10 @@ class TestMaterializeTop3ArgValidation:
 
 
 class TestMainErrorPaths:
-    """Cover error paths in main(): ValueError, no source, unknown source,
-    and validate environment check failures."""
+    """Cover error paths in main().
+
+    ValueError, no source, unknown source, and validate environment check failures.
+    """
 
     def test_invalid_execution_config_returns_2(self, monkeypatch, capsys) -> None:
         """ValueError from build_execution_config_from_args → exit 2."""

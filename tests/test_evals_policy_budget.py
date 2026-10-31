@@ -370,7 +370,7 @@ class TestFinalizeBudgetAttemptUpdateReasons:
         assert meta["adaptive_budget_update_reason"] == "no_decision_emitted"
 
     def test_controller_unavailable_reason(self) -> None:
-        """decision present but controller is None → policy_controller_unavailable."""
+        """A decision is present but the controller is None → policy_controller_unavailable."""
         decision = _make_budget_decision()
         meta: dict[str, Any] = {}
         patch: dict[str, Any] = {}

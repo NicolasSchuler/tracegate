@@ -10,11 +10,27 @@ from typing import Any, TypedDict
 
 
 class ErrorCategoryDict(TypedDict, total=False):
+    """Heuristic classification of a captured exception.
+
+    Attributes:
+        category: Error category identifier, such as ``shape_mismatch``.
+        suggestion: Short remediation hint associated with the category.
+    """
+
     category: str
     suggestion: str
 
 
 class ExceptionDict(TypedDict, total=False):
+    """Structured summary of the exception that triggered a capture.
+
+    Attributes:
+        type: Unqualified exception class name, such as ``ValueError``.
+        qualified_type: Module-qualified exception class name.
+        message: Exception message text, truncated and optionally redacted.
+        error_category: Heuristic error classification with a remediation hint.
+    """
+
     type: str
     qualified_type: str
     message: str
@@ -22,11 +38,26 @@ class ExceptionDict(TypedDict, total=False):
 
 
 class SourceLineDict(TypedDict, total=False):
+    """One line of a captured source snippet.
+
+    Attributes:
+        lineno: One-based line number in the source file.
+        code: Source text of the line.
+    """
+
     lineno: int
     code: str
 
 
 class SourceDict(TypedDict, total=False):
+    """Source snippet surrounding a frame's current line.
+
+    Attributes:
+        start: First line number included in the snippet.
+        end: Last line number included in the snippet.
+        snippet: Ordered source lines between ``start`` and ``end``.
+    """
+
     start: int
     end: int
     snippet: list[SourceLineDict]
@@ -71,13 +102,21 @@ class FrameDict(TypedDict, total=False):
 
 
 class SessionDict(TypedDict, total=False):
+    """Session metadata stored in the DebugSession envelope.
+
+    Attributes:
+        name: Human-readable capture label.
+        timestamp_utc: ISO-8601 UTC timestamp of capture.
+        llmdebug_version: Library version that produced the snapshot.
+    """
+
     name: str
     timestamp_utc: str
     llmdebug_version: str
 
 
 class SnapshotDict(TypedDict, total=False):
-    """Top-level snapshot payload, supporting both legacy flat and DebugSession envelope shapes.
+    """Top-level snapshot payload in either the legacy flat or the DebugSession envelope shape.
 
     Attributes:
         schema_version: Wire-format version string (legacy flat shape).

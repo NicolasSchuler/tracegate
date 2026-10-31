@@ -325,8 +325,10 @@ def test_is_debug_session_payload_schema_version_not_2() -> None:
 
 
 def test_normalize_snapshot_view_session_not_dict_fallback() -> None:
-    """Lines 114-118: when session passes is_debug_session_payload but then
-    the code's else branch (session not isinstance dict) is hit for name/timestamp.
+    """Lines 114-118: the name/timestamp else branch for a session that is not a dict.
+
+    The branch is hit when session passes is_debug_session_payload but then the
+    code's else branch (session not isinstance dict) is taken for name/timestamp.
 
     Note: is_debug_session_payload requires session to be a dict, so the only way
     to reach lines 114-118 is if session is a dict (passes the guard) but then

@@ -482,7 +482,7 @@ class TestRecoveryGateDisabled:
         gate.wait_if_open()
 
     def test_recover_returns_not_attempted_when_disabled(self) -> None:
-        """recover returns a not-attempted dict when disabled."""
+        """The recover method returns a not-attempted dict when disabled."""
         gate = run_eval._OpenAITransportRecoveryGate(
             enabled=False,
             max_wait_sec=10.0,

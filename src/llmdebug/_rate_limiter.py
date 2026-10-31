@@ -4,7 +4,8 @@ Provides a thread-safe token-bucket implementation that replenishes tokens at
 a configurable rate and supports burst capacity.  Used by ``mcp_server`` to
 prevent resource exhaustion under heavy automated IDE loops.
 
-Environment variables (read once at module import):
+Environment variables (read by ``load_mcp_rate_limiter``, which ``mcp_server`` calls
+once at import):
     LLMDEBUG_MCP_RATE_LIMIT  — sustained calls per second (default 10)
     LLMDEBUG_MCP_RATE_BURST  — maximum burst size (default 20)
 """
@@ -18,7 +19,7 @@ from collections.abc import Callable
 
 
 def _read_env_float(name: str, default: float) -> float:
-    """Read a positive float from an environment variable, falling back to *default*."""
+    """Read a positive float from env var *name*, falling back to *default*."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -30,7 +31,7 @@ def _read_env_float(name: str, default: float) -> float:
 
 
 def _read_env_int(name: str, default: int) -> int:
-    """Read a positive int from an environment variable, falling back to *default*."""
+    """Read a positive int from env var *name*, falling back to *default*."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -43,6 +44,9 @@ def _read_env_int(name: str, default: int) -> int:
 
 class TokenBucketRateLimiter:
     """Thread-safe token-bucket rate limiter.
+
+    The bucket starts full and refills continuously at *rate* tokens per second,
+    up to *burst* tokens; each allowed call consumes one token.
 
     Args:
         rate: Token replenishment rate (tokens per second).
@@ -60,6 +64,11 @@ class TokenBucketRateLimiter:
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        """Create a full bucket.
+
+        Raises:
+            ValueError: If *rate* is not positive or *burst* is below 1.
+        """
         if rate <= 0:
             raise ValueError(f"rate must be > 0, got {rate}")
         if burst < 1:
@@ -75,18 +84,21 @@ class TokenBucketRateLimiter:
 
     @property
     def rate(self) -> float:
-        """Tokens replenished per second."""
+        """Return the replenishment rate in tokens per second."""
         return self._rate
 
     @property
     def burst(self) -> int:
-        """Maximum bucket capacity."""
+        """Return the maximum bucket capacity."""
         return self._burst
 
     # -- core API -------------------------------------------------------------
 
     def acquire(self) -> bool:
-        """Try to consume one token.
+        """Consume one token if one is available.
+
+        The bucket is first refilled for the time elapsed since the last refill,
+        capped at the burst capacity.
 
         Returns:
             ``True`` if the call is allowed, ``False`` if rate-limited.
@@ -113,7 +125,14 @@ def load_mcp_rate_limiter(
     """Build a :class:`TokenBucketRateLimiter` from environment variables.
 
     Reads ``LLMDEBUG_MCP_RATE_LIMIT`` (calls/s, default 10) and
-    ``LLMDEBUG_MCP_RATE_BURST`` (burst size, default 20).
+    ``LLMDEBUG_MCP_RATE_BURST`` (burst size, default 20). Missing, unparsable, or
+    non-positive values fall back to the defaults.
+
+    Args:
+        clock: Callable returning the current time in seconds; injectable for testing.
+
+    Returns:
+        A full rate limiter configured from the environment.
     """
     rate = _read_env_float("LLMDEBUG_MCP_RATE_LIMIT", 10.0)
     burst = _read_env_int("LLMDEBUG_MCP_RATE_BURST", 20)

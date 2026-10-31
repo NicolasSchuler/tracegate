@@ -19,7 +19,18 @@ _DEFAULT_GATE_MODE: GateMode = "soft"
 
 @dataclass(frozen=True)
 class GateFeedback:
-    """Result of evaluating gate requirements for a requested RCA action."""
+    """Result of evaluating gate requirements for a requested RCA action.
+
+    Attributes:
+        mode: Gate mode that produced the result.
+        allowed: Whether the action may proceed.
+        severity: ``info`` when no check fired, ``warning`` when the action proceeds
+            despite triggered checks, ``error`` when strict mode blocks it.
+        warnings: Messages for each triggered check, plus a note when a strict-mode
+            override was accepted.
+        next_required: Deduplicated steps that would satisfy the triggered checks.
+        triggered_checks: IDs of the checks that fired, such as ``evidence_required``.
+    """
 
     mode: GateMode
     allowed: bool
@@ -29,6 +40,7 @@ class GateFeedback:
     triggered_checks: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the feedback as a JSON-serializable dict with tuples turned into lists."""
         return {
             "mode": self.mode,
             "allowed": self.allowed,
@@ -40,7 +52,16 @@ class GateFeedback:
 
 
 def normalize_gate_mode(mode: str | None) -> GateMode:
-    """Normalize gate mode; fallback to soft for invalid inputs."""
+    """Normalize a gate mode, falling back to soft for invalid inputs.
+
+    An unrecognized value also writes a warning to stderr.
+
+    Args:
+        mode: Requested gate mode, in any case; ``None`` selects the default.
+
+    Returns:
+        ``off``, ``soft``, or ``strict``; ``soft`` for ``None`` or unrecognized values.
+    """
     if mode is None:
         return _DEFAULT_GATE_MODE
     lowered = mode.strip().lower()
@@ -57,7 +78,27 @@ def normalize_gate_mode(mode: str | None) -> GateMode:
 
 @dataclass(frozen=True)
 class GateRequest:
-    """Inputs for one gate evaluation; see :func:`evaluate_gate` for the fields (RCA-23)."""
+    """Inputs for one gate evaluation (RCA-23).
+
+    Attributes:
+        action: The requested RCA action (e.g. ``"hypothesize"``, ``"plan"``,
+            ``"change"``, ``"verify"``, ``"resolve"``).
+        payload: Dict carrying the current attempt's data for gate evaluation.
+            Expected keys: ``evidence_refs``, ``hypothesis``, ``experiment_plan``,
+            ``verification_result``, ``exploratory``, ``override_reason``, and
+            ``hypothesis_advanced``.
+        mode: Gate policy — ``"off"``, ``"soft"``, or ``"strict"``. ``None`` or
+            unrecognized values default to ``"soft"``.
+        current_state: The current RCA state, or ``None`` for a session's first
+            attempt. An action that isn't one of :func:`allowed_actions_for_state`
+            for it triggers the hard ``illegal_transition`` check.
+        repeated_signature_count: How many consecutive attempts share the same
+            failure signature.
+        exploration_budget: Total exploration budget (max allowed same-signature
+            attempts before loop protection fires).
+        exploration_budget_remaining: Remaining budget units, if already partially
+            consumed. Falls back to *exploration_budget* when ``None``.
+    """
 
     action: str
     payload: dict[str, Any]
@@ -71,7 +112,12 @@ class GateRequest:
 def _collect_gate_issues(
     request: GateRequest,
 ) -> tuple[list[str], list[str], list[str], bool]:
-    """Evaluate all gate checks and return (warnings, next_required, triggered_checks, hard_failed)."""
+    """Evaluate all gate checks for *request*.
+
+    Returns:
+        ``(warnings, next_required, triggered_checks, hard_failed)``, where
+        ``hard_failed`` is true when any hard check fired.
+    """
     action = request.action
     payload = request.payload
     current_state = request.current_state
@@ -87,6 +133,7 @@ def _collect_gate_issues(
     hard_failed = False
 
     def _add(check_id: str, message: str, next_step: str, *, hard: bool = False) -> None:
+        """Record one triggered check with its warning and (deduplicated) next step."""
         nonlocal hard_failed
         triggered_checks.append(check_id)
         warnings.append(message)
@@ -166,6 +213,7 @@ def _make_feedback(
     allowed: bool,
     severity: GateSeverity,
 ) -> GateFeedback:
+    """Build a :class:`GateFeedback`, freezing the collected lists into tuples."""
     return GateFeedback(
         mode=gate_mode,
         allowed=allowed,
@@ -183,7 +231,7 @@ def evaluate_gate(request: GateRequest | None = None, /, **legacy_kwargs: Any) -
     ``evaluate_gate(mode=..., current_state=..., action=..., payload=...)`` still works
     but emits a ``DeprecationWarning``.
 
-    Runs a series of prerequisite checks against the supplied *payload*
+    Runs a series of prerequisite checks against the request's *payload*
     (evidence, hypothesis, plan, verification status) and returns structured
     feedback.  The gate *mode* determines how check failures are surfaced:
 
@@ -191,10 +239,11 @@ def evaluate_gate(request: GateRequest | None = None, /, **legacy_kwargs: Any) -
     - **soft**: All actions are allowed, but unmet prerequisites are
       surfaced as warnings with ``severity="warning"``.
     - **strict**: Actions with *hard* prerequisite failures (missing
-      evidence, missing hypothesis, or unverified resolve) are blocked
-      (``allowed=False``, ``severity="error"``).  An exploratory
-      override with an ``override_reason`` in the payload can bypass
-      the block.
+      evidence, missing hypothesis, unverified resolve, or an illegal
+      transition) are blocked (``allowed=False``, ``severity="error"``).
+      An exploratory override with an ``override_reason`` in the payload
+      can bypass the block.  Other failures are surfaced as warnings, as
+      in soft mode.
 
     Prerequisite checks include:
 
@@ -212,32 +261,19 @@ def evaluate_gate(request: GateRequest | None = None, /, **legacy_kwargs: Any) -
     - ``illegal_transition`` — the action isn't an allowed transition
       from *current_state* (hard; checked last).
 
-    ``GateRequest`` fields:
-        mode: Gate policy — ``"off"``, ``"soft"``, or ``"strict"``.
-            ``None`` or unrecognized values default to ``"soft"``.
-        current_state: The current RCA state, or ``None`` for a session's
-            first attempt.  An action that isn't one of
-            :func:`allowed_actions_for_state` for it triggers the hard
-            ``illegal_transition`` check.
-        action: The requested RCA action (e.g. ``"hypothesize"``,
-            ``"plan"``, ``"change"``, ``"verify"``, ``"resolve"``).
-        payload: Dict carrying the current attempt's data for gate
-            evaluation.  Expected keys: ``evidence_refs``,
-            ``hypothesis``, ``experiment_plan``,
-            ``verification_result``, ``exploratory``,
-            ``override_reason``, and ``hypothesis_advanced``.
-        repeated_signature_count: How many consecutive attempts share the
-            same failure signature.
-        exploration_budget: Total exploration budget (max allowed
-            same-signature attempts before loop protection fires).
-        exploration_budget_remaining: Remaining budget units, if already
-            partially consumed.  Falls back to *exploration_budget* when
-            ``None``.
+    Args:
+        request: Action, payload, gate mode, current state, and loop-protection
+            counters to evaluate; :class:`GateRequest` documents each field.
+        **legacy_kwargs: Deprecated keyword form of the :class:`GateRequest` fields,
+            accepted only when *request* is omitted.
 
     Returns:
         A :class:`GateFeedback` instance with ``allowed``, ``severity``,
         ``warnings``, ``next_required`` steps, and ``triggered_checks``
         populated according to the gate policy and check results.
+
+    Raises:
+        TypeError: If both *request* and keyword arguments are given.
     """
     if request is None:
         import warnings as _warnings

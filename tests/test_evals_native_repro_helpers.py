@@ -1,5 +1,7 @@
-"""Tests for native reproduction helpers (path normalization, pytest commands,
-git operations, case file writing, and internal parsing functions).
+"""Tests for native reproduction helpers.
+
+Exercises path normalization, pytest commands, git operations, case file writing, and
+internal parsing functions.
 
 Covers missing lines: 47, 69, 75-76, 78, 80, 88, 102, 126, 128-129,
 136-140, 147, 157-158, 160, 199, 201, 205, 208, 214, 256, 267, 269,
@@ -141,8 +143,7 @@ class TestNormalizeNativePytestCommand:
         assert normalize_native_pytest_command("python -m") is None
 
     def test_empty_selector_fallback(self) -> None:
-        """Line 102: selector is empty after strip → falls back to
-        normalized_tail join."""
+        """Line 102: selector is empty after strip → falls back to normalized_tail join."""
         cmd = normalize_native_pytest_command("pytest --rootdir /tmp tests/test_a.py")
         assert cmd is not None
         assert "tests/test_a.py" in cmd.source_test_selector
@@ -388,8 +389,10 @@ class TestWriteNativeCaseFiles:
         self,
         tmp_path: Path,
     ) -> None:
-        """Line 181→187 branch: skip placeholder if test_buggy.py is
-        already among the provided files."""
+        """Skip the placeholder if test_buggy.py is already among the provided files.
+
+        Covers the line 181→187 branch.
+        """
         case_dir = tmp_path / "case2"
         write_native_case_files(
             case_dir,

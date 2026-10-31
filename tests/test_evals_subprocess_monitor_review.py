@@ -67,7 +67,7 @@ def test_orc19_child_does_not_inherit_stdin() -> None:
 
 
 def test_orc03_drain_ends_while_a_grandchild_keeps_writing() -> None:
-    """codex 1e#4: the drain bound is wall-clock, not "until the queue is empty"."""
+    """Codex 1e#4: the drain bound is wall-clock, not "until the queue is empty"."""
     started = time.perf_counter()
     result = run_monitored_subprocess(
         cmd=[
@@ -94,7 +94,7 @@ def test_orc03_drain_ends_while_a_grandchild_keeps_writing() -> None:
 
 
 def test_orc03_slow_progress_callbacks_do_not_extend_the_drain() -> None:
-    """codex 1e#4: a slow progress callback must not push the drain past its bound."""
+    """Codex 1e#4: a slow progress callback must not push the drain past its bound."""
     calls: list[str] = []
 
     def _slow_callback(event: str, payload: dict[str, object] | None) -> None:

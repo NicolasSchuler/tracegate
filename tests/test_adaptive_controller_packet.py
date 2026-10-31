@@ -1014,7 +1014,7 @@ class TestLineSpanFromRawItem:
         assert result == (10, 10)
 
     def test_bool_line_falls_through(self) -> None:
-        """bool is subclass of int — ensure it is rejected."""
+        """Ensure a bool is rejected, since bool is a subclass of int."""
         result = controller_packets._line_span_from_raw_item({"line": True, "locator": "file:3"})
         assert result == (3, 3)
 

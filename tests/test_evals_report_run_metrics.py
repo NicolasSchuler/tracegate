@@ -213,7 +213,7 @@ def _cost_row(run_id: str, case_id: str, condition: str, success: bool, tokens: 
 
 
 def test_fixed_budget_success_applies_the_threshold_to_each_run(tmp_path) -> None:
-    """codex 2-2#1: the budget was applied to the mean cost of a case's runs."""
+    """Codex 2-2#1: the budget was applied to the mean cost of a case's runs."""
     rows = [
         # One expensive success and one cheap failure: no run met a 6,000-token budget.
         _cost_row("r1", "c1", "base_repair", True, 10_000.0),
@@ -240,7 +240,7 @@ def test_fixed_budget_success_applies_the_threshold_to_each_run(tmp_path) -> Non
 
 
 def test_token_cost_statistics_need_both_sides_in_the_same_run() -> None:
-    """codex 2-2#3: independent null-skipping means manufactured a covered pair."""
+    """Codex 2-2#3: independent null-skipping means manufactured a covered pair."""
     rows = [
         _cost_row("r1", "c1", "base_repair", True, 4_000.0),
         _cost_row("r1", "c1", "cot_repair", True, None),
@@ -267,7 +267,7 @@ def test_token_cost_statistics_need_both_sides_in_the_same_run() -> None:
 
 
 def test_cost_per_success_counts_only_token_covered_runs() -> None:
-    """codex 2-2#3: success fractions included runs the token means excluded."""
+    """Codex 2-2#3: success fractions included runs the token means excluded."""
     rows = [
         _cost_row("r1", "c1", "base_repair", False, 2_000.0),
         _cost_row("r1", "c1", "cot_repair", False, 2_000.0),
@@ -1143,7 +1143,7 @@ def _v7_record(case_id: str, condition: str, success: bool):
 
 
 def test_main_warns_about_schema_invalid_rows_and_mixed_versions(tmp_path, capsys) -> None:
-    """codex 2-2#5 / 1e#13: dropped rows and mixed schema versions were silent here."""
+    """Codex 2-2#5 / 1e#13: dropped rows and mixed schema versions were silent here."""
     from evals import _json as json
     from evals import report_run_metrics as rrm
 

@@ -17,7 +17,13 @@ from .config import SnapshotConfig
 
 @dataclass(frozen=True)
 class QuickstartResult:
-    """Paths and follow-up commands produced by the quickstart example."""
+    """Paths and follow-up commands produced by the quickstart example.
+
+    Attributes:
+        snapshot_path: Path of the snapshot file written by the example.
+        show_command: Shell-quoted ``llmdebug show`` command for the snapshot directory.
+        list_command: Shell-quoted ``llmdebug list`` command for the snapshot directory.
+    """
 
     snapshot_path: Path
     show_command: str
@@ -37,7 +43,21 @@ def _next_command(command: str, out_dir: Path) -> str:
 
 
 def create_quickstart_snapshot(out_dir: str | Path = ".llmdebug") -> QuickstartResult:
-    """Create one real synthetic failure snapshot without external services."""
+    """Create one real synthetic failure snapshot without external services.
+
+    The snapshot captures a deterministic ``ZeroDivisionError`` with environment,
+    git, coverage, async-context, and argument capture disabled, and without pruning
+    older snapshots in the directory.
+
+    Args:
+        out_dir: Directory that receives the snapshot file.
+
+    Returns:
+        The written snapshot path and the follow-up ``show``/``list`` commands.
+
+    Raises:
+        RuntimeError: If the synthetic failure unexpectedly does not raise.
+    """
     output_dir = Path(out_dir)
     config = SnapshotConfig(
         out_dir=str(output_dir),

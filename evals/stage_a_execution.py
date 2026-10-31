@@ -103,7 +103,8 @@ def run_stage_a_requests(inputs: StageAInputs, state: StageAState) -> StageAStat
 
     Layer 3 of the policy enforcement lives here: requests outside the selected
     action's allowed types are dropped before execution (ATT-03, ATT-04). Moved
-    verbatim from the attempt loop (X-01)."""
+    verbatim from the attempt loop (X-01).
+    """
     _run_openai_operation_with_transport_recovery = (
         inputs._run_openai_operation_with_transport_recovery
     )

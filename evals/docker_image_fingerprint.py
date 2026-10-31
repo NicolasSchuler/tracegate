@@ -69,7 +69,6 @@ def _iter_fingerprint_entries(repo_root: Path) -> list[tuple[str, Path | None]]:
 
 def compute_eval_image_build_fingerprint(repo_root: Path, *, include_baselines: bool) -> str:
     """Return a deterministic fingerprint for the eval Docker image inputs."""
-
     resolved_root = repo_root.resolve()
     # Keep this helper stdlib-only so run_eval_docker.sh can compute fingerprints
     # with plain python3, even before project dependencies are installed.

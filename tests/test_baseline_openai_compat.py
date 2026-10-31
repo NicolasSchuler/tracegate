@@ -470,7 +470,7 @@ class TestEnableThinkingOption:
         assert "def multiply" in text
 
     def test_auto_profile_with_enable_thinking_preserves_setting(self) -> None:
-        """auto profile doesn't apply qwen shaping but preserves enable_thinking meta."""
+        """The auto profile doesn't apply qwen shaping but preserves enable_thinking meta."""
         _, request_meta = apply_compat_request_profile(
             {"model": "test", "messages": []},
             compat_config=BaselineOpenAICompatConfig(profile="auto", enable_thinking=True),

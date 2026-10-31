@@ -91,7 +91,23 @@ def dumps(
     sort_keys: bool = False,
     separators: tuple[str, str] | None = None,
 ) -> str:
-    """Serialize to a JSON string using orjson with stdlib-like kwargs."""
+    """Serialize to a JSON string using orjson with stdlib-like kwargs.
+
+    Args:
+        value: Object to serialize.
+        indent: ``None`` for single-line output or ``2`` for pretty-printing.
+        ensure_ascii: Escape non-ASCII characters as JSON unicode escape sequences.
+        default: Fallback converter for objects orjson cannot serialize natively.
+        sort_keys: Sort object keys.
+        separators: ``None``, compact ``(",", ":")``, or spaced ``(", ", ": ")``.
+            ``None`` without *indent* produces spaced output, as in the stdlib.
+
+    Returns:
+        The JSON text.
+
+    Raises:
+        ValueError: If *indent* is not ``None`` or ``2``, or *separators* is unsupported.
+    """
     option = orjson.OPT_NON_STR_KEYS
     if indent is not None:
         if indent != 2:
@@ -113,5 +129,12 @@ def dumps(
 
 
 def loads(data: str | bytes | bytearray | memoryview) -> Any:
-    """Deserialize JSON from string/bytes payloads."""
+    """Deserialize JSON from string/bytes payloads.
+
+    Args:
+        data: JSON document as text or bytes.
+
+    Returns:
+        The decoded Python object.
+    """
     return orjson.loads(data)

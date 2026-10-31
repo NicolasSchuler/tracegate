@@ -1,4 +1,4 @@
-"""llmdebug CLI — View and manage debug snapshots.
+"""Command-line interface for viewing and managing llmdebug snapshots.
 
 The CLI renders in two modes: Rich (panels/tables when rich is installed and
 stdout is a TTY) and plain text (click.echo fallback).  ``_get_console()``
@@ -94,6 +94,8 @@ except ImportError:
 
 @dataclass(frozen=True)
 class _LoadedExportState:
+    """Primary and optional comparison snapshots loaded for one ``export`` run."""
+
     requested_snapshot_ref: str
     snapshot_ref: str | None
     snapshot_path: Path
@@ -106,6 +108,8 @@ class _LoadedExportState:
 
 @dataclass(frozen=True)
 class _ExportPayloadTarget:
+    """Snapshot and comparison inputs for building one export report payload."""
+
     snapshot: dict[str, Any]
     raw_payload: dict[str, Any]
     snapshot_path: Path
@@ -128,7 +132,7 @@ def _echo_snapshot_error(error: Exception, *, out_dir: str | Path) -> None:
 
 
 def _load_snapshot(path: str | None, out_dir: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction] — used in tests
-    """Load a snapshot from an explicit path or fall back to latest."""
+    """Load a snapshot from an explicit path or fall back to latest; exit 1 if missing."""
     try:
         return _load_snapshot_impl(path, out_dir, _trust_path=True)
     except FileNotFoundError as e:
@@ -137,7 +141,7 @@ def _load_snapshot(path: str | None, out_dir: str) -> dict[str, Any]:  # pyright
 
 
 def _load_snapshot_raw(path: str | None, out_dir: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction] — used in tests
-    """Load a raw snapshot payload (DebugSession envelope when present)."""
+    """Load a raw snapshot payload (DebugSession envelope when present); exit 1 if missing."""
     try:
         return _load_snapshot_raw_impl(path, out_dir, _trust_path=True)
     except FileNotFoundError as e:
@@ -146,7 +150,7 @@ def _load_snapshot_raw(path: str | None, out_dir: str) -> dict[str, Any]:  # pyr
 
 
 def _load_snapshot_ref(ref: str | None, out_dir: str) -> dict[str, Any]:
-    """Load a snapshot from a shared CLI reference syntax."""
+    """Load a snapshot from a shared CLI reference syntax; exit 1 on load errors."""
     try:
         path = _resolve_snapshot_ref_path_impl(ref, out_dir, _trust_path=True)
         return _load_snapshot_from_file_impl(path)
@@ -156,7 +160,7 @@ def _load_snapshot_ref(ref: str | None, out_dir: str) -> dict[str, Any]:
 
 
 def _load_snapshot_ref_raw(ref: str | None, out_dir: str) -> dict[str, Any]:
-    """Load a raw snapshot payload from a shared CLI reference syntax."""
+    """Load a raw snapshot payload from a shared CLI reference syntax; exit 1 on errors."""
     try:
         path = _resolve_snapshot_ref_path_impl(ref, out_dir, _trust_path=True)
         return _load_snapshot_from_file_raw_impl(path)
@@ -203,6 +207,7 @@ def _load_export_state(
     compare_ref: str | None,
     out_dir: str,
 ) -> _LoadedExportState:
+    """Resolve and load the export snapshot and, when requested, the comparison."""
     requested_snapshot_ref = snapshot_ref or "latest"
     snapshot_path = _resolve_export_snapshot_path(snapshot_ref, out_dir)
     raw_payload = _load_snapshot_from_file_raw_impl(snapshot_path)
@@ -229,6 +234,13 @@ def _resolve_export_defaults(
     redaction_profile: str | None,
     bundle_dir: Path | None,
 ) -> tuple[str, str | None]:
+    """Return the effective export mode and redaction profile.
+
+    Bundles default to ``redacted`` and redacted exports default to the ``ci`` profile.
+
+    Raises:
+        click.UsageError: If redacted mode is combined with the ``dev`` profile.
+    """
     effective_mode = export_mode or ("redacted" if bundle_dir is not None else "full")
     effective_redaction_profile = redaction_profile
     if effective_mode == "redacted" and effective_redaction_profile is None:
@@ -247,6 +259,7 @@ def _build_export_report_payload(
     export_mode: str,
     redaction_profile: str | None,
 ) -> dict[str, Any]:
+    """Build the export payload for *target* and apply the requested redaction."""
     export_payload = build_export_payload(
         snapshot=target.snapshot,
         raw_payload=target.raw_payload,
@@ -273,6 +286,7 @@ def _prepare_export_payloads(
     export_mode: str,
     redaction_profile: str | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Return the primary payload and, with a comparison, the reverse-direction payload."""
     export_payload = _build_export_report_payload(
         _ExportPayloadTarget(
             snapshot=state.snapshot,
@@ -307,6 +321,7 @@ def _prepare_export_payloads(
 
 
 def _render_export_text(export_format: str, export_payload: dict[str, Any]) -> str:
+    """Render an export payload as indented JSON or as a standalone HTML page."""
     if export_format == "json":
         return json.dumps(export_payload, indent=2, ensure_ascii=False, default=str)
     return render_export_html(export_payload)
@@ -319,6 +334,7 @@ def _write_export_bundle(
     export_payload: dict[str, Any],
     compare_export_payload: dict[str, Any] | None,
 ) -> None:
+    """Write the report, optional comparison report, manifest, and index page."""
     bundle_dir.mkdir(parents=True, exist_ok=True)
     artifact_name = f"report.{export_format}"
     artifact_path = bundle_dir / artifact_name
@@ -356,6 +372,7 @@ def _write_single_export(
     export_format: str,
     export_payload: dict[str, Any],
 ) -> Path:
+    """Write one report to *output* or the default path and return where it went."""
     output_path = output or default_export_path(snapshot_path=snapshot_path, fmt=export_format)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(_render_export_text(export_format, export_payload), encoding="utf-8")
@@ -363,7 +380,7 @@ def _write_single_export(
 
 
 def _load_snapshot_from_file(path: Path) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction] — used in tests
-    """Load and auto-expand a single snapshot file."""
+    """Load and auto-expand a single snapshot file; exit 1 if missing or TOON is unsupported."""
     try:
         return _load_snapshot_from_file_impl(path)
     except (FileNotFoundError, ImportError) as e:
@@ -396,7 +413,7 @@ def _format_timestamp(ts_str: str | None) -> str:  # pyright: ignore[reportUnuse
 @click.option("--dir", "out_dir", default=".llmdebug", help="Snapshot directory")
 @click.pass_context
 def main(ctx: click.Context, out_dir: str) -> None:
-    """llmdebug - View and manage debug snapshots."""
+    """View and manage llmdebug snapshots."""
     ctx.ensure_object(dict)
     ctx.obj["out_dir"] = out_dir
     if ctx.invoked_subcommand is None:
@@ -674,6 +691,7 @@ _STATE_FILE_NAMES = (
 
 
 def _mtime_or_zero(path: Path) -> float:
+    """Return the file's mtime, or 0.0 when it vanished after the directory listing."""
     try:
         return path.stat().st_mtime
     except OSError:  # deleted since the directory was listed (RCA-21)
@@ -687,7 +705,10 @@ def _compute_delete_list(
     delete_all: bool,
     purge_state: bool = False,
 ) -> list[Path]:
-    """Compute the list of files to delete without performing any I/O side effects."""
+    """Compute the list of files to delete without deleting anything.
+
+    The directory is only inspected (existence checks and a listing for ``--all``).
+    """
     to_delete: list[Path] = []
     if purge_state:
         to_delete.extend(
@@ -856,7 +877,7 @@ def diff(old_ref: str | None, new_ref: str | None, as_json: bool, out_dir: str) 
         llmdebug diff                    # latest vs previous
         llmdebug diff #2 #1             # by list index
         llmdebug diff old.json new.json  # by path
-    """
+    """  # noqa: D301 -- not r""": Click's \b no-rewrap marker must stay a backspace
     from dataclasses import asdict
 
     from .snapshot_diff import diff_snapshots, format_diff_text

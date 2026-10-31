@@ -153,7 +153,8 @@ just eval-two-pass-summary <baseline_run_id> <rescue_run_id>
 
 ## Coding Style & Naming
 - Python 3.10+, 4-space indentation, max line length 100.
-- Ruff config lives in `pyproject.toml` and enforces `E`, `W`, `F`, `I`, `UP`, `B`, `SIM`, `C4`, `RUF`, `PERF`, and `FURB`.
+- Ruff config lives in `pyproject.toml` and enforces `E`, `W`, `F`, `I`, `UP`, `B`, `SIM`, `C4`, `RUF`, `PERF`, `FURB`, and `D` (pydocstyle).
+- Docstrings follow the Google style (`[tool.ruff.lint.pydocstyle] convention = "google"`). In `src/llmdebug`, every public module, class, function, and method needs a docstring: an imperative one-line summary ending with a period, then `Args:` listing every parameter, `Returns:`/`Yields:` for non-`None` results, `Raises:` for exceptions callers must handle, and `Attributes:` for dataclass/TypedDict/Enum fields. Do not repeat types in `Args:`; annotations carry them. In `tests/`, `evals/`, `baselines/`, and `scripts/`, missing docstrings (`D1xx`) are not enforced, but any docstring that exists must follow the same format rules.
 - Pyright runs in `strict` mode for `src/llmdebug`.
 - Prefer precise type annotations on new or changed APIs.
 - Naming conventions: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.

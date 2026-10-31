@@ -132,7 +132,15 @@ _VALID_PROFILES = {"dev", "ci", "prod"}
 
 @dataclass(frozen=True)
 class RedactionPolicy:
-    """Resolved redaction behavior for a capture call/site."""
+    """Resolved redaction behavior for a capture call/site.
+
+    Attributes:
+        profile: Profile the policy was resolved from, or ``None`` when none was selected.
+        patterns: Text redaction patterns (strings or compiled) applied to string values.
+        redact_keys: Also apply the patterns to dict keys and local names.
+        redact_traceback: Apply the patterns to the formatted traceback text.
+        redact_exception_strings: Apply the patterns to exception messages, args, and notes.
+    """
 
     profile: RedactionProfile | None
     patterns: tuple[str | Pattern[str], ...]
@@ -167,7 +175,17 @@ _PROFILE_DEFAULTS: dict[RedactionProfile, RedactionPolicy] = {
 
 
 def normalize_redaction_profile(value: str | None) -> RedactionProfile | None:
-    """Normalize redaction profile names; return None for empty input."""
+    """Normalize redaction profile names; return None for empty input.
+
+    Args:
+        value: Profile name in any case, possibly padded with whitespace.
+
+    Returns:
+        The lowercase profile name, or ``None`` for ``None`` or blank input.
+
+    Raises:
+        ValueError: If the name is not ``dev``, ``ci``, or ``prod``.
+    """
     if value is None:
         return None
     candidate = value.strip().lower()
@@ -181,6 +199,7 @@ def normalize_redaction_profile(value: str | None) -> RedactionProfile | None:
 
 
 def _as_optional_bool(value: Any) -> bool | None:
+    """Return an optional boolean override unchanged, rejecting non-bool values."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -202,12 +221,31 @@ def resolve_redaction_policy(
 ) -> RedactionPolicy:
     """Resolve final redaction behavior with explicit precedence.
 
-    Precedence:
-    1) Explicit overrides (`redact`, `redact_keys`, `redact_traceback`,
-       `redact_exception_strings`)
-    2) Explicit `redaction_profile`
-    3) Legacy fallback values for a given call surface
-    4) Hard defaults (empty patterns / False booleans)
+    Each setting comes from the first of these sources that provides it:
+
+    1. Explicit overrides (``redact``, ``redact_keys``, ``redact_traceback``,
+       ``redact_exception_strings``).
+    2. Explicit ``redaction_profile``.
+    3. Legacy fallback values for a given call surface.
+    4. Hard defaults (empty patterns, False booleans).
+
+    Args:
+        redaction_profile: Preset that fills every setting without an explicit override.
+        redact: Explicit pattern override; ``()`` disables profile patterns.
+        redact_keys: Explicit key-redaction override; ``None`` inherits.
+        redact_traceback: Explicit traceback-redaction override; ``None`` inherits.
+        redact_exception_strings: Explicit exception-string override; ``None`` inherits.
+        legacy_redact: Patterns used only without *redact* and without a profile.
+        legacy_redact_keys: Key-redaction fallback used without override or profile.
+        legacy_redact_traceback: Traceback fallback used without override or profile.
+        legacy_redact_exception_strings: Exception-string fallback used without override
+            or profile.
+
+    Returns:
+        The resolved policy with concrete patterns and booleans.
+
+    Raises:
+        ValueError: If a boolean override is neither a bool nor ``None``.
     """
     explicit_redact_keys = _as_optional_bool(redact_keys)
     explicit_redact_traceback = _as_optional_bool(redact_traceback)

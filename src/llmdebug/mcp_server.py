@@ -134,6 +134,7 @@ def _confined(tool: Callable[_P, str]) -> Callable[_P, str]:
 
     @functools.wraps(tool)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        """Bind the call, confine ``out_dir`` to the MCP root, then run the tool."""
         bound = signature.bind(*args, **kwargs)
         bound.apply_defaults()
         try:
@@ -163,6 +164,7 @@ def _tool(fn: Callable[_P, str]) -> Callable[_P, str]:
 
     @functools.wraps(confined)
     async def run_in_worker_thread(*args: _P.args, **kwargs: _P.kwargs) -> str:
+        """Run the confined tool in a worker thread so the event loop stays responsive."""
         return await asyncio.to_thread(confined, *args, **kwargs)
 
     _mcp.tool()(run_in_worker_thread)
@@ -186,19 +188,24 @@ def llmdebug_diagnose(
 ) -> str:
     """Get a concise diagnosis of the latest snapshot.
 
-    Returns a structured summary with: exception type/message,
-    crash frame with source and locals, repro command, and git context.
     Optimized for LLM consumption.
 
     Args:
-        out_dir: Snapshot directory (default: .llmdebug)
-        detail: Detail level — "crash" (exception + crash frame only),
-                "full" (+ all frames), or "context" (+ repro/git, default)
-        gate_mode: RCA gate mode override: off|soft|strict (default from env or soft)
-        exploratory: Mark this step as exploratory (used by strict gate override logic)
-        response_format: "json" (default) or "text"
-        with_rca: Include RCA block (default: false)
-        evidence_schema: "summary" (default) or "full" for JSON payload detail
+        out_dir: Snapshot directory (default: .llmdebug).
+        detail: Detail level — "crash" (exception + crash frame only), or
+            "full" / "context" (+ all frames, repro, and git; "context" is the
+            default).
+        gate_mode: RCA gate mode override: off|soft|strict (default from env or soft).
+        exploratory: Mark this step as exploratory (used by strict gate override logic).
+        response_format: "json" (default) or "text".
+        with_rca: Record a bind_evidence RCA attempt for the snapshot and include the
+            RCA block (default: false).
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        A structured summary with: exception type/message, crash frame with source
+        and locals, other frames, repro command, and git context (as selected by
+        detail), or an error response.
     """
     format_error = _validate_response_format(response_format)
     if format_error is not None:
@@ -303,20 +310,25 @@ def llmdebug_show(
 ) -> str:
     """Show the debug snapshot as expanded JSON.
 
-    Returns snapshot data with all frames, locals, and metadata.
     Use llmdebug_diagnose first for a concise summary,
     then llmdebug_show if you need the full picture.
 
     Args:
-        out_dir: Snapshot directory (default: .llmdebug)
+        out_dir: Snapshot directory (default: .llmdebug).
         snapshot_path: Path to a specific snapshot file. If empty, uses latest.
-        detail: Detail level — "crash", "full", or "context" (default, everything)
-        raw_session: Return raw DebugSession envelope when available.
-        with_rca: Return JSON envelope with snapshot + RCA block.
+        detail: Detail level — "crash", "full", or "context" (default, everything).
+        raw_session: Return raw DebugSession envelope when available (the detail
+            filter is not applied).
+        with_rca: Record a bind_evidence RCA attempt and include the RCA block; in
+            text mode, return the snapshot and RCA record together as JSON.
         gate_mode: RCA gate mode override: off|soft|strict.
         exploratory: Mark this step as exploratory.
         response_format: "json" (default) or "text".
         evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        Snapshot data with all frames, locals, and metadata (filtered by detail), or
+        an error response.
     """
     format_error = _validate_response_format(response_format)
     if format_error is not None:
@@ -455,15 +467,18 @@ def llmdebug_list(
 ) -> str:
     """List available debug snapshots, newest first.
 
-    Returns snapshot metadata: timestamp, name, exception type,
-    message, and file location. Use snapshot_path from the results
-    with llmdebug_show to inspect a specific snapshot.
+    Use snapshot_path from the results with llmdebug_show to inspect a
+    specific snapshot.
 
     Args:
-        out_dir: Snapshot directory (default: .llmdebug)
-        limit: Maximum number of snapshots to return (default: 10)
-        response_format: "text" (default) or "json"
-        evidence_schema: "summary" (default) or "full" for JSON payload detail
+        out_dir: Snapshot directory (default: .llmdebug).
+        limit: Maximum number of snapshots to return; must be at least 1 (default: 10).
+        response_format: "text" (default) or "json".
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        Snapshot metadata: timestamp, name, exception type, message, file location,
+        and snapshot path; or an error response.
     """
     rate_error = _check_rate_limit("llmdebug_list", response_format, evidence_schema)
     if rate_error is not None:
@@ -489,19 +504,22 @@ def llmdebug_frame(
 ) -> str:
     """Show a specific stack frame in detail.
 
-    Returns source code, all local variables with types and values,
-    and function arguments. Frame 0 is the crash site. Use higher
-    indices to inspect callers.
+    Frame 0 is the crash site. Use higher indices to inspect callers.
 
     Args:
-        index: Frame index (0 = crash site, higher = callers)
-        out_dir: Snapshot directory (default: .llmdebug)
+        index: Frame index (0 = crash site, higher = callers).
+        out_dir: Snapshot directory (default: .llmdebug).
         snapshot_path: Path to a specific snapshot file. If empty, uses latest.
         gate_mode: RCA gate mode override: off|soft|strict.
         exploratory: Mark this step as exploratory.
         response_format: "json" (default) or "text".
-        with_rca: Include RCA block (default: false).
+        with_rca: Record a bind_evidence RCA attempt and include the RCA block
+            (default: false).
         evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        Source code, all local variables with types and values, and function
+        arguments for the frame, or an error response.
     """
     rate_error = _check_rate_limit("llmdebug_frame", response_format, evidence_schema)
     if rate_error is not None:
@@ -531,13 +549,24 @@ def llmdebug_git_context(
 ) -> str:
     """Show on-demand enhanced git metadata for a snapshot.
 
-    Returns metadata-only context:
-    - crash-line blame metadata
-    - recent commit metadata
-    - crash-file diffstat metadata
-
     Use this when the snapshot itself should stay compact but you still need
     git history or diff context around the failing line.
+
+    Args:
+        out_dir: Snapshot directory (default: .llmdebug).
+        snapshot_path: Path to a specific snapshot file. If empty, uses latest.
+        max_commits: Number of recent commits to include, clamped to 1-50 (default: 5).
+        gate_mode: RCA gate mode override: off|soft|strict.
+        exploratory: Mark this step as exploratory.
+        response_format: "json" (default) or "text".
+        with_rca: Record a bind_evidence RCA attempt that cites the git refs and
+            include the RCA block (default: false).
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        Metadata-only context: crash-line blame metadata, recent commit metadata, and
+        crash-file diffstat metadata. A notice replaces it when the snapshot is not in
+        a git repository or git is unavailable; failures return an error response.
     """
     format_error = _validate_response_format(response_format)
     if format_error is not None:
@@ -686,19 +715,23 @@ def llmdebug_diff(
 ) -> str:
     """Compare two snapshots to show what changed between debugging iterations.
 
-    Returns changes in: exception type/message, crash location,
-    local variable values, array shapes, and git context.
     Default: compares the two most recent snapshots.
 
     Args:
         old_ref: Older snapshot — "latest", "previous", "#N" (list index), or file path.
         new_ref: Newer snapshot — same format as old_ref.
-        out_dir: Snapshot directory (default: .llmdebug)
+        out_dir: Snapshot directory (default: .llmdebug).
         gate_mode: RCA gate mode override: off|soft|strict.
         exploratory: Mark this step as exploratory.
         response_format: "json" (default) or "text".
-        with_rca: Include RCA block (default: false).
+        with_rca: Record a verify RCA attempt (status "fail" when the failure
+            signature is unchanged, else "inconclusive") and include the RCA block
+            (default: false).
         evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        Changes in: exception type/message, crash location, local variable values,
+        array shapes, and git context; or an error response.
     """
     rate_error = _check_rate_limit("llmdebug_diff", response_format, evidence_schema)
     if rate_error is not None:
@@ -723,7 +756,19 @@ def llmdebug_rca_status(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Return latest RCA state for a session (or latest overall if session unspecified)."""
+    """Return latest RCA state for a session (or latest overall if session unspecified).
+
+    Args:
+        out_dir: Snapshot directory (default: .llmdebug).
+        session_id: Session to look up. If empty, it is derived from snapshot_path
+            when given; otherwise the latest attempt overall is returned.
+        snapshot_path: Snapshot file used to derive the session ID.
+        response_format: "text" (default) or "json".
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        The latest RCA attempt record, or a message when no attempt exists.
+    """
     rate_error = _check_rate_limit("llmdebug_rca_status", response_format, evidence_schema)
     if rate_error is not None:
         return rate_error
@@ -744,7 +789,18 @@ def llmdebug_rca_history(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Return RCA history (newest-first) for a session or globally."""
+    """Return RCA history (newest-first) for a session or globally.
+
+    Args:
+        out_dir: Snapshot directory (default: .llmdebug).
+        session_id: Session to filter on. If empty, includes every session.
+        limit: Maximum number of attempts to return; must be at least 1 (default: 20).
+        response_format: "text" (default) or "json".
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        RCA attempt records, newest first, or a message when no attempt exists.
+    """
     rate_error = _check_rate_limit("llmdebug_rca_history", response_format, evidence_schema)
     if rate_error is not None:
         return rate_error
@@ -776,7 +832,39 @@ def llmdebug_rca_advance(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Manually advance RCA state machine for custom agent workflows."""
+    """Manually advance RCA state machine for custom agent workflows.
+
+    Without snapshot_path, pass both session_id and failure_signature, or neither
+    to derive them from the latest snapshot.
+
+    Args:
+        action: RCA action: capture, bind_evidence, hypothesize, plan, change,
+            verify, or resolve.
+        out_dir: Snapshot directory (default: .llmdebug).
+        session_id: RCA session ID. If empty, derived from the snapshot.
+        snapshot_path: Snapshot file used to derive an empty session_id or
+            failure_signature.
+        failure_signature: Stable failure fingerprint. If empty, derived from the
+            snapshot.
+        evidence_refs: Comma-separated evidence references to bind.
+        hypothesis: Root-cause hypothesis. If empty, keeps the previous one.
+        experiment_plan: Experiment plan. If empty, keeps the previous one.
+        proposed_change_summary: Summary of the proposed change. If empty, keeps the
+            previous one.
+        verification_status: Verification outcome, e.g. "pass" or "fail". If empty,
+            no new result is recorded.
+        verification_checks: Comma-separated verification check descriptions.
+        gate_mode: RCA gate mode override: off|soft|strict (default from env or soft).
+        exploratory: Mark this step as exploratory; with override_reason, a strict
+            gate lets the action proceed despite hard check failures.
+        override_reason: Justification for a strict-gate override.
+        response_format: "text" (default) or "json".
+        evidence_schema: "summary" (default) or "full" for JSON payload detail.
+
+    Returns:
+        The new RCA attempt record, including state, gate feedback, allowed actions,
+        and next required steps; or an error response.
+    """
     rate_error = _check_rate_limit("llmdebug_rca_advance", response_format, evidence_schema)
     if rate_error is not None:
         return rate_error

@@ -86,8 +86,10 @@ def _default_online_config(**overrides: Any) -> OnlinePolicyConfig:
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_default_helper_policy_learns_linear_rewards(seed: int) -> None:
-    """53 features (52 + bias), 10 arms, linear rewards with noise: after 500 decisions the
-    default policy picks the context's best arm far more often than uniform (10%).
+    """The default helper policy learns noisy linear rewards across 10 arms.
+
+    With 53 features (52 + bias), 10 arms and linear rewards with noise, after 500 decisions
+    the default policy picks the context's best arm far more often than uniform (10%).
 
     Before the review the decay of 0.95 on every arm kept about 20 observations of evidence
     and the score biases vetoed two arms, so the policy barely learned (POL-01, POL-07).
@@ -171,8 +173,10 @@ def _budget_stream(tmp_path: Path, name: str) -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize("stream", [_online_stream, _budget_stream])
 def test_identical_seeds_produce_identical_event_streams(tmp_path: Path, stream: Any) -> None:
-    """Sequential decisions (``--jobs 1``) with the same seed log the same events, apart
-    from the random decision id and the timestamp."""
+    """Sequential decisions (``--jobs 1``) with the same seed log the same events.
+
+    Only the random decision id and the timestamp differ.
+    """
     first = stream(tmp_path, "first")
     second = stream(tmp_path, "second")
     assert len(first) == 40

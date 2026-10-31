@@ -2011,7 +2011,7 @@ class TestAproposeDispatch:
     def test_diff_mode_with_edits_fallback(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """diff mode: first returns no_diff_found → falls back to edits."""
+        """In diff mode, the first call returns no_diff_found → falls back to edits."""
         (tmp_path / "foo.py").write_text("old\n", encoding="utf-8")
         calls = {"n": 0}
 

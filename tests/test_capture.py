@@ -1205,7 +1205,6 @@ def test_summarize_exception_cycle_detected() -> None:
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="BaseExceptionGroup requires Python 3.11+")
 def test_summarize_exception_base_exception_group() -> None:
     """BaseExceptionGroup children are recursively summarized (Python 3.11+)."""
-
     import llmdebug.capture as capture_module
 
     group = BaseExceptionGroup("group", [ValueError("a"), TypeError("b")])  # noqa: F821
@@ -1272,8 +1271,8 @@ def test_extract_function_args_with_kwonly() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_redact_context_non_dict_return_preserves_original(monkeypatch) -> None:
-    """If redact_jsonlike returns a non-dict, the original context is preserved."""
+def test_redact_context_non_dict_return_drops_context(monkeypatch) -> None:
+    """If redact_jsonlike returns a non-dict, the context is dropped (fail closed)."""
     import llmdebug.capture as capture_module
 
     monkeypatch.setattr(
@@ -1286,12 +1285,12 @@ def test_redact_context_non_dict_return_preserves_original(monkeypatch) -> None:
     cfg = SnapshotConfig()
     warnings: list[str] = []
     result = capture_module._redact_context(context, redactors, cfg, warnings)
-    assert result is context
-    assert any("non-dict" in w for w in warnings)
+    assert result == {}
+    assert any("non-dict" in w and "context omitted" in w for w in warnings)
 
 
-def test_redact_context_exception_preserves_original(monkeypatch) -> None:
-    """If redact_jsonlike raises, the original context is preserved with a warning."""
+def test_redact_context_exception_drops_context(monkeypatch) -> None:
+    """If redact_jsonlike raises, the context is dropped with a warning (fail closed)."""
     import llmdebug.capture as capture_module
 
     def _boom(*args, **kwargs):
@@ -1305,8 +1304,8 @@ def test_redact_context_exception_preserves_original(monkeypatch) -> None:
     cfg = SnapshotConfig()
     warnings: list[str] = []
     result = capture_module._redact_context(context, redactors, cfg, warnings)
-    assert result is context
-    assert any("context redaction failed" in w for w in warnings)
+    assert result == {}
+    assert any("context redaction failed" in w and "context omitted" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -1602,6 +1601,7 @@ def test_add_locals_meta_truncated() -> None:
         _FakeFrame(),  # type: ignore[arg-type]
         cfg,
         warnings,
+        [],
     )
     assert frame_dict.get("locals_truncated") is True
     assert frame_dict.get("locals_truncated_keys") == 7  # 10 - 3
@@ -1841,8 +1841,10 @@ def test_summarize_exception_empty_args():
 
 
 def test_extract_function_args_missing_from_locals():
-    """Branches [252,250], [261,259], [269,271], [277,280]:
-    Function args defined in code object but missing from f_locals."""
+    """Function args defined in code object but missing from f_locals.
+
+    Covers branches [252,250], [261,259], [269,271], [277,280].
+    """
     import inspect
     import types
     from unittest.mock import MagicMock
@@ -1918,7 +1920,7 @@ def test_add_locals_meta_extract_args_returns_none(monkeypatch):
 
     frame_dict: dict = {}
     warnings: list[str] = []
-    _add_locals_meta(frame_dict, frame, cfg, warnings)
+    _add_locals_meta(frame_dict, frame, cfg, warnings, [])
     assert "args_meta" not in frame_dict
     assert "arg_names" not in frame_dict
     assert "locals_meta" in frame_dict
@@ -1943,8 +1945,10 @@ def test_frame_locals_are_read_once_per_frame(helper_name: str) -> None:
             _CountingFrame.reads += 1
             return real.f_locals
 
-    helper = getattr(capture_module, helper_name)  # (frame_dict, frame, cfg, redactors/warnings)
-    helper({}, _CountingFrame(), SnapshotConfig(include_args=True), [])
+    # _add_locals_safe(frame_dict, frame, cfg, redactors); _add_locals_meta adds warnings first.
+    helper = getattr(capture_module, helper_name)
+    trailing: list[list[object]] = [[]] if helper_name == "_add_locals_safe" else [[], []]
+    helper({}, _CountingFrame(), SnapshotConfig(include_args=True), *trailing)
 
     assert _CountingFrame.reads == 1
 

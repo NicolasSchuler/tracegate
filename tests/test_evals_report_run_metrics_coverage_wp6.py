@@ -1,8 +1,11 @@
-"""Coverage tests for evals.report_run_metrics — batch covering main() error exits,
-_parse_fixed_budget_thresholds branches, _cohens_kappa_magnitude, _null_sort_key,
-_bootstrap_mean_ci edge cases, _print_input_errors, _as_float, _mean, _median,
-_fmt_* formatting helpers, _print_dual_objective, _print_overhead_analysis,
-_conclusion_line, _print_effect_line, and _print_report with full dual_objective."""
+"""Coverage tests for evals.report_run_metrics.
+
+The batch covers main() error exits, _parse_fixed_budget_thresholds branches,
+_cohens_kappa_magnitude, _null_sort_key, _bootstrap_mean_ci edge cases,
+_print_input_errors, _as_float, _mean, _median, _fmt_* formatting helpers,
+_print_dual_objective, _print_overhead_analysis, _conclusion_line, _print_effect_line,
+and _print_report with full dual_objective.
+"""
 
 from __future__ import annotations
 

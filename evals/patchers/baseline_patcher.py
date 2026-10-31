@@ -1,4 +1,4 @@
-"""Patcher that delegates to an external baseline adapter.
+r"""Patcher that delegates to an external baseline adapter.
 
 Wraps a ``BaselineAdapter`` (from ``baselines.adapter_base``) into the
 ``Patcher`` protocol so that external baselines (LDB, INTERVENOR,
@@ -7,12 +7,12 @@ alongside llmdebug's own conditions.
 
 Usage from the CLI::
 
-    python -m evals.run_eval \\
-        --patcher baseline \\
-        --baseline-name ldb \\
-        --baseline-repo-dir baselines/repos/LLMDebugger \\
-        --openai-base-url http://127.0.0.1:1234 \\
-        --openai-model <model> \\
+    python -m evals.run_eval \
+        --patcher baseline \
+        --baseline-name ldb \
+        --baseline-repo-dir baselines/repos/LLMDebugger \
+        --openai-base-url http://127.0.0.1:1234 \
+        --openai-model <model> \
         --k 2
 """
 
@@ -108,7 +108,6 @@ def _load_baseline_case_context(
     Invalid JSON or schema problems never raise; instead the caller receives a
     typed status plus structured issue metadata.
     """
-
     if not path.is_file():
         return _BaselineCaseContextLoadResult(case_context=None, status="missing")
     try:
@@ -541,7 +540,6 @@ def _infer_repair_contract(result: BaselineResult) -> tuple[str, list[str]]:
     This preserves adapter-owned metadata when supplied, while still recording
     a reasonable repair scope for legacy or partially structured results.
     """
-
     raw_targets = result.meta.get("repair_targets")
     if isinstance(raw_targets, list):
         targets = sorted({str(item).strip() for item in raw_targets if str(item).strip()})

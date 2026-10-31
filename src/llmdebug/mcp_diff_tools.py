@@ -40,7 +40,28 @@ def handle_diff(
     with_rca: bool = False,
     evidence_schema: str = "summary",
 ) -> str:
-    """Implementation of llmdebug_diff."""
+    """Compare two snapshots for the ``llmdebug_diff`` MCP tool.
+
+    With *with_rca*, the comparison is recorded as a ``verify`` RCA attempt whose
+    status is ``fail`` when the failure signature is unchanged and ``inconclusive``
+    otherwise.
+
+    Args:
+        old_ref: Older snapshot: ``latest``, ``previous``, ``#N`` (list index), or a
+            file path.
+        new_ref: Newer snapshot, in the same format as *old_ref*.
+        out_dir: Snapshot directory.
+        gate_mode: RCA gate mode override (``off``, ``soft``, or ``strict``); empty
+            uses ``LLMDEBUG_RCA_GATE_MODE`` or ``soft``.
+        exploratory: Whether to mark the RCA step as exploratory.
+        response_format: ``json`` or ``text``.
+        with_rca: Whether to record the RCA attempt and include the RCA block.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+
+    Returns:
+        The rendered diff response, or an error response when an argument is invalid,
+        a snapshot cannot be resolved or loaded, or the RCA update fails.
+    """
     format_error = validate_response_format(response_format)
     if format_error is not None:
         return render_invalid_response_format_error(

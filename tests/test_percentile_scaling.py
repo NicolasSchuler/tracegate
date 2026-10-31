@@ -135,8 +135,10 @@ class TestComputePercentileCapsEdge:
         assert caps["stagnation_streak"] == pytest.approx(7.0)
 
     def test_all_zero_history_keeps_the_v1_cap(self) -> None:
-        """POL-09: a cap of 1.0 from an all-zero history amplified every later value
-        (this test used to expect 1.0)."""
+        """POL-09: a cap of 1.0 from an all-zero history amplified every later value.
+
+        This test used to expect 1.0.
+        """
         values = [0.0] * 50
         caps = compute_percentile_caps(
             {"stagnation_streak": values},
@@ -353,8 +355,11 @@ class TestExistingBehaviourPreserved:
 
 class TestFrozenPercentileCaps:
     def test_a_raw_value_keeps_its_scaled_value_after_the_freeze(self) -> None:
-        """The review saw stagnation_streak=3 scale to 1.26, 0.71 and 0.60 as the history
-        grew from 40 to 200 samples, all summed into one linear model."""
+        """The review saw the scaled value of stagnation_streak=3 drift as history grew.
+
+        It scaled to 1.26, 0.71 and 0.60 as the history grew from 40 to 200 samples, all
+        summed into one linear model.
+        """
         history: dict[str, list[float]] = {}
         caps: dict[str, float] = {}
         seen: list[float] = []

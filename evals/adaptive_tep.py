@@ -162,8 +162,11 @@ TEP_CRITIC_UNPARSED = "unparsed"
 
 
 def _parse_score(value: Any) -> float | None:
-    """A finite numeric score, or ``None``; accepts numbers and strings like ``"7"`` or
-    ``"7/10"`` (a bare ``float()`` raised on such strings)."""
+    """A finite numeric score, or ``None``.
+
+    Accepts numbers and strings like ``"7"`` or ``"7/10"`` (a bare ``float()`` raised on
+    such strings).
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -654,8 +657,10 @@ class AdaptiveTepController:
         self.latest_traces: dict[str, TepNodeTrace] = {}
 
     def save(self) -> str:
-        """Write the state; returns ``""`` or the error (ATT-17: failures were swallowed,
-        so later cases silently started from stale state)."""
+        """Write the state; returns ``""`` or the error.
+
+        ATT-17: failures were swallowed, so later cases silently started from stale state.
+        """
         if not self.state_path:
             return ""
         try:

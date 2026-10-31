@@ -44,10 +44,12 @@ def filter_snapshot(snapshot: dict[str, Any], detail: DetailLevel = "crash") -> 
 
     Args:
         snapshot: Expanded-key snapshot dict (not compact).
-        detail: One of "crash", "full", "context".
+        detail: One of ``"crash"``, ``"full"``, or ``"context"``.
 
     Returns:
-        Filtered copy of the snapshot. Does not mutate the original.
+        Filtered copy of the snapshot. At ``"crash"`` level, ``frames`` holds only a
+        deep copy of the crash frame and ``crash_frame_index`` is reset to 0. Does not
+        mutate the original.
 
     Raises:
         ValueError: If snapshot appears to use compact keys.

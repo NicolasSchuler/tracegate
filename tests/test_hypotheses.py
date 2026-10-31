@@ -809,8 +809,10 @@ class TestGenerateHypotheses:
             _detectors.remove(_boom)
 
     def test_deduplication_by_pattern_and_description(self) -> None:
-        """CAP-16: distinct hypotheses of one pattern are kept (up to a cap); exact
-        duplicates once; max_per_pattern=1 keeps only the first, as before."""
+        """CAP-16: distinct hypotheses of one pattern are kept (up to a cap).
+
+        Exact duplicates are kept once; max_per_pattern=1 keeps only the first, as before.
+        """
         from llmdebug.hypotheses import _detectors
 
         def _duplicate_file_detector(snapshot: dict[str, Any]) -> list[Hypothesis]:

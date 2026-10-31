@@ -258,3 +258,18 @@ def test_emit_calls_handle_error_when_formatting_fails(monkeypatch):
 def test_uninstall_is_noop_when_not_installed():
     uninstall_log_handler()
     assert get_recent_logs() == []
+
+
+def test_get_recent_logs_zero_limit_returns_nothing():
+    """``max_records=0`` must return no records, not every record (``records[-0:]``)."""
+    install_log_handler(max_records=10)
+
+    logger = logging.getLogger("test_zero_limit")
+    logger.setLevel(logging.DEBUG)
+    for i in range(3):
+        logger.info(f"Message {i}")
+
+    assert get_recent_logs(max_records=0) == []
+    assert get_recent_logs(max_records=-1) == []
+    assert len(get_recent_logs(max_records=None)) == 3
+    assert len(get_recent_logs(max_records=2)) == 2

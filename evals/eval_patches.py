@@ -41,9 +41,9 @@ class _ParsedDiffEntry:
 
 
 def _diff_lines(text: str) -> list[str]:
-    """Split on ``\\n`` or ``\\r\\n`` only (LLM-15).
+    r"""Split on ``\n`` or ``\r\n`` only (LLM-15).
 
-    ``str.splitlines`` also splits on form feeds, ``\\x1c``-``\\x1e``, ``\\x85`` and
+    ``str.splitlines`` also splits on form feeds, ``\x1c``-``\x1e``, ``\x85`` and
     U+2028, which can appear inside source lines.
     """
     lines = text.split("\n")
@@ -349,11 +349,11 @@ def _patch_sanitize_line_reasons(line: str) -> list[str]:
 
 
 def _run_patch_sanitization(*, diff: str) -> tuple[bool, dict[str, Any]]:
-    """Scan added lines in a diff for malformed patch artifacts.
+    r"""Scan added lines in a diff for malformed patch artifacts.
 
     Returns (passed, details_dict) where *passed* is ``False`` when an added line in a
     Python file has one of the artifacts ``_patch_sanitize_line_reasons`` checks for: a
-    backslash before ``Exception``, a literal ``\\n``/``\\t`` outside a string literal,
+    backslash before ``Exception``, a literal ``\n``/``\t`` outside a string literal,
     or an ``await`` line ending in ``",``. Raw diff headers and markdown fences inside
     added lines are not checked (ATT-19).
     """
@@ -977,7 +977,7 @@ _NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
 
 
 def _keepends_lines(text: str) -> list[str]:
-    """Split on ``\\n`` only, keeping terminators; a ``\\r`` stays part of its line."""
+    r"""Split on ``\n`` only, keeping terminators; a ``\r`` stays part of its line."""
     lines = text.split("\n")
     out = [line + "\n" for line in lines[:-1]]
     if lines[-1]:
@@ -986,11 +986,11 @@ def _keepends_lines(text: str) -> list[str]:
 
 
 def _build_diff_from_changes(changes: list[tuple[str, str, str]]) -> str:
-    """Build a git-style diff from ``(path, before, after)`` texts.
+    r"""Build a git-style diff from ``(path, before, after)`` texts.
 
-    Lines are split on ``\\n`` only and a missing final newline gets the standard
-    marker (LLM-15): ``str.splitlines`` also split on form feeds, ``\\x1c``-``\\x1e``,
-    ``\\x85`` and U+2028, and dropped ``\\r``, so the diff didn't describe the file.
+    Lines are split on ``\n`` only and a missing final newline gets the standard
+    marker (LLM-15): ``str.splitlines`` also split on form feeds, ``\x1c``-``\x1e``,
+    ``\x85`` and U+2028, and dropped ``\r``, so the diff didn't describe the file.
     """
     parts: list[str] = []
     for path, before, after in changes:

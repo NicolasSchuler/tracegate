@@ -105,7 +105,7 @@ class TestCollectGitEvidenceRefsBranches:
         assert refs == ["git_crash_file:f.py"]
 
     def test_blame_missing(self) -> None:
-        """blame key absent from crash_file → no blame ref."""
+        """A blame key absent from crash_file → no blame ref."""
         enhanced = {"crash_file": {"file_rel": "f.py"}}
         refs = collect_git_evidence_refs(enhanced)
         assert refs == ["git_crash_file:f.py"]

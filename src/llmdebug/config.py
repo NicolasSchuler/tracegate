@@ -38,21 +38,46 @@ class SnapshotConfig:
     """Configuration for debug snapshot capture.
 
     The same object can be reused across the public capture entry points
-    (`debug_snapshot`, `snapshot_section`, hooks, middleware). A few options
-    are especially important when configuring behavior:
+    (``debug_snapshot``, ``snapshot_section``, hooks, middleware).
 
-    - `source_mode` / `locals_mode` control how much code and local state is
-      captured.
-    - `redaction_profile` and the `redact_*` overrides control privacy. Omitted
-      overrides inherit from the selected profile (or the hard default when no
-      profile is selected). Public attributes are always concrete after
-      construction.
-    - `include_args` separates function arguments from other locals in frame
-      summaries.
-    - `include_coverage` only has an effect when pytest-plugin capture runs
-      alongside pytest-cov.
-    - `output_format` selects between readability (`json`) and smaller
-      context-efficient encodings (`json_compact`, `toon`).
+    ``redaction_profile`` and the ``redact*`` overrides control privacy. Omitted
+    overrides inherit from the selected profile (or the hard default when no
+    profile is selected). Public attributes are always concrete after
+    construction; use :meth:`with_updates` to change redaction settings.
+
+    Attributes:
+        out_dir: Directory for snapshots, traceback sidecars, and the ``latest`` pointer.
+        frames: Number of innermost stack frames to capture.
+        source_context: Source lines to include before and after each frame's line.
+        source_mode: Source snippets for ``"all"`` frames, ``"crash_only"``, or ``"none"``.
+        locals_mode: ``"safe"`` serializes locals, ``"meta"`` records only type and size
+            hints, and ``"none"`` skips them.
+        max_str: Maximum string length before truncation (at least 13, to fit the marker).
+        max_items: Maximum entries kept per collection, mapping, and locals dict.
+        redaction_profile: Optional ``"dev"``, ``"ci"``, or ``"prod"`` redaction preset.
+        redact: Text redaction patterns applied to captured strings.
+        redact_keys: Also redact dict keys and local names; colliding keys get suffixes.
+        redact_traceback: Redact the formatted traceback text.
+        redact_exception_strings: Redact exception messages, args, and notes.
+        include_env: Record Python version, executable, platform, cwd, and argv.
+        debug: Emit non-fatal capture warnings as diagnostics.
+        max_snapshots: Snapshots to keep in ``out_dir``; 0 means unlimited.
+        include_modules: Module-name prefixes of frames to keep; the crash frame is always
+            kept. ``None`` keeps all frames.
+        max_exception_depth: Recursion limit for exception groups, causes, and contexts.
+        lock_timeout: Seconds to wait for the output-directory file lock.
+        include_git: Capture git commit, branch, and dirty status.
+        git_dirty_mode: Dirty-check strategy when ``include_git`` is set.
+        include_array_stats: Compute min/max/mean/std for arrays.
+        include_args: Separate function arguments from other locals in frame summaries.
+        categorize_errors: Auto-classify the exception and attach a suggestion.
+        include_async_context: Capture asyncio task info and mark coroutine frames.
+        capture_logs: Capture recent log records.
+        log_max_records: Maximum number of log records to capture.
+        output_format: ``"json"`` for readability, or the smaller context-efficient
+            ``"json_compact"`` and ``"toon"`` encodings.
+        include_coverage: Include pytest-cov data; only has an effect when pytest-plugin
+            capture runs alongside pytest-cov.
     """
 
     out_dir: str = ".llmdebug"
@@ -106,6 +131,12 @@ class SnapshotConfig:
     )
 
     def __post_init__(self) -> None:
+        """Validate settings and resolve inherited redaction settings to concrete values.
+
+        Raises:
+            ValueError: If a setting is invalid, or ``dataclasses.replace()`` changed
+                ``redaction_profile`` while redaction settings were inherited.
+        """
         _validate_snapshot_config(self)
         inheritance = _resolve_redaction_inheritance(
             config=self,
@@ -118,7 +149,7 @@ class SnapshotConfig:
 
     @property
     def has_explicit_redaction_settings(self) -> bool:
-        """Whether a profile or any redaction override was supplied by the caller."""
+        """Return whether a profile or any redaction override was supplied by the caller."""
         return self.redaction_profile is not None or not all(self._redaction_inheritance or ())
 
     def with_updates(self, **changes: object) -> SnapshotConfig:
@@ -128,6 +159,16 @@ class SnapshotConfig:
         an explicitly repeated resolved value when the profile also changes.
         This method retains the unresolved intent and applies only the fields
         present in ``changes``.
+
+        Args:
+            **changes: Public field names mapped to their new values.
+
+        Returns:
+            A new config; redaction settings not in *changes* that were inherited
+            are re-resolved against the (possibly new) profile.
+
+        Raises:
+            TypeError: If *changes* names an unknown or private field.
         """
         public_fields = {
             config_field.name
@@ -281,5 +322,11 @@ def resolve_snapshot_config(config: SnapshotConfig) -> SnapshotConfig:
 
     Redaction inheritance is resolved during ``SnapshotConfig`` construction,
     so this boundary helper is intentionally an idempotent compatibility seam.
+
+    Args:
+        config: Config to prepare for capture.
+
+    Returns:
+        The same *config* object.
     """
     return config

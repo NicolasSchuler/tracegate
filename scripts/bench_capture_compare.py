@@ -1,4 +1,4 @@
-"""Compare capture-overhead benchmark medians between two pytest-benchmark JSON files.
+r"""Compare capture-overhead benchmark medians between two pytest-benchmark JSON files.
 
 Reads two pytest-benchmark JSON result files and prints a side-by-side table of
 median timings with absolute and percentage deltas, making it easy to spot
@@ -10,8 +10,8 @@ Usage
     python scripts/bench_capture_compare.py <baseline.json> <current.json>
 
     # Example:
-    python scripts/bench_capture_compare.py \\
-        .benchmarks/capture-overhead-baseline.json \\
+    python scripts/bench_capture_compare.py \
+        .benchmarks/capture-overhead-baseline.json \
         .benchmarks/capture-overhead-current.json
 """
 

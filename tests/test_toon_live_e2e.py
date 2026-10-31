@@ -151,7 +151,7 @@ class TestToonVsJsonComparison:
 class TestRoundTripFidelity:
     @pytest.mark.skipif(not _toons_installed(), reason="toons not installed")
     def test_full_roundtrip_all_fields(self, realistic_snapshot: dict[str, Any]) -> None:
-        """encode → decode should preserve all snapshot fields."""
+        """An encode → decode round trip should preserve all snapshot fields."""
         encoded = encode_for_llm(realistic_snapshot, use_toon=True, use_compact_keys=True)
         decoded = decode_for_llm(encoded, expand=True)
 

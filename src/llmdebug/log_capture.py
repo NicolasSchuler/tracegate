@@ -13,13 +13,27 @@ class LLMDebugLogHandler(logging.Handler):
     """Memory handler that stores recent log records in a thread-safe deque."""
 
     def __init__(self, max_records: int = 100):
+        """Create a handler with an empty, bounded record buffer.
+
+        Args:
+            max_records: Capacity of the buffer; the oldest records are dropped once
+                it is full.
+        """
         super().__init__()
         self.max_records = max_records
         self.records: deque[dict[str, Any]] = deque(maxlen=max_records)
         self._lock = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Store log record as a dict."""
+        """Store *record* as a plain dict in the bounded buffer.
+
+        The dict holds ``timestamp`` (UTC ISO 8601), ``level``, ``logger``, the
+        formatted ``message``, ``filename``, ``lineno``, and ``exc_type`` when the
+        record carries exception info. Failures are reported through ``handleError``.
+
+        Args:
+            record: The log record emitted by the logging framework.
+        """
         try:
             entry = {
                 "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
@@ -39,10 +53,22 @@ class LLMDebugLogHandler(logging.Handler):
             self.handleError(record)
 
     def get_records(self, max_records: int | None = None) -> list[dict[str, Any]]:
-        """Get recent log records, oldest first."""
+        """Return the stored log records, oldest first.
+
+        Args:
+            max_records: Upper bound on how many of the newest records to return;
+                None returns every stored record and 0 returns none.
+
+        Returns:
+            A new list of the stored record dicts, oldest first.
+        """
         with self._lock:
             records = list(self.records)
-        if max_records is not None and len(records) > max_records:
+        if max_records is None:
+            return records
+        if max_records <= 0:
+            return []
+        if len(records) > max_records:
             return records[-max_records:]
         return records
 
@@ -58,10 +84,11 @@ _handler_lock = threading.Lock()
 
 
 def install_log_handler(max_records: int = 100) -> None:
-    """Install the log handler on the root logger.
+    """Install the shared log handler on the root logger.
 
-    This function is idempotent - calling it multiple times is safe.
-    Call this early in your application to capture logs before crashes.
+    Idempotent: a repeated call keeps the installed handler and, if *max_records*
+    differs, resizes its buffer, keeping the newest records. Call this early in
+    your application to capture logs before crashes.
 
     Args:
         max_records: Maximum number of log records to keep in memory.
@@ -84,14 +111,14 @@ def install_log_handler(max_records: int = 100) -> None:
 
 
 def get_recent_logs(max_records: int | None = None) -> list[dict[str, Any]]:
-    """Get recent log records for inclusion in snapshots.
+    """Return recent log records for inclusion in snapshots.
 
     Args:
-        max_records: Maximum number of records to return (oldest first).
-                    None returns all stored records.
+        max_records: Upper bound on how many of the newest records to return;
+            None returns every stored record and 0 returns none.
 
     Returns:
-        List of log record dicts, oldest first.
+        Log record dicts, oldest first; empty when the handler is not installed.
     """
     with _handler_lock:
         if _handler is None:
@@ -100,9 +127,9 @@ def get_recent_logs(max_records: int | None = None) -> list[dict[str, Any]]:
 
 
 def uninstall_log_handler() -> None:
-    """Remove the log handler from the root logger.
+    """Remove the log handler from the root logger and discard its records.
 
-    Primarily useful for testing cleanup.
+    A no-op when the handler is not installed. Primarily useful for test cleanup.
     """
     global _handler
     with _handler_lock:

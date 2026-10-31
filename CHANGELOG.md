@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+- Core library: capture-time context redaction now fails closed. When `redact_jsonlike` raised (for example `redact_keys=True` with a non-string dict key in `extra`), the whole context (env, git, logs, extra) was written unredacted with only a warning; the context is now omitted and the warning says so. Metadata-only locals (`locals_mode="meta"`) no longer record the `len` or `shape` of a secret-named local while any redaction pattern is active, matching what `docs/configuration.md` already promised. `log_max_records=0` (`LLMDEBUG_LOG_MAX_RECORDS=0`) captures no log records instead of every buffered record.
 - Corrections from a codex review (gpt-6.1-sol) of every remediation branch and the decision-model advisor (2026-10-06; `codex <branch>#<n>` in commit messages):
   - Evidence enforcement: a restricted adaptive action whose Stage-A requests are all filtered no longer receives the whole-project file context in Stage-B (ATT-03). `adaptive_snapshot_included`, `stage_b_snapshot_in_prompt` and `evidence_chars_by_type` describe the prompt that was delivered, not the evidence that was requested (ATT-03, ATT-06). The Stage-A fallback bundle no longer reads a crash-file path outside the work directory (ATT-20). Native conditions record a `case_information` manifest like the baselines (BAS-07).
   - Run settings: `--deterministic --seed` with a negative or ≥2³² seed no longer makes every pytest subprocess fail to start (ORC-01). A run resumed with `--allow-settings-drift` stays resumable on later invocations (ORC-04), and resuming a results file from an older record schema is refused. `patcher_config` and the settings fingerprint now carry the policy defaults generation, the evidence-policy revision, the attempt-accounting version, the retry-gate limit, the effective test-oracle policy, the snapshot schema of the executor that actually runs pytest (CAP-20) and, for baselines, the resolved generation contract.
@@ -188,6 +189,7 @@
 
 ### Documentation
 
+- Docstrings follow the Google style and Ruff's `D` (pydocstyle) rules enforce it: every public API in `src/llmdebug` documents its arguments, return value, raised exceptions and dataclass attributes, and about 25 inaccurate descriptions were corrected along the way. Outside the package, existing docstrings must follow the same format but none are required.
 - `docs/baseline-adapters.md` carries a `--baseline-*` flag table generated from the parser by `evals.doc_sync` (X-08). The hand-written defaults had drifted.
 - Align architecture, coverage, testing, and first-run guidance with the executable repository contracts.
 

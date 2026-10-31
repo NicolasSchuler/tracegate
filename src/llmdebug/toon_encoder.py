@@ -14,19 +14,19 @@ from typing import Any
 
 
 def encode_snapshot_toon(payload: dict[str, Any]) -> str:
-    """Encode snapshot to TOON format.
+    """Encode a snapshot to TOON format.
 
     Uses TOON's tabular format for uniform arrays (frames, source snippets)
     and standard encoding for nested/irregular data (locals, exception).
 
     Args:
-        payload: Snapshot data dictionary
+        payload: Snapshot data dictionary.
 
     Returns:
-        TOON-encoded string
+        TOON-encoded string.
 
     Raises:
-        ImportError: If toons package is not installed
+        ImportError: If the optional ``toons`` package is not installed.
     """
     try:
         import toons  # pyright: ignore[reportMissingImports]
@@ -41,16 +41,16 @@ def encode_snapshot_toon(payload: dict[str, Any]) -> str:
 
 
 def decode_snapshot_toon(content: str) -> dict[str, Any]:
-    """Decode TOON-formatted snapshot.
+    """Decode a TOON-formatted snapshot.
 
     Args:
-        content: TOON-encoded string
+        content: TOON-encoded string.
 
     Returns:
-        Snapshot data dictionary
+        Snapshot data dictionary.
 
     Raises:
-        ImportError: If toons package is not installed
+        ImportError: If the optional ``toons`` package is not installed.
     """
     try:
         import toons  # pyright: ignore[reportMissingImports]

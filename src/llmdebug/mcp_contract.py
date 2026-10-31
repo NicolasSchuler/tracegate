@@ -33,6 +33,12 @@ def validate_response_format(response_format: str) -> str | None:
 
     Returns an error string instead of raising so callers can surface the
     problem in a stable MCP error envelope when needed.
+
+    Args:
+        response_format: Requested envelope format; ``text`` and ``json`` are valid.
+
+    Returns:
+        An error message for an invalid format, or ``None`` when it is valid.
     """
     if response_format not in VALID_RESPONSE_FORMATS:
         return f"Invalid response_format {response_format!r}. Use 'text' or 'json'."
@@ -44,6 +50,12 @@ def validate_evidence_schema(evidence_schema: str) -> str | None:
 
     ``summary`` is the stable cross-tool contract. ``full`` keeps those stable
     fields and may append additive tool-specific details.
+
+    Args:
+        evidence_schema: Requested evidence schema; ``summary`` and ``full`` are valid.
+
+    Returns:
+        An error message for an invalid schema, or ``None`` when it is valid.
     """
     if evidence_schema not in VALID_EVIDENCE_SCHEMAS:
         return f"Invalid evidence_schema {evidence_schema!r}. Use 'summary' or 'full'."
@@ -55,6 +67,12 @@ def normalized_evidence_schema(evidence_schema: str) -> str:
 
     Invalid inputs degrade to ``summary`` so JSON error payloads still expose a
     predictable evidence block.
+
+    Args:
+        evidence_schema: Requested evidence schema, possibly invalid.
+
+    Returns:
+        *evidence_schema* when it is valid, else ``summary``.
     """
     if evidence_schema in VALID_EVIDENCE_SCHEMAS:
         return evidence_schema
@@ -66,6 +84,10 @@ def default_evidence_fields() -> StableEvidencePayload:
 
     Every JSON success or error envelope starts from this shape so clients can
     rely on these keys being present even when a tool cannot load a snapshot.
+
+    Returns:
+        A new payload with empty exception, crash frame (index ``-1``), locals
+        summary, repro, evidence IDs, and sections.
     """
     return {
         "exception": {"type": "", "message": ""},
@@ -78,7 +100,16 @@ def default_evidence_fields() -> StableEvidencePayload:
 
 
 def rca_view(rca_record: Mapping[str, Any]) -> dict[str, Any]:
-    """Project a full RCA record down to the stable MCP-facing subset."""
+    """Project a full RCA record down to the stable MCP-facing subset.
+
+    Args:
+        rca_record: Full RCA attempt record.
+
+    Returns:
+        The attempt and session IDs, state, failure signature, repeat count, allowed
+        actions, next required steps, gate feedback, and gate warnings (under
+        ``warnings``).
+    """
     return {
         "attempt_id": rca_record.get("attempt_id"),
         "session_id": rca_record.get("session_id"),
@@ -101,9 +132,18 @@ def build_text_response(
 ) -> str:
     """Render the human-readable MCP response form.
 
-    The text format is optimized for direct display. Structured diff details
-    and the RCA prompt contract are appended only when the caller asked for
-    them.
+    The text format is optimized for direct display. The structured diff is
+    appended when one is given, and the RCA view and prompt contract only when
+    *with_rca* is set and a record is available.
+
+    Args:
+        body: Rendered tool output.
+        rca_record: RCA attempt record to summarize, if any.
+        structured_delta: Structured diff to append as JSON, if any.
+        with_rca: Whether to append the RCA view and prompt contract.
+
+    Returns:
+        The body followed by the optional sections, separated by blank lines.
     """
     sections = [body]
     if structured_delta is not None:
@@ -138,6 +178,21 @@ def build_json_response(
     ``summary`` schema returns only the stable evidence block. ``full`` keeps
     those stable fields and appends additive details such as structured diffs
     and tool-specific payload fields.
+
+    Args:
+        tool: Name of the MCP tool, echoed in the envelope.
+        body: Rendered tool output, stored as ``evidence.summary``.
+        rca_record: RCA attempt record to embed, if any.
+        structured_delta: Structured diff, included as ``evidence.diff`` in ``full``
+            mode.
+        evidence_schema: ``summary`` or ``full``.
+        with_rca: Whether to embed the RCA record, view, and prompt contract.
+        evidence_payload: Stable evidence fields, which override the defaults, plus
+            tool-specific fields that only ``full`` mode includes.
+        evidence_sections: Rendered sections that replace ``evidence.sections``.
+
+    Returns:
+        The JSON-encoded response envelope.
     """
     stable = default_evidence_fields()
     evidence: dict[str, Any] = dict(stable)
@@ -190,7 +245,22 @@ def render_tool_response(
     """Dispatch to the requested MCP response format.
 
     JSON responses always use the stable envelope defined in ``mcp_types``.
-    Text responses return only the rendered body plus optional RCA sections.
+    Any other format renders text: the body plus the optional structured diff and
+    RCA sections.
+
+    Args:
+        tool: Name of the MCP tool, echoed in JSON envelopes.
+        body: Rendered tool output.
+        response_format: ``json`` for the envelope; any other value renders text.
+        evidence_schema: ``summary`` or ``full`` evidence detail for JSON envelopes.
+        with_rca: Whether to include the RCA block.
+        rca_record: RCA attempt record to include, if any.
+        structured_delta: Structured diff to include, if any.
+        evidence_payload: Evidence fields for JSON envelopes.
+        evidence_sections: Rendered sections for JSON envelopes.
+
+    Returns:
+        The rendered response.
     """
     if response_format == "json":
         return build_json_response(
@@ -226,6 +296,20 @@ def render_tool_error(
     Text mode returns only the message. JSON mode preserves the normal envelope
     shape, marks metadata status as ``error``, and includes a stable empty
     evidence payload so clients can parse failures uniformly.
+
+    Args:
+        tool: Name of the MCP tool, echoed in the envelope.
+        response_format: ``json`` for the envelope; any other value returns the bare
+            message.
+        evidence_schema: Requested evidence schema; invalid values are reported as
+            ``summary``.
+        with_rca: Whether the caller requested RCA, echoed in the metadata.
+        code: Machine-readable error code.
+        message: Human-readable error description.
+        details: Optional structured error context.
+
+    Returns:
+        The error message in text mode, or the JSON-encoded error envelope.
     """
     if response_format != "json":
         return message
@@ -262,7 +346,20 @@ def render_invalid_response_format_error(
     evidence_schema: str,
     with_rca: bool,
 ) -> str:
-    """Render a stable JSON error for an invalid ``response_format`` value."""
+    """Render a stable JSON error for an invalid ``response_format`` value.
+
+    Args:
+        tool: Name of the MCP tool, echoed in the envelope.
+        response_format: The rejected format value.
+        evidence_schema: Requested evidence schema.
+        with_rca: Whether the caller requested RCA.
+
+    Returns:
+        A JSON ``INVALID_ARGUMENT`` error envelope listing the allowed formats.
+
+    Raises:
+        ValueError: If *response_format* is actually valid.
+    """
     message = validate_response_format(response_format)
     if message is None:
         raise ValueError("response_format is valid; cannot render invalid-format error")

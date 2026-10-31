@@ -205,7 +205,17 @@ def compact_keys(
     data: dict[str, Any] | list[Any] | Any,
     _in_user_data: bool = False,
 ) -> dict[str, Any] | list[Any] | Any:
-    """Recursively replace keys with short versions."""
+    """Recursively replace keys with their short ``KEY_MAP`` versions.
+
+    Keys inside user-data subtrees (locals, args, params, fixtures, markers) are kept.
+
+    Args:
+        data: Snapshot structure to compact (dict, list, or primitive).
+        _in_user_data: Internal flag; True treats *data* as a user-data subtree.
+
+    Returns:
+        A new structure with framework keys abbreviated.
+    """
     return _transform_keys(data, KEY_MAP, _in_user_data=_in_user_data)
 
 
@@ -213,7 +223,17 @@ def expand_keys(
     data: dict[str, Any] | list[Any] | Any,
     _in_user_data: bool = False,
 ) -> dict[str, Any] | list[Any] | Any:
-    """Recursively restore original keys from short versions."""
+    """Recursively restore original keys from short versions.
+
+    Retired short keys from ``LEGACY_REVERSE_KEY_MAP`` are expanded as well.
+
+    Args:
+        data: Compact snapshot structure (dict, list, or primitive).
+        _in_user_data: Internal flag; True treats *data* as a user-data subtree.
+
+    Returns:
+        A new structure with full key names.
+    """
     return _transform_keys(data, REVERSE_KEY_MAP, _in_user_data=_in_user_data)
 
 
@@ -223,6 +243,13 @@ def is_compact_snapshot(data: dict[str, Any]) -> bool:
     Prefers an explicit format marker written by recent versions.
     Falls back to a conservative heuristic for backward compatibility with
     compact snapshots produced before the marker existed.
+
+    Args:
+        data: Top-level snapshot dict as loaded from disk.
+
+    Returns:
+        True if the compact marker is set, or if no canonical full keys are present
+        and at least one compact structural key is.
     """
     if data.get("__llmdebug_compact__") == 1:
         return True

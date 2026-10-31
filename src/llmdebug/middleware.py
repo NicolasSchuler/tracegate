@@ -30,7 +30,7 @@ _PII_COMPILED = [re.compile(p) for p in PII_PATTERNS]
 
 
 def _redact_query_string(qs: str) -> str:
-    """Apply PII patterns to a query string."""
+    """Replace matches of the built-in PII patterns in *qs* with ``[REDACTED]``."""
     for pattern in _PII_COMPILED:
         qs = pattern.sub("[REDACTED]", qs)
     return qs
@@ -97,9 +97,13 @@ class LLMDebugWSGIMiddleware:
     Args:
         app: The WSGI application to wrap.
         out_dir: Snapshot output directory.
-        pii_safe: Enable built-in PII redaction patterns.
-        redaction_profile: Built-in redaction profile override.
-        max_captures_per_minute: Rate limit per unique error signature.
+        pii_safe: Default to the ``"prod"`` redaction profile (built-in PII patterns
+            plus traceback and exception-string redaction) and reject a custom
+            ``redact`` override.
+        redaction_profile: Named redaction profile (``"dev"``, ``"ci"``, or
+            ``"prod"``) that overrides the one *pii_safe* selects.
+        max_captures_per_minute: Captures allowed per unique error signature
+            (exception type, file, line) in a sliding 60-second window.
         **config_overrides: Additional :class:`SnapshotConfig` fields.
     """
 
@@ -113,6 +117,7 @@ class LLMDebugWSGIMiddleware:
         max_captures_per_minute: int = 10,
         **config_overrides: Any,
     ) -> None:
+        """Wrap *app* and build its production-safe snapshot config and rate limiter."""
         self.app = app
         self._cfg = _build_production_config(
             out_dir,
@@ -123,6 +128,7 @@ class LLMDebugWSGIMiddleware:
         self._limiter = _RateLimiter(max_captures_per_minute, 60.0)
 
     def _capture_wsgi_exception(self, exc: Exception, environ: dict[str, Any]) -> None:
+        """Capture *exc* with the request context, unless it has no traceback."""
         tb = exc.__traceback__
         if tb is None:
             return
@@ -130,6 +136,22 @@ class LLMDebugWSGIMiddleware:
         _capture_safely("wsgi_error", exc, tb, self._cfg, self._limiter, extra=extra)
 
     def __call__(self, environ: dict[str, Any], start_response: Callable[..., Any]) -> Any:
+        """Run the wrapped app, capturing any exception it raises before re-raising it.
+
+        Exceptions raised while the response body is iterated are captured too, and
+        the app's iterable is closed once iteration ends.
+
+        Args:
+            environ: The WSGI environment of the request.
+            start_response: The WSGI ``start_response`` callable, passed through.
+
+        Returns:
+            An iterable over the wrapped app's response body.
+
+        Raises:
+            Exception: Whatever the wrapped app raises, re-raised unchanged after
+                capture.
+        """
         try:
             iterable = self.app(environ, start_response)
         except Exception as exc:
@@ -137,6 +159,7 @@ class LLMDebugWSGIMiddleware:
             raise
 
         def _iter_with_capture() -> Any:
+            """Yield the app's body, capturing iteration errors and closing the iterable."""
             try:
                 yield from iterable
             except Exception as exc:
@@ -181,9 +204,13 @@ class LLMDebugASGIMiddleware:
     Args:
         app: The ASGI application to wrap.
         out_dir: Snapshot output directory.
-        pii_safe: Enable built-in PII redaction patterns.
-        redaction_profile: Built-in redaction profile override.
-        max_captures_per_minute: Rate limit per unique error signature.
+        pii_safe: Default to the ``"prod"`` redaction profile (built-in PII patterns
+            plus traceback and exception-string redaction) and reject a custom
+            ``redact`` override.
+        redaction_profile: Named redaction profile (``"dev"``, ``"ci"``, or
+            ``"prod"``) that overrides the one *pii_safe* selects.
+        max_captures_per_minute: Captures allowed per unique error signature
+            (exception type, file, line) in a sliding 60-second window.
         **config_overrides: Additional :class:`SnapshotConfig` fields.
     """
 
@@ -197,6 +224,7 @@ class LLMDebugASGIMiddleware:
         max_captures_per_minute: int = 10,
         **config_overrides: Any,
     ) -> None:
+        """Wrap *app* and build its production-safe snapshot config and rate limiter."""
         self.app = app
         self._cfg = _build_production_config(
             out_dir,
@@ -212,6 +240,20 @@ class LLMDebugASGIMiddleware:
         receive: Callable[..., Any],
         send: Callable[..., Any],
     ) -> None:
+        """Run the wrapped app, capturing any exception it raises before re-raising it.
+
+        Only ``http`` and ``websocket`` scopes are captured; other scopes, such as
+        ``lifespan``, pass straight through.
+
+        Args:
+            scope: The ASGI connection scope.
+            receive: The ASGI ``receive`` callable, passed through.
+            send: The ASGI ``send`` callable, passed through.
+
+        Raises:
+            Exception: Whatever the wrapped app raises, re-raised unchanged after
+                capture.
+        """
         if scope.get("type") not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return

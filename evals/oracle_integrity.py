@@ -272,8 +272,11 @@ def run_succeeded(*, returncode: int, junit_requested: bool, counts: PytestCount
 
 
 def verified_success(*, returncode: int, counts: PytestCounts | None) -> bool:
-    """Success needs exit code 0 and a report with at least one executed test, no failures
-    and no errors. A missing report (the process died or never wrote one) is a failure."""
+    """Success needs exit code 0 and a report with at least one executed test.
+
+    The report must also show no failures and no errors. A missing report (the process
+    died or never wrote one) is a failure.
+    """
     if returncode != 0 or counts is None:
         return False
     return counts.executed >= 1 and counts.failures == 0 and counts.errors == 0

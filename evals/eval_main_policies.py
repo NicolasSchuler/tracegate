@@ -78,7 +78,8 @@ def build_policy_controllers(inputs: PolicyControllerInputs) -> PolicyController
     """Create the run's online helper policy and per-condition budget policies.
 
     Also records the warm-start source and result in *patcher_config* and reports
-    load errors on *display*. Moved verbatim from ``run_main_flow`` (X-01)."""
+    load errors on *display*. Moved verbatim from ``run_main_flow`` (X-01).
+    """
     _close_run_results_io = inputs._close_run_results_io
     args = inputs.args
     artifacts_root = inputs.artifacts_root

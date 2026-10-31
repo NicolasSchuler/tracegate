@@ -15,10 +15,13 @@ from typing import Any, cast
 
 
 def _match_file(measured_files: set[str], target: str) -> str | None:
-    """Find the matching measured file for a target path.
+    """Find the measured-file key that corresponds to *target*.
 
-    Tries exact match, then realpath match. Returns the measured-file key
-    or None if not found.
+    Tries an exact match, then *target*'s realpath, then the realpath of each
+    measured file (for symlinked sources).
+
+    Returns:
+        The matching key from *measured_files*, or None if nothing matches.
     """
     if target in measured_files:
         return target
@@ -46,17 +49,18 @@ def _extract_file_coverage(
 ) -> dict[str, Any] | None:
     """Extract coverage data for a single file.
 
-    Uses ``cov.analysis2()`` for clean executed/missing split.
-    Falls back to ``CoverageData.lines()`` if analysis2 fails.
+    Uses ``cov.analysis2()`` for a clean executed/missing split and falls back to
+    ``CoverageData.lines()`` (executed lines only, so the line rate is unknown) if
+    that fails. Partially taken branches are added when branch data is available.
 
     Args:
-        cov: coverage.Coverage instance
-        measured_key: The file path as known to coverage
-        max_lines: If the file has more executable lines than this,
-                   return summary-only (counts + rate, no line lists)
+        cov: The ``coverage.Coverage`` instance.
+        measured_key: The file path as known to coverage.
+        max_lines: If the file has more executable lines than this, return a
+            summary only (counts and rate, no line lists).
 
     Returns:
-        Coverage dict or None on failure.
+        The file's coverage dict, or None if no data could be read.
     """
     missing_known = True
     try:
@@ -129,15 +133,17 @@ def get_coverage_for_frames(
     *,
     max_lines: int = 200,
 ) -> dict[str, dict[str, Any]] | None:
-    """Extract coverage data for files appearing in the stack trace.
+    """Extract coverage data for the files that appear in a stack trace.
 
     Args:
-        cov: coverage.Coverage instance from pytest-cov
-        frame_files: Absolute paths from the traceback
-        max_lines: Token budget — files with more executable lines get summary-only
+        cov: The ``coverage.Coverage`` instance from pytest-cov.
+        frame_files: File paths from the traceback; duplicates are ignored.
+        max_lines: Token budget; files with more executable lines get a summary
+            without line lists.
 
     Returns:
-        Dict mapping file paths to coverage data, or None if no data found.
+        A dict mapping each matched frame path (as given) to its coverage data, or
+        None if the coverage data is unreadable or empty, or no frame matched.
     """
     try:
         cov_data = cov.get_data()
@@ -173,15 +179,21 @@ def extract_coverage_from_plugin(
     tb: Any,
     warnings: list[str],
 ) -> dict[str, dict[str, Any]] | None:
-    """High-level entry point called from pytest_plugin.py.
+    """Collect pytest-cov coverage data for the files in a failing test's traceback.
 
-    Checks for pytest-cov, extracts coverage, returns the data dict
-    or None. Appends any warnings to the provided list.
+    This is the entry point used by the pytest plugin. It returns None without
+    touching coverage when ``LLMDEBUG_INCLUDE_COVERAGE`` is set to anything other
+    than ``1``/``true``/``yes``/``on`` or pytest-cov is not active, and saves the
+    in-memory coverage data before reading it.
 
     Args:
-        item: The pytest Item object
-        tb: The traceback object
-        warnings: List to append warning messages to
+        item: The failing test item; its config locates the pytest-cov plugin.
+        tb: The failure's traceback; its frames select the files to report.
+        warnings: List that collects warning messages for failed extraction steps.
+
+    Returns:
+        A dict mapping traceback file paths to coverage data, or None when coverage
+        is disabled, unavailable, or has no data for those files.
     """
     import traceback as tb_module
 

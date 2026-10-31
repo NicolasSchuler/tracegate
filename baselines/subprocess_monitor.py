@@ -75,7 +75,6 @@ def run_monitored_subprocess(
     excerpt_max_chars: int = 120,
 ) -> MonitoredSubprocessResult:
     """Run a subprocess while streaming live output/state progress updates."""
-
     base_payload = dict(progress_base_payload or {})
     should_track_progress = progress_callback is not None
     poll_interval = max(0.05, float(poll_interval_sec))

@@ -1,9 +1,9 @@
-"""Re-analysis audit for existing eval results (2026-10-04 review, Phase 2.4).
+r"""Re-analysis audit for existing eval results (2026-10-04 review, Phase 2.4).
 
 Usage::
 
-    python -m evals.reanalysis_audit evals/results/*.jsonl \\
-        [--a base_repair] [--b layered_adaptive_llm] \\
+    python -m evals.reanalysis_audit evals/results/*.jsonl \
+        [--a base_repair] [--b layered_adaptive_llm] \
         [--swebench-run-dir evals/swebench_runs/<id> ...] [--json audit.json]
 
 Part 1 recomputes headline metrics with the corrected analysis and, from the same

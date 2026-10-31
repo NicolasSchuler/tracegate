@@ -35,11 +35,9 @@ class LocalsSerializationBundle:
     Attributes:
         values: Serialized local variable values keyed by variable name.
         metadata: Per-variable type/shape metadata keyed by variable name.
-        truncated: ``True`` when the number of locals exceeded the
-            configured ``max_items`` limit and the result was clipped.
-        truncated_keys: Number of local variable keys that were dropped
-            due to the ``max_items`` limit (zero when *truncated* is
-            ``False``).
+        truncated: ``True`` when the locals exceeded ``max_items`` and the result was clipped.
+        truncated_keys: Number of locals dropped by the ``max_items`` limit (zero if not
+            *truncated*).
     """
 
     values: dict[str, Any]
@@ -49,7 +47,14 @@ class LocalsSerializationBundle:
 
 
 def compile_redactors(patterns: tuple[str | Pattern[str], ...] | None) -> list[Pattern[str]]:
-    """Compile regex patterns for redaction; invalid patterns are reported and skipped."""
+    """Compile regex patterns for redaction; invalid patterns are reported and skipped.
+
+    Args:
+        patterns: Pattern strings or precompiled patterns; ``None`` means none.
+
+    Returns:
+        A fresh list of compiled patterns that callers may mutate.
+    """
     # A fresh list per call: callers may mutate it without touching the shared cache.
     return list(_compile_redactors_cached(tuple(patterns or ())))
 
@@ -82,7 +87,14 @@ SENSITIVE_NAME_PATTERN = re.compile(f"(?i){SENSITIVE_NAMES}")
 
 
 def is_sensitive_name(name: str) -> bool:
-    """Whether a variable or key name marks its value as a secret."""
+    """Return whether a variable or key name marks its value as a secret.
+
+    Args:
+        name: Variable, argument, attribute, or dict key name.
+
+    Returns:
+        True if the name contains a ``SENSITIVE_NAMES`` term (case-insensitive).
+    """
     return SENSITIVE_NAME_PATTERN.search(name) is not None
 
 
@@ -91,7 +103,15 @@ def _is_sensitive_pair_name(first: Any) -> bool:
 
 
 def redact_text(text: str, redactors: list[Pattern[str]]) -> str:
-    """Apply redaction patterns to text."""
+    """Apply redaction patterns to text.
+
+    Args:
+        text: Text to redact.
+        redactors: Compiled patterns, applied in order.
+
+    Returns:
+        The text with every match replaced by ``[REDACTED]``.
+    """
     for rx in redactors:
         text = rx.sub(REDACTED, text)
     return text
@@ -125,13 +145,21 @@ def redact_jsonlike(
     *,
     redact_keys: bool = False,
 ) -> JsonLike:
-    """Recursively redact only string leaf values in JSON-like data.
+    """Recursively redact string leaf values (and optionally keys) in JSON-like data.
 
     This avoids the fragile serialize-then-regex-then-parse flow, where
     aggressive patterns can corrupt JSON structure. When any redactor is
     active, the whole value under a dict key with a sensitive name (see
     :func:`is_sensitive_name`) is replaced, whatever its type, and so is the
     second item of a ``[name, value]`` pair (a header or form field).
+
+    Args:
+        value: JSON-like data; tuples become lists and sets become stably sorted lists.
+        redactors: Compiled patterns; an empty list disables name-based redaction too.
+        redact_keys: Also redact dict keys; colliding keys get ``#2``-style suffixes.
+
+    Returns:
+        A redacted copy of *value*.
     """
     if isinstance(value, str):
         return redact_text(value, redactors)
@@ -170,14 +198,30 @@ def redact_jsonlike(
 
 
 def truncate_str(s: str, max_len: int) -> str:
-    """Truncate string with marker."""
+    """Truncate a string with a marker.
+
+    Args:
+        s: String to truncate.
+        max_len: Length above which *s* is truncated.
+
+    Returns:
+        *s* if it fits, else its first ``max_len - 12`` characters plus ``...[TRUNC]``.
+    """
     if len(s) <= max_len:
         return s
     return s[: max_len - 12] + "...[TRUNC]"
 
 
 def safe_repr(x: Any, cfg: SnapshotConfig) -> str:
-    """Get repr with fallback for unreprable objects."""
+    """Return a truncated ``repr`` with a fallback for unreprable objects.
+
+    Args:
+        x: Object to render.
+        cfg: Config supplying ``max_str``.
+
+    Returns:
+        The repr cut to ``max_str``, or ``<unreprable TypeName>`` if ``repr()`` raises.
+    """
     try:
         r = repr(x)
     except Exception:
@@ -186,7 +230,14 @@ def safe_repr(x: Any, cfg: SnapshotConfig) -> str:
 
 
 def is_array_like(x: Any) -> bool:
-    """Check if object is an array type (numpy, jax, torch, etc)."""
+    """Check if object is an array type (numpy, jax, torch, tensorflow, cupy).
+
+    Args:
+        x: Object to test.
+
+    Returns:
+        True if the type comes from one of those libraries and has a ``shape``.
+    """
     module = type(x).__module__
     return any(
         module.startswith(prefix) for prefix in ("numpy", "jax", "torch", "tensorflow", "cupy")
@@ -194,20 +245,38 @@ def is_array_like(x: Any) -> bool:
 
 
 def is_dataframe(x: Any) -> bool:
-    """Check if object is a pandas DataFrame."""
+    """Check if object is a pandas DataFrame.
+
+    Args:
+        x: Object to test.
+
+    Returns:
+        True for a type named ``DataFrame`` from a ``pandas`` module.
+    """
     return type(x).__module__.startswith("pandas") and type(x).__name__ == "DataFrame"
 
 
 def is_series(x: Any) -> bool:
-    """Check if object is a pandas Series."""
+    """Check if object is a pandas Series.
+
+    Args:
+        x: Object to test.
+
+    Returns:
+        True for a type named ``Series`` from a ``pandas`` module.
+    """
     return type(x).__module__.startswith("pandas") and type(x).__name__ == "Series"
 
 
 def get_tensor_device(arr: Any) -> str | None:
     """Get device string for PyTorch/JAX tensors.
 
-    Returns None for CPU (default) or if device cannot be determined.
-    Only returns non-None for non-CPU devices to highlight noteworthy info.
+    Args:
+        arr: Array-like object.
+
+    Returns:
+        The device string for non-CPU devices only, to highlight noteworthy info;
+        ``None`` for CPU (default) or if the device cannot be determined.
     """
     try:
         # PyTorch: arr.device -> device(type='cuda', index=0)
@@ -239,7 +308,11 @@ def get_tensor_device(arr: Any) -> str | None:
 def get_requires_grad(arr: Any) -> bool | None:
     """Check if tensor requires gradients (PyTorch only).
 
-    Returns True only if requires_grad is True, None otherwise.
+    Args:
+        arr: Array-like object.
+
+    Returns:
+        True only if ``requires_grad`` is truthy, ``None`` otherwise.
     """
     try:
         if hasattr(arr, "requires_grad") and arr.requires_grad:
@@ -257,7 +330,14 @@ def _to_int(value: Any) -> int | None:
 
 
 def get_array_element_count(arr: Any) -> int | None:
-    """Estimate total number of elements for array-like objects."""
+    """Estimate total number of elements for array-like objects.
+
+    Args:
+        arr: Array-like object.
+
+    Returns:
+        A non-negative ``size``, else the product of ``shape``, else ``None``.
+    """
     size = getattr(arr, "size", None)
     if size is not None:
         size_int = _to_int(size)
@@ -307,7 +387,11 @@ def _sample_array_head(arr: Any, max_items: int = 5) -> list[float]:
 def count_anomalies(arr: Any) -> dict[str, int] | None:
     """Count NaN and Inf values in a NumPy, CuPy, PyTorch or JAX array.
 
-    Returns dict with counts only if anomalies exist, None otherwise.
+    Args:
+        arr: Array to scan.
+
+    Returns:
+        Nonzero ``nan``/``inf`` counts if anomalies exist, ``None`` otherwise or on error.
     """
     try:
         return _stats_and_anomalies(arr, want_stats=False)[1]
@@ -322,9 +406,13 @@ def compute_array_stats(
 ) -> dict[str, float] | None:
     """Compute min/max/mean/std statistics for numeric arrays.
 
+    Args:
+        arr: NumPy, CuPy, PyTorch or JAX array.
+        max_elements: Arrays with more elements are skipped.
+
     Returns:
         Dict with statistics rounded to 6 decimal places, or None if not applicable.
-        Returns None for empty arrays, non-numeric dtypes, or on error.
+        Returns None for oversized or empty arrays, non-numeric dtypes, or on error.
     """
     try:
         if _array_exceeds_limit(arr, max_elements=max_elements) or _is_empty_array(arr):
@@ -354,7 +442,7 @@ def _compute_array_stats_and_anomalies(
 def _stats_and_anomalies(
     arr: Any, *, want_stats: bool = True, want_anomalies: bool = True
 ) -> tuple[dict[str, float] | None, dict[str, int] | None]:
-    """The single backend dispatch for array statistics and NaN/Inf counts (CAP-23).
+    """Compute array statistics and NaN/Inf counts in the single backend dispatch (CAP-23).
 
     ``count_anomalies`` and ``compute_array_stats`` used to be separate copies of the
     backend code and had drifted from this path: anomalies were counted on the up-cast
@@ -538,10 +626,14 @@ def _add_array_stats(
 def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
     """Summarize an array-like object.
 
-    Returns basic info (type, shape, dtype, head) plus ML-specific metadata:
-    - device: only if non-CPU (highlights CUDA/TPU tensors)
-    - requires_grad: only if True (highlights trainable tensors)
-    - anomalies: NaN/Inf counts only if present (highlights corruption)
+    Args:
+        arr: Array-like object (see :func:`is_array_like`).
+        cfg: Config; ``include_array_stats`` adds a ``stats`` entry.
+
+    Returns:
+        Basic info (type, shape, dtype, head) plus ML-specific metadata: ``device`` only
+        if non-CPU, ``requires_grad`` only if True, and ``anomalies`` (NaN/Inf counts)
+        only if present. Skipped parts get a ``*_omitted_reason`` entry.
     """
     type_name = f"{type(arr).__module__}.{type(arr).__name__}"
     summary: dict[str, Any] = {"__array__": type_name}
@@ -592,7 +684,7 @@ def summarize_array(arr: Any, cfg: SnapshotConfig) -> dict[str, Any]:
 
 
 def _preview_cell(value: Any, cfg: SnapshotConfig, depth: int = 0) -> Any:
-    """A pandas preview cell or column label, bounded like any other value (CAP-01, CAP-13).
+    """Bound a pandas preview cell or column label like any other value (CAP-01, CAP-13).
 
     Object-dtype cells hold arbitrary Python values, so the normalization has to recurse:
     a wide integer nested in a cell's dict or list reached the JSON encoder unchanged,
@@ -636,7 +728,16 @@ def _add_dataframe_columns(summary: dict[str, Any], df: Any, cfg: SnapshotConfig
 
 
 def summarize_dataframe(df: Any, cfg: SnapshotConfig) -> dict[str, Any]:
-    """Summarize a pandas DataFrame."""
+    """Summarize a pandas DataFrame.
+
+    Args:
+        df: DataFrame to summarize.
+        cfg: Config whose ``max_items`` and ``max_str`` bound columns and cells.
+
+    Returns:
+        Shape, columns, dtypes, nonzero null counts, and up to 3 head rows; lists cut by
+        ``max_items`` are flagged with ``*_truncated``.
+    """
     summary: dict[str, Any] = {"__dataframe__": True}
 
     try:
@@ -697,7 +798,15 @@ def _dataframe_head(df: Any, cfg: SnapshotConfig) -> list[list[Any]]:
 
 
 def summarize_series(series: Any, cfg: SnapshotConfig) -> dict[str, Any]:
-    """Summarize a pandas Series."""
+    """Summarize a pandas Series.
+
+    Args:
+        series: Series to summarize.
+        cfg: Config bounding the preview cells.
+
+    Returns:
+        Shape, name, dtype, and the first 5 values as ``head``.
+    """
     summary: dict[str, Any] = {"__series__": True}
 
     try:
@@ -735,7 +844,7 @@ class _SetPreview(NamedTuple):
 
 
 def _set_preview(x: set[Any] | frozenset[Any], cfg: SnapshotConfig) -> _SetPreview:
-    """The lowest ``max_items`` elements of a set, in a process-independent order.
+    """Return the lowest ``max_items`` elements of a set, in a process-independent order.
 
     Truncation comes from the set's own size: inferring it from the preview length
     reported a 3,000-element set as complete whenever the preview hit an internal
@@ -827,7 +936,7 @@ _REPR_REDACTION_MAX_DEPTH = 6
 
 
 def _is_exact_type(x: Any, expected: type[Any]) -> bool:
-    """``type(x) is expected``; a subclass takes the rebuild path in `_redact_for_repr`."""
+    """Return ``type(x) is expected``; a subclass takes the rebuild path in `_redact_for_repr`."""
     return type(x) is expected
 
 
@@ -860,7 +969,7 @@ def _redacted_items_for_repr(
 
 
 def _redact_namedtuple_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
-    """A namedtuple with the fields under sensitive names replaced, keeping its type.
+    """Return the namedtuple with fields under sensitive names replaced, keeping its type.
 
     Rebuilding it as a plain tuple would drop the field names from the repr, and the text
     patterns would then no longer see the ``password=`` that protects the value. Raising is
@@ -884,7 +993,7 @@ def _redact_namedtuple_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
 
 
 def _redact_container_subclass_for_repr(x: Any, redacted: Any) -> Any:
-    """A dict/list/tuple subclass holding *redacted*, or a rendering of its type name.
+    """Return a dict/list/tuple subclass holding *redacted*, or a rendering of its type name.
 
     Never returns *x*: a subclass may define its own ``__repr__``, and a custom ``redact``
     tuple need not contain the text patterns at all, so leaving its contents in place would
@@ -911,7 +1020,7 @@ def _redact_container_subclass_for_repr(x: Any, redacted: Any) -> Any:
 
 
 def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
-    """A copy of *x* with the values under sensitive names replaced, for repr rendering.
+    """Return a copy of *x* with values under sensitive names replaced, for repr rendering.
 
     Exact ``dict``/``list``/``tuple`` instances are rebuilt as themselves and a namedtuple
     keeps its type and field names. Any other container subclass is rebuilt through
@@ -937,7 +1046,7 @@ def _redact_for_repr(x: Any, cfg: SnapshotConfig, depth: int) -> Any:
 
 
 def _depth_limit_repr(x: Any, cfg: SnapshotConfig) -> str:
-    """``safe_repr`` for a value past the depth limit, with secrets removed first."""
+    """Return ``safe_repr`` of a value past the depth limit, with secrets removed first."""
     if not cfg.redact:
         return safe_repr(x, cfg)
     try:
@@ -954,6 +1063,14 @@ def to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int = 0) -> JsonLike:
     Never raises: a value whose introspection fails (for example a
     ``__getattribute__`` that raises) becomes a ``<serialization failed: ...>``
     marker, so one hostile object can't abort the capture or hide its siblings.
+
+    Args:
+        x: Value to convert.
+        cfg: Config bounding strings and collections and enabling redaction.
+        depth: Nesting level; from depth 2 containers collapse to a redacted repr.
+
+    Returns:
+        A JSON-like value; arrays and pandas objects become summary dicts.
     """
     try:
         return _to_jsonlike(x, cfg, depth)
@@ -988,7 +1105,16 @@ def _to_jsonlike(x: Any, cfg: SnapshotConfig, depth: int) -> JsonLike:
 def serialize_locals(
     local_vars: dict[str, Any], cfg: SnapshotConfig, redactors: list[Pattern[str]]
 ) -> dict[str, Any]:
-    """Serialize local variables with redaction."""
+    """Serialize local variables with redaction.
+
+    Args:
+        local_vars: Frame locals mapping.
+        cfg: Snapshot configuration.
+        redactors: Compiled redaction patterns.
+
+    Returns:
+        Serialized values of the first ``max_items`` locals, keyed by name.
+    """
     result, _, _ = serialize_locals_with_stats(local_vars, cfg, redactors)
     return result
 
@@ -1014,7 +1140,7 @@ _SAFE_LEN_TYPES: tuple[type, ...] = (
 
 
 def _has_builtin_len(value: Any) -> bool:
-    """Whether ``value`` is a safe container that has not overridden ``__len__``.
+    """Return whether ``value`` is a safe container that has not overridden ``__len__``.
 
     An ``isinstance`` check alone still ran user code: a ``list`` subclass that
     overrides ``__len__`` passed it, which is exactly the arbitrary call CAP-21 removed
@@ -1034,7 +1160,7 @@ def _has_builtin_len(value: Any) -> bool:
 
 
 def _safe_len(value: Any) -> int | None:
-    """``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
+    """Return ``len(value)`` for containers and array-likes only; ``None`` otherwise or on error."""
     try:
         if (
             _has_builtin_len(value)
@@ -1079,7 +1205,16 @@ def serialize_locals_bundle(
     cfg: SnapshotConfig,
     redactors: list[Pattern[str]],
 ) -> LocalsSerializationBundle:
-    """Serialize locals and metadata in one pass over the frame locals."""
+    """Serialize locals and metadata in one pass over the frame locals.
+
+    Args:
+        local_vars: Frame locals mapping.
+        cfg: Config supplying limits and ``redact_keys``.
+        redactors: Compiled patterns; if any, secret-named locals become ``[REDACTED]``.
+
+    Returns:
+        Values, metadata, and truncation info for the first ``max_items`` locals.
+    """
     values: dict[str, Any] = {}
     metadata: dict[str, dict[str, Any]] = {}
 
@@ -1131,21 +1266,46 @@ def serialize_locals_with_stats(
     """Serialize local values with redaction and truncation stats.
 
     Kept as compatibility wrapper while internals use :func:`serialize_locals_bundle`.
+
+    Args:
+        local_vars: Frame locals mapping.
+        cfg: Snapshot configuration.
+        redactors: Compiled redaction patterns.
+
+    Returns:
+        A ``(values, truncated, truncated_keys)`` tuple.
     """
     bundle = serialize_locals_bundle(local_vars, cfg, redactors)
     return bundle.values, bundle.truncated, bundle.truncated_keys
 
 
-def locals_metadata(local_vars: dict[str, Any], cfg: SnapshotConfig) -> dict[str, dict[str, Any]]:
-    """Lightweight metadata for local variables (type + size hints).
+def locals_metadata(
+    local_vars: dict[str, Any],
+    cfg: SnapshotConfig,
+    *,
+    redactors: list[Pattern[str]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build lightweight metadata for local variables (type + size hints).
 
-    Kept as compatibility wrapper while internals use :func:`serialize_locals_bundle`.
+    Used by metadata-only capture (``locals_mode="meta"``); values are not serialized.
+
+    Args:
+        local_vars: Frame locals mapping.
+        cfg: Config whose ``max_items`` caps the number of entries.
+        redactors: Compiled patterns; if any, secret-named locals keep only their
+            ``type`` so that ``len`` and ``shape`` cannot leak the size of a secret.
+
+    Returns:
+        Per-name ``type``, plus ``len`` and ``shape`` where cheaply available.
     """
     meta: dict[str, dict[str, Any]] = {}
 
     for i, (k, v) in enumerate(local_vars.items()):
         if i >= cfg.max_items:
             break
+        if redactors and is_sensitive_name(str(k)):
+            meta[str(k)] = {"type": _local_type_name(v)}
+            continue
         meta[str(k)] = _build_local_metadata_entry(v)
 
     return meta

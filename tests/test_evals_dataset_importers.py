@@ -788,7 +788,7 @@ class TestPyBugHiveLoadIssueSpecs:
         assert _load_issue_specs(repo) == []
 
     def test_issues_not_list(self, tmp_path: Path) -> None:
-        """issues not a list → skipped (covers L73)."""
+        """A non-list issues value → skipped (covers L73)."""
         repo = _make_pybughive_repo(
             tmp_path,
             payload=[{"username": "u", "repository": "r", "issues": "not_list"}],
@@ -818,7 +818,7 @@ class TestPyBugHiveLoadIssueSpecs:
         assert _load_issue_specs(repo) == []
 
     def test_commits_not_list(self, tmp_path: Path) -> None:
-        """commits not a list → skipped (covers L82)."""
+        """A non-list commits value → skipped (covers L82)."""
         repo = _make_pybughive_repo(
             tmp_path,
             payload=[

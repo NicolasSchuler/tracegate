@@ -1402,8 +1402,10 @@ def test_load_policy_events_skips_records_missing_required_keys(tmp_path: Path) 
 
 
 def test_load_policy_events_deduplicates_events(tmp_path: Path) -> None:
-    """Two events with the same dedup key → duplicate_events_seen == 1, first wins (POL-18;
-    this used to keep the last one)."""
+    """Two events with the same dedup key → duplicate_events_seen == 1, first wins.
+
+    POL-18: this used to keep the last one.
+    """
     events_path = tmp_path / "dupe.jsonl"
     e1 = _minimal_online_event(reward=0.1)
     e2 = _minimal_online_event(reward=0.9)  # same key (run/case/condition/attempt/decision_id)
@@ -1689,7 +1691,7 @@ def test_apply_recency_decay_skips_action_with_missing_matrix() -> None:
 
 
 def test_apply_reward_update_returns_early_when_no_matrix() -> None:
-    """action not in A/b → returns without updating (line 817)."""
+    """An action not in A/b → returns without updating (line 817)."""
     state = ReplayState(action_names=("a",))
     state.feature_names = ["x"]
     # Don't set A/b for "a"

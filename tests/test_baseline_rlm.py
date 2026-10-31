@@ -2226,7 +2226,7 @@ def test_env_client_key_never_reaches_candidate_subprocesses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """codex 5-6#1: the env-client key is consumed, not inherited by candidate code.
+    """Codex 5-6#1: the env-client key is consumed, not inherited by candidate code.
 
     Runs the real ``run_case_tests`` and import-smoke seams through ``env_client.main``
     with the key only in the environment, and inspects what the child processes saw.
@@ -2331,7 +2331,7 @@ def test_env_client_applies_seed_and_transport_retries_to_requests(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """codex 1e#6: the shared contract reaches the outbound request, not just the record."""
+    """Codex 1e#6: the shared contract reaches the outbound request, not just the record."""
     repo = _make_env_client_tracking_repo(tmp_path)
     request_path = tmp_path / "request.json"
     response_path = tmp_path / "response.json"

@@ -43,7 +43,18 @@ VALID_DETAIL_LEVELS = ("crash", "full", "context")
 
 
 def render_local_preview(value: Any) -> str:
-    """Render a local variable value as a short string (arrays get ``<array shape=... dtype=...>`` format)."""
+    """Render a local variable value as a short preview string.
+
+    Serialized arrays render as ``<array shape=... dtype=...>``, tagged with the
+    recorded array kind. Other values are JSON-encoded (falling back to ``repr``)
+    and truncated to 120 characters.
+
+    Args:
+        value: Serialized local variable value from a snapshot frame.
+
+    Returns:
+        The preview string.
+    """
     # Use a separate binding so the isinstance narrowing doesn't affect `value` below.
     _v: Any = value
     if isinstance(_v, dict) and "__array__" in _v:
@@ -62,7 +73,14 @@ def render_local_preview(value: Any) -> str:
 
 
 def normalize_detail(detail: str) -> str | None:
-    """Validate and normalize a detail level string, returning None if invalid."""
+    """Validate and normalize a detail level string, returning None if invalid.
+
+    Args:
+        detail: Requested detail level, in any case and with optional whitespace.
+
+    Returns:
+        ``crash``, ``full``, or ``context``; ``None`` for any other value.
+    """
     candidate = str(detail or "").strip().lower()
     if candidate in VALID_DETAIL_LEVELS:
         return candidate
@@ -77,6 +95,18 @@ def render_invalid_detail_error(
     evidence_schema: str,
     with_rca: bool,
 ) -> str:
+    """Render an ``INVALID_ARGUMENT`` error for an unsupported ``detail`` value.
+
+    Args:
+        tool: Name of the MCP tool that received the value.
+        detail: The rejected detail value.
+        response_format: ``json`` for the error envelope, ``text`` for the bare message.
+        evidence_schema: Requested evidence schema for the envelope.
+        with_rca: Whether the caller requested RCA, echoed in the metadata.
+
+    Returns:
+        The rendered error, listing the allowed detail levels.
+    """
     return render_tool_error(
         tool=tool,
         response_format=response_format,
@@ -93,7 +123,19 @@ def render_invalid_detail_error(
 
 
 def locals_summary(frame: dict[str, Any], *, max_items: int = 10) -> list[EvidenceLocalSummary]:
-    """Extract up to ``max_items`` local variables from a frame as typed summary dicts."""
+    """Extract up to ``max_items`` local variables from a frame as typed summary dicts.
+
+    Only the first *max_items* locals are considered; internal entries whose names
+    start with ``@`` are then skipped, so fewer summaries may be returned.
+
+    Args:
+        frame: Snapshot frame with ``locals`` and optional ``locals_meta``.
+        max_items: Maximum number of locals to consider.
+
+    Returns:
+        Name, recorded type, and value preview for each kept local; empty when the
+        frame has no locals mapping.
+    """
     out: list[EvidenceLocalSummary] = []
     locals_obj = frame.get("locals")
     locals_meta = frame.get("locals_meta")
@@ -128,7 +170,16 @@ def locals_summary(frame: dict[str, Any], *, max_items: int = 10) -> list[Eviden
 def core_evidence_from_snapshot(
     snapshot: dict[str, Any] | None,
 ) -> StableEvidencePayload:
-    """Extract a stable evidence payload (exception, crash frame, locals, repro) from a snapshot."""
+    """Extract a stable evidence payload from a snapshot.
+
+    Args:
+        snapshot: Loaded snapshot, or ``None``.
+
+    Returns:
+        The exception, crash frame, crash-frame locals, repro command, and evidence
+        IDs found in the snapshot, over the default empty fields; only the defaults
+        when *snapshot* is not a dict.
+    """
     evidence = default_evidence_fields()
     if not isinstance(snapshot, dict):
         return evidence
@@ -169,7 +220,15 @@ def core_evidence_from_snapshot(
 
 
 def snapshot_error_code(message: str) -> str:
-    """Map a human error message to a machine-readable error code string."""
+    """Map a human error message to a machine-readable error code string.
+
+    Args:
+        message: Error message produced by :func:`load_snapshot_safe`.
+
+    Returns:
+        ``NO_SNAPSHOTS`` when the message reports that no snapshots were found, else
+        ``SNAPSHOT_LOAD_ERROR``.
+    """
     if message.startswith("No snapshots found"):
         return "NO_SNAPSHOTS"
     if message.startswith("Error loading snapshot") or message.startswith(
@@ -186,7 +245,19 @@ def load_snapshot_safe(
     *,
     raw: bool = False,
 ) -> dict[str, Any] | str:
-    """Load a snapshot, returning an error message string on failure."""
+    """Load a snapshot, returning an error message string on failure.
+
+    Args:
+        snapshot_path: Snapshot file to load; ``None`` loads the latest snapshot.
+        out_dir: Snapshot directory.
+        tool_name: Calling tool, named in the log for unexpected errors.
+        raw: Whether to return the stored payload without DebugSession normalization
+            instead of the flat snapshot view.
+
+    Returns:
+        The loaded snapshot, or an error message when no snapshot exists or loading
+        fails.
+    """
     try:
         loaded = (
             load_snapshot_raw(snapshot_path, out_dir)
@@ -212,7 +283,14 @@ def load_snapshot_safe(
 
 
 def diagnose_exception_section(snapshot: dict[str, Any]) -> str:
-    """Build the ``## Exception`` markdown section for diagnose output."""
+    """Build the ``## Exception`` markdown section for diagnose output.
+
+    Args:
+        snapshot: Loaded snapshot.
+
+    Returns:
+        The section with the exception type and message.
+    """
     _empty: dict[str, Any] = {}
     exc = cast(dict[str, Any], snapshot.get("exception") or _empty)
     exc_type = exc.get("type", "UnknownError")
@@ -221,7 +299,17 @@ def diagnose_exception_section(snapshot: dict[str, Any]) -> str:
 
 
 def diagnose_crash_frame_section(snapshot: dict[str, Any], detail: str) -> str | None:
-    """Build the ``## Crash Frame`` markdown section(s) for diagnose output."""
+    """Build the ``## Crash Frame`` markdown section(s) for diagnose output.
+
+    Args:
+        snapshot: Loaded snapshot.
+        detail: Normalized detail level; ``full`` and ``context`` add a section per
+            other frame, ``crash`` adds a note on how many frames were left out.
+
+    Returns:
+        The rendered sections, or ``None`` when the snapshot has no usable crash
+        frame.
+    """
     frames_raw = snapshot.get("frames")
     frames = cast(list[Any], frames_raw) if isinstance(frames_raw, list) else cast(list[Any], [])
     if not frames:
@@ -249,7 +337,17 @@ def diagnose_crash_frame_section(snapshot: dict[str, Any], detail: str) -> str |
 
 
 def diagnose_context_section(snapshot: dict[str, Any], detail: str) -> str | None:
-    """Build the ``## Repro`` / ``## Git`` markdown sections for diagnose output."""
+    """Build the ``## Repro`` / ``## Git`` markdown sections for diagnose output.
+
+    Args:
+        snapshot: Loaded snapshot.
+        detail: Normalized detail level; only ``full`` and ``context`` include these
+            sections.
+
+    Returns:
+        The rendered sections, or ``None`` when the detail level excludes them or
+        the snapshot has neither repro nor git commit data.
+    """
     if detail not in ("full", "context"):
         return None
     _empty: dict[str, Any] = {}
@@ -284,7 +382,19 @@ def handle_list(
     response_format: str = "text",
     evidence_schema: str = "summary",
 ) -> str:
-    """Implementation of llmdebug_list."""
+    """List snapshots for the ``llmdebug_list`` MCP tool.
+
+    Args:
+        out_dir: Snapshot directory.
+        limit: Maximum number of snapshots to list; must be at least 1.
+        response_format: ``text`` or ``json``.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+
+    Returns:
+        The newest snapshots with timestamp, name, exception, location, and path, or
+        an error response (a bare message in text mode for scan failures and an empty
+        directory).
+    """
     format_error = validate_response_format(response_format)
     if format_error is not None:
         return render_invalid_response_format_error(
@@ -395,7 +505,25 @@ def handle_frame(
     with_rca: bool = False,
     evidence_schema: str = "summary",
 ) -> str:
-    """Implementation of llmdebug_frame."""
+    """Show one stack frame for the ``llmdebug_frame`` MCP tool.
+
+    Args:
+        index: Frame index; 0 is the crash site and higher indices are callers.
+        out_dir: Snapshot directory.
+        snapshot_path: Snapshot file to read; empty uses the latest snapshot.
+        gate_mode: RCA gate mode override (``off``, ``soft``, or ``strict``); empty
+            uses ``LLMDEBUG_RCA_GATE_MODE`` or ``soft``.
+        exploratory: Whether to mark the RCA step as exploratory.
+        response_format: ``json`` or ``text``.
+        with_rca: Whether to record a ``bind_evidence`` RCA attempt and include the
+            RCA block.
+        evidence_schema: ``summary`` or ``full`` JSON payload detail.
+
+    Returns:
+        The rendered frame with its source and locals, or an error response when an
+        argument is invalid, the snapshot cannot be loaded, the index is out of
+        range, the frame is malformed, or the RCA update fails.
+    """
     format_error = validate_response_format(response_format)
     if format_error is not None:
         return render_invalid_response_format_error(

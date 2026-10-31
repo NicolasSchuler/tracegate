@@ -124,7 +124,7 @@ def test_get_latest_snapshot_raw_session(tmp_path):
 
 
 def test_get_latest_snapshot_rejects_detail_with_raw_mode(tmp_path):
-    """detail filter is only valid with normalized snapshots."""
+    """The detail filter is only valid with normalized snapshots."""
     cfg = SnapshotConfig(out_dir=str(tmp_path))
     write_bundle({"name": "x", "exception": {"type": "E"}, "frames": []}, cfg)
 

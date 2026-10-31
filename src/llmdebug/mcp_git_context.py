@@ -6,7 +6,18 @@ from typing import Any, cast
 
 
 def parse_max_commits(max_commits: Any) -> int:
-    """Parse and clamp max_commits into the supported [1, 50] range."""
+    """Parse and clamp *max_commits* into the supported ``[1, 50]`` range.
+
+    Args:
+        max_commits: Requested number of recent commits, as an int or any value
+            ``int()`` accepts.
+
+    Returns:
+        The parsed count, clamped to the range 1 to 50.
+
+    Raises:
+        ValueError: If *max_commits* cannot be converted to an integer.
+    """
     try:
         parsed = int(max_commits)
     except (TypeError, ValueError) as exc:
@@ -17,7 +28,16 @@ def parse_max_commits(max_commits: Any) -> int:
 
 
 def collect_git_evidence_refs(enhanced: dict[str, Any]) -> list[str]:
-    """Extract RCA evidence refs from enhanced git metadata payload."""
+    """Extract RCA evidence refs from an enhanced git metadata payload.
+
+    Args:
+        enhanced: Enhanced git context with optional ``head`` and ``crash_file``
+            blocks, as returned by ``get_enhanced_git_context``.
+
+    Returns:
+        Refs for the head commit, branch, crash file, and crash-line blame commit, in
+        that order; missing or empty values are skipped.
+    """
     evidence_refs: list[str] = []
     head_raw = enhanced.get("head")
     if isinstance(head_raw, dict):

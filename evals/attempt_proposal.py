@@ -1,6 +1,7 @@
 """Patch and plan proposal under an attempt's shared wall-clock budget.
 
-Also checks that a deterministic run's backend acknowledged the seed."""
+Also checks that a deterministic run's backend acknowledged the seed.
+"""
 
 from __future__ import annotations
 

@@ -164,8 +164,11 @@ def test_budget_on_mode_logs_the_sampling_probability(tmp_path: Path) -> None:
 
 
 def test_budget_shadow_mode_logs_probability_one(tmp_path: Path) -> None:
-    """The budget controller's events used the selection's propensity whenever it matched
-    the applied baseline (POL-03); the attempt metadata path was already fixed."""
+    """POL-03: the budget controller's events used the selection's propensity.
+
+    They did so whenever it matched the applied baseline; the attempt metadata path was
+    already fixed.
+    """
     controller = _budget(tmp_path, mode="shadow", warmup=6, epsilon=0.1)
     agreeing = 0
     for index in range(30):

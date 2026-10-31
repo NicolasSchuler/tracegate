@@ -560,7 +560,7 @@ def test_att08_unit_runtime_error_record_is_schema_valid_and_scored(tmp_path: Pa
 def test_att08_terminal_failure_after_an_infra_event_stays_in_the_denominator(
     tmp_path: Path,
 ) -> None:
-    """codex 1f#1: infra events consume no attempt, so the terminal row must stay scored.
+    """Codex 1f#1: infra events consume no attempt, so the terminal row must stay scored.
 
     The real seam: a transport failure writes an ``infra_event``, the recovered replay
     raises, and ``execute_eval_unit_impl`` has to number the terminal row from the scored
@@ -679,8 +679,10 @@ def test_pol02_tep_learning_calls_are_added_to_attempt_usage() -> None:
 
 
 class _FullTepPatcher:
-    """An ``openai``-shaped patcher whose patch call reports no usage but whose TEP
-    critic/update calls do, with a clock that advances one second per learning call."""
+    """An ``openai``-shaped patcher whose TEP critic/update calls report usage.
+
+    Its patch call reports no usage, and its clock advances one second per learning call.
+    """
 
     name = "openai"
     response_mode = "diff"
@@ -718,7 +720,7 @@ class _FullTepPatcher:
 def test_pol02_full_tep_learning_lands_in_usage_latency_and_policy_cost(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1f#3 / 1f#4: the TEP critic/update calls are paid for in every account.
+    """Codex 1f#3 / 1f#4: the TEP critic/update calls are paid for in every account.
 
     Drives the real full-TEP seam: the patch response omits usage, the learning calls
     report it, and each learning call costs one (fake) second.
@@ -802,7 +804,7 @@ def test_att11_final_prompt_is_the_one_the_patcher_saw(tmp_path: Path) -> None:
 def test_att11_propose_prompt_hashes_honor_the_recording_mode(
     tmp_path: Path, record_prompt: str
 ) -> None:
-    """codex 1f#7: ``--record-prompt none`` suppresses the new hashes too."""
+    """Codex 1f#7: ``--record-prompt none`` suppresses the new hashes too."""
     patcher = _DiffPatcher([_FIX])
     records = _run(
         tmp_path,
@@ -871,7 +873,7 @@ def test_llm02_truncated_answer_has_its_own_attempt_note(
 def test_d4_both_rlm_payloads_carry_the_seed_and_retry_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1e#6: lambda-RLM and RLM forward the seed and retry count, not just sampling."""
+    """Codex 1e#6: lambda-RLM and RLM forward the seed and retry count, not just sampling."""
     import subprocess
 
     from baselines.adapter_base import BaselineConfig, BaselineGenerationSettings
@@ -921,7 +923,7 @@ def test_d4_both_rlm_payloads_carry_the_seed_and_retry_contract(
 def test_bas19_env_client_payloads_use_the_shared_compat_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1e#11: the env-client path can't disagree with the in-process defaults."""
+    """Codex 1e#11: the env-client path can't disagree with the in-process defaults."""
     import subprocess
 
     from baselines.adapter_base import BaselineConfig
@@ -985,7 +987,7 @@ def _baseline_run_args(*extra: str) -> Any:
 
 
 def test_bas03_baseline_generation_settings_change_the_resume_fingerprint() -> None:
-    """codex 1e#1: a changed baseline cap, temperature, retry count or deadline drifts."""
+    """Codex 1e#1: a changed baseline cap, temperature, retry count or deadline drifts."""
     from evals.run_state import _build_run_settings_fingerprint
 
     def _fingerprint(*extra: str) -> str:
@@ -1005,7 +1007,7 @@ def test_bas03_baseline_generation_settings_change_the_resume_fingerprint() -> N
 
 
 def test_bas03_baseline_seed_follows_the_deterministic_switch() -> None:
-    """codex 1e#12: a seed without --deterministic must not change baseline sampling."""
+    """Codex 1e#12: a seed without --deterministic must not change baseline sampling."""
     from evals.eval_cli_args import build_parser
     from evals.eval_recording import _baseline_generation_settings_from_args
     from evals.patcher_factory import make_patcher
@@ -1030,7 +1032,7 @@ def test_bas03_baseline_seed_follows_the_deterministic_switch() -> None:
 def test_bas03_record_reports_the_baseline_specific_generation_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1e#7: the record shows the override the request used, not the shared value."""
+    """Codex 1e#7: the record shows the override the request used, not the shared value."""
     import subprocess
 
     from baselines.adapter_base import (
@@ -1104,7 +1106,7 @@ def test_bas03_record_reports_the_baseline_specific_generation_override(
 
 
 def test_bas14_tree_hash_covers_untracked_file_contents(tmp_path: Path) -> None:
-    """codex 1e#10: editing an untracked upstream module changes the patched-tree hash."""
+    """Codex 1e#10: editing an untracked upstream module changes the patched-tree hash."""
     import subprocess
 
     from baselines.adapter_base import observed_repo_state
@@ -1132,7 +1134,7 @@ def test_bas14_tree_hash_covers_untracked_file_contents(tmp_path: Path) -> None:
 def test_bas08_intervenor_stops_at_the_deadline_between_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """codex 1e#3: a deadline that expires during the teacher call stops the attempt."""
+    """Codex 1e#3: a deadline that expires during the teacher call stops the attempt."""
     from baselines.adapter_base import BaselineCaseContext, BaselineConfig
     from baselines.intervenor.adapter import IntervenorAdapter, _CommandOutcome
 

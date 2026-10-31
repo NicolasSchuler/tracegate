@@ -1,4 +1,4 @@
-"""Cross-baseline comparison tool for ISSRE paper experiments.
+r"""Cross-baseline comparison tool for ISSRE paper experiments.
 
 Loads JSONL results from multiple eval runs (llmdebug conditions +
 external baselines) and generates head-to-head statistical comparisons
@@ -6,12 +6,12 @@ using the existing ``evals.stats`` primitives.
 
 Usage::
 
-    python -m baselines.compare_results \\
-        --jsonl 'evals/results/*.jsonl' \\
-        --conditions base_repair ldb intervenor tracecoder \\
-        --reference base_repair \\
-        --primary layered_adaptive_gated \\
-        --bootstrap 10000 --seed 42 \\
+    python -m baselines.compare_results \
+        --jsonl 'evals/results/*.jsonl' \
+        --conditions base_repair ldb intervenor tracecoder \
+        --reference base_repair \
+        --primary layered_adaptive_gated \
+        --bootstrap 10000 --seed 42 \
         --out comparison.json
 
 The ``--reference`` condition is the baseline (A-side) for all pairwise
